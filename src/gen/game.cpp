@@ -4,6 +4,8 @@
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
 
+#include <GLFW/glfw3.h>
+
 const Game::StateFunc Game::sStateTable[static_cast<int>(GameState::COUNT)] = {
     gsNullState,
     gsIntroState,
@@ -85,7 +87,8 @@ bool Game::gsTitleState(Game* game) {
 
 bool Game::gsTitleLoopState(Game* game) {
     MARKFUNCTION(0x8002BE0C); // gsTitleLoopState
-    p3d::context->SetProjectionMatrix(Ortho(0.0f, 320.0f, 0.0f, 240.0f));
+    // Skip title screen, go straight to level loading
+    game->SetState(GameState::QueueLevelLoad);
     return true;
 }
 
@@ -115,8 +118,34 @@ bool Game::gsPrePlayState(Game* game) {
     return true;
 }
 
-bool Game::gsPlayState(Game*) {
+bool Game::gsPlayState(Game* game) {
     MARKFUNCTION(0x80029C6C); // gsPlayState
+
+    f32 dt = 1.0f / 60.0f;
+    game->mCamera.Update(p3d::display->GetHandle(), dt);
+
+    // LOD cycling with PageUp/PageDown
+    auto* win = static_cast<GLFWwindow*>(p3d::display->GetHandle());
+    static bool pgUpWas = false, pgDnWas = false;
+    bool pgUp = glfwGetKey(win, GLFW_KEY_PAGE_UP) == GLFW_PRESS;
+    bool pgDn = glfwGetKey(win, GLFW_KEY_PAGE_DOWN) == GLFW_PRESS;
+    if (pgUp && !pgUpWas && game->mWorld.GetTargetLOD() < 5) {
+        game->mWorld.SetTargetLOD(game->mWorld.GetTargetLOD() + 1);
+        RC_LOG("[LOD] Set to %d", game->mWorld.GetTargetLOD());
+    }
+    if (pgDn && !pgDnWas && game->mWorld.GetTargetLOD() > 0) {
+        game->mWorld.SetTargetLOD(game->mWorld.GetTargetLOD() - 1);
+        RC_LOG("[LOD] Set to %d", game->mWorld.GetTargetLOD());
+    }
+    pgUpWas = pgUp;
+    pgDnWas = pgDn;
+
+    p3d::context->EnableZBuffer(true);
+    p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+    p3d::context->SetCullMode(PDDI_CULL_NONE);
+    game->mCamera.Apply();
+    game->mWorld.Render();
+
     return true;
 }
 
@@ -183,7 +212,8 @@ bool Game::gsOpenLocationState(Game* game) {
 
 bool Game::gsQueueLevelLoad(Game* game) {
     MARKFUNCTION(0x80029574); // gsQueueLevelLoad
-    RC_LOG("[Game] QueueLevelLoad -> DetermineNextGameState");
+    RC_LOG("[Game] QueueLevelLoad: loading LEV01.LCF");
+    game->mWorld.Load("RTARGET/LEV01.LCF");
     game->SetState(GameState::DetermineNextGameState);
     return true;
 }

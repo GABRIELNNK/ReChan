@@ -113,16 +113,28 @@ public:
                   float x, float y, float w, float h,
                   float u0, float v0, float u1, float v1) override;
 
+    void DrawPrimBuffer(pddiPrimType type,
+                        u32 vao, u32 indexCount) override;
+
+    void SetTexture(pddiTexture* tex) override;
+    void SetVRAMHandle(u32 handle) override;
+
+    u32 Get3DProgram() const { return m3DProgram; }
+
 private:
-    glDisplay* mDisplay;
-    pddiColour mClearColour;
-    Mat4       mProjection;
-    Mat4       mView;
-    Mat4       mWorld;
-    u32        mQuadVAO = 0;
-    u32        mQuadVBO = 0;
+    glDisplay*   mDisplay;
+    pddiColour   mClearColour;
+    Mat4         mProjection;
+    Mat4         mView;
+    Mat4         mWorld;
+    pddiTexture* mCurrentTexture = nullptr;
+    u32          mVRAMHandle = 0;
+    u32          mQuadVAO = 0;
+    u32          mQuadVBO = 0;
+    u32          m3DProgram = 0;
 
     void InitQuadMesh();
+    void Init3DShader();
 };
 
 // glDevice──

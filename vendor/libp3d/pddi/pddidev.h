@@ -55,6 +55,16 @@ public:
                           float x, float y, float w, float h,
                           float u0 = 0, float v0 = 0,
                           float u1 = 1, float v1 = 1) = 0;
+
+    // Draw a vertex buffer (pos3 + color3 + uv2 interleaved floats)
+    virtual void DrawPrimBuffer(pddiPrimType type,
+                                u32 vao, u32 indexCount) = 0;
+
+    // Set texture for 3D primitive rendering (nullptr to disable)
+    virtual void SetTexture(pddiTexture* tex) = 0;
+
+    // Set raw VRAM texture handle for PSX VRAM-in-shader lookup (0 to disable)
+    virtual void SetVRAMHandle(u32 handle) = 0;
 };
 
 // pddiDevice — factory for all pddi objects──

@@ -3,6 +3,7 @@
 #define GAME_H
 
 #include "core.h"
+#include "gen/world.h"
 
 enum class GameState : s32 {
     Null = 0,
@@ -52,6 +53,9 @@ private:
     GameState mState = GameState::Null;
     GameState mPrevState = GameState::Null;
     StateFunc mStateFunc = nullptr;
+
+    World mWorld;
+    FreeCamera mCamera;
 
     static const StateFunc sStateTable[static_cast<int>(GameState::COUNT)];
 

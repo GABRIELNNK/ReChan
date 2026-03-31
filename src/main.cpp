@@ -18,6 +18,9 @@
 #include <algorithm>
 
 int main() {
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+    std::setvbuf(stderr, nullptr, _IONBF, 0);
+
     tPlatform* platform = tPlatform::Create();
 
     tContextInitData init;

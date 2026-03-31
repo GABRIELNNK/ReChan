@@ -19,6 +19,81 @@ void main() {
 }
 )";
 
+// 3D vertex-color shader with PSX VRAM palette lookup
+
+static const char* k3DVert = R"(
+#version 450 core
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec3 aColor;
+layout(location=2) in vec2 aUV;
+layout(location=3) in vec2 aTexInfo;
+uniform mat4 uMVP;
+out vec3 vColor;
+out vec2 vUV;
+flat out vec2 vTexInfo;
+void main() {
+    vColor = aColor;
+    vUV = aUV;
+    vTexInfo = aTexInfo;
+    gl_Position = uMVP * vec4(aPos, 1.0);
+}
+)";
+
+static const char* k3DFrag = R"(
+#version 450 core
+in vec3 vColor;
+in vec2 vUV;
+flat in vec2 vTexInfo;
+uniform usampler2D uVRAM;
+uniform int uHasVRAM;
+out vec4 FragColor;
+void main() {
+    float tpageF = vTexInfo.x;
+    if (uHasVRAM == 0 || tpageF < 0.0) {
+        FragColor = vec4(vColor, 1.0);
+        return;
+    }
+
+    uint tpage = uint(tpageF);
+    uint cba = uint(vTexInfo.y);
+
+    uint tx = tpage & 0xFu;
+    uint ty = (tpage >> 4u) & 1u;
+    uint depth = (tpage >> 7u) & 3u;
+
+    uint pageX = tx * 64u;
+    uint pageY = ty * 256u;
+
+    uint clutX = (cba & 0x3Fu) * 16u;
+    uint clutY = (cba >> 6u) & 0x1FFu;
+
+    uint px = uint(mod(vUV.x + 256.0, 256.0));
+    uint py = uint(mod(vUV.y + 256.0, 256.0));
+
+    uint clutWord;
+    if (depth == 0u) {
+        uint wordX = pageX + px / 4u;
+        uint word = texelFetch(uVRAM, ivec2(wordX, pageY + py), 0).r;
+        uint palIdx = (word >> ((px % 4u) * 4u)) & 0xFu;
+        clutWord = texelFetch(uVRAM, ivec2(clutX + palIdx, clutY), 0).r;
+    } else if (depth == 1u) {
+        uint wordX = pageX + px / 2u;
+        uint word = texelFetch(uVRAM, ivec2(wordX, pageY + py), 0).r;
+        uint palIdx = (px & 1u) != 0u ? (word >> 8u) & 0xFFu : word & 0xFFu;
+        clutWord = texelFetch(uVRAM, ivec2(clutX + palIdx, clutY), 0).r;
+    } else {
+        clutWord = texelFetch(uVRAM, ivec2(pageX + px, pageY + py), 0).r;
+    }
+
+    float r = float(clutWord & 0x1Fu) / 31.0;
+    float g = float((clutWord >> 5u) & 0x1Fu) / 31.0;
+    float b = float((clutWord >> 10u) & 0x1Fu) / 31.0;
+    float a = clutWord == 0u ? 0.0 : 1.0;
+
+    FragColor = vec4(r, g, b, a) * vec4(vColor, 1.0);
+}
+)";
+
 static const char* kSimpleFrag = R"(
 #version 450 core
 in vec2 vUV;
@@ -219,11 +294,13 @@ void glDisplay::GetViewport(int& x, int& y, int& w, int& h) const {
 glContext::glContext(glDisplay* display)
     : mDisplay(display) {
     InitQuadMesh();
+    Init3DShader();
 }
 
 glContext::~glContext() {
     if (mQuadVBO) glDeleteBuffers(1, &mQuadVBO);
     if (mQuadVAO) glDeleteVertexArrays(1, &mQuadVAO);
+    if (m3DProgram) glDeleteProgram(m3DProgram);
 }
 
 void glContext::BeginFrame() {
@@ -327,6 +404,66 @@ void glContext::InitQuadMesh() {
                           (void*)(sizeof(float) * 2));
     glEnableVertexAttribArray(1);
     glBindVertexArray(0);
+}
+
+void glContext::Init3DShader() {
+    u32 vs = CompileGLShader(GL_VERTEX_SHADER, k3DVert);
+    u32 fs = CompileGLShader(GL_FRAGMENT_SHADER, k3DFrag);
+    if (!vs || !fs) return;
+
+    m3DProgram = glCreateProgram();
+    glAttachShader(m3DProgram, vs);
+    glAttachShader(m3DProgram, fs);
+    glLinkProgram(m3DProgram);
+
+    int ok;
+    glGetProgramiv(m3DProgram, GL_LINK_STATUS, &ok);
+    if (!ok) {
+        char log[512];
+        glGetProgramInfoLog(m3DProgram, sizeof(log), nullptr, log);
+        std::fprintf(stderr, "3D shader link error:\n%s\n", log);
+    }
+
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+}
+
+void glContext::SetTexture(pddiTexture* tex) {
+    mCurrentTexture = tex;
+}
+
+void glContext::SetVRAMHandle(u32 handle) {
+    mVRAMHandle = handle;
+}
+
+void glContext::DrawPrimBuffer(pddiPrimType type, u32 vao, u32 indexCount) {
+    glUseProgram(m3DProgram);
+
+    Mat4 mvp = Mat4Multiply(mProjection, Mat4Multiply(mView, mWorld));
+    glUniformMatrix4fv(glGetUniformLocation(m3DProgram, "uMVP"),
+                       1, GL_FALSE, mvp.Data());
+
+    int hasVRAM = mVRAMHandle ? 1 : 0;
+    glUniform1i(glGetUniformLocation(m3DProgram, "uHasVRAM"), hasVRAM);
+    if (mVRAMHandle) {
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, mVRAMHandle);
+        glUniform1i(glGetUniformLocation(m3DProgram, "uVRAM"), 0);
+    }
+
+    GLenum glMode = GL_TRIANGLES;
+    switch (type) {
+        case PDDI_PRIM_TRIANGLES: glMode = GL_TRIANGLES; break;
+        case PDDI_PRIM_TRISTRIP:  glMode = GL_TRIANGLE_STRIP; break;
+        case PDDI_PRIM_LINES:     glMode = GL_LINES; break;
+        case PDDI_PRIM_LINESTRIP: glMode = GL_LINE_STRIP; break;
+        case PDDI_PRIM_POINTS:    glMode = GL_POINTS; break;
+    }
+
+    glBindVertexArray(vao);
+    glDrawElements(glMode, indexCount, GL_UNSIGNED_SHORT, nullptr);
+    glBindVertexArray(0);
+    glUseProgram(0);
 }
 
 // glDevice
