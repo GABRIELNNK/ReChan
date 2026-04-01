@@ -4,16 +4,16 @@
 #include "p3d/inventory.h"
 
 tP3DFileHandler::~tP3DFileHandler() {
-    for (auto* h : mHandlers)
+    for (auto* h : handlers)
         delete h;
 }
 
 void tP3DFileHandler::AddHandler(tChunkHandler* handler) {
-    mHandlers.push_back(handler);
+    handlers.push_back(handler);
 }
 
 tChunkHandler* tP3DFileHandler::GetHandler(u16 chunkID) {
-    for (auto* h : mHandlers) {
+    for (auto* h : handlers) {
         if (h->GetChunkID() == chunkID)
             return h;
     }

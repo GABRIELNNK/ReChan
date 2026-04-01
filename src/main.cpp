@@ -8,10 +8,7 @@
 #include "p3d/stream.h"
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
-#include "gen/assets.h"
 #include "gen/game.h"
-
-#include <GLFW/glfw3.h>
 
 #include <cstdio>
 #include <vector>
@@ -31,13 +28,10 @@ int main() {
     tContext* ctx = platform->CreateContext(init);
     if (!ctx) return 1;
 
-    Assets::SetRoot(".");
-
     Game game;
     game.SetState(GameState::Intro);
 
     p3d::context->SetClearColour(pddiColour(30, 30, 35));
-    p3d::context->SetBlendMode(PDDI_BLEND_ALPHA);
 
     MARKFUNCTION(0x8002635C); // psx_main
 

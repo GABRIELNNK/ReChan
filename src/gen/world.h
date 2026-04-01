@@ -1,9 +1,9 @@
 // world.h — Level world: loads BLK blocks from an LCF stream
-#ifndef WORLD_H
-#define WORLD_H
+#pragma once
 
 #include "core.h"
-#include "gen/geometry.h"
+#include "gen/block.h"
+#include "gen/blockmgr.h"
 #include <vector>
 #include <string>
 #include <cstring>
@@ -44,39 +44,30 @@ public:
     ~World();
 
     bool Load(const std::string& lcfPath);
-    void Render();
+    void Render(const LVector* camPos);
     void Unload();
 
-    u32 GetBlockCount() const { return static_cast<u32>(mBlocks.size()); }
-    void SetTargetLOD(u16 lod) { mTargetLOD = lod; }
-    u16 GetTargetLOD() const { return mTargetLOD; }
+    u32 GetBlockCount() const { return blockMgr.GetNumBlocks(); }
+    BlockManager* GetBlockManager() { return &blockMgr; }
+    const LVector& GetLevelMin() const { return levelMin; }
+    const LVector& GetLevelMax() const { return levelMax; }
 
 private:
-    std::vector<BlockMesh> mBlocks;
-    PsxVRAM mVRAM;
-    u32 mVRAMHandle = 0; // raw GL_R16UI texture of VRAM
-    u16 mTargetLOD = 3;  // default LOD level to render
+    BlockManager blockMgr;
+    PsxVRAM vram;
+    u32 vramHandle = 0;
+    std::vector<u8> streamData; // LCF file data (kept alive for block pointers)
+    LVector levelMin = {}, levelMax = {};
 
     void LoadTPGTextures(const u8* lcfData, u32 lcfSize);
+
+    // DrawEverythingHandler (GAME.CPP:2211) — sorting + rendering pipeline
+    void DrawEverythingHandler(const LVector* camPos);  // 0x8002A98C
+
+    // computeBlockToPointDistances (GAME.CPP:1976) — 8-corner bbox distance + frustum cull
+    void computeBlockToPointDistances(const Block* block, const LVector* point,
+                                      s32* outDistSq, s32* outZDepth);  // 0x8002A238
+
+    // OffsetToPreventSeams (GAME.CPP:2482) — shifts block pos toward camera
+    void OffsetToPreventSeams(LVector& pos, const LVector& camPos);  // 0x8002AF88
 };
-
-// Free camera for level viewing (WASD + LMB drag)
-struct FreeCamera {
-    f32 x = 3240, y = -192, z = -648; // position (level center)
-    f32 yaw   = 0.0f;   // radians, 0 = looking along +Z
-    f32 pitch = 0.0f;
-    f32 speed = 3000.0f;
-    f32 sensitivity = 0.003f;
-
-    // Update from keyboard + mouse (call each frame with dt)
-    void Update(void* window, f32 dt);
-
-    // Build view + projection matrices and set them on the context
-    void Apply();
-
-private:
-    double mLastMX = 0, mLastMY = 0;
-    bool mHasPrev = false;
-};
-
-#endif // WORLD_H

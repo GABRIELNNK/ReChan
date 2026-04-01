@@ -1,9 +1,11 @@
 // game.h
-#ifndef GAME_H
-#define GAME_H
+#pragma once
 
 #include "core.h"
 #include "gen/world.h"
+#include "gen/camera.h"
+#include "gen/control.h"
+#include "p3d/view.h"
 
 enum class GameState : s32 {
     Null = 0,
@@ -44,18 +46,19 @@ public:
     bool Step();
     void SetState(GameState state);
 
-    GameState GetState() const { return mState; }
-    GameState GetPrevState() const { return mPrevState; }
+    GameState GetState() const { return state; }
+    GameState GetPrevState() const { return prevState; }
 
 private:
     using StateFunc = bool(*)(Game*);
 
-    GameState mState = GameState::Null;
-    GameState mPrevState = GameState::Null;
-    StateFunc mStateFunc = nullptr;
+    GameState state = GameState::Null;
+    GameState prevState = GameState::Null;
+    StateFunc stateFunc = nullptr;
 
-    World mWorld;
-    FreeCamera mCamera;
+    World world;
+    Camera gameCamera;
+    tView view;
 
     static const StateFunc sStateTable[static_cast<int>(GameState::COUNT)];
 
@@ -88,5 +91,3 @@ private:
     static bool gsEndGameLoopState(Game* game);
     static bool gsEndState(Game* game);
 };
-
-#endif

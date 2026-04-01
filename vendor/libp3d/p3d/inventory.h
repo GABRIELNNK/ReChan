@@ -1,6 +1,5 @@
 // inventory.h — tInventory: named asset store
-#ifndef P3D_INVENTORY_H
-#define P3D_INVENTORY_H
+#pragma once
 
 #include "p3d/entity.h"
 #include <unordered_map>
@@ -28,12 +27,10 @@ public:
     // Remove all entities
     void RemoveAll();
 
-    u32 Count() const { return static_cast<u32>(mEntities.size()); }
+    u32 Count() const { return static_cast<u32>(entities.size()); }
 
-    const std::unordered_map<std::string, tEntity*>& GetAll() const { return mEntities; }
+    const std::unordered_map<std::string, tEntity*>& GetAll() const { return entities; }
 
 private:
-    std::unordered_map<std::string, tEntity*> mEntities;
+    std::unordered_map<std::string, tEntity*> entities;
 };
-
-#endif // P3D_INVENTORY_H

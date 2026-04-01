@@ -8,52 +8,52 @@ static constexpr u32 CHUNK_HEADER_SIZE = 6; // u16 id + u32 totalSize
 // tChunkFile
 
 tChunkFile::tChunkFile(const u8* data, u32 size)
-    : mData(data), mSize(size), mPos(0), mStackTop(-1) {}
+    : buf(data), bufSize(size), pos(0), stackTop(-1) {}
 
 bool tChunkFile::ChunksRemaining() {
-    if (mStackTop < 0)
-        return mPos + CHUNK_HEADER_SIZE <= mSize;
+    if (stackTop < 0)
+        return pos + CHUNK_HEADER_SIZE <= bufSize;
 
-    return mPos + CHUNK_HEADER_SIZE <= mStack[mStackTop].endPos;
+    return pos + CHUNK_HEADER_SIZE <= stack[stackTop].endPos;
 }
 
 u16 tChunkFile::BeginChunk() {
-    assert(mStackTop < STACK_SIZE - 1);
+    assert(stackTop < STACK_SIZE - 1);
 
     u16 id = ReadU16();
     u32 totalSize = ReadU32();
     u32 dataLength = totalSize - CHUNK_HEADER_SIZE;
 
-    int next = ++mStackTop;
-    mStack[next].id = id;
-    mStack[next].dataLength = dataLength;
-    mStack[next].startPos = mPos;
-    mStack[next].endPos = mPos + dataLength;
+    int next = ++stackTop;
+    stack[next].id = id;
+    stack[next].dataLength = dataLength;
+    stack[next].startPos = pos;
+    stack[next].endPos = pos + dataLength;
 
     return id;
 }
 
 void tChunkFile::EndChunk() {
-    assert(mStackTop >= 0);
+    assert(stackTop >= 0);
 
     // Skip any unread data in this chunk
-    mPos = mStack[mStackTop].endPos;
-    --mStackTop;
+    pos = stack[stackTop].endPos;
+    --stackTop;
 }
 
 u16 tChunkFile::GetCurrentID() const {
-    assert(mStackTop >= 0);
-    return mStack[mStackTop].id;
+    assert(stackTop >= 0);
+    return stack[stackTop].id;
 }
 
 u32 tChunkFile::GetCurrentDataLength() const {
-    assert(mStackTop >= 0);
-    return mStack[mStackTop].dataLength;
+    assert(stackTop >= 0);
+    return stack[stackTop].dataLength;
 }
 
 u8 tChunkFile::GetByte() {
-    assert(mPos + 1 <= mSize);
-    return mData[mPos++];
+    assert(pos + 1 <= bufSize);
+    return buf[pos++];
 }
 
 u16 tChunkFile::GetUShort() {
@@ -77,36 +77,36 @@ f32 tChunkFile::GetFloat() {
 
 std::string tChunkFile::GetPString() {
     u8 len = GetByte();
-    std::string s(reinterpret_cast<const char*>(mData + mPos), len);
-    mPos += len;
+    std::string s(reinterpret_cast<const char*>(buf + pos), len);
+    pos += len;
     return s;
 }
 
-void tChunkFile::GetData(void* buf, u32 count) {
-    assert(mPos + count <= mSize);
-    std::memcpy(buf, mData + mPos, count);
-    mPos += count;
+void tChunkFile::GetData(void* dst, u32 count) {
+    assert(pos + count <= bufSize);
+    std::memcpy(dst, buf + pos, count);
+    pos += count;
 }
 
 void tChunkFile::Skip(u32 bytes) {
-    mPos += bytes;
+    pos += bytes;
 }
 
 u16 tChunkFile::ReadU16() {
-    assert(mPos + 2 <= mSize);
-    u16 v = static_cast<u16>(mData[mPos])
-        | (static_cast<u16>(mData[mPos + 1]) << 8);
-    mPos += 2;
+    assert(pos + 2 <= bufSize);
+    u16 v = static_cast<u16>(buf[pos])
+        | (static_cast<u16>(buf[pos + 1]) << 8);
+    pos += 2;
     return v;
 }
 
 u32 tChunkFile::ReadU32() {
-    assert(mPos + 4 <= mSize);
-    u32 v = static_cast<u32>(mData[mPos])
-        | (static_cast<u32>(mData[mPos + 1]) << 8)
-        | (static_cast<u32>(mData[mPos + 2]) << 16)
-        | (static_cast<u32>(mData[mPos + 3]) << 24);
-    mPos += 4;
+    assert(pos + 4 <= bufSize);
+    u32 v = static_cast<u32>(buf[pos])
+        | (static_cast<u32>(buf[pos + 1]) << 8)
+        | (static_cast<u32>(buf[pos + 2]) << 16)
+        | (static_cast<u32>(buf[pos + 3]) << 24);
+    pos += 4;
     return v;
 }
 

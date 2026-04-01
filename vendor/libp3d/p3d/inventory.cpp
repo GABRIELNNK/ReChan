@@ -8,30 +8,30 @@ tInventory::~tInventory() {
 void tInventory::Store(tEntity* entity) {
     if (!entity) return;
 
-    const std::string& name = entity->GetName();
-    auto it = mEntities.find(name);
-    if (it != mEntities.end()) {
+    const std::string& n = entity->GetName();
+    auto it = entities.find(n);
+    if (it != entities.end()) {
         it->second->Release();
     }
     entity->AddRef();
-    mEntities[name] = entity;
+    entities[n] = entity;
 }
 
-void tInventory::Remove(const std::string& name) {
-    auto it = mEntities.find(name);
-    if (it != mEntities.end()) {
+void tInventory::Remove(const std::string& n) {
+    auto it = entities.find(n);
+    if (it != entities.end()) {
         it->second->Release();
-        mEntities.erase(it);
+        entities.erase(it);
     }
 }
 
-tEntity* tInventory::Find(const std::string& name) {
-    auto it = mEntities.find(name);
-    return (it != mEntities.end()) ? it->second : nullptr;
+tEntity* tInventory::Find(const std::string& n) {
+    auto it = entities.find(n);
+    return (it != entities.end()) ? it->second : nullptr;
 }
 
 void tInventory::RemoveAll() {
-    for (auto& [name, entity] : mEntities)
+    for (auto& [n, entity] : entities)
         entity->Release();
-    mEntities.clear();
+    entities.clear();
 }

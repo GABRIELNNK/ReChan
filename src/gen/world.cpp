@@ -1,13 +1,15 @@
 // world.cpp — Level world implementation
 #include "gen/world.h"
-#include "gen/assets.h"
+#include "gen/geometry.h"
 #include "p3d/context.h"
+#include "p3d/stream.h"
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
 
-#include <glad/gl.h>
-#include <GLFW/glfw3.h>
+#include <cmath>
 #include <cstring>
+#include <fstream>
+#include <filesystem>
 
 // PSX BGR555 to RGBA8
 static void PsxToRGBA(u16 c, u8& r, u8& g, u8& b, u8& a) {
@@ -84,12 +86,9 @@ static u32 ReadU32(const u8* p) { return p[0] | (p[1] << 8) | (p[2] << 16) | (p[
 static s16 ReadS16(const u8* p) { return static_cast<s16>(p[0] | (p[1] << 8)); }
 static s32 ReadS32(const u8* p) { return static_cast<s32>(p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24)); }
 
-// Parse a WDB node stream to extract DBVolume translations.
-// Returns a vector of (block_number, tx, ty, tz) for volumes with subtype==0.
-struct WDBVolume { u32 blockNum; s32 tx, ty, tz; };
-
-static std::vector<WDBVolume> ParseWDBVolumes(const u8* d, u32 size) {
-    std::vector<WDBVolume> vols;
+// Parse a WDB node stream to extract DBVolume entries.
+static std::vector<DBVolume> ParseWDBVolumes(const u8* d, u32 size) {
+    std::vector<DBVolume> vols;
     u32 pos = 0;
     while (pos + 4 <= size) {
         u32 tag = ReadU32(d + pos); pos += 4;
@@ -97,27 +96,36 @@ static std::vector<WDBVolume> ParseWDBVolumes(const u8* d, u32 size) {
 
         // Parse DBRoot common header
         if (pos + 36 > size) break;
-        u16 typ = ReadU16(d + pos); pos += 4; // u16 + 2 padding
-        u16 sub = ReadU16(d + pos); pos += 4;
-        s32 tx = ReadS32(d + pos); pos += 4;
-        s32 ty = ReadS32(d + pos); pos += 4;
-        s32 tz = ReadS32(d + pos); pos += 4;
+        DBVolume vol = {};
+        vol.type = ReadU16(d + pos); pos += 4; // u16 + 2 padding
+        vol.sub = ReadU16(d + pos); pos += 4;
+        vol.pos.x = ReadS32(d + pos); pos += 4;
+        vol.pos.y = ReadS32(d + pos); pos += 4;
+        vol.pos.z = ReadS32(d + pos); pos += 4;
         pos += 12; // skip unk1, unk2, unk3
         if (pos + 4 > size) break;
         u32 nattr = ReadU32(d + pos); pos += 4;
 
-        // Parse attribs: find attrib with id==15 (block number)
-        u32 blockNum = 0;
-        bool hasBlock = false;
+        // Parse attribs
+        vol.numAttribs = 0;
         for (u32 i = 0; i < nattr; i++) {
             if (pos + 8 > size) break;
             u32 hdr = ReadU32(d + pos); pos += 4;
             u32 dlen = ReadU32(d + pos); pos += 4;
             u16 attrId = static_cast<u16>(hdr & 0xFFFF);
             u16 attrType = static_cast<u16>((hdr >> 16) & 0xFFFF);
-            if (attrId == 15 && attrType == 1 && dlen >= 4 && pos + 4 <= size) {
-                blockNum = ReadU32(d + pos);
-                hasBlock = true;
+            if (vol.numAttribs < DBVolume::MAX_ATTRIBS) {
+                DBAttrib& a = vol.attribs[vol.numAttribs];
+                a.id = attrId;
+                a.type = attrType;
+                a.value = 0;
+                a.strValue = nullptr;
+                if (attrType == 1 && dlen >= 4 && pos + 4 <= size) {
+                    a.value = ReadU32(d + pos);
+                } else if (attrType == 3 && dlen > 0 && pos + dlen <= size) {
+                    a.strValue = reinterpret_cast<const char*>(d + pos);
+                }
+                vol.numAttribs++;
             }
             pos += dlen;
         }
@@ -125,10 +133,20 @@ static std::vector<WDBVolume> ParseWDBVolumes(const u8* d, u32 size) {
         // Tag-specific extra fields
         if (tag == 2) { // DBVolume
             if (pos + 12 <= size) {
-                pos += 12; // skip sizeX, sizeZ, sizeY
+                // DBVolume extra: sizeX, sizeZ, sizeY (3 s32)
+                s32 sizeX = ReadS32(d + pos); pos += 4;
+                s32 sizeY = ReadS32(d + pos); pos += 4;
+                s32 sizeZ = ReadS32(d + pos); pos += 4;
+                // Compute corners from position ± half-size
+                vol.cornerA.x = vol.pos.x + sizeX / 2;
+                vol.cornerA.y = vol.pos.y + sizeY / 2;
+                vol.cornerA.z = vol.pos.z + sizeZ / 2;
+                vol.cornerB.x = vol.pos.x - sizeX / 2;
+                vol.cornerB.y = vol.pos.y - sizeY / 2;
+                vol.cornerB.z = vol.pos.z - sizeZ / 2;
             }
-            if (sub == 0 && hasBlock) {
-                vols.push_back({ blockNum, tx, ty, tz });
+            if (vol.sub == 0) {
+                vols.push_back(vol);
             }
         } else if (tag == 6) { // DBMesh
             if (pos + 4 <= size) {
@@ -142,7 +160,7 @@ static std::vector<WDBVolume> ParseWDBVolumes(const u8* d, u32 size) {
 }
 
 void World::LoadTPGTextures(const u8* lcfData, u32 lcfSize) {
-    mVRAM.Clear();
+    vram.Clear();
 
     // Re-parse stream header to find TPG entries
     if (lcfSize < 4) return;
@@ -195,28 +213,20 @@ void World::LoadTPGTextures(const u8* lcfData, u32 lcfSize) {
                 // Upload raw pixel data to VRAM
                 if (rw > 0 && rh > 0 && rw <= 1024 && rh <= 512 &&
                     p + rw * rh * 2 <= offset + size) {
-                    mVRAM.Upload(rx, ry, rw, rh, d + p);
+                    vram.Upload(rx, ry, rw, rh, d + p);
                 }
             }
             cpos += chunkSize;
         }
     }
 
-    // Upload raw VRAM as GL_R16UI texture for shader-side palette lookup
-    if (mVRAMHandle) {
-        glDeleteTextures(1, &mVRAMHandle);
-        mVRAMHandle = 0;
+    // Upload raw VRAM as R16UI texture for shader-side palette lookup
+    if (vramHandle) {
+        p3d::context->DestroyVRAMTexture(vramHandle);
+        vramHandle = 0;
     }
-    glGenTextures(1, &mVRAMHandle);
-    glBindTexture(GL_TEXTURE_2D, mVRAMHandle);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R16UI, 1024, 512, 0,
-                 GL_RED_INTEGER, GL_UNSIGNED_SHORT, mVRAM.data);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    RC_LOG("[World] Uploaded raw VRAM as GL_R16UI (1024x512, handle=%u)", mVRAMHandle);
+    vramHandle = p3d::context->CreateVRAMTexture(1024, 512, vram.data);
+    RC_LOG("[World] Uploaded raw VRAM as R16UI (1024x512, handle=%u)", vramHandle);
 }
 
 World::World() = default;
@@ -228,127 +238,483 @@ World::~World() {
 bool World::Load(const std::string& lcfPath) {
     Unload();
 
-    auto stream = Assets::LoadStream(lcfPath);
-    if (stream.entries.empty()) {
-        RC_ERR("[World] Failed to load stream: %s", lcfPath.c_str());
+    // Read LCF file from disc (PC equivalent of Stream::Open + disc read)
+    std::ifstream file(lcfPath, std::ios::binary | std::ios::ate);
+    if (!file) {
+        RC_ERR("[World] Failed to open: %s", lcfPath.c_str());
+        return false;
+    }
+    auto fileSize = file.tellg();
+    file.seekg(0);
+    streamData.resize(static_cast<size_t>(fileSize));
+    file.read(reinterpret_cast<char*>(streamData.data()), fileSize);
+    file.close();
+
+    u32 dataSize = static_cast<u32>(streamData.size());
+    const u8* data = streamData.data();
+
+    // Parse stream header (PSX Stream::Open reads this from disc)
+    auto entries = ParseStreamHeader(data, dataSize);
+    if (entries.empty()) {
+        RC_ERR("[World] No stream entries in: %s", lcfPath.c_str());
+        streamData.clear();
         return false;
     }
 
-    // Load TPG textures into VRAM and decode page
-    LoadTPGTextures(stream.data.data(), static_cast<u32>(stream.data.size()));
+    // Load TPG textures into VRAM (PSX HandleTPGChunk)
+    LoadTPGTextures(data, dataSize);
 
-    auto blkSpans = Assets::FilterStreamEntries(stream, ".BLK");
-    RC_LOG("[World] Found %u BLK entries in %s", (u32)blkSpans.size(), lcfPath.c_str());
-
-    for (const auto& span : blkSpans) {
-        BlockMesh mesh = ParseBLK(span.ptr, span.size);
-        if (mesh.vao != 0) {
-            mBlocks.push_back(mesh);
-        }
+    // Count BLK and WDB entries from stream header
+    u32 blkCount = 0;
+    u32 wdbCount = 0;
+    for (const auto& e : entries) {
+        if (std::strncmp(e.magic, ".BLK", 4) == 0) blkCount++;
+        if (std::strncmp(e.magic, ".WDB", 4) == 0) wdbCount++;
     }
+    RC_LOG("[World] Found %u BLK, %u WDB entries in %s", blkCount, wdbCount, lcfPath.c_str());
 
-    // Parse WDB entries to extract per-block world translations
-    auto wdbSpans = Assets::FilterStreamEntries(stream, ".WDB");
-    RC_LOG("[World] Found %u WDB entries", (u32)wdbSpans.size());
-    u32 blkBase = 0;
-    for (const auto& wdb : wdbSpans) {
-        auto vols = ParseWDBVolumes(wdb.ptr, wdb.size);
-        for (const auto& v : vols) {
-            u32 globalIdx = blkBase + v.blockNum;
-            if (globalIdx < mBlocks.size()) {
-                mBlocks[globalIdx].tx = v.tx;
-                mBlocks[globalIdx].ty = v.ty;
-                mBlocks[globalIdx].tz = v.tz;
+    // Parse WDB entries (PSX HandleWDBChunk - Database::Scan)
+    // Each WDB has block numbers starting from 0 — they are local to that WDB's
+    // BLK group. Count BLK entries between WDB entries to compute the base offset.
+    std::vector<DBVolume> blockVolumes(blkCount);
+    {
+        // Build list of (wdbIndex, blkBaseOffset) pairs
+        // LCF stream interleaves: WDB#0 BLK*N0 WDB#1 BLK*N1 WDB#2 BLK*N2 ...
+        // Count BLKs after each WDB to determine group sizes
+        struct WDBGroup { u32 entryIdx; u32 blkBase; };
+        std::vector<WDBGroup> wdbGroups;
+        u32 blkAccum = 0;
+        for (u32 i = 0; i < entries.size(); i++) {
+            if (std::strncmp(entries[i].magic, ".WDB", 4) == 0) {
+                wdbGroups.push_back({i, blkAccum});
+            } else if (std::strncmp(entries[i].magic, ".BLK", 4) == 0) {
+                blkAccum++;
             }
         }
-        blkBase += static_cast<u32>(vols.size());
-        RC_LOG("[World]   WDB section: %u volumes, blkBase now %u", (u32)vols.size(), blkBase);
+
+        u32 totalParsed = 0;
+        for (auto& grp : wdbGroups) {
+            const auto& e = entries[grp.entryIdx];
+            if (e.offset + e.size > dataSize) continue;
+            auto vols = ParseWDBVolumes(data + e.offset, e.size);
+            for (const auto& vol : vols) {
+                const DBAttrib* a = vol.FindAttrib(15);
+                if (a) {
+                    u32 globalIdx = grp.blkBase + a->value;
+                    if (globalIdx < blkCount) {
+                        blockVolumes[globalIdx] = vol;
+                    }
+                }
+            }
+            totalParsed += static_cast<u32>(vols.size());
+            RC_LOG("[World] WDB group at entry %u: blkBase=%u, %u volumes",
+                   grp.entryIdx, grp.blkBase, (u32)vols.size());
+        }
+        RC_LOG("[World] Parsed %u DBVolumes from %u WDB entries", totalParsed, (u32)wdbGroups.size());
     }
 
-    RC_LOG("[World] Loaded %u blocks", (u32)mBlocks.size());
-    return !mBlocks.empty();
+    // Initialize blocks from volumes (PSX _LoadBlocksFunc - Block::Init)
+    blockMgr.LoadBlocksFunc(blockVolumes);
+
+    // Parse BLK data into blocks (PSX LoadBlocks - LoadSingleBlockAndParse - Parse)
+    std::vector<const u8*> blkPtrs;
+    std::vector<u32> blkSizes;
+    for (const auto& e : entries) {
+        if (std::strncmp(e.magic, ".BLK", 4) != 0) continue;
+        if (e.offset + e.size > dataSize) {
+            blkPtrs.push_back(nullptr);
+            blkSizes.push_back(0);
+        } else {
+            blkPtrs.push_back(data + e.offset);
+            blkSizes.push_back(e.size);
+        }
+    }
+    blockMgr.LoadBlocks(0, blkPtrs.data(), blkSizes.data(), blkCount);
+
+    RC_LOG("[World] Loaded %u blocks", blockMgr.GetNumBlocks());
+
+    // Debug: log ALL block positions and compute level AABB
+    s32 minX = 0x7FFFFFFF, minY = 0x7FFFFFFF, minZ = 0x7FFFFFFF;
+    s32 maxX = -0x7FFFFFFF, maxY = -0x7FFFFFFF, maxZ = -0x7FFFFFFF;
+    for (u32 i = 0; i < blockMgr.GetNumBlocks(); i++) {
+        Block* b = blockMgr.GetBlock(i);
+        if (!b) continue;
+        if (i < 10) RC_LOG("[World] Block %u: pos=(%d,%d,%d) dim=(%d,%d,%d) parsed=%d",
+                           i, b->posX, b->posY, b->posZ, b->dimX, b->dimY, b->dimZ, b->parsed);
+        s32 bMinX = b->posX + b->halfExtNegX, bMaxX = b->posX + b->halfExtPosX;
+        s32 bMinY = b->posY + b->halfExtNegY, bMaxY = b->posY + b->halfExtPosY;
+        s32 bMinZ = b->posZ + b->halfExtNegZ, bMaxZ = b->posZ + b->halfExtPosZ;
+        if (bMinX < minX) minX = bMinX; if (bMaxX > maxX) maxX = bMaxX;
+        if (bMinY < minY) minY = bMinY; if (bMaxY > maxY) maxY = bMaxY;
+        if (bMinZ < minZ) minZ = bMinZ; if (bMaxZ > maxZ) maxZ = bMaxZ;
+    }
+    levelMin = { minX, minY, minZ };
+    levelMax = { maxX, maxY, maxZ };
+    RC_LOG("[World] Level AABB: min=(%d,%d,%d) max=(%d,%d,%d)",
+           minX, minY, minZ, maxX, maxY, maxZ);
+    RC_LOG("[World] Level size: (%d, %d, %d)",
+           maxX - minX, maxY - minY, maxZ - minZ);
+
+    return blockMgr.GetNumBlocks() > 0;
 }
 
-void World::Render() {
-    p3d::context->SetVRAMHandle(mVRAMHandle);
-
-    for (auto& block : mBlocks) {
-        if (block.lod != mTargetLOD) continue;
-        Mat4 world;
-        world.m[12] = static_cast<f32>(block.tx);
-        world.m[13] = static_cast<f32>(block.ty);
-        world.m[14] = static_cast<f32>(block.tz);
-        p3d::context->SetWorldMatrix(world);
-        p3d::context->DrawPrimBuffer(PDDI_PRIM_TRIANGLES, block.vao, block.indexCount);
-    }
-
+void World::Render(const LVector* camPos) {
+    p3d::context->SetVRAMHandle(vramHandle);
+    DrawEverythingHandler(camPos);
     p3d::context->SetVRAMHandle(0);
 }
 
-void World::Unload() {
-    for (auto& block : mBlocks)
-        block.Destroy();
-    mBlocks.clear();
-    if (mVRAMHandle) {
-        glDeleteTextures(1, &mVRAMHandle);
-        mVRAMHandle = 0;
-    }
+// TransformVector — PC equivalent of PSX tPort::TransformVector
+// Multiplies world-space point by the current view matrix (GTE rotation + translation)
+static void TransformVector(const Mat4& vm, s32 inX, s32 inY, s32 inZ,
+                            s32* outX, s32* outY, s32* outZ) {
+    f32 fx = static_cast<f32>(inX);
+    f32 fy = static_cast<f32>(inY);
+    f32 fz = static_cast<f32>(inZ);
+    *outX = static_cast<s32>(vm.m[0] * fx + vm.m[4] * fy + vm.m[8]  * fz + vm.m[12]);
+    *outY = static_cast<s32>(vm.m[1] * fx + vm.m[5] * fy + vm.m[9]  * fz + vm.m[13]);
+    *outZ = static_cast<s32>(vm.m[2] * fx + vm.m[6] * fy + vm.m[10] * fz + vm.m[14]);
 }
 
-// OrbitCamera
+// chanp3dClipCode — PC equivalent of PSX chanp3dClipCode
+// Computes 6-bit clip code for a view-space point against the frustum
+// bit 0: left, bit 1: right, bit 2: bottom, bit 3: top, bit 4: near, bit 5: far
+static u32 chanp3dClipCode(const Mat4& pm, s32 vx, s32 vy, s32 vz) {
+    f32 fx = static_cast<f32>(vx);
+    f32 fy = static_cast<f32>(vy);
+    f32 fz = static_cast<f32>(vz);
+    // Transform to homogeneous clip space
+    f32 cx = pm.m[0] * fx + pm.m[4] * fy + pm.m[8]  * fz + pm.m[12];
+    f32 cy = pm.m[1] * fx + pm.m[5] * fy + pm.m[9]  * fz + pm.m[13];
+    f32 cz = pm.m[2] * fx + pm.m[6] * fy + pm.m[10] * fz + pm.m[14];
+    f32 cw = pm.m[3] * fx + pm.m[7] * fy + pm.m[11] * fz + pm.m[15];
+    u32 code = 0;
+    if (cx < -cw) code |= 0x01; // left
+    if (cx >  cw) code |= 0x02; // right
+    if (cy < -cw) code |= 0x04; // bottom
+    if (cy >  cw) code |= 0x08; // top
+    if (cz < -cw) code |= 0x10; // near
+    if (cz >  cw) code |= 0x20; // far
+    return code;
+}
 
-void FreeCamera::Update(void* window, f32 dt) {
-    auto* win = static_cast<GLFWwindow*>(window);
+// vecLengthSquared — PC equivalent of PSX vecLengthSquared
+// Returns squared length of view-space vector (with >>8 shift to prevent overflow)
+static s32 vecLengthSquared(s32 x, s32 y, s32 z) {
+    s32 sx = x >> 8;
+    s32 sy = y >> 8;
+    s32 sz = z >> 8;
+    return sx * sx + sy * sy + sz * sz;
+}
 
-    // Mouse rotation on LMB
-    double mx, my;
-    glfwGetCursorPos(win, &mx, &my);
-    if (glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
-        if (mHasPrev) {
-            f32 dx = static_cast<f32>(mx - mLastMX);
-            f32 dy = static_cast<f32>(my - mLastMY);
-            yaw   -= dx * sensitivity;
-            pitch -= dy * sensitivity;
-            if (pitch >  1.55f) pitch =  1.55f;
-            if (pitch < -1.55f) pitch = -1.55f;
+// DrawEverythingHandler__FP7Handler (GAME.CPP:2211)
+// Reversed from PSX: builds draw list from block pool, selection-sorts by distSq,
+// applies OffsetToPreventSeams, renders each block with Draw.
+void World::DrawEverythingHandler(const LVector* camPos) {
+    MARKFUNCTION(0x8002A98C);
+
+    u32 numBlocks = blockMgr.GetNumBlocks();
+    if (numBlocks == 0) return;
+
+    // Build draw entry array: {Block*, distSq, zDepth}
+    // PSX uses 12-byte entries: [block_ptr, distSq, zDepth]
+    struct DrawEntry {
+        Block* block;
+        s32 distSq;
+        s32 zDepth;
+    };
+    std::vector<DrawEntry> drawList;
+    drawList.reserve(numBlocks);
+
+    for (u32 i = 0; i < numBlocks; i++) {
+        Block* block = blockMgr.GetBlock(i);
+        if (!block || !block->primBuffer) continue;
+
+        s32 distSq, zDepth;
+        computeBlockToPointDistances(block, camPos, &distSq, &zDepth);
+        drawList.push_back({ block, distSq, zDepth });
+    }
+
+    u32 count = static_cast<u32>(drawList.size());
+    if (count == 0) return;
+
+    // Selection sort by distSq ascending (nearest first)
+    // PSX: inner loop finds minimum, swaps 12-byte entries
+    for (u32 i = 0; i < count - 1; i++) {
+        u32 minIdx = i;
+        for (u32 j = i + 1; j < count; j++) {
+            if (drawList[j].distSq < drawList[minIdx].distSq) {
+                minIdx = j;
+            }
         }
-        mHasPrev = true;
-    } else {
-        mHasPrev = false;
+        if (minIdx != i) {
+            DrawEntry tmp = drawList[i];
+            drawList[i] = drawList[minIdx];
+            drawList[minIdx] = tmp;
+        }
     }
-    mLastMX = mx;
-    mLastMY = my;
 
-    // Speed boost with shift
-    f32 spd = speed * dt;
-    if (glfwGetKey(win, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) spd *= 4.0f;
+    // PSX: find maxZDepth across all entries, add 64, clamp to 0xFFFF
+    // PSX: count entries with positive distSq (s6 index)
+    // PSX: EnterLayer on tView (OT bucket management — handled by z-buffer on PC)
 
-    // Forward/back/strafe
-    f32 sy = std::sin(yaw), cy_ = std::cos(yaw);
-    f32 sp = std::sin(pitch), cp = std::cos(pitch);
-    // Forward direction
-    f32 fx = sy * cp, fy = sp, fz = cy_ * cp;
-    // Right direction
-    f32 rx = -cy_, rz = sy;
+    // Render each block in sorted order
+    for (u32 i = 0; i < count; i++) {
+        DrawEntry& entry = drawList[i];
 
-    if (glfwGetKey(win, GLFW_KEY_W) == GLFW_PRESS) { x += fx * spd; y += fy * spd; z += fz * spd; }
-    if (glfwGetKey(win, GLFW_KEY_S) == GLFW_PRESS) { x -= fx * spd; y -= fy * spd; z -= fz * spd; }
-    if (glfwGetKey(win, GLFW_KEY_A) == GLFW_PRESS) { x -= rx * spd; z -= rz * spd; }
-    if (glfwGetKey(win, GLFW_KEY_D) == GLFW_PRESS) { x += rx * spd; z += rz * spd; }
-    if (glfwGetKey(win, GLFW_KEY_Q) == GLFW_PRESS) y += spd;
-    if (glfwGetKey(win, GLFW_KEY_E) == GLFW_PRESS) y -= spd;
+        // Skip culled blocks (distSq == -1 from frustum test)
+        if (entry.distSq < 0) continue;
+
+        // Copy block->pos to local and apply OffsetToPreventSeams
+        // PSX: reads block+4/+8/+12 (posX/Y/Z) to stack local
+        LVector localPos;
+        localPos.x = entry.block->posX;
+        localPos.y = entry.block->posY;
+        localPos.z = entry.block->posZ;
+        OffsetToPreventSeams(localPos, *camPos);
+
+        // PSX: profile begin(10), DrawLoop(blockMgr+52, blockNum) — entity list 1
+        // PSX: profile end(10), begin(11), DrawLoop(blockMgr+76, blockNum) — entity list 2
+        // PSX: DrawLoop(blockMgr+64, blockNum) — entity list 3
+        // PSX: profile end(11), begin(12), DrawLoop(blockMgr+88, blockNum) — entity list 4
+        // PSX: profile end(12), begin(13), DrawEffects(blockNum)
+        // PSX: profile end(13)
+
+        // PSX: profile begin(9), Draw(block, &localPos), profile end(9)
+        entry.block->Draw(&localPos);
+
+        // PSX: ExitLayer on tView if current layer == 2
+    }
+
+    // PSX: DebugDrawSector, ExitLayer(2), profile end(7)
 }
 
-void FreeCamera::Apply() {
-    f32 sy = std::sin(yaw), cy_ = std::cos(yaw);
-    f32 sp = std::sin(pitch), cp = std::cos(pitch);
-    f32 tx = x + sy * cp;
-    f32 ty = y + sp;
-    f32 tz = z + cy_ * cp;
+// computeBlockToPointDistances (GAME.CPP:1976)
+// Reversed from PSX: builds 8 bounding box corners + center (9 points),
+// transforms each through view matrix, computes clip codes + view-space distance,
+// tests 13 clip code pairs for frustum culling.
+// a0=block, a1=point, a2=outDistSq, a3=outZDepth
+void World::computeBlockToPointDistances(const Block* block, const LVector* point,
+                                         s32* outDistSq, s32* outZDepth) {
+    MARKFUNCTION(0x8002A238);
 
-    Mat4 view = LookAt(x, y, z, tx, ty, tz, 0, 1, 0);
-    Mat4 proj = Perspective(0.7f, 4.0f / 3.0f, 10.0f, 100000.0f);
+    // PSX: reads bounding box from tPrimGeom virtual call: *(*(block->primGeom+8)+20)()
+    // PC: uses block half-extent fields (same bounding box data, different access path)
+    // s3 equivalent: bbox[0]=negX, [1]=negY, [2]=negZ, [3]=posX, [4]=posY, [5]=posZ
+    s32 bbox[6] = {
+        block->halfExtNegX, block->halfExtNegY, block->halfExtNegZ,
+        block->halfExtPosX, block->halfExtPosY, block->halfExtPosZ
+    };
 
-    p3d::context->SetViewMatrix(view);
-    p3d::context->SetProjectionMatrix(proj);
+    // s5 = &block->posX (block position at offset +4)
+    const s32* pos = &block->posX; // pos[0]=X, pos[1]=Y, pos[2]=Z
+
+    // Get view and projection matrices (PC equivalent of GTE state)
+    const Mat4& vm = p3d::context->GetViewMatrix();
+    const Mat4& pm = p3d::context->GetProjectionMatrix();
+
+    s32 minDistSq = 0; // s7
+    s32 maxZDepth = 0; // s6
+    u32 clipCodes[8];
+    s32 tvx, tvy, tvz; // transformed view-space coords
+
+    // Build and process 8 bounding box corners
+    // PSX corner pattern: (bbox[negX/posX], bbox[negY/posY], bbox[negZ/posZ]) + blockPos
+    // Corner 0: pos + (negX, negY, negZ)
+    {
+        s32 wx = pos[0] + bbox[0], wy = pos[1] + bbox[1], wz = pos[2] + bbox[2];
+        TransformVector(vm, wx, wy, wz, &tvx, &tvy, &tvz);
+        s32 svx = tvx, svy = tvy, svz = tvz; // save pre-project coords
+        clipCodes[0] = chanp3dClipCode(pm, tvx, tvy, tvz);
+        minDistSq = vecLengthSquared(svx, svy, svz);
+        s32 z = svz;
+        if (z > 0xFFFF) z = 0xFFFF;
+        if (z > maxZDepth) maxZDepth = z;
+    }
+
+    // Corner 1: pos + (posX, negY, negZ)
+    {
+        s32 wx = pos[0] + bbox[3], wy = pos[1] + bbox[1], wz = pos[2] + bbox[2];
+        TransformVector(vm, wx, wy, wz, &tvx, &tvy, &tvz);
+        s32 svx = tvx, svy = tvy, svz = tvz;
+        clipCodes[1] = chanp3dClipCode(pm, tvx, tvy, tvz);
+        s32 d = vecLengthSquared(svx, svy, svz);
+        if (d < minDistSq) minDistSq = d;
+        s32 z = svz;
+        if (z > 0xFFFF) z = 0xFFFF;
+        if (z > maxZDepth) maxZDepth = z;
+    }
+
+    // Corner 2: pos + (negX, posY, negZ)
+    {
+        s32 wx = pos[0] + bbox[0], wy = pos[1] + bbox[4], wz = pos[2] + bbox[2];
+        TransformVector(vm, wx, wy, wz, &tvx, &tvy, &tvz);
+        s32 svx = tvx, svy = tvy, svz = tvz;
+        clipCodes[2] = chanp3dClipCode(pm, tvx, tvy, tvz);
+        s32 d = vecLengthSquared(svx, svy, svz);
+        if (d < minDistSq) minDistSq = d;
+        s32 z = svz;
+        if (z > 0xFFFF) z = 0xFFFF;
+        if (z > maxZDepth) maxZDepth = z;
+    }
+
+    // Corner 3: pos + (posX, posY, negZ)
+    {
+        s32 wx = pos[0] + bbox[3], wy = pos[1] + bbox[4], wz = pos[2] + bbox[2];
+        TransformVector(vm, wx, wy, wz, &tvx, &tvy, &tvz);
+        s32 svx = tvx, svy = tvy, svz = tvz;
+        clipCodes[3] = chanp3dClipCode(pm, tvx, tvy, tvz);
+        s32 d = vecLengthSquared(svx, svy, svz);
+        if (d < minDistSq) minDistSq = d;
+        s32 z = svz;
+        if (z > 0xFFFF) z = 0xFFFF;
+        if (z > maxZDepth) maxZDepth = z;
+    }
+
+    // Corner 4: pos + (negX, negY, posZ)
+    {
+        s32 wx = pos[0] + bbox[0], wy = pos[1] + bbox[1], wz = pos[2] + bbox[5];
+        TransformVector(vm, wx, wy, wz, &tvx, &tvy, &tvz);
+        s32 svx = tvx, svy = tvy, svz = tvz;
+        clipCodes[4] = chanp3dClipCode(pm, tvx, tvy, tvz);
+        s32 d = vecLengthSquared(svx, svy, svz);
+        if (d < minDistSq) minDistSq = d;
+        s32 z = svz;
+        if (z > 0xFFFF) z = 0xFFFF;
+        if (z > maxZDepth) maxZDepth = z;
+    }
+
+    // Corner 5: pos + (posX, negY, posZ)
+    {
+        s32 wx = pos[0] + bbox[3], wy = pos[1] + bbox[1], wz = pos[2] + bbox[5];
+        TransformVector(vm, wx, wy, wz, &tvx, &tvy, &tvz);
+        s32 svx = tvx, svy = tvy, svz = tvz;
+        clipCodes[5] = chanp3dClipCode(pm, tvx, tvy, tvz);
+        s32 d = vecLengthSquared(svx, svy, svz);
+        if (d < minDistSq) minDistSq = d;
+        s32 z = svz;
+        if (z > 0xFFFF) z = 0xFFFF;
+        if (z > maxZDepth) maxZDepth = z;
+    }
+
+    // Corner 6: pos + (negX, posY, posZ)
+    {
+        s32 wx = pos[0] + bbox[0], wy = pos[1] + bbox[4], wz = pos[2] + bbox[5];
+        TransformVector(vm, wx, wy, wz, &tvx, &tvy, &tvz);
+        s32 svx = tvx, svy = tvy, svz = tvz;
+        clipCodes[6] = chanp3dClipCode(pm, tvx, tvy, tvz);
+        s32 d = vecLengthSquared(svx, svy, svz);
+        if (d < minDistSq) minDistSq = d;
+        s32 z = svz;
+        if (z > 0xFFFF) z = 0xFFFF;
+        if (z > maxZDepth) maxZDepth = z;
+    }
+
+    // Corner 7: pos + (posX, posY, posZ)
+    {
+        s32 wx = pos[0] + bbox[3], wy = pos[1] + bbox[4], wz = pos[2] + bbox[5];
+        TransformVector(vm, wx, wy, wz, &tvx, &tvy, &tvz);
+        s32 svx = tvx, svy = tvy, svz = tvz;
+        clipCodes[7] = chanp3dClipCode(pm, tvx, tvy, tvz);
+        s32 d = vecLengthSquared(svx, svy, svz);
+        if (d < minDistSq) minDistSq = d;
+        s32 z = svz;
+        if (z > 0xFFFF) z = 0xFFFF;
+        if (z > maxZDepth) maxZDepth = z;
+    }
+
+    // Center (9th point): just blockPos, no bbox offset
+    // PSX: TransformVector + vecLengthSquared only (no ProjectVector/chanp3dClipCode)
+    {
+        TransformVector(vm, pos[0], pos[1], pos[2], &tvx, &tvy, &tvz);
+        s32 d = vecLengthSquared(tvx, tvy, tvz);
+        if (d < minDistSq) minDistSq = d;
+        s32 z = tvz;
+        if (z > 0xFFFF) z = 0xFFFF;
+        if (z > maxZDepth) maxZDepth = z;
+    }
+
+    // Frustum cull test: 13 specific clip code pairs ANDed
+    // If ANY pair ANDs to 0 - visible (at least one edge straddles a frustum plane)
+    // If ALL pairs are non-zero - fully culled
+    // PSX pairs: (0,1)(0,2)(0,4)(1,3)(1,5)(2,3)(2,6)(3,7)(4,5)(4,6)(5,7)(6,7)(0,7)
+    if ((clipCodes[0] & clipCodes[1]) != 0 &&
+        (clipCodes[0] & clipCodes[2]) != 0 &&
+        (clipCodes[0] & clipCodes[4]) != 0 &&
+        (clipCodes[1] & clipCodes[3]) != 0 &&
+        (clipCodes[1] & clipCodes[5]) != 0 &&
+        (clipCodes[2] & clipCodes[3]) != 0 &&
+        (clipCodes[2] & clipCodes[6]) != 0 &&
+        (clipCodes[3] & clipCodes[7]) != 0 &&
+        (clipCodes[4] & clipCodes[5]) != 0 &&
+        (clipCodes[4] & clipCodes[6]) != 0 &&
+        (clipCodes[5] & clipCodes[7]) != 0 &&
+        (clipCodes[6] & clipCodes[7]) != 0 &&
+        (clipCodes[0] & clipCodes[7]) != 0) {
+        // All 13 pairs non-zero - block is fully outside the frustum
+        *outDistSq = -1;
+        return;
+    }
+
+    // Visible — output minimum distance and maximum z-depth
+    *outDistSq = minDistSq;
+    *outZDepth = maxZDepth;
 }
+
+// OffsetToPreventSeams__FR10tagLVectorRC10tagLVector (GAME.CPP:2482)
+// Reversed from PSX func_8002AF94: computes per-axis sign of (pos - camPos),
+// then offset = -sign * (sign * delta / divisor + 1), clamped to ±limit.
+// Modifies pos in-place.
+void World::OffsetToPreventSeams(LVector& pos, const LVector& camPos) {
+    MARKFUNCTION(0x8002AF88);
+
+    // PSX: t1 = &pos, v1 = pos.x, v0 = camPos.x
+    s32 dx = pos.x - camPos.x; // sp[0]
+    s32 dy = pos.y - camPos.y; // sp[4]
+    s32 dz = pos.z - camPos.z; // sp[8]
+
+    // Compute sign per axis: -1, 0, or +1 - sp[16], sp[20], sp[24]
+    s32 signX = (dx < 0) ? -1 : (dx > 0) ? 1 : 0;
+    s32 signY = (dy < 0) ? -1 : (dy > 0) ? 1 : 0;
+    s32 signZ = (dz < 0) ? -1 : (dz > 0) ? 1 : 0;
+
+    // PSX: v1 = gp[96] (seamDivisor)
+    // These are set during level initialization — using reasonable PSX defaults
+    s32 seamDivisor = 4096; // gp+0x60
+    s32 seamLimit = 8;      // gp+0x64
+
+    if (seamDivisor == 0) return;
+
+    // PSX: a3 = (signX * dx) / seamDivisor
+    s32 rawX = (signX * dx) / seamDivisor;
+    s32 rawY = (signY * dy) / seamDivisor;
+    s32 rawZ = (signZ * dz) / seamDivisor;
+
+    // PSX: offset = (-sign) * (raw + 1) — pushes block position toward camera
+    s32 offX = (-signX) * (rawX + 1);
+    s32 offY = (-signY) * (rawY + 1);
+    s32 offZ = (-signZ) * (rawZ + 1);
+
+    // PSX: clamp each to ±seamLimit (gp[100])
+    if (offX < -seamLimit) offX = -seamLimit;
+    else if (offX > seamLimit) offX = seamLimit;
+    if (offY < -seamLimit) offY = -seamLimit;
+    else if (offY > seamLimit) offY = seamLimit;
+    if (offZ < -seamLimit) offZ = -seamLimit;
+    else if (offZ > seamLimit) offZ = seamLimit;
+
+    // PSX: add offsets to position
+    pos.x += offX;
+    pos.y += offY;
+    pos.z += offZ;
+}
+
+void World::Unload() {
+    blockMgr.InternalClose();
+    streamData.clear();
+    if (vramHandle && p3d::context) {
+        p3d::context->DestroyVRAMTexture(vramHandle);
+        vramHandle = 0;
+    }
+}
+

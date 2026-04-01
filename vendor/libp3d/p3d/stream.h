@@ -3,8 +3,7 @@
 // Stream: big-endian header, entries with 4-char magic + size + offset.
 // RR (PETLATL): little-endian "PX" header, 8-byte entries.
 //
-#ifndef STREAM_H
-#define STREAM_H
+#pragma once
 
 #include "core.h"
 #include <string>
@@ -38,5 +37,3 @@ std::vector<tRREntry> ParseRRHeader(const u8* data, u32 dataSize);
 inline const u8* GetStreamEntryData(const u8* fileData, const tStreamEntry& entry) {
     return fileData + entry.offset;
 }
-
-#endif // STREAM_H

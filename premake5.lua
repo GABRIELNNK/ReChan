@@ -26,8 +26,6 @@ project "rechan"
     includedirs {
         "src",
         "vendor/libp3d",
-        "vendor/libp3d/vendor/glad/include",
-        "vendor/libp3d/vendor/glfw/include",
     }
 
     links {

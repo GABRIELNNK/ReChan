@@ -1,6 +1,5 @@
 // psx_types.h — PSX hardware type equivalents
-#ifndef PSX_TYPES_H
-#define PSX_TYPES_H
+#pragma once
 
 #include "core.h"
 #include <cstring>
@@ -34,5 +33,3 @@ struct RECT16 {
     s16 x, y, w, h;
 };
 static_assert(sizeof(RECT16) == 8);
-
-#endif // PSX_TYPES_H

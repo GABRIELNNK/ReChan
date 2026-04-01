@@ -8,32 +8,32 @@
 
 tShader::tShader(const char* definition) {
     if (p3d::device)
-        mShader = p3d::device->NewShader(definition);
+        shader = p3d::device->NewShader(definition);
 }
 
 tShader::~tShader() {
-    if (mShader) {
-        mShader->Release();
-        mShader = nullptr;
+    if (shader) {
+        shader->Release();
+        shader = nullptr;
     }
 }
 
 void tShader::SetTexture(u32 param, tTexture* tex) {
-    if (mShader)
-        mShader->SetTexture(param, tex ? tex->GetTexture() : nullptr);
+    if (shader)
+        shader->SetTexture(param, tex ? tex->GetTexture() : nullptr);
 }
 
 void tShader::SetInt(u32 param, int value) {
-    if (mShader)
-        mShader->SetInt(param, value);
+    if (shader)
+        shader->SetInt(param, value);
 }
 
 void tShader::SetFloat(u32 param, float value) {
-    if (mShader)
-        mShader->SetFloat(param, value);
+    if (shader)
+        shader->SetFloat(param, value);
 }
 
 void tShader::SetColour(u32 param, pddiColour c) {
-    if (mShader)
-        mShader->SetColour(param, c);
+    if (shader)
+        shader->SetColour(param, c);
 }

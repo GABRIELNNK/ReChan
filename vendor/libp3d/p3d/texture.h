@@ -1,6 +1,5 @@
 // texture.h — tTexture + tTextureLoader
-#ifndef P3D_TEXTURE_H
-#define P3D_TEXTURE_H
+#pragma once
 
 #include "p3d/entity.h"
 #include "p3d/loadmanager.h"
@@ -15,12 +14,12 @@ public:
 
     bool Create(int width, int height, int bpp, int alphaDepth, const void* rgba);
 
-    pddiTexture* GetTexture() const { return mTexture; }
+    pddiTexture* GetTexture() const { return texture; }
     int GetWidth() const;
     int GetHeight() const;
 
 private:
-    pddiTexture* mTexture = nullptr;
+    pddiTexture* texture = nullptr;
 };
 
 // Chunk handler for 0xFF04 TexturePage
@@ -37,5 +36,3 @@ inline void PsxColorToRGBA(u16 c, u8& r, u8& g, u8& b, u8& a) {
     b = static_cast<u8>(((c >> 10) & 0x1F) << 3);
     a = (c == 0) ? 0 : 255;
 }
-
-#endif // P3D_TEXTURE_H

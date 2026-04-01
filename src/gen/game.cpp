@@ -1,10 +1,11 @@
 // game.cpp
 #include "gen/game.h"
+#include "gen/block.h"
+#include "config.h"
 #include "p3d/context.h"
+#include "p3d/input.h"
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
-
-#include <GLFW/glfw3.h>
 
 const Game::StateFunc Game::sStateTable[static_cast<int>(GameState::COUNT)] = {
     gsNullState,
@@ -39,31 +40,37 @@ const Game::StateFunc Game::sStateTable[static_cast<int>(GameState::COUNT)] = {
 
 Game::Game() {
     MARKFUNCTION(0x800C9AEC); // __4Game
+
+    // PSX: InputManager created during game init, stored at 0x800DD69C
+    if (!g_inputManager) {
+        g_inputManager = new InputManager();
+    }
+
     SetState(GameState::Null);
     RC_LOG("[Game] Created");
 }
 
 bool Game::Step() {
     MARKFUNCTION(0x8002B65C); // Step__4Game
-    if (mStateFunc)
-        return mStateFunc(this);
+    if (stateFunc)
+        return stateFunc(this);
     return false;
 }
 
-void Game::SetState(GameState state) {
+void Game::SetState(GameState s) {
     MARKFUNCTION(0x8002C5AC); // SetState
-    if (state == mState)
+    if (s == state)
         return;
 
-    mPrevState = mState;
-    s32 idx = static_cast<s32>(state);
+    prevState = state;
+    s32 idx = static_cast<s32>(s);
     if (idx >= 0 && idx < static_cast<s32>(GameState::COUNT))
-        mStateFunc = sStateTable[idx];
+        stateFunc = sStateTable[idx];
     else
-        mStateFunc = nullptr;
-    mState = state;
+        stateFunc = nullptr;
+    state = s;
 
-    RC_LOG("[Game] State: %d -> %d", static_cast<int>(mPrevState), static_cast<int>(mState));
+    RC_LOG("[Game] State: %d -> %d", static_cast<int>(prevState), static_cast<int>(state));
 }
 
 bool Game::gsNullState(Game*) {
@@ -121,30 +128,27 @@ bool Game::gsPrePlayState(Game* game) {
 bool Game::gsPlayState(Game* game) {
     MARKFUNCTION(0x80029C6C); // gsPlayState
 
-    f32 dt = 1.0f / 60.0f;
-    game->mCamera.Update(p3d::display->GetHandle(), dt);
+    // --- PSX per-frame input pipeline ---
+    // PSX: ReadSonyPads() -> ServiceInput(buttons, 0) -> Step()
+    // PC: keyboard -> button bits -> ServiceInput(buttons, 0) -> Step()
+#if RC_FEATURE_PAD_KEYBOARD_EMULATION
+    g_inputManager->UpdateFromKeyboard(p3d::input, 0);
+#endif
+    g_inputManager->Step();
 
-    // LOD cycling with PageUp/PageDown
-    auto* win = static_cast<GLFWwindow*>(p3d::display->GetHandle());
-    static bool pgUpWas = false, pgDnWas = false;
-    bool pgUp = glfwGetKey(win, GLFW_KEY_PAGE_UP) == GLFW_PRESS;
-    bool pgDn = glfwGetKey(win, GLFW_KEY_PAGE_DOWN) == GLFW_PRESS;
-    if (pgUp && !pgUpWas && game->mWorld.GetTargetLOD() < 5) {
-        game->mWorld.SetTargetLOD(game->mWorld.GetTargetLOD() + 1);
-        RC_LOG("[LOD] Set to %d", game->mWorld.GetTargetLOD());
-    }
-    if (pgDn && !pgDnWas && game->mWorld.GetTargetLOD() > 0) {
-        game->mWorld.SetTargetLOD(game->mWorld.GetTargetLOD() - 1);
-        RC_LOG("[LOD] Set to %d", game->mWorld.GetTargetLOD());
-    }
-    pgUpWas = pgUp;
-    pgDnWas = pgDn;
+    // Run the reversed PSX camera pipeline
+    game->gameCamera.Think();
+    game->gameCamera.Update();
+
+    const LVector& camPos = game->gameCamera.GetPosition();
 
     p3d::context->EnableZBuffer(true);
     p3d::context->SetBlendMode(PDDI_BLEND_NONE);
     p3d::context->SetCullMode(PDDI_CULL_NONE);
-    game->mCamera.Apply();
-    game->mWorld.Render();
+
+    game->view.BeginRender();
+    game->world.Render(&camPos);
+    game->view.EndRender();
 
     return true;
 }
@@ -213,7 +217,37 @@ bool Game::gsOpenLocationState(Game* game) {
 bool Game::gsQueueLevelLoad(Game* game) {
     MARKFUNCTION(0x80029574); // gsQueueLevelLoad
     RC_LOG("[Game] QueueLevelLoad: loading LEV01.LCF");
-    game->mWorld.Load("RTARGET/LEV01.LCF");
+    game->world.Load("RTARGET/LEV01.LCF");
+
+    // Position camera at center of level
+    {
+        const LVector& lo = game->world.GetLevelMin();
+        const LVector& hi = game->world.GetLevelMax();
+        s32 cx = (lo.x + hi.x) / 2;
+        s32 cy = (lo.y + hi.y) / 2;
+        s32 cz = lo.z - (hi.z - lo.z) / 2;
+
+        // Reset and configure the PSX camera
+        game->gameCamera.Reset();
+        game->gameCamera.SetMode(CAM_MODE_DEFAULT); // DebugCam mode
+
+        // Set initial camera position at level center, backed off in Z
+        game->gameCamera.SetPosition(cx, cy, cz);
+
+        tCamera* cam = game->gameCamera.GetP3DCamera();
+        cam->SetFOV(0.7f, 4.0f / 3.0f);
+        cam->SetNearPlane(100.0f);
+        cam->SetFarPlane(500000.0f);
+
+        RC_LOG("[Game] Camera positioned at (%d, %d, %d), DebugCam mode active", cx, cy, cz);
+        RC_LOG("[Game] Controls: WASD=move, IJKL=rotate, Enter=Start, N=L3 (up/down)");
+    }
+
+    // Use PSX camera for view
+    game->view.SetCamera(game->gameCamera.GetP3DCamera());
+    game->view.SetBackgroundColour(pddiColour(30, 30, 35));
+    game->view.SetClearMask(PDDI_BUFFER_ALL);
+
     game->SetState(GameState::DetermineNextGameState);
     return true;
 }

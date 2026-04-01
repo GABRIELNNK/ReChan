@@ -1,6 +1,5 @@
 // loadmanager.h — tChunkHandler + tP3DFileHandler
-#ifndef P3D_LOADMANAGER_H
-#define P3D_LOADMANAGER_H
+#pragma once
 
 #include "core.h"
 #include <vector>
@@ -28,7 +27,5 @@ public:
     void LoadFromMemory(const u8* data, u32 size, tInventory* store);
 
 private:
-    std::vector<tChunkHandler*> mHandlers;
+    std::vector<tChunkHandler*> handlers;
 };
-
-#endif // P3D_LOADMANAGER_H

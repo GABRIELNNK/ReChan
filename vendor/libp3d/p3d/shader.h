@@ -1,6 +1,5 @@
 // shader.h — tShader: P3D shader entity wrapping pddiBaseShader
-#ifndef P3D_SHADER_H
-#define P3D_SHADER_H
+#pragma once
 
 #include "p3d/entity.h"
 #include "pddi/pddi.h"
@@ -13,7 +12,7 @@ public:
     tShader(const char* definition = "simple");
     ~tShader() override;
 
-    pddiBaseShader* GetShader() const { return mShader; }
+    pddiBaseShader* GetShader() const { return shader; }
 
     void SetTexture(u32 param, tTexture* tex);
     void SetInt(u32 param, int value);
@@ -21,7 +20,5 @@ public:
     void SetColour(u32 param, pddiColour c);
 
 private:
-    pddiBaseShader* mShader = nullptr;
+    pddiBaseShader* shader = nullptr;
 };
-
-#endif // P3D_SHADER_H

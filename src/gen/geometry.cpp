@@ -1,6 +1,10 @@
 // geometry.cpp — BLK level geometry parser implementation
 #include "gen/geometry.h"
+#include "p3d/context.h"
+#include "pddi/pddi.h"
+#include "pddi/pddidev.h"
 #include <cstring>
+#include <vector>
 
 // BLK layout:
 //   [0-23]   Block header (translation at +8: s16 x,y,z)
@@ -52,16 +56,8 @@ static s16 ReadS16LE(const u8* p) {
     return static_cast<s16>(p[0] | (p[1] << 8));
 }
 
-BlockMesh ParseBLK(const u8* data, u32 size) {
-    BlockMesh mesh;
-
-    if (size < 24 + 108) return mesh;
-
-    // Block header: byte 0 = LOD level (u16)
-    mesh.lod = ReadU16LE(data + 0);
-
-    const u8* pg = data + 24; // tPrimGeom base
-    u32 pgSize = size - 24;
+pddiPrimBuffer* ParseBLKPrims(const u8* pg, u32 pgSize) {
+    if (pgSize < 108) return nullptr;
 
     u32 vertListOff = ReadU32LE(pg + 0x10) << 2;
     u16 numVerts    = ReadU16LE(pg + 0x14);
@@ -71,12 +67,12 @@ BlockMesh ParseBLK(const u8* data, u32 size) {
     u32 loopCtOff   = ReadU32LE(pg + 0x60) << 2;
     s16 numLoops    = ReadS16LE(pg + 0x66);
 
-    if (numVerts == 0 || numPolys == 0) return mesh;
+    if (numVerts == 0 || numPolys == 0) return nullptr;
     if (numLoops < 1) numLoops = 1;
 
     // Validate offsets
-    if (vertListOff + numVerts * 8 > pgSize) return mesh;
-    if (polyDataOff + numPolys * 4 > pgSize) return mesh;
+    if (vertListOff + numVerts * 8 > pgSize) return nullptr;
+    if (polyDataOff + numPolys * 4 > pgSize) return nullptr;
 
     const u8* verts = pg + vertListOff;
     const u8* polys = pg + polyDataOff;
@@ -135,9 +131,9 @@ BlockMesh ParseBLK(const u8* data, u32 size) {
                 if (idx >= numVerts) idx = 0;
                 const u8* v = verts + idx * 8;
                 Vert vert;
-                vert.x = ReadS16LE(v + 0) * 1.0f;
-                vert.y = ReadS16LE(v + 2) * 1.0f;
-                vert.z = ReadS16LE(v + 4) * 1.0f;
+                vert.x = static_cast<f32>(ReadS16LE(v + 0));
+                vert.y = static_cast<f32>(ReadS16LE(v + 2));
+                vert.z = static_cast<f32>(ReadS16LE(v + 4));
                 vert.r = 0.7f; vert.g = 0.7f; vert.b = 0.7f;
                 vert.u = 0.0f; vert.v = 0.0f;
                 vert.tpage = -1.0f; vert.cba = 0.0f;
@@ -153,7 +149,9 @@ BlockMesh ParseBLK(const u8* data, u32 size) {
                 return std::make_tuple(r, g, b);
             };
 
-            if (cmd == 0x3C || cmd == 0x2C) {
+            u8 cmdBase = cmd & 0xFD; // mask out semi-transparency bit (bit 1)
+
+            if (cmdBase == 0x3C || cmdBase == 0x2C) {
                 // POLY_GT4 / POLY_FT4: textured quad (52 bytes)
                 // Colors at +4, +16, +28, +40; UVs at +12, +24, +36, +48
                 // CBA at +14, TPAGE at +26
@@ -185,13 +183,13 @@ BlockMesh ParseBLK(const u8* data, u32 size) {
                 idxBuf.push_back(base); idxBuf.push_back(base+1); idxBuf.push_back(base+2);
                 idxBuf.push_back(base+1); idxBuf.push_back(base+3); idxBuf.push_back(base+2);
 
-            } else if (cmd == 0x38 || cmd == 0x28) {
+            } else if (cmdBase == 0x38 || cmdBase == 0x28) {
                 // POLY_G4 / POLY_F4: untextured quad (36 bytes)
                 // Colors at +4, +12, +20, +28 (2-word groups: RGB + XY)
                 Vert v0 = readVert(vi0), v1 = readVert(vi1);
                 Vert v2 = readVert(vi2), v3 = readVert(vi3);
 
-                if (cmd == 0x38) {
+                if (cmdBase == 0x38) {
                     auto [r0,g0,b0] = readRGB(4);
                     auto [r1,g1,b1] = readRGB(12);
                     auto [r2,g2,b2] = readRGB(20);
@@ -214,7 +212,7 @@ BlockMesh ParseBLK(const u8* data, u32 size) {
                 idxBuf.push_back(base); idxBuf.push_back(base+1); idxBuf.push_back(base+2);
                 idxBuf.push_back(base+1); idxBuf.push_back(base+3); idxBuf.push_back(base+2);
 
-            } else if (cmd == 0x34 || cmd == 0x24) {
+            } else if (cmdBase == 0x34 || cmdBase == 0x24) {
                 // POLY_GT3 / POLY_FT3: textured tri (40 bytes)
                 // Colors at +4, +16, +28; UVs at +12, +24, +36
                 // CBA at +14, TPAGE at +26
@@ -240,12 +238,12 @@ BlockMesh ParseBLK(const u8* data, u32 size) {
                 vertBuf.push_back(v0); vertBuf.push_back(v1); vertBuf.push_back(v2);
                 idxBuf.push_back(base); idxBuf.push_back(base+1); idxBuf.push_back(base+2);
 
-            } else if (cmd == 0x30 || cmd == 0x20) {
+            } else if (cmdBase == 0x30 || cmdBase == 0x20) {
                 // POLY_G3 / POLY_F3: untextured tri (28 bytes)
                 // G3 colors at +4, +12, +20; F3 flat from +4
                 Vert v0 = readVert(vi0), v1 = readVert(vi1), v2 = readVert(vi2);
 
-                if (cmd == 0x30) {
+                if (cmdBase == 0x30) {
                     auto [r0,g0,b0] = readRGB(4);
                     auto [r1,g1,b1] = readRGB(12);
                     auto [r2,g2,b2] = readRGB(20);
@@ -268,41 +266,17 @@ BlockMesh ParseBLK(const u8* data, u32 size) {
         }
     }
 
-    if (idxBuf.empty()) return mesh;
+    if (idxBuf.empty()) return nullptr;
 
-    mesh.indexCount = static_cast<u32>(idxBuf.size());
+    // Create pddiPrimBuffer through the device abstraction
+    u32 format = PDDI_V_POSITION | PDDI_V_COLOUR | PDDI_V_UV | PDDI_V_TEXINFO;
+    pddiPrimBufferDesc desc(PDDI_PRIM_TRIANGLES, format,
+                            static_cast<u32>(vertBuf.size()),
+                            static_cast<u32>(idxBuf.size()));
 
-    // Upload to GPU: 10 floats per vertex (40 bytes stride)
-    glGenVertexArrays(1, &mesh.vao);
-    glGenBuffers(1, &mesh.vbo);
-    glGenBuffers(1, &mesh.ebo);
+    pddiPrimBuffer* buffer = p3d::device->NewPrimBuffer(desc);
+    buffer->SetVertexData(vertBuf.data(), static_cast<u32>(vertBuf.size()));
+    buffer->SetIndices(idxBuf.data(), static_cast<u32>(idxBuf.size()));
 
-    glBindVertexArray(mesh.vao);
-
-    glBindBuffer(GL_ARRAY_BUFFER, mesh.vbo);
-    glBufferData(GL_ARRAY_BUFFER,
-                 static_cast<GLsizeiptr>(vertBuf.size() * sizeof(Vert)),
-                 vertBuf.data(), GL_STATIC_DRAW);
-
-    // location 0: vec3 position
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vert), (void*)0);
-    glEnableVertexAttribArray(0);
-    // location 1: vec3 color
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vert), (void*)(3 * sizeof(f32)));
-    glEnableVertexAttribArray(1);
-    // location 2: vec2 uv (raw 0-255 pixel coords)
-    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vert), (void*)(6 * sizeof(f32)));
-    glEnableVertexAttribArray(2);
-    // location 3: vec2 texinfo (x=tpage, y=cba; -1 = untextured)
-    glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, sizeof(Vert), (void*)(8 * sizeof(f32)));
-    glEnableVertexAttribArray(3);
-
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh.ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER,
-                 static_cast<GLsizeiptr>(idxBuf.size() * sizeof(u16)),
-                 idxBuf.data(), GL_STATIC_DRAW);
-
-    glBindVertexArray(0);
-
-    return mesh;
+    return buffer;
 }

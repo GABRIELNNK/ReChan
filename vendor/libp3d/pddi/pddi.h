@@ -1,6 +1,5 @@
 // pddi.h — Core types and enums for the device driver interface
-#ifndef PDDI_H
-#define PDDI_H
+#pragma once
 
 #include "core.h"
 
@@ -59,6 +58,30 @@ enum pddiClearFlag {
     PDDI_BUFFER_ALL = PDDI_BUFFER_COLOUR | PDDI_BUFFER_DEPTH
 };
 
+// Vertex format flags (bitfield)
+enum pddiVertexFormat {
+    PDDI_V_POSITION = 0x01,
+    PDDI_V_COLOUR   = 0x02,
+    PDDI_V_UV       = 0x04,
+    PDDI_V_TEXINFO  = 0x08  // PSX tpage/cba pair
+};
+
+// Primitive buffer description
+struct pddiPrimBufferDesc {
+    pddiPrimType primType;
+    u32 vertexFormat;
+    u32 vertexCount;
+    u32 indexCount;
+
+    pddiPrimBufferDesc()
+        : primType(PDDI_PRIM_TRIANGLES), vertexFormat(0)
+        , vertexCount(0), indexCount(0) {}
+
+    pddiPrimBufferDesc(pddiPrimType type, u32 format, u32 nVerts, u32 nIndices = 0)
+        : primType(type), vertexFormat(format)
+        , vertexCount(nVerts), indexCount(nIndices) {}
+};
+
 // Shader parameter names
 namespace PDDI_SP {
     constexpr u32 UVMODE = 0x01;
@@ -79,15 +102,26 @@ namespace PDDI_SP {
 
 class pddiObject {
 public:
-    pddiObject() : mRefCount(1) {}
+    pddiObject() : refCount(1) {}
     virtual ~pddiObject() = default;
 
-    void AddRef() { ++mRefCount; }
-    void Release() { if (--mRefCount <= 0) delete this; }
-    int  GetRefCount() const { return mRefCount; }
+    void AddRef() { ++refCount; }
+    void Release() { if (--refCount <= 0) delete this; }
+    int  GetRefCount() const { return refCount; }
 
 private:
-    int mRefCount;
+    int refCount;
 };
 
-#endif // PDDI_H
+// Retained-mode primitive buffer
+class pddiPrimBuffer : public pddiObject {
+public:
+    virtual void SetVertexData(const void* data, u32 count) = 0;
+    virtual void SetIndices(const u16* indices, u32 count) = 0;
+    virtual u32 GetIndexCount() const = 0;
+    virtual u32 GetVertexCount() const = 0;
+    virtual pddiPrimType GetPrimType() const = 0;
+
+protected:
+    virtual ~pddiPrimBuffer() = default;
+};

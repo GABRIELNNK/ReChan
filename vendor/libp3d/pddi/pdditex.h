@@ -1,6 +1,5 @@
 // pdditex.h — pddiTexture: abstract GPU texture interface
-#ifndef PDDI_TEX_H
-#define PDDI_TEX_H
+#pragma once
 
 #include "pddi/pddi.h"
 
@@ -18,5 +17,3 @@ public:
     // Bind for rendering on a texture unit
     virtual void Bind(int unit) = 0;
 };
-
-#endif // PDDI_TEX_H

@@ -1,6 +1,5 @@
 // context.h — tContext + tPlatform
-#ifndef P3D_CONTEXT_H
-#define P3D_CONTEXT_H
+#pragma once
 
 #include "core.h"
 
@@ -8,6 +7,7 @@ class pddiDevice;
 class pddiDisplay;
 class pddiRenderContext;
 class tInventory;
+class PlatformInput;
 
 // Context init params
 struct tContextInitData {
@@ -25,19 +25,21 @@ public:
     bool Setup(const tContextInitData& init);
     void Shutdown();
 
-    pddiDevice* GetDevice() { return mDevice; }
-    pddiDisplay* GetDisplay() { return mDisplay; }
-    pddiRenderContext* GetContext() { return mRenderContext; }
-    tInventory* GetInventory() { return mInventory; }
+    pddiDevice* GetDevice() { return device; }
+    pddiDisplay* GetDisplay() { return display; }
+    pddiRenderContext* GetContext() { return renderContext; }
+    tInventory* GetInventory() { return inventory; }
+    PlatformInput* GetInputManager() { return inputManager; }
 
     void BeginFrame();
     void EndFrame();
 
 private:
-    pddiDevice* mDevice = nullptr;
-    pddiDisplay* mDisplay = nullptr;
-    pddiRenderContext* mRenderContext = nullptr;
-    tInventory* mInventory = nullptr;
+    pddiDevice* device = nullptr;
+    pddiDisplay* display = nullptr;
+    pddiRenderContext* renderContext = nullptr;
+    tInventory* inventory = nullptr;
+    PlatformInput* inputManager = nullptr;
 };
 
 // Platform singleton
@@ -50,14 +52,14 @@ public:
     tContext* CreateContext(const tContextInitData& init);
     void     DestroyContext(tContext* ctx);
     void     SetActiveContext(tContext* ctx);
-    tContext* GetActiveContext() { return mActiveContext; }
+    tContext* GetActiveContext() { return activeContext; }
 
 private:
     tPlatform() = default;
     ~tPlatform() = default;
 
     static tPlatform* sInstance;
-    tContext* mActiveContext = nullptr;
+    tContext* activeContext = nullptr;
 };
 
 // Global access (Pure3D convention — set by tPlatform::SetActiveContext)
@@ -66,6 +68,5 @@ namespace p3d {
     extern pddiDisplay* display;
     extern pddiRenderContext* context;
     extern tInventory* inventory;
+    extern PlatformInput* input;
 }
-
-#endif // P3D_CONTEXT_H

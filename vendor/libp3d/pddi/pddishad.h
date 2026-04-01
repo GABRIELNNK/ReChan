@@ -1,6 +1,5 @@
 // pddishad.h — pddiBaseShader: abstract material interface
-#ifndef PDDI_SHAD_H
-#define PDDI_SHAD_H
+#pragma once
 
 #include "pddi/pddi.h"
 
@@ -21,5 +20,3 @@ public:
     virtual void PreRender() = 0;
     virtual void PostRender() = 0;
 };
-
-#endif // PDDI_SHAD_H

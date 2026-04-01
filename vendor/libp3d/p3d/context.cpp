@@ -1,6 +1,7 @@
 // context.cpp — tContext + tPlatform implementation
 #include "p3d/context.h"
 #include "p3d/inventory.h"
+#include "p3d/input.h"
 #include "pddi/pddidev.h"
 
 // Global access pointers
@@ -10,6 +11,7 @@ namespace p3d {
     pddiDisplay* display = nullptr;
     pddiRenderContext* context = nullptr;
     tInventory* inventory = nullptr;
+    PlatformInput* input = nullptr;
 }
 
 // tContext
@@ -21,38 +23,61 @@ tContext::~tContext() {
 }
 
 bool tContext::Setup(const tContextInitData& init) {
-    mDevice = pddiCreate();
-    if (!mDevice) return false;
+    device = pddiCreate();
+    if (!device) return false;
 
-    mDisplay = mDevice->NewDisplay();
+    display = device->NewDisplay();
     pddiDisplayInit di;
     di.xSize = init.xSize;
     di.ySize = init.ySize;
     di.title = init.title;
-    if (!mDisplay->InitDisplay(di))
+    if (!display->InitDisplay(di))
         return false;
 
-    mRenderContext = mDevice->NewRenderContext(mDisplay);
-    mInventory = new tInventory();
+    renderContext = device->NewRenderContext(display);
+    inventory = new tInventory();
+    inputManager = new PlatformInput();
+    inputManager->SetDisplay(display);
 
     return true;
 }
 
 void tContext::Shutdown() {
-    delete mInventory;   mInventory = nullptr;
-    if (mRenderContext) { mRenderContext->Release(); mRenderContext = nullptr; }
-    if (mDisplay) { mDisplay->Release();       mDisplay = nullptr; }
-    if (mDevice) { mDevice->Release();        mDevice = nullptr; }
+    if (inputManager) {
+        delete inputManager;
+        inputManager = nullptr;
+    }
+
+    if (inventory) {
+        delete inventory;
+        inventory = nullptr;
+    }
+
+    if (renderContext) {
+        renderContext->Release();
+        renderContext = nullptr;
+    }
+
+    if (display) {
+        display->Release();
+        display = nullptr;
+    }
+
+    if (device) {
+        device->Release();
+        device = nullptr;
+    }
 }
 
 void tContext::BeginFrame() {
-    if (mDisplay)       mDisplay->PollEvents();
-    if (mRenderContext) mRenderContext->BeginFrame();
+    if (display)       display->PollEvents();
+    if (inputManager)  inputManager->ServiceInput();
+    if (renderContext) renderContext->BeginFrame();
 }
 
 void tContext::EndFrame() {
-    if (mRenderContext) mRenderContext->EndFrame();
-    if (mDisplay)       mDisplay->SwapBuffers();
+    if (renderContext) renderContext->EndFrame();
+    if (display)       display->SwapBuffers();
 }
 
 // tPlatform
@@ -85,23 +110,25 @@ tContext* tPlatform::CreateContext(const tContextInitData& init) {
 }
 
 void tPlatform::DestroyContext(tContext* ctx) {
-    if (ctx == mActiveContext)
+    if (ctx == activeContext)
         SetActiveContext(nullptr);
     delete ctx;
 }
 
 void tPlatform::SetActiveContext(tContext* ctx) {
-    mActiveContext = ctx;
+    activeContext = ctx;
     if (ctx) {
         p3d::device = ctx->GetDevice();
         p3d::display = ctx->GetDisplay();
         p3d::context = ctx->GetContext();
         p3d::inventory = ctx->GetInventory();
+        p3d::input = ctx->GetInputManager();
     }
     else {
         p3d::device = nullptr;
         p3d::display = nullptr;
         p3d::context = nullptr;
         p3d::inventory = nullptr;
+        p3d::input = nullptr;
     }
 }

@@ -1,0 +1,61 @@
+// blockmgr.h — BlockManager reversed from PSX BLKMGR.CPP
+// Original: C:\CHAN\GAME\SRC\GEN\BLKMGR.CPP
+//           C:\CHAN\GAME\INC\GEN\BLKMGR.HPP
+#pragma once
+
+#include "core.h"
+#include "gen/block.h"
+#include <vector>
+
+// BlockManager — manages level block loading, draw lists, demand loading
+// Reversed from PSX struct layout (BLKMGR.CPP)
+class BlockManager {
+public:
+    BlockManager();
+    ~BlockManager();
+
+    // _LoadBlocksFunc (BLKMGR.CPP:207) — allocate block pool from WDB database
+    void LoadBlocksFunc(const std::vector<DBVolume>& volumes);   // 0x8005010C
+
+    // InternalOpen (BLKMGR.CPP:258) — set up draw/load callback nodes
+    void InternalOpen();                                          // 0x800502BC
+
+    // InternalClose (BLKMGR.CPP:280)
+    void InternalClose();                                         // 0x80050384
+
+    // LoadBlocks (BLKMGR.CPP:695) — load and parse block data from stream
+    void LoadBlocks(u32 blockNum,
+                    const u8* const* blkDataPtrs,
+                    const u32* blkSizes,
+                    u32 blkCount);                                // 0x80050A98
+
+    // GetBlock (BLKMGR.CPP:1374) — get block by index
+    Block* GetBlock(u32 index);                                   // 0x800518C4
+
+    // IsValidBlockNumber (BLKMGR.CPP:769)
+    bool IsValidBlockNumber(u32 index) const;                     // 0x80050C70
+
+    u32 GetNumBlocks() const { return totalBlocks; }
+
+    // Block array access (for rendering iteration)
+    Block* GetBlocks() { return blocks.data(); }
+    const Block* GetBlocks() const { return blocks.data(); }
+
+private:
+    // +32: numBlocks (max blocks that can be loaded at once)
+    u32 numBlocks;
+    // +40: Block array (pointer, but we use vector on PC)
+    std::vector<Block> blocks;
+    // +48: totalBlocks (total blocks in level)
+    u32 totalBlocks;
+    // +52: currentBlockNum
+    u32 currentBlockNum;
+    // +132-140: flags (all initialized to 1)
+    u32 flag1;
+    u32 flag2;
+    u32 flag3;
+    // +156: drawListCount
+    u32 drawListCount;
+    // +160: loadingState (0x1000 = complete)
+    u32 loadingState;
+};

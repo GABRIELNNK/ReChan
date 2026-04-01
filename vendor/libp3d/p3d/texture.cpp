@@ -22,22 +22,22 @@
 tTexture::tTexture() = default;
 
 tTexture::~tTexture() {
-    if (mTexture) {
-        mTexture->Release();
-        mTexture = nullptr;
+    if (texture) {
+        texture->Release();
+        texture = nullptr;
     }
 }
 
 bool tTexture::Create(int width, int height, int bpp, int alphaDepth,
                       const void* rgba) {
     if (!p3d::device) return false;
-    mTexture = p3d::device->NewTexture();
-    mTexture->SetData(width, height, bpp, alphaDepth, rgba);
+    texture = p3d::device->NewTexture();
+    texture->SetData(width, height, bpp, alphaDepth, rgba);
     return true;
 }
 
-int tTexture::GetWidth() const { return mTexture ? mTexture->GetWidth() : 0; }
-int tTexture::GetHeight() const { return mTexture ? mTexture->GetHeight() : 0; }
+int tTexture::GetWidth() const { return texture ? texture->GetWidth() : 0; }
+int tTexture::GetHeight() const { return texture ? texture->GetHeight() : 0; }
 
 // 0x6008 sub-chunk parser
 

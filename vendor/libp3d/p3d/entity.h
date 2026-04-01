@@ -1,6 +1,5 @@
 // entity.h — tRefCounted + tEntity base classes
-#ifndef P3D_ENTITY_H
-#define P3D_ENTITY_H
+#pragma once
 
 #include "core.h"
 #include <string>
@@ -21,34 +20,32 @@ inline tUID MakeUID(const char* name) {
 // Reference-counted base
 class tRefCounted {
 public:
-    tRefCounted() : mRefCount(1) {}
+    tRefCounted() : refCount(1) {}
     virtual ~tRefCounted() = default;
 
-    void AddRef() { ++mRefCount; }
-    void Release() { if (--mRefCount <= 0) delete this; }
-    int  GetRefCount() const { return mRefCount; }
+    void AddRef() { ++refCount; }
+    void Release() { if (--refCount <= 0) delete this; }
+    int  GetRefCount() const { return refCount; }
 
 private:
-    int mRefCount;
+    int refCount;
 };
 
 // Named entity base class
 class tEntity : public tRefCounted {
 public:
-    tEntity() : mUID(0) {}
+    tEntity() : uid(0) {}
     virtual ~tEntity() = default;
 
-    void SetName(const char* name) {
-        mName = name;
-        mUID = MakeUID(name);
+    void SetName(const char* n) {
+        name = n;
+        uid = MakeUID(n);
     }
 
-    const std::string& GetName() const { return mName; }
-    tUID GetUID() const { return mUID; }
+    const std::string& GetName() const { return name; }
+    tUID GetUID() const { return uid; }
 
 private:
-    std::string mName;
-    tUID        mUID;
+    std::string name;
+    tUID uid;
 };
-
-#endif // P3D_ENTITY_H

@@ -85,12 +85,16 @@ void main() {
         clutWord = texelFetch(uVRAM, ivec2(pageX + px, pageY + py), 0).r;
     }
 
+    if (clutWord == 0u) discard;
+
+    // Magenta (R=31,G=0,B=31) is the transparency key
+    if ((clutWord & 0x7FFFu) == 0x7C1Fu) discard;
+
     float r = float(clutWord & 0x1Fu) / 31.0;
     float g = float((clutWord >> 5u) & 0x1Fu) / 31.0;
     float b = float((clutWord >> 10u) & 0x1Fu) / 31.0;
-    float a = clutWord == 0u ? 0.0 : 1.0;
 
-    FragColor = vec4(r, g, b, a) * vec4(vColor, 1.0);
+    FragColor = vec4(r, g, b, 1.0) * vec4(vColor, 1.0);
 }
 )";
 
@@ -123,26 +127,105 @@ static u32 CompileGLShader(u32 type, const char* src) {
     return shader;
 }
 
+// glPrimBuffer
+
+glPrimBuffer::glPrimBuffer(const pddiPrimBufferDesc& desc)
+    : primType(desc.primType), vertexFormat(desc.vertexFormat)
+    , vertexCount(desc.vertexCount), indexCount(desc.indexCount) {
+    // Compute stride from vertex format
+    stride = 0;
+    if (vertexFormat & PDDI_V_POSITION) stride += 3 * sizeof(f32);
+    if (vertexFormat & PDDI_V_COLOUR)   stride += 3 * sizeof(f32);
+    if (vertexFormat & PDDI_V_UV)       stride += 2 * sizeof(f32);
+    if (vertexFormat & PDDI_V_TEXINFO)  stride += 2 * sizeof(f32);
+
+    glGenVertexArrays(1, &vao);
+    glGenBuffers(1, &vbo);
+    glGenBuffers(1, &ebo);
+
+    glBindVertexArray(vao);
+
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, stride * desc.vertexCount, nullptr, GL_STATIC_DRAW);
+
+    SetupVertexAttribs();
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, desc.indexCount * sizeof(u16), nullptr, GL_STATIC_DRAW);
+
+    glBindVertexArray(0);
+}
+
+glPrimBuffer::~glPrimBuffer() {
+    if (ebo) glDeleteBuffers(1, &ebo);
+    if (vbo) glDeleteBuffers(1, &vbo);
+    if (vao) glDeleteVertexArrays(1, &vao);
+}
+
+void glPrimBuffer::SetVertexData(const void* data, u32 count) {
+    vertexCount = count;
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, stride * count, data, GL_STATIC_DRAW);
+}
+
+void glPrimBuffer::SetIndices(const u16* indices, u32 count) {
+    indexCount = count;
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, count * sizeof(u16), indices, GL_STATIC_DRAW);
+    glBindVertexArray(0);
+}
+
+void glPrimBuffer::SetupVertexAttribs() {
+    u32 offset = 0;
+    u32 loc = 0;
+
+    if (vertexFormat & PDDI_V_POSITION) {
+        glVertexAttribPointer(loc, 3, GL_FLOAT, GL_FALSE, stride, (void*)(uintptr_t)offset);
+        glEnableVertexAttribArray(loc);
+        offset += 3 * sizeof(f32);
+        loc++;
+    }
+    if (vertexFormat & PDDI_V_COLOUR) {
+        glVertexAttribPointer(loc, 3, GL_FLOAT, GL_FALSE, stride, (void*)(uintptr_t)offset);
+        glEnableVertexAttribArray(loc);
+        offset += 3 * sizeof(f32);
+        loc++;
+    }
+    if (vertexFormat & PDDI_V_UV) {
+        glVertexAttribPointer(loc, 2, GL_FLOAT, GL_FALSE, stride, (void*)(uintptr_t)offset);
+        glEnableVertexAttribArray(loc);
+        offset += 2 * sizeof(f32);
+        loc++;
+    }
+    if (vertexFormat & PDDI_V_TEXINFO) {
+        glVertexAttribPointer(loc, 2, GL_FLOAT, GL_FALSE, stride, (void*)(uintptr_t)offset);
+        glEnableVertexAttribArray(loc);
+        offset += 2 * sizeof(f32);
+        loc++;
+    }
+}
+
 // glTexture
 
 glTexture::glTexture() = default;
 
 glTexture::~glTexture() {
-    if (mHandle)
-        glDeleteTextures(1, &mHandle);
+    if (handle)
+        glDeleteTextures(1, &handle);
 }
 
-void glTexture::SetData(int w, int h, int bpp, int alphaDepth, const void* rgba) {
-    mWidth = w;
-    mHeight = h;
-    mBpp = bpp;
-    mAlphaDepth = alphaDepth;
+void glTexture::SetData(int w, int h, int b, int a, const void* rgba) {
+    width = w;
+    height = h;
+    bpp = b;
+    alphaDepth = a;
 
-    if (mHandle)
-        glDeleteTextures(1, &mHandle);
+    if (handle)
+        glDeleteTextures(1, &handle);
 
-    glGenTextures(1, &mHandle);
-    glBindTexture(GL_TEXTURE_2D, mHandle);
+    glGenTextures(1, &handle);
+    glBindTexture(GL_TEXTURE_2D, handle);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0,
                  GL_RGBA, GL_UNSIGNED_BYTE, rgba);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -154,7 +237,7 @@ void glTexture::SetData(int w, int h, int bpp, int alphaDepth, const void* rgba)
 
 void glTexture::Bind(int unit) {
     glActiveTexture(GL_TEXTURE0 + unit);
-    glBindTexture(GL_TEXTURE_2D, mHandle);
+    glBindTexture(GL_TEXTURE_2D, handle);
 }
 
 // glShader
@@ -164,25 +247,26 @@ glShader::glShader() {
 }
 
 glShader::~glShader() {
-    if (mProgram)
-        glDeleteProgram(mProgram);
+    if (program)
+        glDeleteProgram(program);
 }
 
 void glShader::CreateDefaultProgram() {
     u32 vs = CompileGLShader(GL_VERTEX_SHADER, kSimpleVert);
     u32 fs = CompileGLShader(GL_FRAGMENT_SHADER, kSimpleFrag);
-    if (!vs || !fs) return;
+    if (!vs || !fs) 
+        return;
 
-    mProgram = glCreateProgram();
-    glAttachShader(mProgram, vs);
-    glAttachShader(mProgram, fs);
-    glLinkProgram(mProgram);
+    program = glCreateProgram();
+    glAttachShader(program, vs);
+    glAttachShader(program, fs);
+    glLinkProgram(program);
 
     int ok;
-    glGetProgramiv(mProgram, GL_LINK_STATUS, &ok);
+    glGetProgramiv(program, GL_LINK_STATUS, &ok);
     if (!ok) {
         char log[512];
-        glGetProgramInfoLog(mProgram, sizeof(log), nullptr, log);
+        glGetProgramInfoLog(program, sizeof(log), nullptr, log);
         std::fprintf(stderr, "GLSL link error:\n%s\n", log);
     }
 
@@ -190,19 +274,19 @@ void glShader::CreateDefaultProgram() {
     glDeleteShader(fs);
 }
 
-void glShader::SetTexture(u32 param, pddiTexture* tex) { mTexture = tex; }
+void glShader::SetTexture(u32 param, pddiTexture* t) { tex = t; }
 void glShader::SetInt(u32, int) {}
 void glShader::SetFloat(u32, float) {}
 void glShader::SetColour(u32 param, pddiColour c) {
     if (param == PDDI_SP::DIFFUSE)
-        mDiffuse = c;
+        diffuse = c;
 }
 
 void glShader::PreRender() {
-    glUseProgram(mProgram);
-    if (mTexture) {
-        mTexture->Bind(0);
-        glUniform1i(glGetUniformLocation(mProgram, "uTex"), 0);
+    glUseProgram(program);
+    if (tex) {
+        tex->Bind(0);
+        glUniform1i(glGetUniformLocation(program, "uTex"), 0);
     }
 }
 
@@ -215,9 +299,9 @@ void glShader::PostRender() {
 glDisplay::glDisplay() = default;
 
 glDisplay::~glDisplay() {
-    if (mWindow) {
-        glfwDestroyWindow(mWindow);
-        mWindow = nullptr;
+    if (window) {
+        glfwDestroyWindow(window);
+        window = nullptr;
     }
     glfwTerminate();
 }
@@ -232,18 +316,18 @@ bool glDisplay::InitDisplay(const pddiDisplayInit& init) {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    mWindow = glfwCreateWindow(init.xSize, init.ySize, init.title, nullptr, nullptr);
-    if (!mWindow) {
+    window = glfwCreateWindow(init.xSize, init.ySize, init.title, nullptr, nullptr);
+    if (!window) {
         std::fprintf(stderr, "GLFW: window creation failed\n");
         glfwTerminate();
         return false;
     }
-    mWidth = init.xSize;
-    mHeight = init.ySize;
+    width = init.xSize;
+    height = init.ySize;
 
-    glfwMakeContextCurrent(mWindow);
-    glfwSetWindowUserPointer(mWindow, this);
-    glfwSetFramebufferSizeCallback(mWindow, FramebufferSizeCallback);
+    glfwMakeContextCurrent(window);
+    glfwSetWindowUserPointer(window, this);
+    glfwSetFramebufferSizeCallback(window, FramebufferSizeCallback);
 
     if (!gladLoadGL(glfwGetProcAddress)) {
         std::fprintf(stderr, "GLAD: failed to load OpenGL\n");
@@ -256,70 +340,87 @@ bool glDisplay::InitDisplay(const pddiDisplayInit& init) {
     return true;
 }
 
-void glDisplay::SwapBuffers() { glfwSwapBuffers(mWindow); }
-bool glDisplay::ShouldClose() { return glfwWindowShouldClose(mWindow); }
-void glDisplay::PollEvents() { glfwPollEvents(); }
+void glDisplay::SwapBuffers() {
+    glfwSwapBuffers(window); 
+}
 
-void glDisplay::FramebufferSizeCallback(GLFWwindow* window, int width, int height) {
-    auto* self = static_cast<glDisplay*>(glfwGetWindowUserPointer(window));
+bool glDisplay::ShouldClose() {
+    return glfwWindowShouldClose(window); 
+}
+
+void glDisplay::PollEvents() {
+    glfwPollEvents(); 
+}
+
+bool glDisplay::IsKeyDown(int key) {
+    return window && glfwGetKey(window, key) == GLFW_PRESS;
+}
+
+bool glDisplay::IsMouseButtonDown(int button) {
+    return window && glfwGetMouseButton(window, button) == GLFW_PRESS;
+}
+
+void glDisplay::GetMousePosition(double& x, double& y) {
+    if (window) 
+        glfwGetCursorPos(window, &x, &y);
+
+    else {
+        x = 0;
+        y = 0; 
+    }
+}
+
+void glDisplay::FramebufferSizeCallback(GLFWwindow* win, int w, int h) {
+    auto* self = static_cast<glDisplay*>(glfwGetWindowUserPointer(win));
     if (self) {
-        self->mWidth = width;
-        self->mHeight = height;
+        self->width = w;
+        self->height = h;
     }
 }
 
 void glDisplay::GetViewport(int& x, int& y, int& w, int& h) const {
-    // 4:3 letterbox inside the window
-    constexpr float TARGET_ASPECT = 4.0f / 3.0f;
-    float windowAspect = static_cast<float>(mWidth) / static_cast<float>(mHeight);
-
-    if (windowAspect > TARGET_ASPECT) {
-        // Pillarbox (bars on sides)
-        h = mHeight;
-        w = static_cast<int>(mHeight * TARGET_ASPECT);
-        x = (mWidth - w) / 2;
-        y = 0;
-    }
-    else {
-        // Letterbox (bars on top/bottom)
-        w = mWidth;
-        h = static_cast<int>(mWidth / TARGET_ASPECT);
-        x = 0;
-        y = (mHeight - h) / 2;
-    }
+    // Use the full window — no letterboxing.
+    // Aspect ratio is handled by the camera's projection matrix (HOR+).
+    x = 0;
+    y = 0;
+    w = width;
+    h = height;
 }
 
 // glContext
 
-glContext::glContext(glDisplay* display)
-    : mDisplay(display) {
+glContext::glContext(glDisplay* disp)
+    : display(disp) {
     InitQuadMesh();
     Init3DShader();
 }
 
 glContext::~glContext() {
-    if (mQuadVBO) glDeleteBuffers(1, &mQuadVBO);
-    if (mQuadVAO) glDeleteVertexArrays(1, &mQuadVAO);
-    if (m3DProgram) glDeleteProgram(m3DProgram);
+    if (quadVBO) glDeleteBuffers(1, &quadVBO);
+    if (quadVAO) glDeleteVertexArrays(1, &quadVAO);
+    if (program3D) glDeleteProgram(program3D);
 }
 
 void glContext::BeginFrame() {
     int vx, vy, vw, vh;
-    mDisplay->GetViewport(vx, vy, vw, vh);
+    display->GetViewport(vx, vy, vw, vh);
     glViewport(vx, vy, vw, vh);
     glScissor(vx, vy, vw, vh);
     glEnable(GL_SCISSOR_TEST);
+    stateDirty = true;
 }
 
-void glContext::EndFrame() {}
+void glContext::EndFrame() {
 
-void glContext::SetClearColour(pddiColour c) { mClearColour = c; }
+}
+
+void glContext::SetClearColour(pddiColour c) { clearColour = c; }
 
 void glContext::Clear(int flags) {
     GLbitfield mask = 0;
     if (flags & PDDI_BUFFER_COLOUR) {
-        glClearColor(mClearColour.r / 255.0f, mClearColour.g / 255.0f,
-                     mClearColour.b / 255.0f, mClearColour.a / 255.0f);
+        glClearColor(clearColour.r / 255.0f, clearColour.g / 255.0f,
+                     clearColour.b / 255.0f, clearColour.a / 255.0f);
         mask |= GL_COLOR_BUFFER_BIT;
     }
     if (flags & PDDI_BUFFER_DEPTH)
@@ -328,24 +429,50 @@ void glContext::Clear(int flags) {
         glClear(mask);
 }
 
-void glContext::SetProjectionMatrix(const Mat4& m) { mProjection = m; }
-void glContext::SetViewMatrix(const Mat4& m) { mView = m; }
-void glContext::SetWorldMatrix(const Mat4& m) { mWorld = m; }
+void glContext::SetProjectionMatrix(const Mat4& m) { projection = m; }
+void glContext::SetViewMatrix(const Mat4& m) { viewMatrix = m; }
+void glContext::SetWorldMatrix(const Mat4& m) { worldMatrix = m; }
 
 void glContext::SetCullMode(pddiCullMode mode) {
+    if (!stateDirty && mode == cachedCullMode) 
+        return;
+
+    cachedCullMode = mode;
+
+    // PSX uses CW winding (left-handed). X-flip in projection preserves CW.
+    glFrontFace(GL_CW);
+
     switch (mode) {
-        case PDDI_CULL_NONE:     glDisable(GL_CULL_FACE); break;
-        case PDDI_CULL_NORMAL:   glEnable(GL_CULL_FACE); glCullFace(GL_BACK); break;
-        case PDDI_CULL_INVERTED: glEnable(GL_CULL_FACE); glCullFace(GL_FRONT); break;
+        case PDDI_CULL_NONE:     
+            glDisable(GL_CULL_FACE);
+            break;
+        case PDDI_CULL_NORMAL:  
+            glEnable(GL_CULL_FACE); 
+            glCullFace(GL_BACK); 
+            break;
+        case PDDI_CULL_INVERTED: 
+            glEnable(GL_CULL_FACE);
+            glCullFace(GL_FRONT); 
+            break;
     }
 }
 
 void glContext::EnableZBuffer(bool enable) {
-    if (enable) glEnable(GL_DEPTH_TEST);
-    else        glDisable(GL_DEPTH_TEST);
+    if (!stateDirty && enable == cachedZBuffer)
+        return;
+
+    cachedZBuffer = enable;
+    if (enable)
+        glEnable(GL_DEPTH_TEST);
+    else       
+        glDisable(GL_DEPTH_TEST);
 }
 
 void glContext::SetBlendMode(pddiBlendMode mode) {
+    if (!stateDirty && mode == cachedBlendMode) 
+        return;
+
+    cachedBlendMode = mode;
     switch (mode) {
         case PDDI_BLEND_NONE:
             glDisable(GL_BLEND);
@@ -364,6 +491,7 @@ void glContext::SetBlendMode(pddiBlendMode mode) {
             glBlendEquation(GL_FUNC_REVERSE_SUBTRACT);
             break;
     }
+    stateDirty = false;
 }
 
 void glContext::DrawQuad(pddiBaseShader* shader,
@@ -373,7 +501,7 @@ void glContext::DrawQuad(pddiBaseShader* shader,
 
     auto* s = static_cast<glShader*>(shader);
     glUniformMatrix4fv(glGetUniformLocation(s->GetProgram(), "uProj"),
-                       1, GL_FALSE, mProjection.Data());
+                       1, GL_FALSE, projection.Data());
 
     float verts[] = {
         x,     y,     u0, v1,
@@ -384,8 +512,8 @@ void glContext::DrawQuad(pddiBaseShader* shader,
         x,     y + h, u0, v0,
     };
 
-    glBindVertexArray(mQuadVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, mQuadVBO);
+    glBindVertexArray(quadVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, quadVBO);
     glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(verts), verts);
     glDrawArrays(GL_TRIANGLES, 0, 6);
 
@@ -393,10 +521,10 @@ void glContext::DrawQuad(pddiBaseShader* shader,
 }
 
 void glContext::InitQuadMesh() {
-    glGenVertexArrays(1, &mQuadVAO);
-    glGenBuffers(1, &mQuadVBO);
-    glBindVertexArray(mQuadVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, mQuadVBO);
+    glGenVertexArrays(1, &quadVAO);
+    glGenBuffers(1, &quadVBO);
+    glBindVertexArray(quadVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, quadVBO);
     glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 4 * 6, nullptr, GL_DYNAMIC_DRAW);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 4, (void*)0);
     glEnableVertexAttribArray(0);
@@ -409,18 +537,20 @@ void glContext::InitQuadMesh() {
 void glContext::Init3DShader() {
     u32 vs = CompileGLShader(GL_VERTEX_SHADER, k3DVert);
     u32 fs = CompileGLShader(GL_FRAGMENT_SHADER, k3DFrag);
-    if (!vs || !fs) return;
 
-    m3DProgram = glCreateProgram();
-    glAttachShader(m3DProgram, vs);
-    glAttachShader(m3DProgram, fs);
-    glLinkProgram(m3DProgram);
+    if (!vs || !fs)
+        return;
+
+    program3D = glCreateProgram();
+    glAttachShader(program3D, vs);
+    glAttachShader(program3D, fs);
+    glLinkProgram(program3D);
 
     int ok;
-    glGetProgramiv(m3DProgram, GL_LINK_STATUS, &ok);
+    glGetProgramiv(program3D, GL_LINK_STATUS, &ok);
     if (!ok) {
         char log[512];
-        glGetProgramInfoLog(m3DProgram, sizeof(log), nullptr, log);
+        glGetProgramInfoLog(program3D, sizeof(log), nullptr, log);
         std::fprintf(stderr, "3D shader link error:\n%s\n", log);
     }
 
@@ -428,31 +558,52 @@ void glContext::Init3DShader() {
     glDeleteShader(fs);
 }
 
-void glContext::SetTexture(pddiTexture* tex) {
-    mCurrentTexture = tex;
+void glContext::SetTexture(pddiTexture* t) {
+    currentTexture = t;
 }
 
-void glContext::SetVRAMHandle(u32 handle) {
-    mVRAMHandle = handle;
+void glContext::SetVRAMHandle(u32 h) {
+    vramHandle = h;
 }
 
-void glContext::DrawPrimBuffer(pddiPrimType type, u32 vao, u32 indexCount) {
-    glUseProgram(m3DProgram);
+u32 glContext::CreateVRAMTexture(int w, int h, const u16* data) {
+    u32 tex;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R16UI, w, h, 0,
+                 GL_RED_INTEGER, GL_UNSIGNED_SHORT, data);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    return tex;
+}
 
-    Mat4 mvp = Mat4Multiply(mProjection, Mat4Multiply(mView, mWorld));
-    glUniformMatrix4fv(glGetUniformLocation(m3DProgram, "uMVP"),
+void glContext::DestroyVRAMTexture(u32 handle) {
+    if (handle) glDeleteTextures(1, &handle);
+}
+
+void glContext::DrawPrimBuffer(pddiPrimBuffer* buffer) {
+    if (!buffer)
+        return;
+
+    glUseProgram(program3D);
+
+    Mat4 mvp = Mat4Multiply(projection, Mat4Multiply(viewMatrix, worldMatrix));
+    glUniformMatrix4fv(glGetUniformLocation(program3D, "uMVP"),
                        1, GL_FALSE, mvp.Data());
 
-    int hasVRAM = mVRAMHandle ? 1 : 0;
-    glUniform1i(glGetUniformLocation(m3DProgram, "uHasVRAM"), hasVRAM);
-    if (mVRAMHandle) {
+    int hasVRAM = vramHandle ? 1 : 0;
+    glUniform1i(glGetUniformLocation(program3D, "uHasVRAM"), hasVRAM);
+    if (vramHandle) {
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, mVRAMHandle);
-        glUniform1i(glGetUniformLocation(m3DProgram, "uVRAM"), 0);
+        glBindTexture(GL_TEXTURE_2D, vramHandle);
+        glUniform1i(glGetUniformLocation(program3D, "uVRAM"), 0);
     }
 
     GLenum glMode = GL_TRIANGLES;
-    switch (type) {
+    switch (buffer->GetPrimType()) {
         case PDDI_PRIM_TRIANGLES: glMode = GL_TRIANGLES; break;
         case PDDI_PRIM_TRISTRIP:  glMode = GL_TRIANGLE_STRIP; break;
         case PDDI_PRIM_LINES:     glMode = GL_LINES; break;
@@ -460,8 +611,9 @@ void glContext::DrawPrimBuffer(pddiPrimType type, u32 vao, u32 indexCount) {
         case PDDI_PRIM_POINTS:    glMode = GL_POINTS; break;
     }
 
-    glBindVertexArray(vao);
-    glDrawElements(glMode, indexCount, GL_UNSIGNED_SHORT, nullptr);
+    auto* glBuf = static_cast<glPrimBuffer*>(buffer);
+    glBindVertexArray(glBuf->GetVAO());
+    glDrawElements(glMode, buffer->GetIndexCount(), GL_UNSIGNED_SHORT, nullptr);
     glBindVertexArray(0);
     glUseProgram(0);
 }
@@ -471,6 +623,7 @@ void glContext::DrawPrimBuffer(pddiPrimType type, u32 vao, u32 indexCount) {
 pddiDisplay* glDevice::NewDisplay() { return new glDisplay(); }
 pddiRenderContext* glDevice::NewRenderContext(pddiDisplay* d) { return new glContext(static_cast<glDisplay*>(d)); }
 pddiTexture* glDevice::NewTexture() { return new glTexture(); }
+pddiPrimBuffer* glDevice::NewPrimBuffer(const pddiPrimBufferDesc& desc) { return new glPrimBuffer(desc); }
 pddiBaseShader* glDevice::NewShader(const char*) { return new glShader(); }
 
 // Platform factory

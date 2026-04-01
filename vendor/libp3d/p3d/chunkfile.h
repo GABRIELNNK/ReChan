@@ -3,8 +3,7 @@
 // PSX P3D chunk format: 16-bit IDs, 6-byte headers (u16 id + u32 totalSize).
 // totalSize includes the header. Chunks can nest.
 //
-#ifndef CHUNKFILE_H
-#define CHUNKFILE_H
+#pragma once
 
 #include "core.h"
 #include <vector>
@@ -55,27 +54,27 @@ public:
     tChunkFile(const u8* data, u32 size);
 
     // Navigation
-    bool     ChunksRemaining();
-    u16      BeginChunk();
-    void     EndChunk();
+    bool ChunksRemaining();
+    u16 BeginChunk();
+    void EndChunk();
 
-    u16      GetCurrentID() const;
-    u32      GetCurrentDataLength() const;
+    u16 GetCurrentID() const;
+    u32 GetCurrentDataLength() const;
 
     // Data readers
-    u8       GetByte();
-    u16      GetUShort();
-    u32      GetUInt();
-    s32      GetInt();
-    f32      GetFloat();
+    u8 GetByte();
+    u16 GetUShort();
+    u32 GetUInt();
+    s32 GetInt();
+    f32 GetFloat();
     std::string GetPString();  // Pascal string: u8 length + chars
 
-    void     GetData(void* buf, u32 count);
-    void     Skip(u32 bytes);
+    void GetData(void* buf, u32 count);
+    void Skip(u32 bytes);
 
     // Legacy names
-    s32      GetLong() { return GetInt(); }
-    u16      GetUWord() { return GetUShort(); }
+    s32 GetLong() { return GetInt(); }
+    u16 GetUWord() { return GetUShort(); }
 
 private:
     static constexpr int STACK_SIZE = 32;
@@ -87,11 +86,11 @@ private:
         u32 endPos;       // startPos + dataLength
     };
 
-    const u8* mData;
-    u32 mSize;
-    u32 mPos;
-    Frame mStack[STACK_SIZE];
-    int mStackTop;
+    const u8* buf;
+    u32 bufSize;
+    u32 pos;
+    Frame stack[STACK_SIZE];
+    int stackTop;
 
     u16 ReadU16();
     u32 ReadU32();
@@ -102,5 +101,3 @@ tChunk ParseChunkTree(const u8* data, u32 size);
 
 // Parse all top-level chunks from a buffer
 std::vector<tChunk> ParseAllChunks(const u8* data, u32 size);
-
-#endif // CHUNKFILE_H
