@@ -7,7 +7,7 @@
 using f32 = float;
 
 // 4x4 column-major float matrix (OpenGL convention)
-// Column c, row r → m[c*4 + r]
+// Column c, row r -> m[c*4 + r]
 struct Mat4 {
     f32 m[16];
 

@@ -1,20 +1,20 @@
-// camera.h — Camera class reversed from PSX CAMERA.CPP
-// Original: C:\CHAN\GAME\SRC\GEN\CAMERA.CPP
+// camera.h = Camera class reversed from PSX CAMERA.CPP
 // PSX Camera struct: 492 bytes, inherits DynamicThing (200 bytes base)
 #pragma once
 
 #include "core.h"
 #include "gen/block.h" // LVector
+#include "gen/cammgr.h" // CameraAnchor
 #include "p3d/camera.h" // tCamera
 
 // Camera mode identifiers (PSX SetMode parameter)
 enum CameraMode : s32 {
-    CAM_MODE_DEFAULT  = 0, // _DebugCam — free-look via pad input
-    CAM_MODE_FOLLOW   = 1, // _FollowPath — spline follow + track target
-    CAM_MODE_RIGID    = 2, // _RigidCam — fixed offset from target
+    CAM_MODE_DEFAULT  = 0, // _DebugCam = free-look via pad input
+    CAM_MODE_FOLLOW   = 1, // _FollowPath = spline follow + track target
+    CAM_MODE_RIGID    = 2, // _RigidCam = fixed offset from target
 };
 
-// EvalCubic — cubic Hermite interpolation (FXP.CPP:81)
+// EvalCubic = cubic Hermite interpolation (FXP.CPP:81)
 // Smoothly moves *curValue toward target, updating *accel.
 // Returns true if curValue reached (or overshot) target.
 bool EvalCubic(s32* curValue, s32* accel, s32 target, s32 velocity, s32 time);
@@ -36,8 +36,8 @@ public:
 
     void SetMode(CameraMode mode);             // 0x80049C44
 
-    void SetFOV(s32 fov);                      // 0x8004A500 — sets desiredFOV
-    void SetCurFOV(s32 fov);                   // 0x8004A464 — sets curFOV + pushes to tCamera
+    void SetFOV(s32 fov);                      // 0x8004A500 = sets desiredFOV
+    void SetCurFOV(s32 fov);                   // 0x8004A464 = sets curFOV + pushes to tCamera
     void SetMovementTime(const LVector* t);    // 0x8004A400
     void SetTrackingTime(const LVector* t);    // 0x8004A39C
     void SetLookAtTarget(void* thing, u16 mode); // 0x80049DC0
@@ -56,9 +56,9 @@ public:
 
 private:
     // Mode dispatch functions
-    void DebugCam();                           // 0x80048718 — mode 0
-    void FollowPath();                         // 0x80048AC0 — mode 1
-    void RigidCam();                           // 0x8004897C — mode 2
+    void DebugCam();                           // 0x80048718 = mode 0
+    void FollowPath();                         // 0x80048AC0 = mode 1
+    void RigidCam();                           // 0x8004897C = mode 2
     void CameraShake();                        // 0x80049DEC
 
     // --- DynamicThing base fields (PSX offsets +0..+199) ---
@@ -73,7 +73,7 @@ private:
     // +124,+128,+132: previous position (saved each Move)
     LVector prevPosition = {};
 
-    // +200: hasCollision flag — controls whether Move() is called
+    // +200: hasCollision flag = controls whether Move() is called
     s32 hasCollision = 0;
 
     // --- Camera-specific fields (PSX offsets +204..+491) ---
@@ -135,8 +135,8 @@ private:
     s32 lookAtMode = 0;
 
     // --- Mode dispatch (PSX OrderHandler at +368) ---
-    // +368: thisOffset (s16) — added to 'this' before calling mode func
-    // +370: modeIndex (s16) — -1=direct call, 0=skip, >0=vtable index
+    // +368: thisOffset (s16) = added to 'this' before calling mode func
+    // +370: modeIndex (s16) = -1=direct call, 0=skip, >0=vtable index
     // +372: function pointer / vtable base
     // On PC we use CameraMode enum + function pointer instead.
     CameraMode currentMode = CAM_MODE_DEFAULT;
@@ -153,15 +153,15 @@ private:
     s32 camAngleY = 0; // yaw
     s32 camAngleZ = 0; // roll
 
-    // +392: CameraAnchor reference (path data, not yet reversed)
-    s32 cameraAnchor = 0;
+    // +392: CameraAnchor = owns camera rail paths for current level
+    CameraAnchor* cameraAnchor = nullptr;
 
     // +396: (reserved)
 
     // +400: shake frames remaining
     s32 shakeFrames = 0;
 
-    // +404: embedded tMatrixCamera — on PC we use tCamera directly
+    // +404: embedded tMatrixCamera = on PC we use tCamera directly
     tCamera p3dCamera;
 
     // +460: async anim enum (0xFFFF = none)

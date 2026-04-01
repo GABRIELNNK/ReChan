@@ -1,4 +1,4 @@
-// block.cpp — Block class reversed from PSX BLOCK.CPP
+// block.cpp = Block class reversed from PSX BLOCK.CPP
 // Original: C:\CHAN\GAME\SRC\GEN\BLOCK.CPP
 #include "gen/block.h"
 #include "gen/geometry.h"
@@ -7,7 +7,7 @@
 #include "pddi/pddidev.h"
 #include <cstring>
 
-// DBVolume::FindAttrib — search for attribute by id
+// DBVolume::FindAttrib = search for attribute by id
 const DBAttrib* DBVolume::FindAttrib(u32 id) const {
     for (u32 i = 0; i < numAttribs; i++) {
         if (attribs[i].id == id) return &attribs[i];

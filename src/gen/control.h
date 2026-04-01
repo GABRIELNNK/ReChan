@@ -8,10 +8,10 @@
 
 class PlatformInput; // PC platform input (keyboard/mouse via GLFW)
 
-// ============================================================================
+
 // PSX pad button bits (from Sony libpad, active-high after NOT by ReadSonyPads)
 // These are the bit positions in Control::rawButtons and GetControlVal() output.
-// ============================================================================
+
 namespace PsxPad {
     static constexpr u32 Select   = 0x0001;
     static constexpr u32 L3       = 0x0002;
@@ -31,10 +31,10 @@ namespace PsxPad {
     static constexpr u32 Square   = 0x8000;
 }
 
-// ============================================================================
-// Button — individual button state tracker (PSX: 40 bytes per instance)
+
+// Button = individual button state tracker (PSX: 40 bytes per instance)
 // 16 per Control, at Control+52, stride 40
-// ============================================================================
+
 enum ButtonMode : s32 {
     BUTTON_MODE_RAW     = 0, // GetState = true while held
     BUTTON_MODE_ONESHOT = 1, // GetState = true on first press frame only
@@ -45,15 +45,15 @@ struct Button {
     s32 prevInput = 0;    // previous frame raw input (for oneshot)
     ButtonMode mode = BUTTON_MODE_RAW;
 
-    void Input(s32 bit);                // 0x8002D8C4 — process raw bit
-    s32  GetState() const;              // 0x8002D898 — return state by mode
-    void SetMode(ButtonMode m);         // 0x8002D9E8 — set button mode
+    void Input(s32 bit);                // 0x8002D8C4 = process raw bit
+    s32  GetState() const;              // 0x8002D898 = return state by mode
+    void SetMode(ButtonMode m);         // 0x8002D9E8 = set button mode
 };
 
-// ============================================================================
-// Control — one controller port (PSX: 728 bytes, 2 per InputManager)
+
+// Control = one controller port (PSX: 728 bytes, 2 per InputManager)
 // PSX offsets relative to Control base (InputManager+28 for controls[0])
-// ============================================================================
+
 struct Control {
     // +28: flags (bit 0 = connected, bit 1 = updated this frame)
     s32 flags = 0;
@@ -80,15 +80,15 @@ struct Control {
     // +724: connected pad detected flag
     s32 hasConnectedPad = 0;
 
-    void Input(u32 buttonBits);         // 0x8002DCF0 — dispatch bits to Buttons
-    u32  GetMask() const;               // 0x8002DDEC — combined bitmask from Buttons
+    void Input(u32 buttonBits);         // 0x8002DCF0 = dispatch bits to Buttons
+    u32  GetMask() const;               // 0x8002DDEC = combined bitmask from Buttons
     void SetControlMapArray(const u8* map);
 };
 
-// ============================================================================
-// InputManager — game-level input system (PSX: ~1492 bytes)
+
+// InputManager = game-level input system (PSX: ~1492 bytes)
 // Singleton on PSX at 0x800DD69C
-// ============================================================================
+
 class InputManager {
 public:
     InputManager();                                         // 0x8002DF74

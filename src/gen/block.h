@@ -1,4 +1,4 @@
-// block.h — Block class reversed from PSX BLOCK.CPP
+// block.h = Block class reversed from PSX BLOCK.CPP
 // Original: C:\CHAN\GAME\SRC\GEN\BLOCK.CPP
 #pragma once
 
@@ -6,12 +6,12 @@
 
 class pddiPrimBuffer;
 
-// LVector — PSX 3D integer vector (tagLVector)
+// LVector = PSX 3D integer vector (tagLVector)
 struct LVector {
     s32 x, y, z;
 };
 
-// DBAttrib — attribute from WDB database node
+// DBAttrib = attribute from WDB database node
 struct DBAttrib {
     u16 id;
     u16 type;
@@ -19,7 +19,7 @@ struct DBAttrib {
     const char* strValue;
 };
 
-// DBVolume — parsed WDB database volume entry
+// DBVolume = parsed WDB database volume entry
 struct DBVolume {
     u16 type;
     u16 sub;
@@ -35,7 +35,7 @@ struct DBVolume {
     const DBAttrib* FindAttrib(u32 id) const;
 };
 
-// Block — reversed from PSX Block class (104 bytes on PSX)
+// Block = reversed from PSX Block class (104 bytes on PSX)
 // Source: C:\CHAN\GAME\SRC\GEN\BLOCK.CPP
 struct Block {
     // +0: parsed flag (1 if data has prims, 0 otherwise)

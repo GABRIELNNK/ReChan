@@ -1,4 +1,4 @@
-// control.cpp — from C:\CHAN\GAME\SRC\GEN\CONTROL.CPP
+// control.cpp = from C:\CHAN\GAME\SRC\GEN\CONTROL.CPP
 // InputManager / Control / Button implementations
 #include "gen/control.h"
 
@@ -10,17 +10,17 @@
 // Global singleton (PSX: 0x800DD69C)
 InputManager* g_inputManager = nullptr;
 
-// ============================================================================
-// Button
-// ============================================================================
 
-// Button::Input (0x8002D8C4) — process raw bit (0 or 1)
+// Button
+
+
+// Button::Input (0x8002D8C4) = process raw bit (0 or 1)
 void Button::Input(s32 bit) {
     prevInput = rawInput;
     rawInput = bit;
 }
 
-// Button::GetState (0x8002D898) — return state based on mode
+// Button::GetState (0x8002D898) = return state based on mode
 s32 Button::GetState() const {
     switch (mode) {
         case BUTTON_MODE_RAW:
@@ -40,11 +40,11 @@ void Button::SetMode(ButtonMode m) {
     prevInput = 0;
 }
 
-// ============================================================================
-// Control
-// ============================================================================
 
-// Control::Input (0x8002DCF0) — dispatch raw button bits to individual Buttons
+// Control
+
+
+// Control::Input (0x8002DCF0) = dispatch raw button bits to individual Buttons
 // PSX iterates 16 buttons, looks up controlMap[i] for physical->logical mapping,
 // then calls Button::Input with the corresponding bit.
 void Control::Input(u32 buttonBits) {
@@ -55,7 +55,7 @@ void Control::Input(u32 buttonBits) {
     }
 }
 
-// Control::GetMask (0x8002DDEC) — combine 16 Button::GetState results into bitmask
+// Control::GetMask (0x8002DDEC) = combine 16 Button::GetState results into bitmask
 u32 Control::GetMask() const {
     u32 mask = 0;
     for (int i = 0; i < 16; ++i) {
@@ -66,16 +66,16 @@ u32 Control::GetMask() const {
     return mask;
 }
 
-// Control::SetControlMapArray — set button remapping table
+// Control::SetControlMapArray = set button remapping table
 void Control::SetControlMapArray(const u8* map) {
     for (int i = 0; i < 16; ++i) {
         controlMap[i] = map[i];
     }
 }
 
-// ============================================================================
+
 // InputManager
-// ============================================================================
+
 
 // InputManager::InputManager (0x8002DF74)
 InputManager::InputManager() {
@@ -167,9 +167,9 @@ void InputManager::InternalReset() {
     controlValFlags[0] = controlValFlags[1] = 0;
 }
 
-// ============================================================================
+
 // PC keyboard -> PSX pad emulation (behind config macro)
-// ============================================================================
+
 #if RC_FEATURE_PAD_KEYBOARD_EMULATION
 
 // Keyboard binding: maps a PC key code to a PSX pad button bit

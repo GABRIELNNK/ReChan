@@ -9,10 +9,10 @@
 #include "p3d/matrix.h"
 #include <cmath>
 
-// ============================================================================
+
 // PSX math function equivalents (float versions)
 // Names match decompiled PSX code for easy cross-reference.
-// ============================================================================
+
 
 // PSX binary angle: 65536 = 2π. Convert to/from radians.
 constexpr f32 P3D_ANGLE_TO_RAD = (2.0f * 3.14159265358979323846f) / 65536.0f;

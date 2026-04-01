@@ -1,4 +1,4 @@
-// camera.h — tCamera base class (Pure3D v11.3)
+// camera.h = tCamera base class (Pure3D v11.3)
 #pragma once
 
 #include "p3d/entity.h"

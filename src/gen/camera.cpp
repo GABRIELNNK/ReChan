@@ -10,9 +10,9 @@
 #include <cmath>
 #include <cstdlib>
 
-// ============================================================================
+
 // PSX math helpers
-// ============================================================================
+
 
 static constexpr f32 PSX_ANGLE_TO_RAD = P3D_ANGLE_TO_RAD;
 static constexpr f32 PSX_FOV_TO_RAD = 0.61f / 30000.0f;
@@ -92,9 +92,9 @@ bool EvalCubic(s32* curValue, s32* accel, s32 target, s32 velocity, s32 time) {
     return false;
 }
 
-// ============================================================================
+
 // Camera constructor (0x80047AD4)
-// ============================================================================
+
 Camera::Camera() {
     MARKFUNCTION(0x80047AD4);
     // PSX: calls DynamicThing ctor with type 602, creates tMatrixCamera at +404
@@ -106,9 +106,9 @@ Camera::~Camera() {
     MARKFUNCTION(0x80047C30);
 }
 
-// ============================================================================
+
 // Camera::Reset (0x80047C5C)
-// ============================================================================
+
 void Camera::Reset() {
     MARKFUNCTION(0x80047C5C);
 
@@ -184,10 +184,10 @@ void Camera::Reset() {
     cameraAnchor = 0;
 }
 
-// ============================================================================
+
 // Camera::Think (0x80047F28)
 // Per-frame entry point. Dispatches to current mode function, then Move + Shake.
-// ============================================================================
+
 void Camera::Think() {
     MARKFUNCTION(0x80047F28);
 
@@ -207,11 +207,11 @@ void Camera::Think() {
     }
 }
 
-// ============================================================================
+
 // Camera::Move (0x80047FD4)
 // Interpolates position/target toward their goals using EvalCubic.
 // Also interpolates FOV.
-// ============================================================================
+
 void Camera::Move() {
     MARKFUNCTION(0x80047FD4);
 
@@ -288,11 +288,11 @@ void Camera::Move() {
     }
 }
 
-// ============================================================================
+
 // Camera::Update (0x800482DC)
 // Builds the world-to-camera matrix and pushes it to tCamera.
 // Two paths: angle-based (cameraAnim==0) or point-based (cameraAnim!=0).
-// ============================================================================
+
 void Camera::Update() {
     MARKFUNCTION(0x800482DC);
 
@@ -354,10 +354,10 @@ void Camera::Update() {
     prevTargetPos = targetPos;
 }
 
-// ============================================================================
+
 // Camera::LookAtTarget (0x8004850C)
 // Computes camera Euler angles from position toward target.
-// ============================================================================
+
 void Camera::LookAtTarget(const LVector* target) {
     MARKFUNCTION(0x8004850C);
 
@@ -420,9 +420,9 @@ void Camera::LookAtTarget(const LVector* target) {
     orientAngles.z = camAngleZ;
 }
 
-// ============================================================================
+
 // Camera::SetMode (0x80049C44)
-// ============================================================================
+
 void Camera::SetMode(CameraMode mode) {
     MARKFUNCTION(0x80049C44);
 
@@ -446,19 +446,19 @@ void Camera::SetMode(CameraMode mode) {
     // (updates the movement time based on current global state)
 }
 
-// ============================================================================
+
 // Camera::SetFOV (0x8004A500)
-// ============================================================================
+
 void Camera::SetFOV(s32 fov) {
     MARKFUNCTION(0x8004A500);
     desiredFOV = fov;
 }
 
-// ============================================================================
+
 // Camera::SetCurFOV (0x8004A464)
 // Sets curFOV and immediately pushes to tCamera.
 // PSX formula: curFOV = ((v*3)<<4 - v)<<3 - v)<<3 = v * 3000
-// ============================================================================
+
 void Camera::SetCurFOV(s32 fov) {
     MARKFUNCTION(0x8004A464);
     curFOV = fov * 3000;
@@ -468,10 +468,10 @@ void Camera::SetCurFOV(s32 fov) {
     }
 }
 
-// ============================================================================
+
 // Camera::SetMovementTime (0x8004A400)
 // Converts user time values to internal units: input * 1000
-// ============================================================================
+
 void Camera::SetMovementTime(const LVector* t) {
     MARKFUNCTION(0x8004A400);
     movementTime.x = t->x * TIME_SCALE;
@@ -479,9 +479,9 @@ void Camera::SetMovementTime(const LVector* t) {
     movementTime.z = t->z * TIME_SCALE;
 }
 
-// ============================================================================
+
 // Camera::SetTrackingTime (0x8004A39C)
-// ============================================================================
+
 void Camera::SetTrackingTime(const LVector* t) {
     MARKFUNCTION(0x8004A39C);
     trackingTime.x = t->x * TIME_SCALE;
@@ -489,9 +489,9 @@ void Camera::SetTrackingTime(const LVector* t) {
     trackingTime.z = t->z * TIME_SCALE;
 }
 
-// ============================================================================
+
 // Camera::SetLookAtTarget (0x80049DC0)
-// ============================================================================
+
 void Camera::SetLookAtTarget(void* thing, u16 mode) {
     MARKFUNCTION(0x80049DC0);
     targetThing = thing;
@@ -500,20 +500,20 @@ void Camera::SetLookAtTarget(void* thing, u16 mode) {
     }
 }
 
-// ============================================================================
+
 // Camera::ShakeCamera (0x80049DE4)
-// ============================================================================
+
 void Camera::ShakeCamera(s32 frames) {
     MARKFUNCTION(0x80049DE4);
     shakeFrames = frames;
 }
 
-// ============================================================================
+
 // Camera::DebugCam (0x80048718) — Mode 0
 // PSX: reads pad input, adjusts camera Euler angles + position.
 // Angles are 16-bit PSX angle units (65536 = full circle).
 // Position delta is rotated by camera orientation before applying.
-// ============================================================================
+
 void Camera::DebugCam() {
     MARKFUNCTION(0x80048718);
 
@@ -627,32 +627,32 @@ void Camera::DebugCam() {
 #endif // RC_FEATURE_IMPROVED_DEBUG_CAM
 }
 
-// ============================================================================
+
 // Camera::FollowPath (0x80048AC0) — Mode 1
 // PSX: 4484 bytes, finds closest camera path nodes, interpolates position
 // along spline path, sets target positions. Requires CameraAnchor + path data.
 // Stubbed until camera path data is loaded from level.
-// ============================================================================
+
 void Camera::FollowPath() {
     MARKFUNCTION(0x80048AC0);
     // TODO: implement camera path follow when CameraAnchor system is reversed
     // For now, does nothing — camera stays at current position
 }
 
-// ============================================================================
+
 // Camera::RigidCam (0x8004897C) — Mode 2
 // PSX: maintains fixed offset from target Thing. Requires targetThing.
-// ============================================================================
+
 void Camera::RigidCam() {
     MARKFUNCTION(0x8004897C);
     if (targetThing == nullptr) return;
     // TODO: implement rigid camera offset when Thing/Character system exists
 }
 
-// ============================================================================
+
 // Camera::CameraShake (0x80049DEC)
 // Applies random offset to position based on shakeStrength.
-// ============================================================================
+
 void Camera::CameraShake() {
     MARKFUNCTION(0x80049DEC);
     shakeFrames--;

@@ -1,4 +1,4 @@
-// camera.cpp — tCamera implementation
+// camera.cpp = tCamera implementation
 #include "p3d/camera.h"
 #include "p3d/context.h"
 #include "pddi/pddidev.h"

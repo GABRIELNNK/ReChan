@@ -1,4 +1,4 @@
-// blockmgr.cpp — BlockManager reversed from PSX BLKMGR.CPP
+// blockmgr.cpp = BlockManager reversed from PSX BLKMGR.CPP
 // Original: C:\CHAN\GAME\SRC\GEN\BLKMGR.CPP
 #include "gen/blockmgr.h"
 
@@ -38,7 +38,7 @@ void BlockManager::LoadBlocksFunc(const std::vector<DBVolume>& volumes) {
 
 // InternalOpen__12BlockManager (BLKMGR.CPP:258)
 // PSX: creates ccNode callback pairs for load/unload, adds to LevelMgr lists
-// PC: just clear state — async loading not needed
+// PC: just clear state = async loading not needed
 void BlockManager::InternalOpen() {
     MARKFUNCTION(0x800502BC);
     drawListCount = 0;

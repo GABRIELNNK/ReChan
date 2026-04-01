@@ -48,6 +48,6 @@ struct Fixed {
     static Fixed FromFloat(f32 v) { return { static_cast<s32>(v * (1 << FRAC_BITS)) }; }
 };
 
-// Math types — split into separate headers
+// Math types = split into separate headers
 #include "p3d/vector.h"
 #include "p3d/matrix.h"

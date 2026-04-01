@@ -1,4 +1,4 @@
-// context.h — tContext + tPlatform
+// context.h = tContext + tPlatform
 #pragma once
 
 #include "core.h"
@@ -16,7 +16,7 @@ struct tContextInitData {
     const char* title = "libp3d";
 };
 
-// Context — owns all engine subsystems
+// Context = owns all engine subsystems
 class tContext {
 public:
     tContext();
@@ -62,7 +62,7 @@ private:
     tContext* activeContext = nullptr;
 };
 
-// Global access (Pure3D convention — set by tPlatform::SetActiveContext)
+// Global access (Pure3D convention = set by tPlatform::SetActiveContext)
 namespace p3d {
     extern pddiDevice* device;
     extern pddiDisplay* display;

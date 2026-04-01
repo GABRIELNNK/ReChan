@@ -1,4 +1,4 @@
-// chunkfile.h — P3D chunk file reader
+// chunkfile.h = P3D chunk file reader
 //
 // PSX P3D chunk format: 16-bit IDs, 6-byte headers (u16 id + u32 totalSize).
 // totalSize includes the header. Chunks can nest.
@@ -31,7 +31,7 @@ namespace ChunkID {
     constexpr u16 IndexList = 0x6206;
 
     // Tool/debug markers
-    constexpr u16 Separator = 0x7001;  // P3D_ALIGN — section separator
+    constexpr u16 Separator = 0x7001;  // P3D_ALIGN = section separator
 
     // Bitmap chunks
     constexpr u16 BitmapRaw = 0xA001;

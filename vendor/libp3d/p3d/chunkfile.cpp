@@ -1,4 +1,4 @@
-// chunkfile.cpp — P3D chunk file reader implementation
+// chunkfile.cpp = P3D chunk file reader implementation
 #include "p3d/chunkfile.h"
 #include <cassert>
 #include <stdexcept>
