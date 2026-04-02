@@ -480,7 +480,7 @@ void Database::Scan(const u8* data, u32 size) {
     }
 
 done:
-    isOpen = true;
+    isOpen = 1;
 
     // Sort block list by priority (reverse)
     // PSX calls SortPriReverse on the blockList
@@ -490,7 +490,7 @@ done:
 void Database::Close() {
     MARKFUNCTION(0x800390C8);
 
-    isOpen = false;
+    isOpen = 0;
 
     // Clear all lists - pop from head and delete
     while (ccMinNode* n = pointList.head) {

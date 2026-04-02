@@ -2,24 +2,25 @@
 #pragma once
 
 #include "core.h"
+#include "gen/manager.h"
 #include "gen/block.h"
 #include <vector>
 
 // BlockManager = manages level block loading, draw lists, demand loading
 // Reversed from PSX struct layout (BLKMGR.CPP)
-class BlockManager {
+class BlockManager : public Manager {
 public:
     BlockManager();
-    ~BlockManager();
+    ~BlockManager() override;
 
     // _LoadBlocksFunc (BLKMGR.CPP:207) = allocate block pool from WDB database
     void LoadBlocksFunc(const std::vector<DBVolume*>& volumes);   // 0x8005010C
 
     // InternalOpen (BLKMGR.CPP:258) = set up draw/load callback nodes
-    void InternalOpen();                                          // 0x800502BC
+    void InternalOpen() override;                                          // 0x800502BC
 
     // InternalClose (BLKMGR.CPP:280)
-    void InternalClose();                                         // 0x80050384
+    void InternalClose() override;                                         // 0x80050384
 
     // LoadBlocks (BLKMGR.CPP:695) = load and parse block data from stream
     void LoadBlocks(u32 blockNum,

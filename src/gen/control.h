@@ -5,6 +5,7 @@
 
 #include "core.h"
 #include "config.h"
+#include "gen/manager.h"
 
 class PlatformInput; // PC platform input (keyboard/mouse via GLFW)
 
@@ -89,10 +90,10 @@ struct Control {
 // InputManager = game-level input system (PSX: ~1492 bytes)
 // Singleton on PSX at 0x800DD69C
 
-class InputManager {
+class InputManager : public Manager {
 public:
     InputManager();                                         // 0x8002DF74
-    ~InputManager();                                        // 0x8002E048
+    ~InputManager() override;                               // 0x8002E048
 
     // --- Per-frame pipeline (called from game loop) ---
     // PSX: ReadSonyPads() -> ServiceInput(buttons,0) -> ServiceInput(buttons>>16,1) -> Step()
@@ -111,7 +112,7 @@ public:
 
     // --- Configuration ---
     void SetControlMapArray(s16 padIndex, const u8* map);   // 0x8002E2F0
-    void InternalReset();                                   // 0x8002E550
+    void InternalReset() override;                        // 0x8002E550
 
 #if RC_FEATURE_PAD_KEYBOARD_EMULATION
     // PC: read keyboard state from PlatformInput => PSX button bits => ServiceInput

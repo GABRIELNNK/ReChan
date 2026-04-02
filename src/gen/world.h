@@ -2,6 +2,7 @@
 #pragma once
 
 #include "core.h"
+#include "gen/manager.h"
 #include "gen/block.h"
 #include "gen/blockmgr.h"
 #include <vector>
@@ -38,10 +39,10 @@ struct PsxVRAM {
     void DecodePage(u16 tpage, u16 cba, u8* rgbaOut) const;
 };
 
-class World {
+class World : public Manager {
 public:
     World();
-    ~World();
+    ~World() override;
 
     bool Load(const std::string& lcfPath);
     void Render(const LVector* camPos);

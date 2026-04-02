@@ -4,7 +4,7 @@
 
 #include "core.h"
 #include "p3d/lvector.h"
-#include "gen/cclist.h"  // ccNode, ccMinNode, ccMinList, ccList
+#include "gen/manager.h"  // Manager -> ccNode, ccMinNode, ccMinList, ccList
 #include <cstring>
 
 // DBAttrib = attribute from WDB database node
@@ -128,13 +128,13 @@ struct DBPath : public DBRoot {
 // Database - WDB database manager (120 bytes on PSX)
 // PSX: extends Manager. Global instance at gp+3460.
 // Holds linked lists of every DB object type parsed from WDB data.
-class Database {
+class Database : public Manager {
 public:
     Database();
-    ~Database();
+    ~Database() override;
 
-    void InternalOpen();
-    void InternalClose();
+    void InternalOpen() override;
+    void InternalClose() override;
 
     void PreScan();
     void Scan(const u8* data, u32 size);
@@ -165,11 +165,6 @@ public:
     // Analyze mesh resource attributes
     void AnalyzeMesh(DBRoot* root);
 
-    bool IsOpen() const
-    {
-        return isOpen;
-    }
-
 private:
     ccList pointList;
     ccList lineList;
@@ -178,7 +173,6 @@ private:
     ccList volumeList;
     ccList meshList;
     ccList blockList;
-    bool isOpen = false;
 };
 
 // PSX: gp+3460, defined in database.cpp

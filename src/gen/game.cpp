@@ -1,6 +1,11 @@
 // game.cpp
 #include "gen/game.h"
+#include "gen/world.h"
 #include "gen/block.h"
+#include "gen/charmgr.h"
+#include "gen/database.h"
+#include "gen/cammgr.h"
+#include "gen/levelmgr.h"
 #include "config.h"
 #include "p3d/context.h"
 #include "p3d/input.h"
@@ -9,6 +14,9 @@
 #if RC_FEATURE_COLLISION_DEBUG
 #include "pc/coldebug.h"
 #endif
+
+// Global game pointer
+Game* g_game = nullptr;
 
 const Game::StateFunc Game::sStateTable[static_cast<int>(GameState::COUNT)] = {
     gsNullState,
@@ -44,13 +52,173 @@ const Game::StateFunc Game::sStateTable[static_cast<int>(GameState::COUNT)] = {
 Game::Game() {
     MARKFUNCTION(0x800C9AEC); // __4Game
 
-    // PSX: InputManager created during game init, stored at 0x800DD69C
-    if (!g_inputManager) {
-        g_inputManager = new InputManager();
-    }
+    controlVal[0] = 0;
+    controlVal[1] = 0;
+    field136 = 0;
+
+    // PSX: Game constructor creates 4 handlers in handlerSet2
+    // BeginFrameHandler (pri=64), DrawEverythingHandler (pri=-16),
+    // AnimateEverythingHandler (pri=-48), EndFrameHandler (pri=-64)
+    // For now we register the ones we have:
+    handlerSet2.AddHandler(BeginFrameHandler, 64);
+    handlerSet2.AddHandler(DrawEverythingHandlerCB, -16);
+    handlerSet2.AddHandler(EndFrameHandler, -64);
 
     SetState(GameState::Null);
+    g_game = this;
     RC_LOG("[Game] Created");
+}
+
+Game::~Game() {
+    // Close all managers
+    for (ccMinNode* n = managerList.head; n; ) {
+        ccMinNode* next = n->next;
+        Manager* mgr = static_cast<Manager*>(n);
+        mgr->Close();
+        n = next;
+    }
+    g_game = nullptr;
+}
+
+// PSX: InternalOpen__4Game (GAME.CPP:2888, 0x800C9D08)
+// Creates all game managers and adds them to managerList, then calls Open() on each.
+void Game::InternalOpen() {
+    MARKFUNCTION(0x800C9D08);
+
+    // PSX creates managers in this order:
+    // 1. tCellAlligator (8204) - memory allocator (not needed on PC)
+    // 2. oxScreenManager (48) + FontInit - screen/font (TODO)
+    // 3. Time (40) - frame timing (TODO)
+    // 4. AI (116) - AI master (TODO)
+
+    // 5. World (PSX: 160 bytes)
+    World* world = new World();
+    world->SetName("World", 0);
+    managerList.AddNodePri(world);
+
+    // 6. EnvironmentManager (140) - environment effects (TODO)
+    // 7. Display (32) - PSX display (not needed on PC)
+    // 8. Director (212) - scripting/cutscenes (TODO)
+
+    // 9. InputManager (PSX: 1492 bytes)
+    if (!g_inputManager) {
+        g_inputManager = new InputManager();
+        g_inputManager->SetName("InputManager", 0);
+        managerList.AddNodePri(g_inputManager);
+    }
+
+    // 10. LevelManager (PSX: 136 bytes)
+    LevelManager* levelMgr = new LevelManager();
+    levelMgr->SetName("LevelManager", 0);
+    managerList.AddNodePri(levelMgr);
+
+    // 11. Database (PSX: 120 bytes)
+    Database* database = new Database();
+    database->SetName("Database", 0);
+    managerList.AddNodePri(database);
+
+    // 12. Sound (44) - audio (TODO)
+
+    // 13. CameraManager (PSX: 60 bytes)
+    CameraManager* camMgr = new CameraManager();
+    camMgr->SetName("CameraManager", 0);
+    managerList.AddNodePri(camMgr);
+
+    // 14. BlockManager (PSX: 168 bytes)
+    // BlockManager is currently owned by World, so we don't create a separate instance.
+    // TODO: extract from World when block loading is decoupled
+
+    // 15. AnimationManager (40) - animation playback (TODO)
+
+    // 16. CharacterManager (PSX: 3004 bytes)
+    g_characterManager = new CharacterManager();
+    g_characterManager->SetName("CharacterManager", 0);
+    managerList.AddNodePri(g_characterManager);
+
+    // 17. ScoreManager (504) - score/collectibles (TODO)
+
+    // Open all managers in list
+    for (ccMinNode* n = managerList.head; n; n = n->next) {
+        Manager* mgr = static_cast<Manager*>(n);
+        mgr->Open();
+    }
+
+    RC_LOG("[Game] InternalOpen: managers created");
+}
+
+// PSX: InternalClose__4Game (GAME.CPP:3003)
+void Game::InternalClose() {
+    MARKFUNCTION(0x8002A184);
+    // Close all managers in reverse order
+    for (ccMinNode* n = managerList.tail; n; ) {
+        ccMinNode* prev = n->prev;
+        Manager* mgr = static_cast<Manager*>(n);
+        mgr->Close();
+        n = prev;
+    }
+}
+
+// PSX: InternalReset__4Game
+void Game::InternalReset() {
+    for (ccMinNode* n = managerList.head; n; n = n->next) {
+        Manager* mgr = static_cast<Manager*>(n);
+        mgr->Reset();
+    }
+}
+
+// PSX: ProcessHandlers__4Game (GAME.CPP:2756, 0x8002B4F0)
+// Iterates both handler sets and calls each handler's funcPtr
+void Game::ProcessHandlers() {
+    MARKFUNCTION(0x8002B4F0);
+
+    // Process handlerSet1 (think/logic handlers)
+    for (ccMinNode* n = handlerSet1.handlerList.head; n; ) {
+        ccMinNode* next = n->next;
+        Handler* h = static_cast<Handler*>(n);
+        if (h->funcPtr) h->funcPtr(h);
+        n = next;
+    }
+
+    // Process handlerSet2 (draw/render handlers)
+    for (ccMinNode* n = handlerSet2.handlerList.head; n; ) {
+        ccMinNode* next = n->next;
+        Handler* h = static_cast<Handler*>(n);
+        if (h->funcPtr) h->funcPtr(h);
+        n = next;
+    }
+}
+
+// Helper: get World from manager list
+World* Game::GetWorld() const {
+    // World is the first manager in the list (for now)
+    for (ccMinNode* n = managerList.head; n; n = n->next) {
+        World* w = dynamic_cast<World*>(static_cast<Manager*>(n));
+        if (w) return w;
+    }
+    return nullptr;
+}
+
+// Handler callbacks
+void Game::BeginFrameHandler(Handler*) {
+    MARKFUNCTION(0x8002B408);
+    // PSX: BeginFrame - P3D context begin frame
+    // Now handled by main.cpp BeginFrame/EndFrame
+}
+
+void Game::DrawEverythingHandlerCB(Handler*) {
+    MARKFUNCTION(0x8002A98C);
+    if (!g_game) return;
+    World* world = g_game->GetWorld();
+    if (!world) return;
+
+    const LVector& camPos = g_game->gameCamera.GetPosition();
+    world->Render(&camPos);
+}
+
+void Game::EndFrameHandler(Handler*) {
+    MARKFUNCTION(0x8002B420);
+    // PSX: EndFrame - P3D context end frame
+    // Now handled by main.cpp BeginFrame/EndFrame
 }
 
 bool Game::Step() {
@@ -139,24 +307,42 @@ bool Game::gsPlayState(Game* game) {
 #endif
     g_inputManager->Step();
 
-    // Run the reversed PSX camera pipeline
+    // PSX: loop 2 pads, store GetControlVal into game->controlVal[pad]
+    for (s32 pad = 0; pad < 2; pad++) {
+        game->controlVal[pad] = (s32)g_inputManager->GetControlVal((u16)pad);
+    }
+
+    // Camera update (before rendering)
     game->gameCamera.Think();
     game->gameCamera.Update();
-
-    const LVector& camPos = game->gameCamera.GetPosition();
 
     p3d::context->EnableZBuffer(true);
     p3d::context->SetBlendMode(PDDI_BLEND_NONE);
     p3d::context->SetCullMode(PDDI_CULL_NONE);
 
     game->view.BeginRender();
-    game->world.Render(&camPos);
+
+    // PSX: ProcessHandlers - runs all registered handler callbacks
+    // This calls BeginFrameHandler, DrawEverythingHandler, EndFrameHandler
+    game->ProcessHandlers();
+
 #if RC_FEATURE_COLLISION_DEBUG
     if (p3d::input->IsKeyTriggered(pddiInput::KeyF3))
         CollisionDebug::enabled = !CollisionDebug::enabled;
-    CollisionDebug::Draw(game->world.GetBlockManager());
+    {
+        World* world = game->GetWorld();
+        if (world)
+            CollisionDebug::Draw(world->GetBlockManager());
+    }
 #endif
+
     game->view.EndRender();
+
+    // PSX: check if still in Play state after handlers
+    if (game->state != GameState::Play) return true;
+
+    // PSX: check for Start button -> pause menu (state 14 = Menu)
+    // TODO: implement pause menu
 
     return true;
 }
@@ -224,13 +410,21 @@ bool Game::gsOpenLocationState(Game* game) {
 
 bool Game::gsQueueLevelLoad(Game* game) {
     MARKFUNCTION(0x80029574); // gsQueueLevelLoad
-    RC_LOG("[Game] QueueLevelLoad: loading LEV01.LCF");
-    game->world.Load("RTARGET/LEV01.LCF");
+    RC_LOG("[Game] QueueLevelLoad: loading LEV07.LCF");
+
+    World* world = game->GetWorld();
+    if (!world) {
+        RC_ERR("[Game] No World manager!");
+        game->SetState(GameState::DetermineNextGameState);
+        return true;
+    }
+
+    world->Load("RTARGET/LEV07.LCF");
 
     // Position camera at center of level
     {
-        const LVector& lo = game->world.GetLevelMin();
-        const LVector& hi = game->world.GetLevelMax();
+        const LVector& lo = world->GetLevelMin();
+        const LVector& hi = world->GetLevelMax();
         s32 cx = (lo.x + hi.x) / 2;
         s32 cy = (lo.y + hi.y) / 2;
         s32 cz = lo.z - (hi.z - lo.z) / 2;

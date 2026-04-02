@@ -29,6 +29,7 @@ int main() {
     if (!ctx) return 1;
 
     Game game;
+    game.Open(); // PSX: Manager::Open() -> InternalOpen() creates all managers
     game.SetState(GameState::Intro);
 
     p3d::context->SetClearColour(pddiColour(30, 30, 35));

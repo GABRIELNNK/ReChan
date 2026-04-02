@@ -211,7 +211,7 @@ s32 LinearPath::Subdivide(s32 threshold) {
                 mid->x = (prev->x + cur->x) / 2;
                 mid->y = (prev->y + cur->y) / 2;
                 mid->z = (prev->z + cur->z) / 2;
-                tempList.AddNode(mid, prev);
+                tempList.AddNode(prev, mid);
                 // Re-check from prev to mid next iteration
                 cur = mid;
             } else {

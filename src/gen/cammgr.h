@@ -5,7 +5,7 @@
 
 #include "core.h"
 #include "p3d/lvector.h"
-#include "gen/cclist.h"      // ccMinNode, ccMinList, ccNode
+#include "gen/manager.h"  // Manager -> ccNode, ccMinNode, ccMinList
 #include "gen/database.h"    // DBPath, DBPoint, DBRoot
 
 // DBCameraPathNode (0x8004B480)
@@ -133,15 +133,15 @@ struct CameraAnchor : public ccNode {
 // CameraManager (0x8004A548)
 // PSX struct: extends Manager. Loads camera paths from Database.
 // Stored as global: gp+3548 (g_cameraManager)
-class CameraManager {
+class CameraManager : public Manager {
 public:
     CameraManager();
-    ~CameraManager();
+    ~CameraManager() override;
 
     // Load camera paths from the Database and set up the CameraAnchor.
     // PSX: InternalOpen (0x8004A5F4) - creates a callback node that calls SetupPaths.
     // On PC we call SetupPaths directly since we don't have the async callback system.
-    void InternalOpen();
+    void InternalOpen() override;
 
     // Iterate all DB paths, create DBCameraPath entries, assign to CameraAnchor.
     // PSX: SetupPaths (0x8004A668)
