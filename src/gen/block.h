@@ -5,6 +5,7 @@
 #include "core.h"
 
 class pddiPrimBuffer;
+struct DBVolume;
 
 // LVector = PSX 3D integer vector (tagLVector)
 struct LVector {
@@ -17,22 +18,6 @@ struct DBAttrib {
     u16 type;
     u32 value;
     const char* strValue;
-};
-
-// DBVolume = parsed WDB database volume entry
-struct DBVolume {
-    u16 type;
-    u16 sub;
-    LVector pos;       // +28,+32,+36 in PSX struct
-    LVector cornerA;   // +60
-    LVector cornerB;   // +72
-    u8 scriptAxis;     // +18 (signed byte)
-
-    static constexpr u32 MAX_ATTRIBS = 32;
-    DBAttrib attribs[MAX_ATTRIBS];
-    u32 numAttribs;
-
-    const DBAttrib* FindAttrib(u32 id) const;
 };
 
 // Block = reversed from PSX Block class (104 bytes on PSX)
@@ -97,7 +82,7 @@ struct Block {
     Block();
     ~Block();
 
-    void Init(const DBVolume* vol);                             // 0x80052BB0
+    void Init(const DBVolume* vol);                            // 0x80052BB0
     void SetDimension(const LVector* a, const LVector* b);     // 0x80052EA0
     void Parse(u32 size, const u8* blkData);                    // 0x80052F80
     void Unload();                                              // 0x80052FF0

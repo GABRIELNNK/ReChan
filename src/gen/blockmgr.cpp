@@ -1,6 +1,7 @@
 // blockmgr.cpp = BlockManager reversed from PSX BLKMGR.CPP
 // Original: C:\CHAN\GAME\SRC\GEN\BLKMGR.CPP
 #include "gen/blockmgr.h"
+#include "gen/database.h"
 
 // __12BlockManager (BLKMGR.CPP:148)
 BlockManager::BlockManager() {
@@ -23,14 +24,14 @@ BlockManager::~BlockManager() {
 
 // _LoadBlocksFunc__12BlockManagerP8Callback (BLKMGR.CPP:207)
 // PSX: reads block count from database, allocates Block array, calls Init on each
-void BlockManager::LoadBlocksFunc(const std::vector<DBVolume>& volumes) {
+void BlockManager::LoadBlocksFunc(const std::vector<DBVolume*>& volumes) {
     MARKFUNCTION(0x8005010C);
 
     totalBlocks = static_cast<u32>(volumes.size());
     blocks.resize(totalBlocks);
 
     for (u32 i = 0; i < totalBlocks; i++) {
-        blocks[i].Init(&volumes[i]);
+        blocks[i].Init(volumes[i]);
     }
 
     RC_LOG("[BlockManager] Initialized %u blocks from WDB volumes", totalBlocks);

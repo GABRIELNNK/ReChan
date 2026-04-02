@@ -1,6 +1,4 @@
 // blockmgr.h = BlockManager reversed from PSX BLKMGR.CPP
-// Original: C:\CHAN\GAME\SRC\GEN\BLKMGR.CPP
-//           C:\CHAN\GAME\INC\GEN\BLKMGR.HPP
 #pragma once
 
 #include "core.h"
@@ -15,7 +13,7 @@ public:
     ~BlockManager();
 
     // _LoadBlocksFunc (BLKMGR.CPP:207) = allocate block pool from WDB database
-    void LoadBlocksFunc(const std::vector<DBVolume>& volumes);   // 0x8005010C
+    void LoadBlocksFunc(const std::vector<DBVolume*>& volumes);   // 0x8005010C
 
     // InternalOpen (BLKMGR.CPP:258) = set up draw/load callback nodes
     void InternalOpen();                                          // 0x800502BC

@@ -4,12 +4,9 @@
 #pragma once
 
 #include "core.h"
-#include "gen/block.h"   // LVector
-#include "gen/cclist.h"  // ccMinNode, ccMinList, ccNode
-
-// Forward declarations - Database/path types not yet reversed
-struct DBPath;
-struct DBPoint;
+#include "gen/block.h"      // LVector
+#include "gen/cclist.h"      // ccMinNode, ccMinList, ccNode
+#include "gen/database.h"    // DBPath, DBPoint, DBRoot
 
 // DBCameraPathNode (0x8004B480)
 // PSX struct: 64 bytes. Each node is a point along a camera rail.

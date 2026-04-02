@@ -1,19 +1,12 @@
 // block.cpp = Block class reversed from PSX BLOCK.CPP
 // Original: C:\CHAN\GAME\SRC\GEN\BLOCK.CPP
 #include "gen/block.h"
+#include "gen/database.h"
 #include "gen/geometry.h"
 #include "p3d/context.h"
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
 #include <cstring>
-
-// DBVolume::FindAttrib = search for attribute by id
-const DBAttrib* DBVolume::FindAttrib(u32 id) const {
-    for (u32 i = 0; i < numAttribs; i++) {
-        if (attribs[i].id == id) return &attribs[i];
-    }
-    return nullptr;
-}
 
 Block::Block() {
     MARKFUNCTION(0x80052B64); // __5Block
@@ -35,13 +28,13 @@ void Block::Destroy() {
 void Block::Init(const DBVolume* vol) {
     MARKFUNCTION(0x80052BB0);
 
-    // Copy position from DBVolume (+28,+32,+36)
+    // Copy position from DBVolume
     posX = vol->pos.x;
     posY = vol->pos.y;
     posZ = vol->pos.z;
 
-    // Set dimensions from corners
-    SetDimension(&vol->cornerA, &vol->cornerB);
+    // Set dimensions from bbox corners
+    SetDimension(&vol->bboxMin, &vol->bboxMax);
 
     // Default LOD values
     lodNearX = 5; lodFarX = 1;
@@ -185,7 +178,6 @@ void Block::Init(const DBVolume* vol) {
         }
     }
 }
-
 // SetDimension__5BlockRC10tagLVectorT1 (BLOCK.CPP:442)
 void Block::SetDimension(const LVector* a, const LVector* b) {
     MARKFUNCTION(0x80052EA0);

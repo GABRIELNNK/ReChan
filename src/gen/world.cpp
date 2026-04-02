@@ -1,5 +1,6 @@
 // world.cpp — Level world implementation
 #include "gen/world.h"
+#include "gen/database.h"
 #include "gen/geometry.h"
 #include "p3d/context.h"
 #include "p3d/stream.h"
@@ -86,78 +87,7 @@ static u32 ReadU32(const u8* p) { return p[0] | (p[1] << 8) | (p[2] << 16) | (p[
 static s16 ReadS16(const u8* p) { return static_cast<s16>(p[0] | (p[1] << 8)); }
 static s32 ReadS32(const u8* p) { return static_cast<s32>(p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24)); }
 
-// Parse a WDB node stream to extract DBVolume entries.
-static std::vector<DBVolume> ParseWDBVolumes(const u8* d, u32 size) {
-    std::vector<DBVolume> vols;
-    u32 pos = 0;
-    while (pos + 4 <= size) {
-        u32 tag = ReadU32(d + pos); pos += 4;
-        if (tag >= 8 || tag == 0) continue;
-
-        // Parse DBRoot common header
-        if (pos + 36 > size) break;
-        DBVolume vol = {};
-        vol.type = ReadU16(d + pos); pos += 4; // u16 + 2 padding
-        vol.sub = ReadU16(d + pos); pos += 4;
-        vol.pos.x = ReadS32(d + pos); pos += 4;
-        vol.pos.y = ReadS32(d + pos); pos += 4;
-        vol.pos.z = ReadS32(d + pos); pos += 4;
-        pos += 12; // skip unk1, unk2, unk3
-        if (pos + 4 > size) break;
-        u32 nattr = ReadU32(d + pos); pos += 4;
-
-        // Parse attribs
-        vol.numAttribs = 0;
-        for (u32 i = 0; i < nattr; i++) {
-            if (pos + 8 > size) break;
-            u32 hdr = ReadU32(d + pos); pos += 4;
-            u32 dlen = ReadU32(d + pos); pos += 4;
-            u16 attrId = static_cast<u16>(hdr & 0xFFFF);
-            u16 attrType = static_cast<u16>((hdr >> 16) & 0xFFFF);
-            if (vol.numAttribs < DBVolume::MAX_ATTRIBS) {
-                DBAttrib& a = vol.attribs[vol.numAttribs];
-                a.id = attrId;
-                a.type = attrType;
-                a.value = 0;
-                a.strValue = nullptr;
-                if (attrType == 1 && dlen >= 4 && pos + 4 <= size) {
-                    a.value = ReadU32(d + pos);
-                } else if (attrType == 3 && dlen > 0 && pos + dlen <= size) {
-                    a.strValue = reinterpret_cast<const char*>(d + pos);
-                }
-                vol.numAttribs++;
-            }
-            pos += dlen;
-        }
-
-        // Tag-specific extra fields
-        if (tag == 2) { // DBVolume
-            if (pos + 12 <= size) {
-                // DBVolume extra: sizeX, sizeZ, sizeY (3 s32)
-                s32 sizeX = ReadS32(d + pos); pos += 4;
-                s32 sizeY = ReadS32(d + pos); pos += 4;
-                s32 sizeZ = ReadS32(d + pos); pos += 4;
-                // Compute corners from position ± half-size
-                vol.cornerA.x = vol.pos.x + sizeX / 2;
-                vol.cornerA.y = vol.pos.y + sizeY / 2;
-                vol.cornerA.z = vol.pos.z + sizeZ / 2;
-                vol.cornerB.x = vol.pos.x - sizeX / 2;
-                vol.cornerB.y = vol.pos.y - sizeY / 2;
-                vol.cornerB.z = vol.pos.z - sizeZ / 2;
-            }
-            if (vol.sub == 0) {
-                vols.push_back(vol);
-            }
-        } else if (tag == 6) { // DBMesh
-            if (pos + 4 <= size) {
-                u32 fnlen = ReadU32(d + pos); pos += 4;
-                pos += (fnlen + 3) & ~3;
-            }
-        }
-        // tag 1 (DBPoint), 3-5: no extra fields after DBRoot
-    }
-    return vols;
-}
+// Database::Scan handles WDB parsing now (see database.cpp).
 
 void World::LoadTPGTextures(const u8* lcfData, u32 lcfSize) {
     vram.Clear();
@@ -273,43 +203,66 @@ bool World::Load(const std::string& lcfPath) {
     }
     RC_LOG("[World] Found %u BLK, %u WDB entries in %s", blkCount, wdbCount, lcfPath.c_str());
 
-    // Parse WDB entries (PSX HandleWDBChunk - Database::Scan)
+    // Parse WDB entries using Database::Scan (PSX HandleWDBChunk)
     // Each WDB has block numbers starting from 0 — they are local to that WDB's
     // BLK group. Count BLK entries between WDB entries to compute the base offset.
-    std::vector<DBVolume> blockVolumes(blkCount);
+    std::vector<DBVolume*> blockVolumes(blkCount, nullptr);
+    // We need the Database alive so DBVolume pointers remain valid
+    Database db;
     {
         // Build list of (wdbIndex, blkBaseOffset) pairs
         // LCF stream interleaves: WDB#0 BLK*N0 WDB#1 BLK*N1 WDB#2 BLK*N2 ...
-        // Count BLKs after each WDB to determine group sizes
-        struct WDBGroup { u32 entryIdx; u32 blkBase; };
+        struct WDBGroup { u32 entryIdx; u32 blkBase; u32 blocksBefore; };
         std::vector<WDBGroup> wdbGroups;
         u32 blkAccum = 0;
         for (u32 i = 0; i < entries.size(); i++) {
             if (std::strncmp(entries[i].magic, ".WDB", 4) == 0) {
-                wdbGroups.push_back({i, blkAccum});
+                wdbGroups.push_back({i, blkAccum, 0});
             } else if (std::strncmp(entries[i].magic, ".BLK", 4) == 0) {
                 blkAccum++;
             }
         }
 
-        u32 totalParsed = 0;
-        for (auto& grp : wdbGroups) {
-            const auto& e = entries[grp.entryIdx];
+        // Count existing block volumes before each scan so we can
+        // attribute newly added volumes to the correct WDB group
+        u32 prevCount = 0;
+        for (size_t gi = 0; gi < wdbGroups.size(); gi++) {
+            wdbGroups[gi].blocksBefore = prevCount;
+            const auto& e = entries[wdbGroups[gi].entryIdx];
             if (e.offset + e.size > dataSize) continue;
-            auto vols = ParseWDBVolumes(data + e.offset, e.size);
-            for (const auto& vol : vols) {
-                const DBAttrib* a = vol.FindAttrib(15);
-                if (a) {
-                    u32 globalIdx = grp.blkBase + a->value;
-                    if (globalIdx < blkCount) {
-                        blockVolumes[globalIdx] = vol;
+            db.Scan(data + e.offset, e.size);
+
+            // Count how many block volumes are in the database now
+            u32 curCount = 0;
+            DBRoot* v = db.GetFirstBlock();
+            while (v) { curCount++; v = static_cast<DBRoot*>(v->next); }
+
+            // The new volumes from this WDB group are indices [prevCount..curCount)
+            // Their attrib 15 values are local, offset by blkBase
+            u32 idx = 0;
+            v = db.GetFirstBlock();
+            while (v) {
+                if (idx >= wdbGroups[gi].blocksBefore) {
+                    DBVolume* dbVol = static_cast<DBVolume*>(v);
+                    const DBAttrib* a = dbVol->FindAttrib(15);
+                    if (a) {
+                        u32 globalIdx = wdbGroups[gi].blkBase + a->value;
+                        if (globalIdx < blkCount) {
+                            blockVolumes[globalIdx] = dbVol;
+                        }
                     }
                 }
+                idx++;
+                v = static_cast<DBRoot*>(v->next);
             }
-            totalParsed += static_cast<u32>(vols.size());
+            prevCount = curCount;
+
             RC_LOG("[World] WDB group at entry %u: blkBase=%u, %u volumes",
-                   grp.entryIdx, grp.blkBase, (u32)vols.size());
+                   wdbGroups[gi].entryIdx, wdbGroups[gi].blkBase, curCount - wdbGroups[gi].blocksBefore);
         }
+
+        u32 totalParsed = 0;
+        for (auto* v : blockVolumes) { if (v) totalParsed++; }
         RC_LOG("[World] Parsed %u DBVolumes from %u WDB entries", totalParsed, (u32)wdbGroups.size());
     }
 

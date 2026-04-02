@@ -25,40 +25,58 @@ DBCameraPath::~DBCameraPath() {
 }
 
 // DBCameraPath::AddSourceNode (0x8004AC40)
-// Creates a DBCameraPathNode from a DBPoint, reads attributes 7-16 into
-// the node's camera parameters, then appends to the nodes list.
-void DBCameraPath::AddSourceNode(DBPoint* /*point*/) {
+void DBCameraPath::AddSourceNode(DBPoint* point) {
     MARKFUNCTION(0x8004AC40);
 
-    // TODO: Requires DBPoint (with position, attrib list, FindAttrib, GetAttribByIndex)
-    // PSX flow:
-    //   1. new DBCameraPathNode (64 bytes)
-    //   2. Iterate DBPoint's attribs (count at point+56)
-    //   3. Switch on attrib id (7..16):
-    //        7 = node.fov, 8 = node.camAngleY, 9 = node.camAngleX
-    //       10 = node.camAngleZ, 11 = node.zoom, 12 = node.speed
-    //       13 = node.flags, 14 = node.param0, 15 = node.param1
-    //       16 = node.param2
-    //   4. node.pathIndex = (s16)this->pathID
-    //   5. node.sourcePos = point->position (+28,+32,+36 in DBPoint)
-    //   6. nodes.AddNodeTail(node)
-    //   7. Update bboxMin/bboxMax from sourcePos
+    DBCameraPathNode* node = new DBCameraPathNode();
+
+    for (u32 i = 0; i < point->attribCount; i++) {
+        const DBAttrib* attr = point->GetAttribByIndex(i);
+        u32 id = attr->id;
+        u32 val = attr->value;
+        switch (id) {
+        case 7:  node->fov       = (s16)val; break;
+        case 8:  node->camAngleY = (s16)val; break;
+        case 9:  node->camAngleX = (s16)val; break;
+        case 10: node->camAngleZ = (s16)val; break;
+        case 11: node->zoom      = (s16)val; break;
+        case 12: node->speed     = (s16)val; break;
+        case 13: node->flags     = (u8)val;  break;
+        case 14: node->param0    = (s32)val; break;
+        case 15: node->param1    = (s32)val; break;
+        case 16: node->param2    = (s32)val; break;
+        default: break;
+        }
+    }
+
+    node->pathIndex = (s16)pathID;
+    node->sourcePos = point->pos;
+    nodes.AddNodeTail(node);
 }
 
 // DBCameraPath::AddTargetNode (0x8004ADD0)
-// Walks existing source nodes and matching point nodes in parallel,
-// setting target positions and updating the bounding box.
-void DBCameraPath::AddTargetNode(DBPoint* /*point*/, s32 /*reverseOrder*/) {
+void DBCameraPath::AddTargetNode(DBPoint* point, s32 reverseOrder) {
     MARKFUNCTION(0x8004ADD0);
 
-    // TODO: Requires DBPoint linked list traversal
-    // PSX flow:
-    //   1. node = this->nodes.head, pointNode = point
-    //   2. While both non-null:
-    //      a. node.targetPos = pointNode->position
-    //      b. Update bboxMin/bboxMax from targetPos
-    //      c. Advance: reverseOrder ? pointNode=pointNode->next : pointNode=pointNode->child
-    //      d. node = node->next
+    DBCameraPathNode* node = static_cast<DBCameraPathNode*>(nodes.GetFirst());
+
+    while (point && node) {
+        node->targetPos = point->pos;
+
+        if (node->targetPos.x < bboxMin.x) bboxMin.x = node->targetPos.x;
+        if (node->targetPos.y < bboxMin.y) bboxMin.y = node->targetPos.y;
+        if (node->targetPos.z < bboxMin.z) bboxMin.z = node->targetPos.z;
+        if (node->targetPos.x > bboxMax.x) bboxMax.x = node->targetPos.x;
+        if (node->targetPos.y > bboxMax.y) bboxMax.y = node->targetPos.y;
+        if (node->targetPos.z > bboxMax.z) bboxMax.z = node->targetPos.z;
+
+        if (reverseOrder) {
+            point = static_cast<DBPoint*>(point->next);
+        } else {
+            point = static_cast<DBPoint*>(point->prev);
+        }
+        node = static_cast<DBCameraPathNode*>(node->next);
+    }
 }
 
 // DBCameraPath::FinalizeBoundaries (0x8004AED0)
@@ -255,39 +273,68 @@ CameraAnchor::~CameraAnchor() {
 // Creates a DBCameraPath from a DBPath (type 0x9B = 155).
 // Reads source nodes, checks for reverse-order flag (attrib 4),
 // reads the pathID (attrib 6), and appends to sourcePaths.
-void CameraAnchor::AddCameraSourcePath(DBPath* /*path*/) {
+void CameraAnchor::AddCameraSourcePath(DBPath* path) {
     MARKFUNCTION(0x8004A870);
 
-    // TODO: Requires DBPath (with firstPoint, attribs, FindAttrib)
-    // PSX flow:
-    //   1. new DBCameraPath (52 bytes)
-    //   2. reverseOrder = 0
-    //   3. point = path->firstPoint (at path+60)
-    //   4. If point has attrib 4 with nonzero value: reverseOrder = 1
-    //   5. pathID = GetAttribValue(FindAttrib(point, 6))
-    //   6. camPath->pathID = pathID
-    //   7. While point != null:
-    //        camPath->AddSourceNode(point)
-    //        point = reverseOrder ? point->prev : point->next
-    //   8. sourcePaths.AddNodeTail(camPath)
+    DBCameraPath* camPath = new DBCameraPath();
+    s32 reverseOrder = 0;
+
+    DBPoint* point = static_cast<DBPoint*>(path->points.GetFirst());
+    if (point) {
+        const DBAttrib* attr4 = point->FindAttrib(4);
+        if (attr4 && attr4->value != 0) {
+            reverseOrder = 1;
+        } else {
+            point = static_cast<DBPoint*>(path->points.GetLast());
+        }
+
+        const DBAttrib* attr6 = point->FindAttrib(6);
+        if (attr6) {
+            camPath->pathID = (s32)attr6->value;
+        }
+    }
+
+    while (point) {
+        camPath->AddSourceNode(point);
+        if (reverseOrder) {
+            point = static_cast<DBPoint*>(point->next);
+        } else {
+            point = static_cast<DBPoint*>(point->prev);
+        }
+    }
+
+    sourcePaths.AddNodeTail(camPath);
 }
 
 // CameraAnchor::AddCameraTargetPath (0x8004A968)
 // Associates target positions with an existing source path.
 // Finds the matching source path by pathID, then adds target nodes.
-void CameraAnchor::AddCameraTargetPath(DBPath* /*path*/) {
+void CameraAnchor::AddCameraTargetPath(DBPath* path) {
     MARKFUNCTION(0x8004A968);
 
-    // TODO: Requires DBPath
-    // PSX flow:
-    //   1. reverseOrder = 0
-    //   2. point = path->firstPoint
-    //   3. If point has attrib 4 with nonzero value: reverseOrder = 1; point = path->firstPoint->child
-    //      else: point = path->firstPoint->next
-    //   4. pathID = GetAttribValue(FindAttrib(point, 6))
-    //   5. camPath = GetPathWithID(pathID)
-    //   6. If camPath: AddTargetNode(point, reverseOrder)
-    //   7. FinalizeBoundaries(10240)
+    s32 reverseOrder = 0;
+    DBCameraPath* camPath = nullptr;
+
+    DBPoint* point = static_cast<DBPoint*>(path->points.GetFirst());
+    if (point) {
+        const DBAttrib* attr4 = point->FindAttrib(4);
+        if (attr4 && attr4->value != 0) {
+            reverseOrder = 1;
+        } else {
+            point = static_cast<DBPoint*>(path->points.GetLast());
+            reverseOrder = 0;
+        }
+
+        const DBAttrib* attr6 = point->FindAttrib(6);
+        if (attr6) {
+            camPath = GetPathWithID(attr6->value);
+        }
+    }
+
+    if (camPath) {
+        camPath->AddTargetNode(point, reverseOrder);
+        camPath->FinalizeBoundaries(10240);
+    }
 }
 
 // CameraAnchor::GetPathWithID (0x8004AA30)
@@ -353,7 +400,7 @@ CameraManager::~CameraManager() {
 void CameraManager::InternalOpen() {
     MARKFUNCTION(0x8004A5F4);
 
-    // TODO: Once Database loading is implemented, call SetupPaths() here.
+    SetupPaths();
 }
 
 // CameraManager::SetupPaths (0x8004A668)
@@ -367,21 +414,26 @@ void CameraManager::SetupPaths() {
     anchor = new CameraAnchor();
     anchor->SetName("CamAnchor", 0);
 
-    // TODO: Requires Database iteration (GetFirstPath, path->type, etc.)
-    // PSX flow:
-    //   1. Add anchor to World's anchor list (at g_world + 28)
-    //   2. Iterate g_database->GetFirstPath():
-    //      while (path != null):
-    //        if (path->firstPoint->attrib[26] == 155)
-    //          anchor->AddCameraSourcePath(path)
-    //        path = path->next
-    //   3. Iterate again for type 156:
-    //      while (path != null):
-    //        if (path->firstPoint->attrib[26] == 156)
-    //          anchor->AddCameraTargetPath(path)
-    //        path = path->next
-    //   4. g_camera->cameraAnchor = anchor (at camera + 392)
+    if (g_database) {
+        // Pass 1: add source paths (type 155 = 0x9B)
+        DBPath* path = g_database->GetFirstPath();
+        while (path) {
+            DBPoint* firstPt = static_cast<DBPoint*>(path->points.GetFirst());
+            if (firstPt && firstPt->subType == 155) {
+                anchor->AddCameraSourcePath(path);
+            }
+            path = static_cast<DBPath*>(path->next);
+        }
 
-    this->anchor = anchor;
+        // Pass 2: add target paths (type 156 = 0x9C)
+        path = g_database->GetFirstPath();
+        while (path) {
+            DBPoint* firstPt = static_cast<DBPoint*>(path->points.GetFirst());
+            if (firstPt && firstPt->subType == 156) {
+                anchor->AddCameraTargetPath(path);
+            }
+            path = static_cast<DBPath*>(path->next);
+        }
+    }
 }
 
