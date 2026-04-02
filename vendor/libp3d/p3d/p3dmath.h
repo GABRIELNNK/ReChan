@@ -75,7 +75,35 @@ inline void p3dBuildRotMatrixZYX(s32 az, s32 ay, s32 ax, Mat4& m) {
         static_cast<f32>(ax & 0xFFFF) * P3D_ANGLE_TO_RAD,
         m);
 }
+// p3dBuildRotMatrixYZX - compose Y*Z*X rotation
+// PSX: used by Thing::GetObjectToWorldSpaceVector (0x80062874)
+inline void p3dBuildRotMatrixYZX(f32 ay, f32 az, f32 ax, Mat4& m) {
+    f32 cx = std::cos(ax), sx = std::sin(ax);
+    f32 cy = std::cos(ay), sy = std::sin(ay);
+    f32 cz = std::cos(az), sz = std::sin(az);
 
+    m = Mat4();
+    m.m[0]  = cy * cz + sy * sx * sz;
+    m.m[1]  = cx * sz;
+    m.m[2]  = -sy * cz + cy * sx * sz;
+
+    m.m[4]  = -cy * sz + sy * sx * cz;
+    m.m[5]  = cx * cz;
+    m.m[6]  = sy * sz + cy * sx * cz;
+
+    m.m[8]  = sy * cx;
+    m.m[9]  = -sx;
+    m.m[10] = cy * cx;
+}
+
+// Overload taking PSX angle units (s32) - converts internally
+inline void p3dBuildRotMatrixYZX(s32 ay, s32 az, s32 ax, Mat4& m) {
+    p3dBuildRotMatrixYZX(
+        static_cast<f32>(ay & 0xFFFF) * P3D_ANGLE_TO_RAD,
+        static_cast<f32>(az & 0xFFFF) * P3D_ANGLE_TO_RAD,
+        static_cast<f32>(ax & 0xFFFF) * P3D_ANGLE_TO_RAD,
+        m);
+}
 // --------------------------------------------------------------------------
 // p3dVecTimesMatrix — transform vector by matrix (rotation + translation)
 // PSX: 0x80094568 — result = vec * rotPart + translation
