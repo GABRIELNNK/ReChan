@@ -32,6 +32,16 @@ struct Wall {
 
     // PSX: CheckWallBounds__C4WallRC10tagLVectorllli (COLWALL.CPP:312) 0x80092250
     s32 CheckWallBounds(const LVector& pos, s32 radius, s32 height, s32 arg4, int checkHeight) const;
+
+    // PSX: CheckWallIntersection__C4WallR10tagLVectorRC10tagLVectorllli (COLWALL.CPP:132) 0x80091C90
+    s32 CheckWallIntersection(LVector& hitPos, const LVector& moveDir,
+        s32 radius, s32 height, s32 arg5, int checkHeight) const;
+
+    // PSX: Get__C4WallR10tagLVectorN31 (COLWALL.CPP:348) 0x800923D8
+    void Get(LVector& v0, LVector& v1, LVector& v2, LVector& v3) const;
+
+    // PSX: IsCurb__C4Wall (COLWALL.CPP:269) 0x80092144
+    bool IsCurb() const;
 };
 
 // Collision globals (PSX: gp-relative, set during init)

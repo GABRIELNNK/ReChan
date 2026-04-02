@@ -1,7 +1,9 @@
 // colfloor.cpp - Floor collision functions
 // Original: C:\CHAN\GAME\SRC\GEN\COLFLOOR.CPP
 #include "gen/colfloor.h"
+#include "gen/colline.h"
 #include "p3d/p3dmath.h"
+#include <cstring>
 
 // PSX: GetFloorHeight__C5FloorRC10tagLVector (COLFLOOR.CPP:119) 0x800926BC
 // Height = fixmul16(normalX, pos.x) + fixmul16(normalZ, pos.z) + heightC
@@ -57,4 +59,128 @@ s32 Floor::CheckFloorBounds(const LVector& pos, s32 tolerance) const {
 s32 Floor::BoundNumber() const {
     MARKFUNCTION(0x80093244);
     return Equal(bound[2], bound[3]) ? 3 : 4;
+}
+
+// PSX: Get__C5FloorR10tagLVectorN31 (COLFLOOR.CPP:369) 0x80093278
+// Reconstruct polygon vertices by intersecting adjacent boundary lines
+bool Floor::Get(LVector& v0, LVector& v1, LVector& v2, LVector& v3) const {
+    MARKFUNCTION(0x80093278);
+
+    s32 numBounds = BoundNumber();
+    s32 ok0, ok1, ok2, ok3;
+
+    if (numBounds == 3) {
+        ok0 = Intersection(bound[0], bound[1], 0, v0.x, v0.z);
+        ok1 = Intersection(bound[1], bound[2], 0, v1.x, v1.z);
+        ok2 = Intersection(bound[2], bound[0], 0, v3.x, v3.z);
+        ok3 = ok2;
+        v2.x = v3.x;
+        v2.z = v3.z;
+    } else {
+        ok0 = Intersection(bound[0], bound[1], 0, v0.x, v0.z);
+        ok1 = Intersection(bound[1], bound[2], 0, v1.x, v1.z);
+        ok2 = Intersection(bound[2], bound[3], 0, v2.x, v2.z);
+        ok3 = Intersection(bound[3], bound[0], 0, v3.x, v3.z);
+    }
+
+    if (ok0 == 0 || ok1 == 0 || ok2 == 0 || ok3 == 0) return false;
+
+    v0.y = GetFloorHeight(v0);
+    v1.y = GetFloorHeight(v1);
+    v2.y = GetFloorHeight(v2);
+    v3.y = GetFloorHeight(v3);
+
+    return true;
+}
+
+// PSX: GetRailingCorrection__C5FloorR10tagLVectorRC10tagLVector (COLFLOOR.CPP:189) 0x8009296C
+// Compute push-away correction from nearest boundary edge for railing floors
+bool Floor::GetRailingCorrection(LVector& correction, const LVector& pos) const {
+    MARKFUNCTION(0x8009296C);
+
+    s32 hasRailing = (flags >> 2) & 1;
+    if (!hasRailing) {
+        correction.x = 0;
+        correction.y = 0;
+        correction.z = 0;
+        return false;
+    }
+
+    // Find boundary line closest to position (most negative dot product)
+    s32 dot0 = fixmul16(bound[0].a, pos.x) + fixmul16(bound[0].b, pos.z) + bound[0].c;
+    s32 minDot = dot0;
+    s32 minIdx = 0;
+
+    for (int i = 1; i < 4; i++) {
+        s32 dot = fixmul16(bound[i].a, pos.x) + fixmul16(bound[i].b, pos.z) + bound[i].c;
+        if (dot < minDot) {
+            minDot = dot;
+            minIdx = i;
+        }
+    }
+
+    // Push away from nearest edge: correction = -normal * (minDot + 2)
+    s32 pushDist = minDot + 2;
+    correction.x = -fixmul16(bound[minIdx].a, pushDist);
+    correction.y = 0;
+    correction.z = -fixmul16(bound[minIdx].b, pushDist);
+
+    return hasRailing != 0;
+}
+
+// PSX: LedgePrototype__C5FloorRC10tagLVectorT1llR9_RMVECT16R10tagLVector (COLFLOOR.CPP:244) 0x80092B24
+// Detect crossing a ledge edge between startPos and endPos
+bool Floor::LedgePrototype(const LVector& startPos, const LVector& endPos,
+    s32 height, s32 maxFallHeight,
+    LVector& outNormal, LVector& outCorrectionPos) const {
+    MARKFUNCTION(0x80092B24);
+
+    // Early exit: ledge flag (bit 16) must be set
+    if (!(flags & 0x0001)) return false;  // bit0 = ledge flag in u16
+    // Early exit: railing flag (bit 2) must NOT be set
+    if ((flags >> 2) & 1) return false;
+
+    // Evaluate each boundary line at endPos
+    s32 dotEnd[4];
+    for (int i = 0; i < 4; i++) {
+        dotEnd[i] = fixmul16(bound[i].a, endPos.x) + fixmul16(bound[i].b, endPos.z) + bound[i].c;
+    }
+
+    // Check if endPos is inside the polygon (all dots >= 0)
+    for (int i = 0; i < 4; i++) {
+        if (dotEnd[i] < 0) return false;
+    }
+
+    // Evaluate each boundary line at startPos
+    s32 dotStart[4];
+    for (int i = 0; i < 4; i++) {
+        dotStart[i] = fixmul16(bound[i].a, startPos.x) + fixmul16(bound[i].b, startPos.z) + bound[i].c;
+    }
+
+    // Find edges where startPos was outside but endPos is inside (edge crossing)
+    s32 numEdges = BoundNumber();
+    for (int i = 1; i < numEdges; i++) {
+        if (dotStart[i] >= 0) continue; // start was inside this half-plane
+
+        // Compute correction for this crossed edge
+        outNormal.x = -bound[i].a;
+        outNormal.y = 0;
+        outNormal.z = -bound[i].b;
+
+        // Push correction: move back along the edge normal
+        s32 pushDist = dotEnd[i] + 2;
+        outCorrectionPos.x = endPos.x - fixmul16(bound[i].a, pushDist);
+        outCorrectionPos.y = endPos.y;
+        outCorrectionPos.z = endPos.z - fixmul16(bound[i].b, pushDist);
+
+        // Verify the height at correction position is within tolerance
+        s32 floorH = GetFloorHeight(outCorrectionPos);
+        s32 diff = outCorrectionPos.y - floorH;
+        if (diff < 0) diff = -diff;
+        if (diff < maxFallHeight) {
+            return true;
+        }
+    }
+
+    return false;
 }

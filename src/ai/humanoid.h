@@ -7,28 +7,31 @@
 #include "ai/behaviour.h"
 
 // Action state IDs for Humanoid::SetActionState
+// PSX: 74-case switch at 0x80065680. IDs confirmed from handler transitions.
 enum ActionState : u32 {
-    AS_INACTIVE_IDLE = 0,
-    AS_STAND         = 1,
-    AS_STAND_ANIM    = 2,
-    AS_RUN           = 4,
-    AS_JUMP          = 5,
-    AS_TAUNT         = 6,
-    AS_FALL          = 7,
-    AS_STRAFE        = 8,
-    AS_DIVE_ROLL     = 9,
-    AS_PAUSE         = 10,
-    AS_GOT_HIT_HIGH  = 11,
-    AS_COLLAPSE      = 12,
-    AS_DEAD          = 13,
-    AS_SPIN_BACK     = 14,
-    AS_FLYING_BACK   = 15,
-    AS_STUNNED       = 16,
-    AS_THROW         = 17,
-    AS_PICKUP        = 18,
-    AS_THROW_PUNCH   = 34,
-    AS_THROW_KICK    = 35,
-    AS_COUNT         = 74,
+    AS_INACTIVE_IDLE     = 0,
+    AS_STAND             = 1,
+    AS_STAND_ANIM        = 2,
+    AS_DIVE_ROLL         = 4,
+    AS_PAUSE             = 6,
+    AS_JUMP              = 8,
+    AS_RUN               = 10,
+    AS_BACKFLIP          = 11,
+    AS_STRAFE            = 12,
+    AS_STRAFE_SPECIAL    = 20,
+    AS_PUNCH_ATTACK      = 32,
+    AS_KICK_ATTACK       = 34,
+    AS_COMBAT_IDLE       = 36,
+    AS_THROW_PICKUP      = 45,
+    AS_FLYING_BACK_LAND  = 58,
+    AS_BACK_GRAB_RECOVER = 62,
+    AS_GET_UP            = 68,
+    AS_FLYING_BACK_CHECK = 70,
+    AS_SPIN_BACK_RECOVER = 71,
+    AS_DEAD              = 72,
+    AS_HIT_EXPLOSION     = 74,
+    AS_HIT_ENVIRONMENT   = 75,
+    AS_COUNT             = 76,
 };
 
 // State dispatch indices for Humanoid::ProcessAction
@@ -67,6 +70,9 @@ public:
     // PSX +208 (s32): facing range / attack range
     s32 attackRange = 0;
 
+    // PSX +212 (s32): run speed for AddForce
+    s32 runSpeed = 0;
+
     // PSX +216 (s32): reserved
     s32 field216 = 0;
 
@@ -84,6 +90,14 @@ public:
 
     // PSX +260 (u8): reserved
     u8 field260 = 0;
+
+    // PSX +264..275: undeclared fields
+    s32 field264 = 0;
+    s32 field268 = 0;
+    s32 field272 = 0;
+
+    // PSX +276 (s32): desired face angle (binary angle units)
+    s32 faceAngle = 0;
 
     // PSX +280 (s32,s32,s32): bounding box for collision
     // Initialized to {175, 0, 768} then {175, 0, 768} (two sets)
@@ -118,6 +132,11 @@ public:
 
     // PSX +348 (u16): vtable pointer offset (always 8 on PSX)
     u16 field348 = 8;
+
+    // PSX +352 (s32): input command bitfield (set by AI/controls, read by action handlers)
+    // Bits: 1=guard, 2=kick, 3=punch, 4=taunt, 5=strafe, 6=backflip,
+    //        7=combat, 8-20=combos, 21=dive roll, 30=env hit, 31=explosion
+    s32 commandBits = 0;
 
     // PSX +356 (s32): current action state number
     s32 actionState = -1;
@@ -272,6 +291,9 @@ public:
 
     // PSX: ReleaseTarget__8Humanoid (HUMANOID.CPP:2553)
     void ReleaseTarget();
+
+    // PSX: FaceAngleY__8Humanoidli (HUMANOID.CPP:2402)
+    void FaceAngleY(s32 angle, s32 immediate);
 
     virtual void _Stand();
     virtual void _Run();

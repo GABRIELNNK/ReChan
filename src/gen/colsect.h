@@ -31,4 +31,59 @@ struct CollisionSector {
 
     // PSX: Unload__15CollisionSector (COLSECT.CPP:445) 0x800422A0
     void Unload();
+
+    // PSX: GetWorldFloorHeight__15CollisionSectorRC10tagLVectorl (COLSECT.CPP:1105) 0x800417B8
+    s32 GetWorldFloorHeight(const LVector& pos, s32 radius);
+
+    // PSX: (COLSECT.CPP:1142) 0x800417F0
+    static void GetWorldFloorAndCeilingHeight(
+        s32& outFloorH, s32& outCeilingH,
+        LVector& outFloorNormal, LVector& outCeilingNormal,
+        const LVector& pos, s32 radius);
+
+    // PSX: (COLSECT.CPP:1207) 0x80041980
+    static s32 FillWorldFloorArray(
+        const LVector& searchMin, const LVector& searchMax,
+        Floor** outArray, s32 maxCount);
+
+    // PSX: (COLSECT.CPP:1271) 0x80041ADC
+    static void GetArrayFloorAndCeilingHeight(
+        Floor** floorArray, s32 count,
+        s32& outFloorH, s32& outCeilingH,
+        LVector& outFloorNormal, LVector& outCeilingNormal,
+        s32* outHasRailing, const LVector* pos, s32 radius);
+
+    // PSX: FillWorldWallArray__15CollisionSectorRC10tagLVectorT1PPC4Walli (COLSECT.CPP:863) 0x800411F8
+    static s32 FillWorldWallArray(
+        const LVector& searchMin, const LVector& searchMax,
+        Wall** outArray, s32 maxCount);
+
+    // PSX: CheckArrayWallCollision__15CollisionSectorPPC4WalliRC10tagLVectorT3llli (COLSECT.CPP:931) 0x80041384
+    static s32 CheckArrayWallCollision(
+        Wall** walls, s32 count,
+        const LVector& oldPos, const LVector& newPos,
+        s32 radius, s32 height, s32 arg5, int checkHeight);
+
+    // PSX: CheckArrayWallIntersection__15CollisionSectorPPC4WalliR10tagLVectorRC10tagLVectorllli (COLSECT.CPP:1011) 0x800415C0
+    static s32 CheckArrayWallIntersection(
+        Wall** walls, s32 count,
+        LVector& hitPos, const LVector& moveDir,
+        s32 radius, s32 height, s32 arg5, int checkHeight);
 };
+
+// Wall collision result info (PSX: CS_CheckArrayWallCollision_Info at 0x800E00C8, 44 bytes)
+struct WallCollisionInfo {
+    s32 collisionRatio;         // +0: best (smallest) fraction (16.16)
+    LVector wallNormal;         // +4: wall normal at hit point
+    LVector hitPoint;           // +16: world-space hit point
+    s32 wallHorizontal;         // +28: CheckWallBounds result
+    s32 wallVerticalMin;        // +32: top edge height at hit point
+    s32 wallVerticalMax;        // +36: bottom edge height at hit point
+    s32 wallMaterial;           // +40: wall flags lower 16 bits
+};
+
+extern WallCollisionInfo g_wallCollisionInfo;  // PSX: 0x800E00C8
+extern Wall* g_colHitWall;                     // PSX: gp+1160
+
+// Global array of 12 collision sectors (PSX: gp+1156)
+extern CollisionSector g_collisionSectors[12];

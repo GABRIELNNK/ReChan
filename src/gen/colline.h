@@ -18,6 +18,10 @@ struct Line {
     s32 GetZOnLine(s32 x) const;
 };
 
+// PSX: Intersection__C4LineRC4LinelRlT3 (COLLINE.CPP:38) 0x800C0160
+// Cramer's rule solve for two Line equations; outX,outZ = intersection point
+bool Intersection(const Line& A, const Line& B, s32 unused, s32& outX, s32& outZ);
+
 // PSX: Equal__C4LineRC4LineT1 (COLLINE.CPP:141) 0x800C00A4
 // Compare two lines within tolerance of 8
 bool Equal(const Line& a, const Line& b);

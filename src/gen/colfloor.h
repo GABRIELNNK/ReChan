@@ -28,4 +28,15 @@ struct Floor {
 
     // PSX: BoundNumber__C5Floor (COLFLOOR.CPP:340) 0x80093244
     s32 BoundNumber() const;
+
+    // PSX: Get__C5FloorR10tagLVectorN31 (COLFLOOR.CPP:369) 0x80093278
+    bool Get(LVector& v0, LVector& v1, LVector& v2, LVector& v3) const;
+
+    // PSX: GetRailingCorrection__C5FloorR10tagLVectorRC10tagLVector (COLFLOOR.CPP:189) 0x8009296C
+    bool GetRailingCorrection(LVector& correction, const LVector& pos) const;
+
+    // PSX: LedgePrototype__C5FloorRC10tagLVectorT1llR9_RMVECT16R10tagLVector (COLFLOOR.CPP:244) 0x80092B24
+    bool LedgePrototype(const LVector& startPos, const LVector& endPos,
+        s32 height, s32 maxFallHeight,
+        LVector& outNormal, LVector& outCorrectionPos) const;
 };

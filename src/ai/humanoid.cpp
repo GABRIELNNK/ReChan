@@ -192,7 +192,7 @@ void Humanoid::HandleCollision(Thing* other, s32 damage) {
     health -= damage;
     if (health <= 0) {
         health = 0;
-        SetActionState(AS_COLLAPSE, 0);
+        SetActionState(AS_DEAD, 0);
     }
 }
 
@@ -206,10 +206,6 @@ void Humanoid::AnalyzeMesh(DBRoot* root) {
 // PSX: 5580 bytes, 74-case switch. Each case sets up animation, flags, and the
 // method thunk (stateDispatch) that ProcessAction uses to call the state handler.
 // On PC, we set stateDispatch to the vtable index corresponding to the handler.
-// vtable indices: 22=_Stand, 23=_Run, 24=_Jump, 25=_Fall, 26=_Straif,
-// 27=_DiveRoll, 28=_Taunt, 29=_Pause, 30=_GotHitHigh, 31=_GotHitMed,
-// 32=_GotHitLow, 33=_Collapse, 34=_Dead, 35=_SpinBack, 36=_FlyingBack,
-// 37=_Stunned, 38=_Throw, 39=_Pickup
 void Humanoid::SetActionState(u32 state, s32 param) {
     MARKFUNCTION(0x80065680);
 
@@ -219,7 +215,6 @@ void Humanoid::SetActionState(u32 state, s32 param) {
     // PSX preamble: clear combatFlag, set flags bit 11, end sounds
     combatFlag = 0;
     flags |= TF_DYNAMIC;
-    // PSX: if sound object (field328) != null, EndAllSounds()
 
     if (state >= AS_COUNT) return;
 
@@ -229,28 +224,30 @@ void Humanoid::SetActionState(u32 state, s32 param) {
     // Map state number to handler dispatch index
     // PSX uses a 74-entry jump table; here we map the known cases.
     switch (state) {
-    case AS_INACTIVE_IDLE: stateDispatch = SD_STAND; break;
-    case AS_STAND:         stateDispatch = SD_STAND; break;
-    case AS_STAND_ANIM:    stateDispatch = SD_STAND; break;
-    case AS_RUN:           stateDispatch = SD_RUN; break;
-    case AS_JUMP:          stateDispatch = SD_JUMP; break;
-    case AS_TAUNT:         stateDispatch = SD_TAUNT; break;
-    case AS_FALL:          stateDispatch = SD_FALL; break;
-    case AS_STRAFE:        stateDispatch = SD_STRAFE; break;
-    case AS_DIVE_ROLL:     stateDispatch = SD_DIVE_ROLL; break;
-    case AS_PAUSE:         stateDispatch = SD_PAUSE; break;
-    case AS_GOT_HIT_HIGH:  stateDispatch = SD_GOT_HIT_HIGH; break;
-    case AS_COLLAPSE:      stateDispatch = SD_COLLAPSE; break;
-    case AS_DEAD:          stateDispatch = SD_DEAD; break;
-    case AS_SPIN_BACK:     stateDispatch = SD_SPIN_BACK; break;
-    case AS_FLYING_BACK:   stateDispatch = SD_FLYING_BACK; break;
-    case AS_STUNNED:       stateDispatch = SD_STUNNED; break;
-    case AS_THROW:         stateDispatch = SD_THROW; break;
-    case AS_PICKUP:        stateDispatch = SD_PICKUP; break;
-    case AS_THROW_PUNCH:   stateDispatch = SD_THROW; break;
-    case AS_THROW_KICK:    stateDispatch = SD_THROW; break;
+    case AS_INACTIVE_IDLE:     stateDispatch = SD_STAND; break;
+    case AS_STAND:             stateDispatch = SD_STAND; break;
+    case AS_STAND_ANIM:        stateDispatch = SD_STAND; break;
+    case AS_DIVE_ROLL:         stateDispatch = SD_DIVE_ROLL; break;
+    case AS_PAUSE:             stateDispatch = SD_PAUSE; break;
+    case AS_JUMP:              stateDispatch = SD_JUMP; break;
+    case AS_RUN:               stateDispatch = SD_RUN; break;
+    case AS_BACKFLIP:          stateDispatch = SD_JUMP; break;
+    case AS_STRAFE:            stateDispatch = SD_STRAFE; break;
+    case AS_STRAFE_SPECIAL:    stateDispatch = SD_STRAFE; break;
+    case AS_PUNCH_ATTACK:      stateDispatch = SD_THROW; break;
+    case AS_KICK_ATTACK:       stateDispatch = SD_THROW; break;
+    case AS_COMBAT_IDLE:       stateDispatch = SD_STAND; break;
+    case AS_THROW_PICKUP:      stateDispatch = SD_THROW; break;
+    case AS_FLYING_BACK_LAND:  stateDispatch = SD_FLYING_BACK; break;
+    case AS_BACK_GRAB_RECOVER: stateDispatch = SD_STAND; break;
+    case AS_GET_UP:            stateDispatch = SD_STAND; break;
+    case AS_FLYING_BACK_CHECK: stateDispatch = SD_FLYING_BACK; break;
+    case AS_SPIN_BACK_RECOVER: stateDispatch = SD_STAND; break;
+    case AS_DEAD:              stateDispatch = SD_DEAD; break;
+    case AS_HIT_EXPLOSION:     stateDispatch = SD_GOT_HIT_HIGH; break;
+    case AS_HIT_ENVIRONMENT:   stateDispatch = SD_GOT_HIT_HIGH; break;
     default:
-        // Many states (19-33, 36-73) set up specific animations and dispatch
+        // Many states set up specific animations and dispatch
         // to one of the above handlers. Default to _Stand for safety.
         stateDispatch = SD_STAND;
         break;
@@ -366,22 +363,696 @@ void Humanoid::ReleaseTarget() {
     field384 = 0;
 }
 
-// Action state handler stubs
-void Humanoid::_Stand() { MARKFUNCTION(0x80066CA0); }
-void Humanoid::_Run() { MARKFUNCTION(0x800672EC); }
-void Humanoid::_Jump() { MARKFUNCTION(0x80067DBC); }
-void Humanoid::_Fall() { MARKFUNCTION(0x80067F2C); }
-void Humanoid::_Straif() { MARKFUNCTION(0x80067610); }
-void Humanoid::_DiveRoll() { MARKFUNCTION(0x80066E3C); }
-void Humanoid::_Taunt() { MARKFUNCTION(0x8006710C); }
-void Humanoid::_Pause() { MARKFUNCTION(0x80067288); }
-void Humanoid::_GotHitHigh() { MARKFUNCTION(0x8006882C); }
-void Humanoid::_GotHitMed() { MARKFUNCTION(0x800688B4); }
-void Humanoid::_GotHitLow() { MARKFUNCTION(0x800689B4); }
-void Humanoid::_Collapse() { MARKFUNCTION(0x80068DD4); }
-void Humanoid::_Dead() { MARKFUNCTION(0x800691DC); }
-void Humanoid::_SpinBack() { MARKFUNCTION(0x80068B78); }
-void Humanoid::_FlyingBack() { MARKFUNCTION(0x80068BC8); }
-void Humanoid::_Stunned() { MARKFUNCTION(0x80068AB4); }
-void Humanoid::_Throw() { MARKFUNCTION(0x800685A8); }
-void Humanoid::_Pickup() { MARKFUNCTION(0x80068508); }
+// PSX: FaceAngleY__8Humanoidli (HUMANOID.CPP:2402)
+// Turns orientation.y toward the given angle, limited by turnRate.
+// If immediate == 0: snap directly. Otherwise: gradual turn.
+void Humanoid::FaceAngleY(s32 angle, s32 immediate) {
+    MARKFUNCTION(0x80064EB0);
+
+    if (immediate == 0) {
+        orientation.y = angle;
+        return;
+    }
+
+    s32 diff = angle - orientation.y;
+
+    // Wrap difference to -32768..32767
+    if (diff > 0x8000) diff -= 0x10000;
+    if (diff < -0x8000) diff += 0x10000;
+
+    s32 absDiff = (diff >= 0) ? diff : -diff;
+
+    if (absDiff < (s32)turnRate) {
+        orientation.y = angle;
+    } else if (diff < 0) {
+        orientation.y -= turnRate;
+    } else {
+        orientation.y += turnRate;
+    }
+}
+
+// PSX: ReturnMostSignificant32BitNumber__FUl (HUMANOID.CPP:3826)
+// Returns the 1-based index of the highest set bit, or 0 if input is 0.
+// PSX uses binary search: test top 16 bits, then 8, then 4, etc.
+static s32 ReturnMostSignificant32BitNumber(u32 value) {
+    MARKFUNCTION(0x80066C4C);
+    if (value == 0) return 0;
+    s32 result = 0;
+    s32 shift = 16;
+    while (shift > 0) {
+        u32 upper = value >> shift;
+        if (upper != 0) {
+            result += shift;
+            value = upper;
+        }
+        shift >>= 1;
+    }
+    return result;
+}
+
+// PSX: _Stand__8Humanoid (HUMANOID.CPP:3859)
+// Dispatches input commands from commandBits via highest-bit priority.
+void Humanoid::_Stand() {
+    MARKFUNCTION(0x80066CA0);
+
+    s32 cmd = ReturnMostSignificant32BitNumber((u32)commandBits);
+    flags2 |= 0x0008; // ground sticking
+
+    if (cmd < 1 || cmd > 31) return;
+
+    SVector dir;
+    dir.x = (s16)orientation.x;
+    dir.y = (s16)orientation.y;
+    dir.z = (s16)orientation.z;
+    dir.pad = 0;
+
+    switch (cmd) {
+    case 1: // guard/face
+        FaceAngleY(faceAngle, 0);
+        return;
+    case 2: // kick -> run
+        SetActionState(AS_RUN, runSpeed);
+        return;
+    case 3: // punch -> jump
+        SetActionState(AS_JUMP, 0);
+        return;
+    case 4: // facing -> dive roll
+        SetActionState(AS_DIVE_ROLL, 0);
+        return;
+    case 5: // roll to stand -> backflip
+        SetActionState(AS_BACKFLIP, 0);
+        return;
+    case 6: // backflip -> pickup/throw or combat idle
+        if (field500 != 0 || field504 != 0) {
+            if (field500 != 0 && field316 != 0) {
+                SetActionState(AS_COMBAT_IDLE, 0);
+            } else {
+                SetActionState(AS_THROW_PICKUP, 0);
+            }
+        } else {
+            SetActionState(AS_COMBAT_IDLE, 0);
+        }
+        return;
+    case 7: // combat attack -> punch
+        SetActionState(AS_PUNCH_ATTACK, 0);
+        return;
+    case 8: // dodge -> combat idle
+        SetActionState(AS_COMBAT_IDLE, 0);
+        return;
+    case 9: // face + stand
+        FaceAngleY(faceAngle, 0);
+        SetActionState(AS_STAND, 0);
+        return;
+    case 10: // run -> strafe
+        FaceAngleY(faceAngle, 0);
+        SetActionState(AS_STRAFE, 0);
+        return;
+    case 11: // hit explosion
+        SetActionState(AS_HIT_ENVIRONMENT, 0);
+        return;
+    case 12: // hit environment
+        SetActionState(AS_HIT_EXPLOSION, 0);
+        return;
+    default:
+        return;
+    }
+}
+
+// PSX: _DiveRoll__8Humanoid (HUMANOID.CPP:3977)
+// Phase-based dive roll: early frames apply forward force, mid/late check transitions.
+void Humanoid::_DiveRoll() {
+    MARKFUNCTION(0x80066E3C);
+
+    // PSX: checks animation frame for phase transitions
+    // Without animation system, check commandBits for immediate transitions
+    s32 cb = commandBits;
+
+    if (cb & 0x0008) { // punch -> jump
+        SetActionState(AS_JUMP, 0);
+        return;
+    }
+    if (cb & 0x0010) { // taunt -> pause
+        SetActionState(AS_PAUSE, 0);
+        return;
+    }
+    if (cb & 0x0004) { // kick -> run
+        SetActionState(AS_RUN, 0);
+        return;
+    }
+    if (cb & 0x0020) { // strafe
+        SetActionState(AS_STRAFE, 0);
+        return;
+    }
+
+    // PSX: apply forward force during early frames
+    SVector dir;
+    dir.x = (s16)orientation.x;
+    dir.y = (s16)orientation.y;
+    dir.z = (s16)orientation.z;
+    dir.pad = 0;
+    AddForce(runSpeed, &dir);
+
+    // PSX: check stateTimer as frame proxy
+    stateTimer++;
+    if (stateTimer > 20) {
+        SetActionState(AS_STAND, 0);
+    }
+}
+
+// PSX: _Taunt__8Humanoid (HUMANOID.CPP:4069)
+// Wait for animation to complete, then dispatch commands.
+void Humanoid::_Taunt() {
+    MARKFUNCTION(0x8006710C);
+
+    // PSX: waits for animation complete flag, then dispatches
+    // Without animation system, use stateTimer as frame proxy
+    stateTimer++;
+    if (stateTimer < 30) return;
+
+    s32 cmd = ReturnMostSignificant32BitNumber((u32)commandBits);
+    if (cmd < 2 || cmd > 31) {
+        SetActionState(AS_STAND, 0);
+        return;
+    }
+
+    switch (cmd) {
+    case 2: // kick -> run
+        SetActionState(AS_RUN, runSpeed);
+        return;
+    case 3: // taunt -> backflip
+        SetActionState(AS_BACKFLIP, 0);
+        return;
+    case 5: // face+roll -> punch
+        SetActionState(AS_PUNCH_ATTACK, 0);
+        return;
+    case 6: // backflip -> pickup/throw or combat idle
+        if (field500 != 0 || field504 != 0) {
+            if (field500 != 0 && field316 != 0) {
+                SetActionState(AS_COMBAT_IDLE, 0);
+            } else {
+                SetActionState(AS_THROW_PICKUP, 0);
+            }
+        } else {
+            SetActionState(AS_COMBAT_IDLE, 0);
+        }
+        return;
+    case 7: // combat idle
+        SetActionState(AS_COMBAT_IDLE, 0);
+        return;
+    case 8: // dodge -> combat idle
+        SetActionState(AS_COMBAT_IDLE, 0);
+        return;
+    case 9: // face+strafe
+        FaceAngleY(faceAngle, 0);
+        return;
+    case 11: // hit env
+        SetActionState(AS_HIT_ENVIRONMENT, 0);
+        return;
+    case 12: // hit explosion
+        SetActionState(AS_HIT_EXPLOSION, 0);
+        return;
+    default:
+        SetActionState(AS_STAND, 0);
+        return;
+    }
+}
+
+// PSX: _Pause__8Humanoid (HUMANOID.CPP:4153)
+// Simple counter decrement, then return to stand.
+void Humanoid::_Pause() {
+    MARKFUNCTION(0x80067288);
+
+    FaceAngleY(faceAngle, 0);
+
+    if (field324 != 0) {
+        field324--;
+    } else {
+        SetActionState(AS_STAND, 0);
+    }
+}
+
+// PSX: _Run__8Humanoid (HUMANOID.CPP:4172)
+// Extensive bit dispatch for attack/move transitions.
+void Humanoid::_Run() {
+    MARKFUNCTION(0x800672EC);
+
+    flags2 |= 0x0008; // ground sticking
+    s32 sd = commandBits;
+
+    // Backflip (bit 6)
+    if (sd & 0x0040) {
+        SetActionState(AS_BACKFLIP, 0);
+        return;
+    }
+
+    // Attack punch group (bits 8,10,12,20)
+    if ((sd >> 8) & 1 || (sd >> 10) & 1 || (sd >> 12) & 1 || (sd >> 20) & 1) {
+        SetActionState(AS_PUNCH_ATTACK, 0);
+        return;
+    }
+
+    // Attack kick group (bits 9,11,13,14)
+    if ((sd >> 9) & 1 || (sd >> 11) & 1 || (sd >> 13) & 1 || (sd >> 14) & 1) {
+        SetActionState(AS_KICK_ATTACK, 0);
+        return;
+    }
+
+    // Multi-hit combat (bits 7,19,15,16,17,18) -> pickup/throw or combat idle
+    if ((sd >> 7) & 1 || (sd >> 19) & 1 || (sd >> 15) & 1
+            || (sd >> 16) & 1 || (sd >> 17) & 1 || (sd >> 18) & 1) {
+        if (field500 != 0 || field504 != 0) {
+            if (field500 != 0 && field316 != 0) {
+                SetActionState(AS_COMBAT_IDLE, 0);
+            } else {
+                SetActionState(AS_THROW_PICKUP, 0);
+            }
+        } else {
+            SetActionState(AS_COMBAT_IDLE, 0);
+        }
+        return;
+    }
+
+    // Taunt (bit 4) -> pause
+    if (sd & 0x0010) {
+        SetActionState(AS_PAUSE, 0);
+        return;
+    }
+
+    // Punch (bit 3) -> jump
+    if (sd & 0x0008) {
+        SetActionState(AS_JUMP, 0);
+        return;
+    }
+
+    // Dive roll (bit 21)
+    if (sd & 0x200000) {
+        SetActionState(AS_DIVE_ROLL, 0);
+        return;
+    }
+
+    // Guard (bit 1) -> stand
+    if (sd & 0x0002) {
+        SetActionState(AS_STAND, 0);
+        return;
+    }
+
+    // Kick (bit 2) -> face + run forward
+    if (sd & 0x0004) {
+        FaceAngleY(faceAngle, 0);
+        SVector dir;
+        dir.x = (s16)orientation.x;
+        dir.y = (s16)orientation.y;
+        dir.z = (s16)orientation.z;
+        dir.pad = 0;
+        AddForce(runSpeed, &dir);
+        return;
+    }
+
+    // Explosion (bit 31)
+    if (sd < 0) {
+        SetActionState(AS_HIT_ENVIRONMENT, 0);
+        return;
+    }
+
+    // Env hit (bit 30)
+    if ((sd >> 30) & 1) {
+        SetActionState(AS_HIT_EXPLOSION, 0);
+        return;
+    }
+
+    // Strafe (bit 5) -> face and strafe
+    if (sd & 0x0020) {
+        FaceAngleY(faceAngle, 0);
+        SetActionState(AS_STRAFE, 0);
+    }
+}
+
+// PSX: _Straif__8Humanoid (HUMANOID.CPP:4307)
+// Complex: targeting, angle-based animation, movement.
+void Humanoid::_Straif() {
+    MARKFUNCTION(0x80067610);
+
+    s32 sd = commandBits;
+
+    // Attack punch group (bits 8,10,12,20)
+    if ((sd >> 8) & 1 || (sd >> 10) & 1 || (sd >> 12) & 1 || (sd >> 20) & 1) {
+        faceAngle = orientation.y;
+        ReleaseTarget();
+        SetActionState(AS_PUNCH_ATTACK, 0);
+        return;
+    }
+
+    // Attack kick group (bits 9,11,13,14)
+    if ((sd >> 9) & 1 || (sd >> 11) & 1 || (sd >> 13) & 1 || (sd >> 14) & 1) {
+        faceAngle = orientation.y;
+        ReleaseTarget();
+        SetActionState(AS_KICK_ATTACK, 0);
+        return;
+    }
+
+    // Multi-hit combat (bits 7,19,15,16,17,18) -> pickup/throw or combat idle
+    if ((sd >> 7) & 1 || (sd >> 19) & 1 || (sd >> 15) & 1
+            || (sd >> 16) & 1 || (sd >> 17) & 1 || (sd >> 18) & 1) {
+        if (field500 != 0 || field504 != 0) {
+            if (field500 != 0 && field316 != 0) {
+                ReleaseTarget();
+                SetActionState(AS_COMBAT_IDLE, 0);
+            } else {
+                ReleaseTarget();
+                SetActionState(AS_THROW_PICKUP, 0);
+            }
+        } else {
+            ReleaseTarget();
+            SetActionState(AS_COMBAT_IDLE, 0);
+        }
+        return;
+    }
+
+    // Explosion (bit 31)
+    if (sd < 0) {
+        ReleaseTarget();
+        SetActionState(AS_HIT_ENVIRONMENT, 0);
+        return;
+    }
+
+    // Env hit (bit 30)
+    if ((sd >> 30) & 1) {
+        ReleaseTarget();
+        SetActionState(AS_HIT_EXPLOSION, 0);
+        return;
+    }
+
+    // Guard release (bit 1)
+    if (sd & 0x0002) {
+        faceAngle = orientation.y;
+        ReleaseTarget();
+        SetActionState(AS_STAND, 0);
+        return;
+    }
+
+    // Dive roll (bit 21)
+    if (sd & 0x200000) {
+        ReleaseTarget();
+        SetActionState(AS_DIVE_ROLL, 0);
+        return;
+    }
+
+    // Taunt (bit 4) -> pause
+    if (sd & 0x0010) {
+        ReleaseTarget();
+        SetActionState(AS_PAUSE, 0);
+        return;
+    }
+
+    // Punch (bit 3) -> jump
+    if (sd & 0x0008) {
+        ReleaseTarget();
+        SetActionState(AS_JUMP, 0);
+        return;
+    }
+
+    // Kick (bit 2) -> face + run
+    if (sd & 0x0004) {
+        faceAngle = orientation.y;
+        ReleaseTarget();
+        SetActionState(AS_RUN, 0);
+        return;
+    }
+
+    // Strafe (bit 5) -> face + strafe
+    if (sd & 0x0020) {
+        FaceAngleY(faceAngle, 0);
+        ReleaseTarget();
+        SetActionState(AS_STRAFE, 0);
+        return;
+    }
+
+    // No commands -> strafe movement
+    // PSX: face target, select strafe animation based on angle difference
+    if (field256 != 0) {
+        // field256 = target thing pointer (stored as s32)
+        // FaceAngleY toward target's direction
+        FaceAngleY(faceAngle, 1);
+    }
+
+    // Apply movement force in facing direction
+    if (attackRange != 0) {
+        SVector dir;
+        dir.x = (s16)orientation.x;
+        dir.y = (s16)orientation.y;
+        dir.z = (s16)orientation.z;
+        dir.pad = 0;
+        AddForce(attackRange, &dir);
+    }
+}
+
+// PSX: _Jump__8Humanoid (HUMANOID.CPP:4569)
+// Apply forces, check air attack, call HandleLand.
+void Humanoid::_Jump() {
+    MARKFUNCTION(0x80067DBC);
+
+    flags2 |= 0x0008; // ground sticking
+
+    // If kick bit set (bit 2), apply directional jump
+    if (commandBits & 0x0004) {
+        FaceAngleY(faceAngle, 1);
+        SVector dir;
+        dir.x = (s16)orientation.x;
+        dir.y = (s16)orientation.y;
+        dir.z = (s16)orientation.z;
+        dir.pad = 0;
+        AddForce(runSpeed, &dir);
+    }
+
+    // PSX: check animation frame > threshold for air attack
+    // Check attack bits (8,9,14)
+    if ((commandBits >> 8) & 1 || (commandBits >> 9) & 1 || (commandBits >> 14) & 1) {
+        commandBits = (commandBits | 0x4000) & ~0x0100 & ~0x0200;
+        SetActionState(AS_PUNCH_ATTACK, 0);
+        return;
+    }
+
+    // PSX: call HandleLand (checks if landed on ground)
+    HandleLand(0);
+}
+
+// PSX: _Fall__8Humanoid (HUMANOID.CPP:4620)
+// Empty function on PSX (8 bytes, just jr $ra + nop)
+void Humanoid::_Fall() {
+    MARKFUNCTION(0x80067F2C);
+}
+
+// PSX: _Pickup__8Humanoid (HUMANOID.CPP:4959)
+// Grab item at animation frame threshold.
+void Humanoid::_Pickup() {
+    MARKFUNCTION(0x80068508);
+
+    // PSX: checks model->animStruct frame >= grabFrame, then sets up pickup
+    // Without animation system, use stateTimer as proxy
+    stateTimer++;
+
+    if (field500 != 0 && stateTimer > 10) {
+        flags2 |= 0x0001; // carrying flag
+    }
+
+    // PSX: if animation complete, return to stand
+    if (stateTimer > 20) {
+        SetActionState(AS_STAND, 0);
+    }
+}
+
+// PSX: _Throw__8Humanoid (HUMANOID.CPP:4998)
+// Face target, release object at frame, cleanup.
+void Humanoid::_Throw() {
+    MARKFUNCTION(0x800685A8);
+
+    stateTimer++;
+
+    // Face target in early frames
+    if (stateTimer < 6 && field256 != 0) {
+        Thing* target = (Thing*)(intptr_t)field256;
+        FaceThing(target, 1);
+    }
+
+    // PSX: if pickup object exists, check throw frame
+    if (field500 != 0 && stateTimer > 8) {
+        if (flags2 & 0x0001) { // carrying
+            // PSX: release the pickup object
+            field500 = 0;
+            flags2 &= ~0x0001; // clear carrying flag
+        }
+    }
+
+    // PSX: if animation complete
+    if (stateTimer > 20) {
+        ReleaseTarget();
+        SetActionState(AS_STAND, 0);
+    }
+}
+
+// PSX: _GotHitHigh__8Humanoid (HUMANOID.CPP:5114)
+// Apply knockback speed, check for death.
+void Humanoid::_GotHitHigh() {
+    MARKFUNCTION(0x8006882C);
+
+    // PSX: on first frame when walkCycleFlag == 46, force specific animation frame
+    if (walkCycleFlag == 46) {
+        walkCycleFlag = 1;
+    }
+
+    // PSX: apply knockback from field466
+    // field466 is knockback magnitude (s16)
+    // Applied as animation speed adjustment
+
+    // Check for death
+    if (health <= 0) {
+        walkCycleFlag = (s32)AS_DEAD; // 72 = next state on recovery
+    }
+}
+
+// PSX: _GotHitMed__8Humanoid (HUMANOID.CPP:5161)
+// Apply knockback, check for death.
+void Humanoid::_GotHitMed() {
+    MARKFUNCTION(0x800688B4);
+
+    // PSX: apply knockback from field466 (same as GotHitHigh but without frame forcing)
+
+    // Check for death
+    if (health <= 0) {
+        walkCycleFlag = (s32)AS_DEAD;
+    }
+}
+
+// PSX: _GotHitLow__8Humanoid (HUMANOID.CPP:5232)
+// Identical logic to _GotHitMed.
+void Humanoid::_GotHitLow() {
+    MARKFUNCTION(0x800689B4);
+
+    // Check for death
+    if (health <= 0) {
+        walkCycleFlag = (s32)AS_DEAD;
+    }
+}
+
+// PSX: _Stunned__8Humanoid (HUMANOID.CPP:5333)
+// Countdown stun timer, return to stand on expire.
+void Humanoid::_Stunned() {
+    MARKFUNCTION(0x80068AB4);
+
+    s16 stunCounter = (s16)field468;
+    u16 stunDecRate = (u16)comboCount; // PSX +470
+
+    if (stunCounter <= 0) {
+        // Stun expired
+        field468 = 0;
+
+        // PSX: clean up animControl target
+        if (animControl != 0) {
+            animControl = 0;
+        }
+
+        SetActionState(AS_STAND, 0);
+    } else {
+        // Decrement stun timer
+        field468 = (u16)(stunCounter - (s16)stunDecRate);
+    }
+
+    // Health check - if dead
+    if (health <= 0) {
+        if (animControl != 0) {
+            animControl = 0;
+        }
+        SetActionState(AS_DEAD, 0);
+    }
+}
+
+// PSX: _SpinBack__8Humanoid (HUMANOID.CPP:5373)
+// Wait for animation to complete, then transition to recovery.
+void Humanoid::_SpinBack() {
+    MARKFUNCTION(0x80068B78);
+
+    // PSX: checks model->animStruct->stopFlag > 0
+    // Without animation, use stateTimer as proxy
+    stateTimer++;
+    if (stateTimer > 30) {
+        SetActionState(AS_SPIN_BACK_RECOVER, 0);
+    }
+}
+
+// PSX: _FlyingBack__8Humanoid (HUMANOID.CPP:5397)
+// Scale velocity, check ground/animation end.
+void Humanoid::_FlyingBack() {
+    MARKFUNCTION(0x80068BC8);
+
+    stateTimer++;
+
+    // PSX: check if animation complete
+    if (stateTimer > 30) {
+        SetActionState(AS_FLYING_BACK_LAND, 0);
+        return;
+    }
+
+    // PSX: check if on ground (flags bit 12 = TF_ON_GROUND)
+    if (flags & TF_ON_GROUND) {
+        SetActionState(AS_FLYING_BACK_CHECK, 0);
+    }
+}
+
+// PSX: _Collapse__8Humanoid (HUMANOID.CPP:5476)
+// Play groan, count timer, get-up or die.
+void Humanoid::_Collapse() {
+    MARKFUNCTION(0x80068DD4);
+
+    // PSX: LoadDialog(1, 50) — groan sound (not yet implemented)
+
+    // PSX: calls CollapseUpdate virtual (not yet implemented)
+
+    stateTimer++;
+
+    // PSX: check if on ground (flags bit 12)
+    if (!(flags & TF_ON_GROUND)) return;
+
+    if (health <= 0) {
+        // Dead
+        SetActionState(AS_DEAD, 0);
+    } else {
+        // Check get-up conditions
+        s16 getUpThreshold = (s16)humanoidDataID; // PSX +464
+        if (stateTimer >= getUpThreshold) {
+            // PSX: if not player, signal enemy get-up
+            SetActionState(AS_GET_UP, 0);
+        }
+    }
+}
+
+// PSX: _Dead__8Humanoid (HUMANOID.CPP:5723)
+// Signal player, cleanup, remove or fade.
+void Humanoid::_Dead() {
+    MARKFUNCTION(0x800691DC);
+
+    // PSX: special handling for type 23 (boss)
+    // PSX: type check for respawn eligibility (types 10-17)
+
+    // PSX: toggle animation direction flag based on thinkCounter
+    if ((thinkCounter & 0x03) == 2) {
+        if (flags & TF_BIT8) {
+            flags &= ~TF_BIT8;
+        } else {
+            flags |= TF_BIT8;
+        }
+    }
+
+    // PSX: check if death animation has played long enough
+    if (thinkCounter < 41) return;
+
+    // Full cleanup
+    ReleaseTarget();
+    flags &= ~0x0080; // clear bit 7
+
+    if (field260 != 0) {
+        // PSX: set model fade flag
+    } else {
+        // PSX: call Kill virtual
+        Kill();
+    }
+}

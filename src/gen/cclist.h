@@ -47,7 +47,8 @@ struct ccMinList {
             if (head) head->prev = node;
             else tail = node;
             head = node;
-        } else {
+        }
+        else {
             node->next = after->next;
             node->prev = after;
             if (after->next) after->next->prev = node;
