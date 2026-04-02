@@ -8,12 +8,16 @@
 #include "pddi/pddidev.h"
 
 #include <cmath>
-
-// Global block manager pointer - PSX: gp scope, set by World
-BlockManager* g_blockManager = nullptr;
 #include <cstring>
 #include <fstream>
 #include <filesystem>
+
+// Global block manager pointer (PSX: gp scope, set by World)
+BlockManager* g_blockManager = nullptr;
+
+// DynamicThing physics globals (PSX: gp+1740, gp+1744)
+s32 g_maxFallSpeed = 0x4000;
+s32 g_dampingFactor = 0xCCCC;
 
 // PSX BGR555 to RGBA8
 static void PsxToRGBA(u16 c, u8& r, u8& g, u8& b, u8& a) {

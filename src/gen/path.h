@@ -3,7 +3,7 @@
 #pragma once
 
 #include "core.h"
-#include "gen/block.h"
+#include "p3d/lvector.h"
 #include "gen/cclist.h"
 #include "gen/database.h"
 

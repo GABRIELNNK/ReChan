@@ -3,9 +3,17 @@
 #pragma once
 
 #include "core.h"
-#include "gen/block.h"   // LVector, DBAttrib
+#include "p3d/lvector.h"
 #include "gen/cclist.h"  // ccNode, ccMinNode, ccMinList, ccList
 #include <cstring>
+
+// DBAttrib = attribute from WDB database node
+struct DBAttrib {
+    u16 id;
+    u16 type;
+    u32 value;
+    const char* strValue;
+};
 
 // DBRoot - base class for all database objects (60 bytes on PSX)
 // PSX layout:
@@ -173,5 +181,5 @@ private:
     bool isOpen = false;
 };
 
-// PSX global: gp+3460
+// PSX: gp+3460, defined in database.cpp
 extern Database* g_database;

@@ -9,14 +9,23 @@
 // Global Thing unique ID counter (PSX: gp+3868)
 u16 Thing::s_nextUniqueID = 0;
 
-// Global BlockManager pointer (defined in world.cpp)
-extern BlockManager* g_blockManager;
-
 // ThingHandle - lazy-allocated safe reference (8 bytes on PSX)
 struct ThingHandle {
     Thing* owner;
     u16 refCount;
 };
+
+// PSX: __6TicketP5ThingP12DynamicThing (THING.CPP:1312)
+Ticket::Ticket(Thing* iss, DynamicThing* pass) {
+    issuer = iss;
+    passenger = pass;
+}
+
+// PSX: _._6Ticket (THING.CPP:1318)
+Ticket::~Ticket() {
+    issuer = nullptr;
+    passenger = nullptr;
+}
 
 // PSX: __5ThingPC10tagLVectorUs (THING.CPP:428)
 Thing::Thing(const LVector* initialPos, u16 type) {
@@ -35,14 +44,14 @@ Thing::Thing(const LVector* initialPos, u16 type) {
     thingHandle = nullptr;
     field76 = nullptr;
     model = nullptr;
-    blockNum = 0x1000;
+    blockNum = BLOCK_UNASSIGNED;
 
     // Assign unique ID from global counter
     uniqueID = s_nextUniqueID;
     s_nextUniqueID++;
 
-    // Initialize flags: set bit 2 (needs activation), clear bit 4 and 6
-    flags = 0x0004;   // |= 4, &= ~0x10, &= ~0x40
+    // Initialize flags: set needs activation, clear activated and model created
+    flags = TF_NEEDS_ACTIVATION;
     flags2 = 0;
 }
 
@@ -80,13 +89,13 @@ void Thing::Draw() {
 void Thing::Reset() {
     MARKFUNCTION(0x80061760);
     // PSX: flags |= 4 (needs activation)
-    flags |= 0x0004;
+    flags |= TF_NEEDS_ACTIVATION;
     // PSX: clear orientation
     orientation = {};
     // PSX: restore activeRadius from initialActiveRadius
     activeRadius = initialActiveRadius;
     // PSX: flags2 &= 1 (keep only bit 0)
-    flags2 &= 0x0001;
+    flags2 &= TF2_KILLED;
 }
 
 // PSX: UpdatePosition__5Thing (THING.HPP:440)
@@ -107,9 +116,9 @@ void Thing::Activate() {
 
     if (inActiveList) {
         // Mark as activated
-        flags |= 0x0010;
-        // If model not yet created (bit 6 not set), create it
-        if (!(flags & 0x0040)) {
+        flags |= TF_ACTIVATED;
+        // If model not yet created, create it
+        if (!(flags & TF_MODEL_CREATED)) {
             CreateModel(nullptr);
         }
     }
@@ -119,7 +128,7 @@ void Thing::Activate() {
 void Thing::Deactivate() {
     MARKFUNCTION(0x8006182C);
     // PSX: clear activated flag, delete model
-    flags &= ~0x0010;
+    flags &= ~TF_ACTIVATED;
     DeleteModel();
 }
 
@@ -135,7 +144,7 @@ void Thing::CreateModel(const char* /*name*/) {
     // PSX: loads model from CharacterManager / resource system
     // PC: character model loading not yet implemented
     // Mark model as created
-    flags |= 0x0040;
+    flags |= TF_MODEL_CREATED;
 }
 
 // PSX: DeleteModel__5Thing (THING.CPP:689)
@@ -145,7 +154,7 @@ void Thing::DeleteModel() {
     if (model) {
         model = nullptr;
     }
-    flags &= ~0x0040;
+    flags &= ~TF_MODEL_CREATED;
 }
 
 // PSX: HandleCollision__5ThingP5Thingle (THING.CPP:713)
@@ -193,7 +202,7 @@ void Thing::GetViewSpot(LVector* outPos, LVector* /*outTarget*/) {
 void Thing::Kill() {
     MARKFUNCTION(0x800628D0);
     // Mark for removal
-    flags2 |= 0x0001;
+    flags2 |= TF2_KILLED;
 }
 
 // PSX: GetSoundPosPtr__5Thing (THING.HPP:516)
@@ -215,21 +224,40 @@ void Thing::AddPassenger(DynamicThing* passenger) {
         return;
     if (passenger->ticket)
         return;
-    // PSX: allocates Ticket, links into subNode list, sets passenger->ticket
-    // Ticket system not yet reversed - store basic association
-    passenger->standingOn = this;
+    // Allocate ticket and link into subNode list
+    Ticket* t = new Ticket(this, passenger);
+    subNode.next = (ccMinNode*)t; // simplified: single-link for now
+    passenger->ticket = t;
 }
 
 // PSX: RemPassenger__5ThingP6Ticket (THING.CPP:1104)
-void Thing::RemPassenger(Ticket* /*ticket*/) {
+void Thing::RemPassenger(Ticket* t) {
     MARKFUNCTION(0x8006247C);
-    // PSX: removes ticket from list, clears passenger->ticket, deletes ticket
+    if (!t) return;
+    // Clear the passenger's ticket pointer
+    if (t->passenger) {
+        t->passenger->ticket = nullptr;
+    }
+    // Unlink from list
+    t->Remove();
+    delete t;
 }
 
 // PSX: RemAllPassengers__5Thing (THING.CPP:1144)
 void Thing::RemAllPassengers() {
     MARKFUNCTION(0x80062504);
-    // PSX: iterates passenger list, calls RemPassenger on each
+    // Iterate subNode list, remove each ticket
+    ccMinNode* node = subNode.next;
+    while (node) {
+        ccMinNode* next = node->next;
+        Ticket* t = static_cast<Ticket*>(node);
+        if (t->passenger) {
+            t->passenger->ticket = nullptr;
+        }
+        delete t;
+        node = next;
+    }
+    subNode.next = nullptr;
 }
 
 // PSX: GetThingHandle__5Thing (THING.CPP:1170)
@@ -282,7 +310,7 @@ DynamicThing::DynamicThing(const LVector* initialPos, u16 type)
     MARKFUNCTION(0x80061D68);
 
     // PSX: flags |= 0x0800 (mark as dynamic)
-    flags |= 0x0800;
+    flags |= TF_DYNAMIC;
 
     // PSX: homePos = initialPos
     homePos = *initialPos;
@@ -325,49 +353,172 @@ void DynamicThing::Reset() {
 }
 
 // PSX: Move__12DynamicThing (THING.CPP:891)
-// Physics simulation: applies velocity, force, gravity
+// PSX: 0x80061EC4, 1340 bytes.
+// Full physics step: subtracts force from velocity, applies gravity friction,
+// distributes contact forces over stateCounter frames, half-step integration,
+// clamps XZ speed to health, damps XZ force by g_dampingFactor.
 void DynamicThing::Move() {
     MARKFUNCTION(0x80061EC4);
 
-    // PSX: velocity -= force (drag/friction)
+    LVector localForce = {};
+    LVector movement = {};
+
+    // Step 1: subtract accumulated force from velocity
     velocity.x -= force.x;
     velocity.y -= force.y;
     velocity.z -= force.z;
 
-    // PSX: clear force after applying
-    force = {};
+    // Step 2: compute signs for velocity and contact force directions
+    s32 sign_vx = (velocity.x >= 0) ? 1 : -1;
+    s32 sign_vz = (velocity.z >= 0) ? 1 : -1;
+    s32 sign_cfx = (contactForce.x >= 0) ? 1 : -1;
+    s32 sign_cfz = (contactForce.z >= 0) ? 1 : -1;
 
-    // PSX: apply gravity to Y velocity if airborne
-    if (!(flags & 0x1000)) { // not on ground
-        velocity.y -= gravity;
-        // PSX: clamp fall speed
-        if (maxFallDivisor > 0) {
-            s32 maxFall = -0x8000 / maxFallDivisor;
-            if (velocity.y < maxFall)
-                velocity.y = maxFall;
+    // Step 3: gravity friction (drag opposing velocity)
+    // PSX: abs(vel) * gravity → 64-bit, extract bits 16..47, negate sign
+    s32 abs_vx = velocity.x * sign_vx;
+    s32 abs_vz = velocity.z * sign_vz;
+
+    s32 drag_x = (s32)(((s64)abs_vx * (s64)gravity) >> 16);
+    s32 drag_z = (s32)(((s64)abs_vz * (s64)gravity) >> 16);
+
+    s32 friction_x = (-sign_vx) * drag_x;
+    s32 friction_z = (-sign_vz) * drag_z;
+
+    // Reset gravity to default (overridden each frame by ground contact)
+    gravity = 0x8000;
+
+    // Step 4: contact force handling (if stateCounter != 0)
+    if (stateCounter != 0) {
+        // X axis
+        if (contactForce.x != 0) {
+            s32 abs_cfx = contactForce.x * sign_cfx;
+            s32 divided = rmDiv16i(abs_cfx, stateCounter) >> 16;
+            localForce.x = (divided * sign_cfx) + friction_x;
+        } else {
+            s32 av = (velocity.x >= 0) ? velocity.x : -velocity.x;
+            if (av < 2) {
+                velocity.x = 0;
+            } else if (friction_x != 0) {
+                localForce.x = friction_x;
+            }
         }
+
+        // Y axis (plain integer division, no rmDiv16i)
+        if (contactForce.y != 0) {
+            localForce.y = contactForce.y / stateCounter;
+        }
+
+        // Z axis
+        if (contactForce.z != 0) {
+            s32 abs_cfz = contactForce.z * sign_cfz;
+            s32 divided = rmDiv16i(abs_cfz, stateCounter) >> 16;
+            localForce.z = (divided * sign_cfz) + friction_z;
+        } else {
+            s32 av = (velocity.z >= 0) ? velocity.z : -velocity.z;
+            if (av < 2) {
+                velocity.z = 0;
+            } else if (friction_z != 0) {
+                localForce.z = friction_z;
+            }
+        }
+
+        // Y gravity fall (maxFallDivisor accumulates downward acceleration)
+        if (maxFallDivisor != 0) {
+            localForce.y -= maxFallDivisor;
+            if (localForce.y < -g_maxFallSpeed) {
+                localForce.y = -g_maxFallSpeed;
+            }
+        }
+        maxFallDivisor = 18;
     }
 
-    // PSX: apply contact force
-    velocity.x += contactForce.x;
-    velocity.y += contactForce.y;
-    velocity.z += contactForce.z;
+    // Step 5: half-step integration
+    // PSX pattern: make positive, (n + (unsigned(n) >> 31)) >> 1, restore sign
+    s32 sign_lfx = (localForce.x >= 0) ? 1 : -1;
+    s32 sign_lfz = (localForce.z >= 0) ? 1 : -1;
+
+    s32 abs_lfx = localForce.x * sign_lfx;
+    s32 abs_lfz = localForce.z * sign_lfz;
+
+    s32 half_lfx = (s32)(((u32)abs_lfx + ((u32)abs_lfx >> 31)) >> 1) * sign_lfx;
+    s32 half_lfy = (s32)((localForce.y + ((u32)localForce.y >> 31)) >> 1);
+    s32 half_lfz = (s32)(((u32)abs_lfz + ((u32)abs_lfz >> 31)) >> 1) * sign_lfz;
+
+    movement.x = velocity.x + half_lfx;
+    movement.y = velocity.y + half_lfy;
+    movement.z = velocity.z + half_lfz;
+
+    // Step 6: clamp movement magnitude to health (XZ only, Y untouched)
+    s32 mag = (s32)rmMag3((f32)movement.x, (f32)movement.y, (f32)movement.z);
+    if (health < mag) {
+        LVector normalized;
+        rmV3Normalize(&normalized, &movement);
+        movement.x = (s32)(((s64)normalized.x * health) >> 16);
+        // movement.y intentionally NOT clamped
+        movement.z = (s32)(((s64)normalized.z * health) >> 16);
+    }
+
+    // Step 7: add accumulated force back to movement
+    movement.x += force.x;
+    movement.y += force.y;
+    movement.z += force.z;
+
+    // Step 8: update homePos
+    homePos.x += movement.x;
+    homePos.y += movement.y;
+    homePos.z += movement.z;
+
+    // Step 9: update velocity with localForce
+    velocity.x += localForce.x;
+    velocity.y += localForce.y;
+    velocity.z += localForce.z;
+
+    // Step 10: damp XZ force and add to velocity
+    // PSX: (g_dampingFactor * force) >> 16, stored back to force, then added to velocity
+    s32 damped_fx = (s32)(((s64)g_dampingFactor * (s64)force.x) >> 16);
+    s32 damped_fz = (s32)(((s64)g_dampingFactor * (s64)force.z) >> 16);
+
+    force.x = damped_fx;
+    force.z = damped_fz;
+
+    velocity.x += damped_fx;
+    velocity.y += force.y;  // Y force is NOT damped
+    velocity.z += damped_fz;
+
+    // Step 11: save contactForce to field148[0..2], clear contactForce
+    field148[0] = contactForce.x;
+    field148[1] = contactForce.y;
+    field148[2] = contactForce.z;
     contactForce = {};
-
-    // PSX: update position from velocity
-    // PSX uses >>12 fixed-point shift for velocity-to-position
-    pos.x += velocity.x;
-    pos.y += velocity.y;
-    pos.z += velocity.z;
-
-    // PSX: clear on-ground flag (will be re-set by collision)
-    flags &= ~0x1000;
 }
 
 // PSX: UpdatePosition__12DynamicThing (THING.CPP:1280)
+// PSX: 196 bytes. Computes displacement, updates block membership,
+// then commits homePos to pos.
 void DynamicThing::UpdatePosition() {
     MARKFUNCTION(0x8006272C);
-    Move();
+
+    // Compute displacement (homePos - pos)
+    field148[3] = homePos.x - pos.x;
+    field148[4] = homePos.y - pos.y;
+    field148[5] = homePos.z - pos.z;
+
+    // Update block membership if activated
+    if (flags & TF_ACTIVATED) {
+        if (g_blockManager) {
+            u16 newBlock = g_blockManager->GetBlockNumber(homePos);
+            if (newBlock != BLOCK_UNASSIGNED) {
+                blockNum = newBlock;
+            } else if (!(flags & TF_BIT5)) {
+                // Left all blocks and bit5 not set: deactivate
+                flags &= ~TF_ACTIVATED;
+            }
+        }
+    }
+
+    // Commit homePos to pos
+    pos = homePos;
 }
 
 // PSX: AddForce__12DynamicThinglPC9_RMVECT16 (THING.CPP:753)
@@ -383,7 +534,7 @@ void DynamicThing::AddForce(s32 magnitude, const SVector* direction) {
 // PSX: Land__12DynamicThing (THING.CPP:794)
 void DynamicThing::Land() {
     MARKFUNCTION(0x80061C78);
-    flags |= 0x1000; // on ground
+    flags |= TF_ON_GROUND;
     velocity.y = 0;
 }
 
@@ -397,8 +548,10 @@ void DynamicThing::DisembarkObstacle(const LVector& newPos) {
 // PSX: Disembark__12DynamicThing (THING.CPP:1126)
 void DynamicThing::Disembark() {
     MARKFUNCTION(0x800624C4);
-    if (standingOn && ticket) {
-        standingOn->RemPassenger(ticket);
+    if (ticket) {
+        if (ticket->issuer) {
+            ticket->issuer->RemPassenger(ticket);
+        }
     }
     ticket = nullptr;
 }

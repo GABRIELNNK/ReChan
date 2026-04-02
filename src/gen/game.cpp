@@ -6,6 +6,9 @@
 #include "p3d/input.h"
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
+#if RC_FEATURE_COLLISION_DEBUG
+#include "pc/coldebug.h"
+#endif
 
 const Game::StateFunc Game::sStateTable[static_cast<int>(GameState::COUNT)] = {
     gsNullState,
@@ -148,6 +151,11 @@ bool Game::gsPlayState(Game* game) {
 
     game->view.BeginRender();
     game->world.Render(&camPos);
+#if RC_FEATURE_COLLISION_DEBUG
+    if (p3d::input->IsKeyTriggered(pddiInput::KeyF3))
+        CollisionDebug::enabled = !CollisionDebug::enabled;
+    CollisionDebug::Draw(game->world.GetBlockManager());
+#endif
     game->view.EndRender();
 
     return true;

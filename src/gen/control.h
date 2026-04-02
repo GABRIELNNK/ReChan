@@ -125,5 +125,5 @@ private:
     s32 controlValFlags[2] = {};   // per-frame query flags (PSX: at +1484)
 };
 
-// Global singleton (PSX: 0x800DD69C)
+// PSX: 0x800DD69C, defined in control.cpp
 extern InputManager* g_inputManager;

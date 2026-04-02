@@ -3,22 +3,12 @@
 #pragma once
 
 #include "core.h"
+#include "p3d/lvector.h"
 
 class pddiPrimBuffer;
 struct DBVolume;
-
-// LVector = PSX 3D integer vector (tagLVector)
-struct LVector {
-    s32 x, y, z;
-};
-
-// DBAttrib = attribute from WDB database node
-struct DBAttrib {
-    u16 id;
-    u16 type;
-    u32 value;
-    const char* strValue;
-};
+struct DBAttrib;
+struct CollisionSector;
 
 // Block = reversed from PSX Block class (104 bytes on PSX)
 // Source: C:\CHAN\GAME\SRC\GEN\BLOCK.CPP
@@ -68,7 +58,7 @@ struct Block {
     // +68: tPrimGeom / pddiPrimBuffer (PC replacement)
     pddiPrimBuffer* primBuffer;
     // +72: collision sector pointer
-    void* collision;
+    CollisionSector* collision;
     // +76: texture page animation frame counter
     s32 texPageFrame;
     // +80-100: half-extents (computed in SetDimension)

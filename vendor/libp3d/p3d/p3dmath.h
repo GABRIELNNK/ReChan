@@ -7,6 +7,7 @@
 
 #include "p3d/vector.h"
 #include "p3d/matrix.h"
+#include "p3d/lvector.h"
 #include <cmath>
 
 
@@ -154,6 +155,14 @@ inline void p3dFillHeadingMatrix(const Vec3& heading, const Vec3& up, Mat4& m) {
 }
 
 // --------------------------------------------------------------------------
+// fixmul16 — 16.16 fixed-point multiply: (a * b) >> 16
+// PSX: implemented inline via MIPS mult + shift
+// --------------------------------------------------------------------------
+inline s32 fixmul16(s32 a, s32 b) {
+    return (s32)(((s64)a * (s64)b) >> 16);
+}
+
+// --------------------------------------------------------------------------
 // rmMag2 — 2D magnitude (PSX: 0x80113984)
 // --------------------------------------------------------------------------
 inline f32 rmMag2(f32 x, f32 y) {
@@ -165,6 +174,33 @@ inline f32 rmMag2(f32 x, f32 y) {
 // --------------------------------------------------------------------------
 inline f32 rmMag3(f32 x, f32 y, f32 z) {
     return std::sqrt(x * x + y * y + z * z);
+}
+
+// --------------------------------------------------------------------------
+// rmDiv16i — 16.16 fixed-point division (PSX: 0x8007D8B4)
+// Returns (a << 16) / b as a 16.16 fixed-point result.
+// Source: C:\chan\devsys\psx\radlib\SOURCE\MATH\MULTDIV\DIVIDE.C:30
+// --------------------------------------------------------------------------
+inline s32 rmDiv16i(s32 a, s32 b) {
+    if (b == 0) return (a >= 0) ? 0x7FFFFFFF : -0x7FFFFFFF;
+    return (s32)(((s64)a << 16) / b);
+}
+
+// --------------------------------------------------------------------------
+// rmV3Normalize — normalize integer vector to 16.16 fixed-point unit vector
+// PSX: 0x8009DA64 — calls rmMag3, rmInverse16, then scales components.
+// If magnitude is zero, returns {0x10000, 0, 0}.
+// Source: C:\chan\devsys\psx\radlib\SOURCE\MATH\VECTOR\VECT3D.CPP:22
+// --------------------------------------------------------------------------
+inline void rmV3Normalize(LVector* out, const LVector* in) {
+    s32 mag = (s32)rmMag3((f32)in->x, (f32)in->y, (f32)in->z);
+    if (mag == 0) {
+        out->x = 0x10000; out->y = 0; out->z = 0;
+        return;
+    }
+    out->x = (s32)(((s64)in->x << 16) / mag);
+    out->y = (s32)(((s64)in->y << 16) / mag);
+    out->z = (s32)(((s64)in->z << 16) / mag);
 }
 
 // --------------------------------------------------------------------------

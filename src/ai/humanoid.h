@@ -4,7 +4,55 @@
 
 #include "ai/thing.h"
 
-struct Behaviour;
+#include "ai/behaviour.h"
+
+// Action state IDs for Humanoid::SetActionState
+enum ActionState : u32 {
+    AS_INACTIVE_IDLE = 0,
+    AS_STAND         = 1,
+    AS_STAND_ANIM    = 2,
+    AS_RUN           = 4,
+    AS_JUMP          = 5,
+    AS_TAUNT         = 6,
+    AS_FALL          = 7,
+    AS_STRAFE        = 8,
+    AS_DIVE_ROLL     = 9,
+    AS_PAUSE         = 10,
+    AS_GOT_HIT_HIGH  = 11,
+    AS_COLLAPSE      = 12,
+    AS_DEAD          = 13,
+    AS_SPIN_BACK     = 14,
+    AS_FLYING_BACK   = 15,
+    AS_STUNNED       = 16,
+    AS_THROW         = 17,
+    AS_PICKUP        = 18,
+    AS_THROW_PUNCH   = 34,
+    AS_THROW_KICK    = 35,
+    AS_COUNT         = 74,
+};
+
+// State dispatch indices for Humanoid::ProcessAction
+enum StateDispatch : u16 {
+    SD_NONE         = 0,
+    SD_STAND        = 22,
+    SD_RUN          = 23,
+    SD_JUMP         = 24,
+    SD_FALL         = 25,
+    SD_STRAFE       = 26,
+    SD_DIVE_ROLL    = 27,
+    SD_TAUNT        = 28,
+    SD_PAUSE        = 29,
+    SD_GOT_HIT_HIGH = 30,
+    SD_GOT_HIT_MED  = 31,
+    SD_GOT_HIT_LOW  = 32,
+    SD_COLLAPSE     = 33,
+    SD_DEAD         = 34,
+    SD_SPIN_BACK    = 35,
+    SD_FLYING_BACK  = 36,
+    SD_STUNNED      = 37,
+    SD_THROW        = 38,
+    SD_PICKUP       = 39,
+};
 
 // Humanoid - DynamicThing with combat, animation, and AI state
 // PSX: ~560 bytes. Base class for Player and all enemy types.
@@ -65,11 +113,11 @@ public:
 
     // PSX +344 (u16): reserved
     u16 field344 = 0;
-    // PSX +346 (u16): walk/idle timer (22)
-    u16 idleTimer = 22;
+    // PSX +346 (u16): state handler dispatch index (see StateDispatch enum)
+    u16 stateDispatch = SD_STAND;
 
-    // PSX +348 (u16): run speed (8)
-    u16 runSpeed = 8;
+    // PSX +348 (u16): vtable pointer offset (always 8 on PSX)
+    u16 field348 = 8;
 
     // PSX +356 (s32): current action state number
     s32 actionState = -1;

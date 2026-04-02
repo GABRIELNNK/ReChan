@@ -1,4 +1,4 @@
-// player.cpp - Player class implementation stubs
+// player.cpp - Player class implementation
 // Reversed from PSX C:\CHAN\GAME\SRC\AI\PLAYER.CPP
 #include "ai/player.h"
 
@@ -38,7 +38,7 @@ Player::Player(const LVector* initialPos)
     // PSX: gp+3432 = this (global player pointer)
     s_player = this;
 
-    SetActionState(0, 0);
+    SetActionState(AS_INACTIVE_IDLE, 0);
 }
 
 // PSX: _._6Player (PLAYER.CPP:1050)
@@ -78,7 +78,7 @@ void Player::Reset() {
 
     stateCounter = 100;
     activeRadius = 200;
-    flags |= 0x0800 | 0x0028;
+    flags |= TF_DYNAMIC | TF_BIT5 | TF_BIT3;
     velocity = {};
     contactForce = {};
     turnRate = 5500;
@@ -86,7 +86,7 @@ void Player::Reset() {
     field620 = 0;
     hitCombo = 0;
     comboTimer = 0;
-    playerFlags |= 0x04;
+    playerFlags |= PF_COMBAT_READY;
     field704 = 0;
     field706 = 0;
     field712 = 0;
@@ -95,7 +95,7 @@ void Player::Reset() {
     field728 = 0;
     lastPos = orientation;
 
-    SetActionState(1, 0);
+    SetActionState(AS_STAND, 0);
 }
 
 // PSX: Move__6Player (PLAYER.CPP:1408)
@@ -112,13 +112,14 @@ void Player::CreateModel(const char* name) {
 }
 
 // PSX: SetActionState__6PlayerUll (PLAYER.CPP:1579)
+// PSX: 73-case switch. Player adds states for platforming, weapon combos, etc.
+// Player-specific stateDispatch indices use virtual overrides of the state handlers.
 void Player::SetActionState(u32 state, s32 param) {
     MARKFUNCTION(0x800303BC);
     actionStateFlag = 0;
-    flags |= 0x0800;
+    flags |= TF_DYNAMIC;
 
-    // PSX: giant switch on state (73 cases)
-    // For now, delegate to Humanoid base
+    // Delegate to Humanoid for the core state mapping and preamble
     Humanoid::SetActionState(state, param);
 }
 

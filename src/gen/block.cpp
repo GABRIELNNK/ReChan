@@ -3,6 +3,7 @@
 #include "gen/block.h"
 #include "gen/database.h"
 #include "gen/geometry.h"
+#include "gen/colsect.h"
 #include "p3d/context.h"
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
@@ -21,6 +22,10 @@ void Block::Destroy() {
     if (primBuffer) {
         primBuffer->Release();
         primBuffer = nullptr;
+    }
+    if (collision) {
+        delete collision;
+        collision = nullptr;
     }
 }
 
@@ -203,7 +208,6 @@ void Block::SetDimension(const LVector* a, const LVector* b) {
 
 // Parse__5BlockUlPc (BLOCK.CPP:482)
 // PSX: stores data ptr, checks prim offset, calls collision loader + LoadPrim
-// PC: skip collision, call LoadPrim to build pddiPrimBuffer
 void Block::Parse(u32 size, const u8* blkData) {
     MARKFUNCTION(0x80052F80);
 
@@ -218,8 +222,17 @@ void Block::Parse(u32 size, const u8* blkData) {
         parsed = 0;
     }
 
-    // PSX: collision = AsynchLoad__15CollisionSector(blockNum, data + *(data+20))
-    // PC: skip collision loading
+    // PSX: collision = AsynchLoad(blockNum, data + *(data+20))
+    // Load collision sector from BLK data
+    if (size > 24) {
+        u32 colOffset = blkData[20] | (blkData[21] << 8) |
+                        (blkData[22] << 16) | (blkData[23] << 24);
+        if (colOffset > 0 && colOffset < size) {
+            collision = new CollisionSector();
+            collision->status = blockNum;
+            collision->Load((u32*)(blkData + colOffset));
+        }
+    }
 
     // PSX: primGeom = LoadPrim(data + 24)
     // PC: build pddiPrimBuffer from tPrimGeom GPU packets
@@ -234,6 +247,10 @@ void Block::Unload() {
     MARKFUNCTION(0x80052FF0);
 
     // PSX: Unload__15CollisionSector(collision)
+    if (collision) {
+        collision->Unload();
+        delete collision;
+    }
     collision = nullptr;
     data = nullptr;
 }

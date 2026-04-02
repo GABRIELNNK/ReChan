@@ -33,6 +33,9 @@ public:
     // IsValidBlockNumber (BLKMGR.CPP:769)
     bool IsValidBlockNumber(u32 index) const;                     // 0x80050C70
 
+    // GetBlockNumber (BLKMGR.CPP:749) = find block containing position
+    u16 GetBlockNumber(const LVector& pos) const;                 // 0x80050C04
+
     u32 GetNumBlocks() const { return totalBlocks; }
 
     // Block array access (for rendering iteration)
@@ -57,3 +60,6 @@ private:
     // +160: loadingState (0x1000 = complete)
     u32 loadingState;
 };
+
+// PSX: gp scope, defined in world.cpp
+extern BlockManager* g_blockManager;

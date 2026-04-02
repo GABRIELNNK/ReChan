@@ -91,3 +91,17 @@ bool BlockManager::IsValidBlockNumber(u32 index) const {
     MARKFUNCTION(0x80050C70);
     return index < totalBlocks;
 }
+
+// GetBlockNumber__12BlockManagerRC10tagLVector (BLKMGR.CPP:749)
+// PSX: iterates loaded block list, returns block number containing pos.
+// Returns BLOCK_UNASSIGNED (0x1000) if no block contains the position.
+u16 BlockManager::GetBlockNumber(const LVector& pos) const {
+    MARKFUNCTION(0x80050C04);
+    for (u32 i = 0; i < totalBlocks; i++) {
+        const Block& blk = blocks[i];
+        if (blk.PointInBlock(&pos)) {
+            return (u16)i;
+        }
+    }
+    return 0x1000;
+}

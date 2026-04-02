@@ -19,3 +19,10 @@
 //   When disabled, DebugCam uses the original PSX pad-button controls.
 // ---------------------------------------------------------------------------
 #define RC_FEATURE_IMPROVED_DEBUG_CAM 1
+
+// ---------------------------------------------------------------------------
+// RC_FEATURE_COLLISION_DEBUG
+//   Draw collision walls/floors as colored lines.
+//   Toggle at runtime with F3. Green=walls, cyan=floors, magenta=ceilings.
+// ---------------------------------------------------------------------------
+#define RC_FEATURE_COLLISION_DEBUG 1

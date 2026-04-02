@@ -4,6 +4,11 @@
 
 #include "ai/humanoid.h"
 
+// Player flags (s32 playerFlags bitmask)
+enum PlayerFlags : s32 {
+    PF_COMBAT_READY = 0x04,  // bit 2: combat-ready
+};
+
 // Player - the player character (Jackie Chan)
 // PSX: ~764 bytes. Extends Humanoid with combat combos, platforming states,
 // and player-specific action handlers.

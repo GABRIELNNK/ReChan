@@ -4,7 +4,7 @@
 #pragma once
 
 #include "core.h"
-#include "gen/block.h"      // LVector
+#include "p3d/lvector.h"
 #include "gen/cclist.h"      // ccMinNode, ccMinList, ccNode
 #include "gen/database.h"    // DBPath, DBPoint, DBRoot
 
@@ -156,5 +156,5 @@ private:
     CameraAnchor* anchor = nullptr;
 };
 
-// PSX global: gp+3548
+// PSX: gp+3548, defined in cammgr.cpp
 extern CameraManager* g_cameraManager;

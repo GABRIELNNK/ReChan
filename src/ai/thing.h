@@ -3,17 +3,15 @@
 #pragma once
 
 #include "core.h"
+#include "p3d/lvector.h"
 #include "gen/cclist.h"
-#include "gen/block.h"
 
 struct DBRoot;
 class BlockManager;
 struct Ticket;
 
-// SVector - PSX _RMVECT16 (s16 x,y,z,pad)
-struct SVector {
-    s16 x, y, z, pad;
-};
+// Block number sentinel (unassigned)
+static constexpr u16 BLOCK_UNASSIGNED = 0x1000;
 
 // AI namespace enums matching PSX AI:: scope
 namespace AI {
@@ -45,6 +43,25 @@ enum ThingTypes : u16 {
 };
 
 } // namespace AI
+
+// Thing flags (u32 flags bitmask)
+enum ThingFlags : u32 {
+    TF_BIT1             = 0x0002,  // cleared each Think frame
+    TF_NEEDS_ACTIVATION = 0x0004,  // needs activation check
+    TF_BIT3             = 0x0008,
+    TF_ACTIVATED        = 0x0010,  // currently activated
+    TF_BIT5             = 0x0020,
+    TF_MODEL_CREATED    = 0x0040,  // model has been created
+    TF_BIT8             = 0x0100,
+    TF_DYNAMIC          = 0x0800,  // is a DynamicThing
+    TF_ON_GROUND        = 0x1000,  // on ground
+};
+
+// Thing secondary flags (u32 flags2 bitmask)
+enum ThingFlags2 : u32 {
+    TF2_KILLED = 0x0001,  // marked for removal
+    TF2_BIT3   = 0x0008,  // cleared each Think frame
+};
 
 // Thing - base class for all game entities
 // PSX: 96 bytes. Inherits ccNode (intrusive list node with name).
@@ -83,21 +100,16 @@ public:
     // PSX +80 (ptr): tDrawable* model for rendering
     void* model = nullptr;
 
-    // PSX +84 (u16): block number this Thing is in (0x1000 = unassigned)
-    u16 blockNum = 0x1000;
+    // PSX +84 (u16): block number this Thing is in (BLOCK_UNASSIGNED = unassigned)
+    u16 blockNum = BLOCK_UNASSIGNED;
 
     // PSX +86 (u16): unique ID assigned from global counter
     u16 uniqueID = 0;
 
-    // PSX +88 (u32): bitfield flags
-    // bit 2 (0x04): needs activation
-    // bit 4 (0x10): currently activated
-    // bit 6 (0x40): model created
-    // bit 11 (0x0800): is DynamicThing
-    // bit 12 (0x1000): on ground
+    // PSX +88 (u32): bitfield flags (see ThingFlags enum)
     u32 flags = 0;
 
-    // PSX +92 (u32): secondary flags
+    // PSX +92 (u32): secondary flags (see ThingFlags2 enum)
     u32 flags2 = 0;
 
     // Global Thing counter - PSX: gp+3868
@@ -250,3 +262,20 @@ public:
     // PSX: HandleLand__12DynamicThingl (THING.CPP:1360)
     virtual void HandleLand(s32 height);
 };
+
+// Ticket - embark/passenger link between a Thing and a DynamicThing
+// PSX: 32 bytes. Inherits ccNode, stored in Thing's subNode list.
+// Source: C:\CHAN\GAME\SRC\AI\THING.CPP:1312
+struct Ticket : public ccNode {
+    Thing* issuer = nullptr;           // PSX +24: the Thing being stood on
+    DynamicThing* passenger = nullptr; // PSX +28: the DynamicThing standing on it
+
+    // PSX: __6TicketP5ThingP12DynamicThing (THING.CPP:1312)
+    Ticket(Thing* iss, DynamicThing* pass);
+    // PSX: _._6Ticket (THING.CPP:1318)
+    ~Ticket() override;
+};
+
+// DynamicThing physics constants (PSX: gp+1740, gp+1744, defined in world.cpp)
+extern s32 g_maxFallSpeed;
+extern s32 g_dampingFactor;
