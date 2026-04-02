@@ -1,4 +1,4 @@
-// geometry.cpp — BLK level geometry parser implementation
+// geometry.cpp - BLK level geometry parser implementation
 #include "gen/geometry.h"
 #include "p3d/context.h"
 #include "pddi/pddi.h"

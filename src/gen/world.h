@@ -1,4 +1,4 @@
-// world.h — Level world: loads BLK blocks from an LCF stream
+// world.h - Level world: loads BLK blocks from an LCF stream
 #pragma once
 
 #include "core.h"
@@ -61,13 +61,13 @@ private:
 
     void LoadTPGTextures(const u8* lcfData, u32 lcfSize);
 
-    // DrawEverythingHandler (GAME.CPP:2211) — sorting + rendering pipeline
+    // DrawEverythingHandler (GAME.CPP:2211) - sorting + rendering pipeline
     void DrawEverythingHandler(const LVector* camPos);  // 0x8002A98C
 
-    // computeBlockToPointDistances (GAME.CPP:1976) — 8-corner bbox distance + frustum cull
+    // computeBlockToPointDistances (GAME.CPP:1976) - 8-corner bbox distance + frustum cull
     void computeBlockToPointDistances(const Block* block, const LVector* point,
                                       s32* outDistSq, s32* outZDepth);  // 0x8002A238
 
-    // OffsetToPreventSeams (GAME.CPP:2482) — shifts block pos toward camera
+    // OffsetToPreventSeams (GAME.CPP:2482) - shifts block pos toward camera
     void OffsetToPreventSeams(LVector& pos, const LVector& camPos);  // 0x8002AF88
 };

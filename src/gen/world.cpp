@@ -1,4 +1,4 @@
-// world.cpp — Level world implementation
+// world.cpp - Level world implementation
 #include "gen/world.h"
 #include "gen/database.h"
 #include "gen/geometry.h"
@@ -8,6 +8,9 @@
 #include "pddi/pddidev.h"
 
 #include <cmath>
+
+// Global block manager pointer - PSX: gp scope, set by World
+BlockManager* g_blockManager = nullptr;
 #include <cstring>
 #include <fstream>
 #include <filesystem>
@@ -204,7 +207,7 @@ bool World::Load(const std::string& lcfPath) {
     RC_LOG("[World] Found %u BLK, %u WDB entries in %s", blkCount, wdbCount, lcfPath.c_str());
 
     // Parse WDB entries using Database::Scan (PSX HandleWDBChunk)
-    // Each WDB has block numbers starting from 0 — they are local to that WDB's
+    // Each WDB has block numbers starting from 0 - they are local to that WDB's
     // BLK group. Count BLK entries between WDB entries to compute the base offset.
     std::vector<DBVolume*> blockVolumes(blkCount, nullptr);
     // We need the Database alive so DBVolume pointers remain valid
@@ -317,7 +320,7 @@ void World::Render(const LVector* camPos) {
     p3d::context->SetVRAMHandle(0);
 }
 
-// TransformVector — PC equivalent of PSX tPort::TransformVector
+// TransformVector - PC equivalent of PSX tPort::TransformVector
 // Multiplies world-space point by the current view matrix (GTE rotation + translation)
 static void TransformVector(const Mat4& vm, s32 inX, s32 inY, s32 inZ,
                             s32* outX, s32* outY, s32* outZ) {
@@ -329,7 +332,7 @@ static void TransformVector(const Mat4& vm, s32 inX, s32 inY, s32 inZ,
     *outZ = static_cast<s32>(vm.m[2] * fx + vm.m[6] * fy + vm.m[10] * fz + vm.m[14]);
 }
 
-// chanp3dClipCode — PC equivalent of PSX chanp3dClipCode
+// chanp3dClipCode - PC equivalent of PSX chanp3dClipCode
 // Computes 6-bit clip code for a view-space point against the frustum
 // bit 0: left, bit 1: right, bit 2: bottom, bit 3: top, bit 4: near, bit 5: far
 static u32 chanp3dClipCode(const Mat4& pm, s32 vx, s32 vy, s32 vz) {
@@ -351,7 +354,7 @@ static u32 chanp3dClipCode(const Mat4& pm, s32 vx, s32 vy, s32 vz) {
     return code;
 }
 
-// vecLengthSquared — PC equivalent of PSX vecLengthSquared
+// vecLengthSquared - PC equivalent of PSX vecLengthSquared
 // Returns squared length of view-space vector (with >>8 shift to prevent overflow)
 static s32 vecLengthSquared(s32 x, s32 y, s32 z) {
     s32 sx = x >> 8;
@@ -409,7 +412,7 @@ void World::DrawEverythingHandler(const LVector* camPos) {
 
     // PSX: find maxZDepth across all entries, add 64, clamp to 0xFFFF
     // PSX: count entries with positive distSq (s6 index)
-    // PSX: EnterLayer on tView (OT bucket management — handled by z-buffer on PC)
+    // PSX: EnterLayer on tView (OT bucket management - handled by z-buffer on PC)
 
     // Render each block in sorted order
     for (u32 i = 0; i < count; i++) {
@@ -426,10 +429,10 @@ void World::DrawEverythingHandler(const LVector* camPos) {
         localPos.z = entry.block->posZ;
         OffsetToPreventSeams(localPos, *camPos);
 
-        // PSX: profile begin(10), DrawLoop(blockMgr+52, blockNum) — entity list 1
-        // PSX: profile end(10), begin(11), DrawLoop(blockMgr+76, blockNum) — entity list 2
-        // PSX: DrawLoop(blockMgr+64, blockNum) — entity list 3
-        // PSX: profile end(11), begin(12), DrawLoop(blockMgr+88, blockNum) — entity list 4
+        // PSX: profile begin(10), DrawLoop(blockMgr+52, blockNum) - entity list 1
+        // PSX: profile end(10), begin(11), DrawLoop(blockMgr+76, blockNum) - entity list 2
+        // PSX: DrawLoop(blockMgr+64, blockNum) - entity list 3
+        // PSX: profile end(11), begin(12), DrawLoop(blockMgr+88, blockNum) - entity list 4
         // PSX: profile end(12), begin(13), DrawEffects(blockNum)
         // PSX: profile end(13)
 
@@ -609,7 +612,7 @@ void World::computeBlockToPointDistances(const Block* block, const LVector* poin
         return;
     }
 
-    // Visible — output minimum distance and maximum z-depth
+    // Visible - output minimum distance and maximum z-depth
     *outDistSq = minDistSq;
     *outZDepth = maxZDepth;
 }
@@ -632,7 +635,7 @@ void World::OffsetToPreventSeams(LVector& pos, const LVector& camPos) {
     s32 signZ = (dz < 0) ? -1 : (dz > 0) ? 1 : 0;
 
     // PSX: v1 = gp[96] (seamDivisor)
-    // These are set during level initialization — using reasonable PSX defaults
+    // These are set during level initialization - using reasonable PSX defaults
     s32 seamDivisor = 4096; // gp+0x60
     s32 seamLimit = 8;      // gp+0x64
 
@@ -643,7 +646,7 @@ void World::OffsetToPreventSeams(LVector& pos, const LVector& camPos) {
     s32 rawY = (signY * dy) / seamDivisor;
     s32 rawZ = (signZ * dz) / seamDivisor;
 
-    // PSX: offset = (-sign) * (raw + 1) — pushes block position toward camera
+    // PSX: offset = (-sign) * (raw + 1) - pushes block position toward camera
     s32 offX = (-signX) * (rawX + 1);
     s32 offY = (-signY) * (rawY + 1);
     s32 offZ = (-signZ) * (rawZ + 1);

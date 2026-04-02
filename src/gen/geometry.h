@@ -1,4 +1,4 @@
-// geometry.h — BLK level geometry parser
+// geometry.h - BLK level geometry parser
 // Reads PSX tPrimGeom data from BLK stream entries and produces
 // pddiPrimBuffer objects for rendering through the pddi abstraction.
 #pragma once

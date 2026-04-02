@@ -1,4 +1,4 @@
-// camera.cpp — Camera class reversed from PSX CAMERA.CPP
+// camera.cpp - Camera class reversed from PSX CAMERA.CPP
 // Original: C:\CHAN\GAME\SRC\GEN\CAMERA.CPP
 #include "gen/camera.h"
 #include "gen/control.h"
@@ -124,12 +124,12 @@ void Camera::Reset() {
     trackingAccel = {};
     trackingVel = {};
 
-    // Velocity magnitudes — PSX init to 1966
+    // Velocity magnitudes - PSX init to 1966
     velocityMag.x = 1966;
     velocityMag.y = 1966;
     velocityMag.z = 1966;
 
-    // Default movement/tracking times — PSX calls Set*Time with default vectors
+    // Default movement/tracking times - PSX calls Set*Time with default vectors
     // PSX Reset passes {8,8,8} to SetMovementTime and {4,4,4} to SetTrackingTime
     LVector defaultMovTime = {8, 8, 8};
     LVector defaultTrackTime = {4, 4, 4};
@@ -148,7 +148,7 @@ void Camera::Reset() {
     if (fovRad < 0.01f) fovRad = 0.7f; // fallback
     p3dCamera.SetFOV(fovRad, PSX_ASPECT);
 
-    // Twist — PSX 8192 ≈ 45 degrees
+    // Twist - PSX 8192 ≈ 45 degrees
     twist = 8192;
 
     // Camera angles
@@ -296,7 +296,7 @@ void Camera::Move() {
 void Camera::Update() {
     MARKFUNCTION(0x800482DC);
 
-    // PC improved cam already set the matrix directly — skip
+    // PC improved cam already set the matrix directly - skip
     if (directMatrix) {
         directMatrix = false;
         return;
@@ -322,7 +322,7 @@ void Camera::Update() {
     // Direction vector (target - eye)
     Vec3 fwd = (tgt - eye).Normalized();
 
-    // Up hint — PSX uses p3dFillHeadingMatrix with twist-rotated up
+    // Up hint - PSX uses p3dFillHeadingMatrix with twist-rotated up
     // If forward is nearly vertical, use X as up hint
     Vec3 up(0.0f, 1.0f, 0.0f);
     if (std::fabs(fwd.x) < 0.001f && std::fabs(fwd.z) < 0.001f)
@@ -509,7 +509,7 @@ void Camera::ShakeCamera(s32 frames) {
 }
 
 
-// Camera::DebugCam (0x80048718) — Mode 0
+// Camera::DebugCam (0x80048718) - Mode 0
 // PSX: reads pad input, adjusts camera Euler angles + position.
 // Angles are 16-bit PSX angle units (65536 = full circle).
 // Position delta is rotated by camera orientation before applying.
@@ -519,7 +519,7 @@ void Camera::DebugCam() {
 
 #if RC_FEATURE_IMPROVED_DEBUG_CAM
     // ------------------------------------------------------------------
-    // PC Improved Debug Camera — WASD + mouse-look (LMB drag)
+    // PC Improved Debug Camera - WASD + mouse-look (LMB drag)
     // Replaces the PSX DebugCam with smooth float-precision controls.
     // Matches the old FreeCamera behaviour that worked well on PC.
     // ------------------------------------------------------------------
@@ -587,7 +587,7 @@ void Camera::DebugCam() {
 
 #else
     // ------------------------------------------------------------------
-    // Original PSX DebugCam (0x80048718) — faithful reversal
+    // Original PSX DebugCam (0x80048718) - faithful reversal
     // Reads pad input, adjusts Euler angles (±511 per frame) and
     // position (±50 per frame), rotated by camera orientation.
     // ------------------------------------------------------------------
@@ -628,7 +628,7 @@ void Camera::DebugCam() {
 }
 
 
-// Camera::FollowPath (0x80048AC0) — Mode 1
+// Camera::FollowPath (0x80048AC0) - Mode 1
 // PSX: 4484 bytes, finds closest camera path nodes, interpolates position
 // along spline path, sets target positions. Requires CameraAnchor + path data.
 // Stubbed until camera path data is loaded from level.
@@ -636,11 +636,11 @@ void Camera::DebugCam() {
 void Camera::FollowPath() {
     MARKFUNCTION(0x80048AC0);
     // TODO: implement camera path follow when CameraAnchor system is reversed
-    // For now, does nothing — camera stays at current position
+    // For now, does nothing - camera stays at current position
 }
 
 
-// Camera::RigidCam (0x8004897C) — Mode 2
+// Camera::RigidCam (0x8004897C) - Mode 2
 // PSX: maintains fixed offset from target Thing. Requires targetThing.
 
 void Camera::RigidCam() {

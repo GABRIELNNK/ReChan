@@ -1,4 +1,4 @@
-// config.h — PC recompilation feature flags
+// config.h - PC recompilation feature flags
 // Toggle non-OG / custom PC features here.
 // The goal is to keep reversed PSX code faithful; any PC-specific
 // convenience features should be gated behind macros in this file.
