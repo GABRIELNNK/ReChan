@@ -10,6 +10,17 @@
 #include <cstdlib>
 #include <algorithm>
 
+// PSX: CharDataLoadCallback creates loaders on stack, calls P3DLoad.
+// PC: we use tP3DFileHandler + tTextureLoader to process TexturePage chunks.
+// The .RR P3D resources (rrIdx = slotIdx*2+3) contain 0xFF04 TexturePage data.
+// Raw PRIM mesh data (rrIdx-1) is stored directly in slot.dataBuffer.
+static void P3DLoadTextures(const u8* data, u32 size) {
+    if (!data || size < 6 || !p3d::inventory) return;
+    tP3DFileHandler handler;
+    handler.AddHandler(new tTextureLoader());
+    handler.LoadFromMemory(data, size, p3d::inventory);
+}
+
 // Global singleton (PSX: gp+796)
 CharacterManager* g_characterManager = nullptr;
 

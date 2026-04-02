@@ -2,11 +2,13 @@
 // Original: C:\CHAN\GAME\SRC\GEN\CAMERA.CPP
 #include "gen/camera.h"
 #include "gen/control.h"
+#include "ai/player.h"
 #include "config.h"
 #include "p3d/p3dmath.h"     // Vec3, Mat4, p3dBuildRotMatrixZYX, etc.
 #include "p3d/input.h"       // PlatformInput
 #include "p3d/context.h"     // p3d::input
 #include "pddi/pddidev.h"    // pddiInput key codes
+#include "gen/time.h"        // g_time (delta time)
 #include <cmath>
 #include <cstdlib>
 
@@ -538,7 +540,7 @@ void Camera::DebugCam() {
     }
 
     const f32 sensitivity = 0.003f;
-    const f32 dt = 1.0f / 60.0f;
+    const f32 dt = g_time ? g_time->GetDeltaTime() : (1.0f / 30.0f);
     f32 speed = 3000.0f;
 
     // Mouse rotation (LMB held)
@@ -635,8 +637,51 @@ void Camera::DebugCam() {
 
 void Camera::FollowPath() {
     MARKFUNCTION(0x80048AC0);
-    // TODO: implement camera path follow when CameraAnchor system is reversed
-    // For now, does nothing - camera stays at current position
+
+    // PC: simple player-follow camera until full spline path system is wired.
+    // Places camera behind and above the player, looking at player center.
+    // Uses direct smooth-follow (not EvalCubic) to avoid drift from the
+    // Hermite interpolator accumulating stale accel state.
+    if (!Player::s_player) return;
+
+    const LVector& ppos = Player::s_player->pos;
+    s32 pOrientY = Player::s_player->orientation.y;
+
+    // Camera offset: behind player in facing direction, raised up
+    f32 rad = (f32)pOrientY * P3D_ANGLE_TO_RAD;
+    constexpr f32 behindDist = 3000.0f;
+    constexpr f32 heightOfs  = 2000.0f;
+
+    // Desired camera position (behind player)
+    s32 goalX = ppos.x - (s32)(std::sin(rad) * behindDist);
+    s32 goalY = ppos.y + (s32)heightOfs;
+    s32 goalZ = ppos.z - (s32)(std::cos(rad) * behindDist);
+
+    // Smooth follow via exponential lerp (per 30 fps tick, ~15% per frame)
+    constexpr f32 followSpeed = 0.15f;
+
+    position.x += (s32)((goalX - position.x) * followSpeed);
+    position.y += (s32)((goalY - position.y) * followSpeed);
+    position.z += (s32)((goalZ - position.z) * followSpeed);
+    curPos = position;
+    prevPosition = position;
+
+    // Look-at target: smoothed toward player center
+    LVector goalTarget = {ppos.x, ppos.y + 400, ppos.z};
+    targetPos.x += (s32)((goalTarget.x - targetPos.x) * followSpeed);
+    targetPos.y += (s32)((goalTarget.y - targetPos.y) * followSpeed);
+    targetPos.z += (s32)((goalTarget.z - targetPos.z) * followSpeed);
+    prevTargetPos = targetPos;
+
+    // Skip EvalCubic in Move() — we handle interpolation here.
+    flags |= 0x01;
+
+    // Build and set view matrix directly
+    Vec3 eye((f32)position.x, (f32)position.y, (f32)position.z);
+    Vec3 tgt((f32)targetPos.x, (f32)targetPos.y, (f32)targetPos.z);
+    Mat4 view = p3dLookAt(eye, tgt, Vec3(0.0f, 1.0f, 0.0f));
+    p3dCamera.SetCameraMatrix(view);
+    directMatrix = true;
 }
 
 

@@ -5,6 +5,10 @@
 #include "gen/database.h"
 #include "p3d/hash.h"
 #include "p3d/p3dmath.h"
+#include "p3d/context.h"
+#include "pddi/pddi.h"
+#include "pddi/pddidev.h"
+#include <vector>
 
 // Global Thing unique ID counter (PSX: gp+3868)
 u16 Thing::s_nextUniqueID = 0;
@@ -77,12 +81,70 @@ void Thing::Think() {
 // Sets model position/orientation from Thing fields, then calls model->Display
 void Thing::Draw() {
     MARKFUNCTION(0x800616EC);
-    // PSX: reads model at +80, sets position at model+64/+68/+72
-    //       sets orientation at model+52/+56/+60
-    //       calls model->Display(0) via vtable
-    // PC: model rendering will be implemented when character models are loaded
-    if (!model) return;
-    // TODO: set model transform from pos/orientation and call Display
+    if (model) {
+        // TODO: set model transform from pos/orientation and call Display
+        return;
+    }
+
+    // PC debug: draw wireframe box at thing position when no model is loaded
+    // Box size: 300 wide, 768 tall (approximate humanoid collision box)
+    f32 hw = 300.0f;  // half-width
+    f32 hh = 768.0f;  // full height
+    f32 hd = 300.0f;  // half-depth
+
+    f32 cx = (f32)pos.x;
+    f32 cy = (f32)pos.y;
+    f32 cz = (f32)pos.z;
+
+    f32 x0 = cx - hw, x1 = cx + hw;
+    f32 y0 = cy,      y1 = cy + hh;
+    f32 z0 = cz - hd, z1 = cz + hd;
+
+    // 12 edges of a box = 24 line vertices, 24 indices
+    struct DV { f32 x, y, z, r, g, b; };
+    DV verts[24];
+    u16 indices[24];
+    u32 vi = 0;
+
+    // Color: yellow for player (type 1), red for others
+    f32 cr = (thingType == AI::TT_PLAYER) ? 1.0f : 1.0f;
+    f32 cg = (thingType == AI::TT_PLAYER) ? 1.0f : 0.3f;
+    f32 cb = (thingType == AI::TT_PLAYER) ? 0.0f : 0.3f;
+
+    // Helper macro to push a line
+    #define PUSHLINE(ax,ay,az,bx,by,bz) \
+        indices[vi] = (u16)vi; verts[vi] = {ax,ay,az,cr,cg,cb}; vi++; \
+        indices[vi] = (u16)vi; verts[vi] = {bx,by,bz,cr,cg,cb}; vi++;
+
+    // Bottom face
+    PUSHLINE(x0,y0,z0, x1,y0,z0);
+    PUSHLINE(x1,y0,z0, x1,y0,z1);
+    PUSHLINE(x1,y0,z1, x0,y0,z1);
+    PUSHLINE(x0,y0,z1, x0,y0,z0);
+    // Top face
+    PUSHLINE(x0,y1,z0, x1,y1,z0);
+    PUSHLINE(x1,y1,z0, x1,y1,z1);
+    PUSHLINE(x1,y1,z1, x0,y1,z1);
+    PUSHLINE(x0,y1,z1, x0,y1,z0);
+    // Verticals
+    PUSHLINE(x0,y0,z0, x0,y1,z0);
+    PUSHLINE(x1,y0,z0, x1,y1,z0);
+    PUSHLINE(x1,y0,z1, x1,y1,z1);
+    PUSHLINE(x0,y0,z1, x0,y1,z1);
+    #undef PUSHLINE
+
+    pddiPrimBufferDesc desc(PDDI_PRIM_LINES,
+                            PDDI_V_POSITION | PDDI_V_COLOUR,
+                            vi, vi);
+    pddiPrimBuffer* buf = p3d::device->NewPrimBuffer(desc);
+    buf->SetVertexData(verts, vi);
+    buf->SetIndices(indices, vi);
+
+    Mat4 identity;
+    p3d::context->SetWorldMatrix(identity);
+    p3d::context->SetVRAMHandle(0);
+    p3d::context->DrawPrimBuffer(buf);
+    buf->Release();
 }
 
 // PSX: Reset__5Thing (THING.CPP:502)

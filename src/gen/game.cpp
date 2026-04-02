@@ -6,6 +6,9 @@
 #include "gen/database.h"
 #include "gen/cammgr.h"
 #include "gen/levelmgr.h"
+#include "gen/time.h"
+#include "snd/sound.h"
+#include "ai/player.h"
 #include "config.h"
 #include "p3d/context.h"
 #include "p3d/input.h"
@@ -88,7 +91,12 @@ void Game::InternalOpen() {
     // PSX creates managers in this order:
     // 1. tCellAlligator (8204) - memory allocator (not needed on PC)
     // 2. oxScreenManager (48) + FontInit - screen/font (TODO)
-    // 3. Time (40) - frame timing (TODO)
+
+    // 3. Time (PSX: 40 bytes)
+    g_time = new Time();
+    g_time->SetName("Time", 0);
+    managerList.AddNodePri(g_time);
+
     // 4. AI (116) - AI master (TODO)
 
     // 5. World (PSX: 160 bytes)
@@ -117,7 +125,10 @@ void Game::InternalOpen() {
     database->SetName("Database", 0);
     managerList.AddNodePri(database);
 
-    // 12. Sound (44) - audio (TODO)
+    // 12. Sound (PSX: 44 bytes)
+    g_sound = new Sound();
+    g_sound->SetName("Sound", 0);
+    managerList.AddNodePri(g_sound);
 
     // 13. CameraManager (PSX: 60 bytes)
     CameraManager* camMgr = new CameraManager();
@@ -149,6 +160,12 @@ void Game::InternalOpen() {
 // PSX: InternalClose__4Game (GAME.CPP:3003)
 void Game::InternalClose() {
     MARKFUNCTION(0x8002A184);
+
+    // Destroy player entity
+    if (Player::s_player) {
+        delete Player::s_player;
+    }
+
     // Close all managers in reverse order
     for (ccMinNode* n = managerList.tail; n; ) {
         ccMinNode* prev = n->prev;
@@ -291,6 +308,25 @@ bool Game::gsFEState(Game*) {
 
 bool Game::gsPrePlayState(Game* game) {
     MARKFUNCTION(0x80029AC0); // gsPrePlayState
+
+    // PSX: gsPrePlayState creates the Player entity and loads character data.
+    // PC: create Player at level center, skip character model loading for now.
+    if (!Player::s_player) {
+        World* world = game->GetWorld();
+        if (world) {
+            const LVector& lo = world->GetLevelMin();
+            const LVector& hi = world->GetLevelMax();
+            LVector spawnPos;
+            spawnPos.x = (lo.x + hi.x) / 2;
+            spawnPos.y = (lo.y + hi.y) / 2;
+            spawnPos.z = (lo.z + hi.z) / 2;
+
+            Player* player = new Player(&spawnPos);
+            player->Reset();
+            RC_LOG("[Game] Player spawned at (%d, %d, %d)", spawnPos.x, spawnPos.y, spawnPos.z);
+        }
+    }
+
     RC_LOG("[Game] PrePlay -> Play");
     game->SetState(GameState::Play);
     return true;
@@ -312,6 +348,11 @@ bool Game::gsPlayState(Game* game) {
         game->controlVal[pad] = (s32)g_inputManager->GetControlVal((u16)pad);
     }
 
+    // Player think/AI (PSX: called from handler pipeline)
+    if (Player::s_player) {
+        Player::s_player->Think();
+    }
+
     // Camera update (before rendering)
     game->gameCamera.Think();
     game->gameCamera.Update();
@@ -326,6 +367,11 @@ bool Game::gsPlayState(Game* game) {
     // This calls BeginFrameHandler, DrawEverythingHandler, EndFrameHandler
     game->ProcessHandlers();
 
+    // Draw entities (PSX: DrawLoop on per-block entity lists)
+    if (Player::s_player) {
+        Player::s_player->Draw();
+    }
+
 #if RC_FEATURE_COLLISION_DEBUG
     if (p3d::input->IsKeyTriggered(pddiInput::KeyF3))
         CollisionDebug::enabled = !CollisionDebug::enabled;
@@ -336,13 +382,21 @@ bool Game::gsPlayState(Game* game) {
     }
 #endif
 
+    // F1: toggle between follow camera and debug camera
+    if (p3d::input->IsKeyTriggered(pddiInput::KeyF1)) {
+        if (game->gameCamera.GetMode() == CAM_MODE_FOLLOW) {
+            game->gameCamera.SetMode(CAM_MODE_DEFAULT);
+            RC_LOG("[Game] Camera: Debug mode (WASD+mouse)");
+        } else {
+            game->gameCamera.SetMode(CAM_MODE_FOLLOW);
+            RC_LOG("[Game] Camera: Follow mode");
+        }
+    }
+
     game->view.EndRender();
 
     // PSX: check if still in Play state after handlers
     if (game->state != GameState::Play) return true;
-
-    // PSX: check for Start button -> pause menu (state 14 = Menu)
-    // TODO: implement pause menu
 
     return true;
 }
@@ -431,7 +485,7 @@ bool Game::gsQueueLevelLoad(Game* game) {
 
         // Reset and configure the PSX camera
         game->gameCamera.Reset();
-        game->gameCamera.SetMode(CAM_MODE_DEFAULT); // DebugCam mode
+        game->gameCamera.SetMode(CAM_MODE_FOLLOW); // Player-follow mode
 
         // Set initial camera position at level center, backed off in Z
         game->gameCamera.SetPosition(cx, cy, cz);
@@ -441,8 +495,8 @@ bool Game::gsQueueLevelLoad(Game* game) {
         cam->SetNearPlane(100.0f);
         cam->SetFarPlane(500000.0f);
 
-        RC_LOG("[Game] Camera positioned at (%d, %d, %d), DebugCam mode active", cx, cy, cz);
-        RC_LOG("[Game] Controls: WASD=move, IJKL=rotate, Enter=Start, N=L3 (up/down)");
+        RC_LOG("[Game] Camera positioned at (%d, %d, %d), Follow mode", cx, cy, cz);
+        RC_LOG("[Game] Controls: WASD=move, K=jump, F1=toggle debug cam");
     }
 
     // Use PSX camera for view

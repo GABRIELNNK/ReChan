@@ -46,6 +46,7 @@ public:
     // Accessors
     tCamera* GetP3DCamera() { return &p3dCamera; }
     const LVector& GetPosition() const { return position; }  // +28
+    CameraMode GetMode() const { return currentMode; }
 
     // Set all position fields at once (for initial placement)
     void SetPosition(s32 x, s32 y, s32 z) {

@@ -1,6 +1,23 @@
 // player.cpp - Player class implementation
 // Reversed from PSX C:\CHAN\GAME\SRC\AI\PLAYER.CPP
 #include "ai/player.h"
+#include "gen/game.h"
+#include "gen/control.h"
+#include "p3d/p3dmath.h"
+#include <cmath>
+
+// Command bit positions (matching PSX Behaviour output → commandBits)
+// PSX _Stand dispatches via ReturnMostSignificant32BitNumber(commandBits):
+//   bit 1 → run, bit 2 → jump, bit 3 → dive roll, etc.
+static constexpr s32 CB_RUN      = (1 << 1);  // movement input present
+static constexpr s32 CB_JUMP     = (1 << 2);  // jump input (Cross / K)
+
+// Movement tuning constants (PSX original values)
+// PSX uses a ramping force accumulator (gp+392) that gradually increases from 0
+// to runSpeed. AddForce accumulates into DynamicThing::force (80% damped per frame).
+static constexpr s32 PLAYER_RUN_FORCE  = 2500;  // per-frame AddForce magnitude
+static constexpr s32 PLAYER_JUMP_FORCE = 2000;  // upward velocity on jump
+static constexpr s32 PLAYER_AIR_FORCE  = 800;   // air-control force
 
 Player* Player::s_player = nullptr;
 
@@ -38,6 +55,9 @@ Player::Player(const LVector* initialPos)
     // PSX: gp+3432 = this (global player pointer)
     s_player = this;
 
+    // Store spawn ground level for simple floor clamping
+    jumpReturnHeight = homePos.y;
+
     SetActionState(AS_INACTIVE_IDLE, 0);
 }
 
@@ -55,8 +75,17 @@ void Player::Think() {
     // PSX: CHumanoidSound think, encounter check, behaviour process,
     // ProcessAction, Move, combo tracking, input read
     PlayerSingleEncounterCheak();
+
+    // PSX: Behaviour::Process() reads controller → commandBits + faceAngle
+    // PC: read input directly since Behaviour system not yet reversed
+    ReadPlayerInput();
+
     ProcessAction();
     Move();
+
+    // PSX: UpdatePosition is called through handler system for the player.
+    // PC: call explicitly to commit homePos → pos each frame.
+    UpdatePosition();
 
     // Combo tracking
     if (hitCombo < 3) {
@@ -101,7 +130,17 @@ void Player::Reset() {
 // PSX: Move__6Player (PLAYER.CPP:1408)
 void Player::Move() {
     MARKFUNCTION(0x80030100);
+
     Humanoid::Move();
+
+    // PC: simple ground plane collision until collision system is reversed.
+    // Clamp homePos.y to ground level when not airborne.
+    if (stateDispatch != SD_JUMP && stateDispatch != SD_FALL) {
+        if (homePos.y < jumpReturnHeight) {
+            homePos.y = jumpReturnHeight;
+            velocity.y = 0;
+        }
+    }
 }
 
 // PSX: CreateModel__6PlayerPCc (PLAYER.CPP:1111)
@@ -197,6 +236,31 @@ void Player::PlayerSingleEncounterCheak() {
     MARKFUNCTION(0x80034210);
 }
 
+// PC: reads InputManager state and sets commandBits + faceAngle.
+// On PSX this is done by the player's Behaviour::Process() object.
+void Player::ReadPlayerInput() {
+    commandBits = 0;
+
+    u32 buttons = (u32)g_game->GetControlVal(0);
+
+    // D-pad → movement direction and faceAngle
+    s32 dx = 0, dz = 0;
+    if (buttons & PsxPad::Up)    dz += 1;
+    if (buttons & PsxPad::Down)  dz -= 1;
+    if (buttons & PsxPad::Right) dx += 1;
+    if (buttons & PsxPad::Left)  dx -= 1;
+
+    if (dx != 0 || dz != 0) {
+        commandBits |= CB_RUN;
+        // atan2(dx, dz) → PSX binary angle (0=+Z, 0x4000=+X)
+        f32 rad = std::atan2((f32)dx, (f32)dz);
+        faceAngle = ((s32)(rad * P3D_RAD_TO_ANGLE)) & 0xFFFF;
+    }
+
+    // Cross button → jump
+    if (buttons & PsxPad::Cross) commandBits |= CB_JUMP;
+}
+
 void Player::LoadPlayerTauntResponse(Humanoid* /*target*/) {
     MARKFUNCTION(0x80034290);
 }
@@ -207,13 +271,118 @@ void Player::PlayPlayerTauntResponse() {
 
 // Action state handler stubs
 void Player::_InactiveIdle() { MARKFUNCTION(0x8003123C); }
-void Player::_Stand() { MARKFUNCTION(0x80031350); }
+
+// PSX: _Stand__6Player (PLAYER.CPP:2134) — 1832 bytes, 117 blocks
+// Checks commandBits for movement/jump/combat transitions.
+// Full PSX version has combat combo dispatching; PC implements core movement.
+void Player::_Stand() {
+    MARKFUNCTION(0x80031350);
+    stateTimer++;
+
+    // Movement input → run
+    if (commandBits & CB_RUN) {
+        SetActionState(AS_RUN, 0);
+        return;
+    }
+
+    // Jump input → jump
+    if (commandBits & CB_JUMP) {
+        SetActionState(AS_JUMP, 0);
+        return;
+    }
+}
+
 void Player::_Flip() { MARKFUNCTION(0x80031A78); }
-void Player::_Jump() { MARKFUNCTION(0x80031C68); }
-void Player::_Fall() { MARKFUNCTION(0x80032444); }
+
+// PSX: _Jump__6Player (PLAYER.CPP:2539) — sets upward velocity, air control
+void Player::_Jump() {
+    MARKFUNCTION(0x80031C68);
+
+    // First frame: set upward velocity
+    if (stateTimer == 0) {
+        DoJump(PLAYER_JUMP_FORCE);
+    }
+    stateTimer++;
+
+    // Air control: apply reduced force in input direction
+    if (commandBits & CB_RUN) {
+        FaceAngleY(faceAngle, 1);
+        f32 rad = (f32)orientation.y * P3D_ANGLE_TO_RAD;
+        SVector dir;
+        dir.x = (s16)(std::sin(rad) * 4096.0f);
+        dir.y = 0;
+        dir.z = (s16)(std::cos(rad) * 4096.0f);
+        dir.pad = 0;
+        AddForce(PLAYER_AIR_FORCE, &dir);
+    }
+
+    // Transition to fall when velocity turns negative
+    if (stateTimer > 1 && velocity.y <= 0) {
+        stateDispatch = SD_FALL;
+    }
+}
+
+// PSX: _Fall__6Player (PLAYER.CPP:3173) — gravity fall, landing check
+void Player::_Fall() {
+    MARKFUNCTION(0x80032444);
+    stateTimer++;
+
+    // Air control
+    if (commandBits & CB_RUN) {
+        FaceAngleY(faceAngle, 1);
+        f32 rad = (f32)orientation.y * P3D_ANGLE_TO_RAD;
+        SVector dir;
+        dir.x = (s16)(std::sin(rad) * 4096.0f);
+        dir.y = 0;
+        dir.z = (s16)(std::cos(rad) * 4096.0f);
+        dir.pad = 0;
+        AddForce(PLAYER_AIR_FORCE, &dir);
+    }
+
+    // Check for landing: homePos.y at or below ground level
+    if (homePos.y <= jumpReturnHeight) {
+        homePos.y = jumpReturnHeight;
+        Land();
+        SetActionState(AS_STAND, 0);
+    }
+}
+
 void Player::_HardFall() { MARKFUNCTION(0x800324E8); }
 void Player::_HardLand() { MARKFUNCTION(0x80032560); }
-void Player::_Run() { MARKFUNCTION(0x800325CC); }
+
+// PSX: _Run__6Player (PLAYER.CPP:3004) — 1148 bytes, 73 blocks
+// Applies locomotion force in facing direction, checks transitions.
+void Player::_Run() {
+    MARKFUNCTION(0x800325CC);
+    stateTimer++;
+
+    // Jump input takes priority
+    if (commandBits & CB_JUMP) {
+        SetActionState(AS_JUMP, 0);
+        return;
+    }
+
+    // No movement input → stop
+    if (!(commandBits & CB_RUN)) {
+        SetActionState(AS_STAND, 0);
+        return;
+    }
+
+    // Turn toward input direction (gradual, limited by turnRate)
+    FaceAngleY(faceAngle, 1);
+
+    // Build direction vector from current orientation angle
+    // PSX binary angles: 0=+Z, 0x4000=+X, 0x8000=-Z, 0xC000=-X
+    f32 rad = (f32)orientation.y * P3D_ANGLE_TO_RAD;
+    SVector dir;
+    dir.x = (s16)(std::sin(rad) * 4096.0f);
+    dir.y = 0;
+    dir.z = (s16)(std::cos(rad) * 4096.0f);
+    dir.pad = 0;
+
+    // Apply locomotion force (PSX: AddForce with gp+392 accumulated magnitude)
+    AddForce(PLAYER_RUN_FORCE, &dir);
+}
 void Player::_Push() { MARKFUNCTION(0x80032A48); }
 void Player::_PushObject() { MARKFUNCTION(0x80032B80); }
 void Player::_Teetering() { MARKFUNCTION(0x80032C70); }

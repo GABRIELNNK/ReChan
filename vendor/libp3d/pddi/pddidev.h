@@ -24,6 +24,7 @@ namespace pddiInput {
     constexpr int KeyLeftShift = 340;
     constexpr int KeyPageUp    = 266;
     constexpr int KeyPageDown  = 267;
+    constexpr int KeyF1        = 290;
     constexpr int KeyF3        = 292;
 
     constexpr int MouseLeft   = 0;

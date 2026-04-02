@@ -165,6 +165,10 @@ public:
     // PSX: PlayerSingleEncounterCheak__6Player (PLAYER.CPP:4660)
     void PlayerSingleEncounterCheak();
 
+    // PC: reads InputManager → sets commandBits + faceAngle
+    // (PSX: done via Behaviour::Process in the player's Behaviour object)
+    void ReadPlayerInput();
+
     // PSX: LoadPlayerTauntResponse__6PlayerP8Humanoid (PLAYER.CPP:4712)
     void LoadPlayerTauntResponse(Humanoid* target);
 
