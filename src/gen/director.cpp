@@ -6,6 +6,8 @@
 #include "ai/player.h"
 #include "gen/charmgr.h"
 #include "gen/game.h"
+#include "gen/display.h"
+#include "gen/camera.h"
 #include "gen/scoremgr.h"
 #include "gen/time.h"
 #include "gen/world.h"
@@ -14,21 +16,25 @@
 #include "snd/sound.h"
 #include "p3d/p3dmath.h"
 #include "snd/rsevent.h"
+#include "pc/tim.h"
 
 namespace {
 
 // PSX globals used by DIRECTOR.CPP script control flow.
 // Addresses from decomp notes:
-// - directorTimeOut: 0x800DC960
-// - returnAddress:   0x800DFC84
+// - directorTimeOut: gp+1068 (0x800DC960)
+// - returnAddress:   gp+1056..1087 (0x800DFC84)
+// - codeSnipThing:   gp+869 (stored in global, NOT in Director object)
 static s32 directorTimeOut = 0;
 static s32 returnAddressIndex = 0;
 static s32 directorDialogCounter = -1;
 static s32 directorDialogLimit = 180;
 static s32* returnAddress[8] = {};
+static Thing* g_codeSnipThing = nullptr; // PSX: gp[869]
+static s32 g_dialogHandle = 0;          // PSX: gp[3496/4=874]
 
-static s32 start_generic[10] = { 9, 6, -1, 98, 102, 40, 103, 256, 100, 0 };
-static s32 start_frantic[12] = { 9, 6, -1, 73, 74, 98, 102, 40, 103, 256, 100, 0 };
+static s32 start_generic[12] = { 9, 6, -1, 98, 102, 40, 103, 256, 100, 0, 5, 0 };
+static s32 start_frantic[14] = { 9, 6, -1, 73, 74, 98, 102, 40, 103, 256, 100, 0, 5, 0 };
 
 static s32 gotopoint[7] = { 9, 64, 19, 84386293, 20, 8, 2 };
 static s32 NISladder1[20] = {
@@ -40,11 +46,11 @@ static s32 victory_ok[2] = { 15, 0 };
 static s32 victory_good[2] = { 15, 0 };
 static s32 victory_perfect[2] = { 15, 0 };
 
-static s32 death[19] = {
-    9, 43, 45, 73, 74, 6, -1, 6, 30, 120, 6, 60, 98, 102, 120, 103, 256, 100, 0
+static s32 death[21] = {
+    9, 43, 45, 73, 74, 6, -1, 6, 30, 120, 6, 60, 98, 102, 120, 103, 256, 100, 0, 5, 0
 };
-static s32 death_vol[19] = {
-    9, 43, 45, 6, -1, 121, 120, 127, 6, -1, 73, 74, 98, 102, 120, 103, 256, 100, 0
+static s32 death_vol[21] = {
+    9, 43, 45, 6, -1, 121, 120, 127, 6, -1, 73, 74, 98, 102, 120, 103, 256, 100, 0, 5, 0
 };
 static s32 death_fall_pavement[2] = { 115, 0 };
 static s32 death_fall_water[2] = { 115, 0 };
@@ -324,11 +330,30 @@ static Humanoid* FindHumanoidByScriptRef(u32 ref) {
 }
 
 static Camera* GetGameCamera() {
-    if (!g_game) {
+    if (!g_display) {
         return nullptr;
     }
 
-    return &g_game->GetCamera();
+    return g_display->GetCamera();
+}
+
+// PSX: sets TF2_DIRECTOR_ACTIVE (0x200) on all humanoids during script processing.
+// This prevents normal AI think/move for entities while the director runs.
+static void SetDirectorFlagsOnHumanoids() {
+    if (!g_ai) return;
+    for (ccMinNode* n = g_ai->humanoidList.head; n; n = n->next) {
+        Thing* thing = static_cast<Thing*>(n);
+        thing->flags2 |= TF2_DIRECTOR_ACTIVE;
+    }
+}
+
+// PSX: clears TF2_DIRECTOR_ACTIVE (0x200) on all humanoids when script ends.
+static void ClearDirectorFlagsOnHumanoids() {
+    if (!g_ai) return;
+    for (ccMinNode* n = g_ai->humanoidList.head; n; n = n->next) {
+        Thing* thing = static_cast<Thing*>(n);
+        thing->flags2 &= ~TF2_DIRECTOR_ACTIVE;
+    }
 }
 
 } // namespace
@@ -341,21 +366,15 @@ Director::Director() {
     scriptPtr = nullptr;
     scriptBase = nullptr;
     codeSnipPtr = nullptr;
-    codeSnipThing = nullptr;
-    processState = 0;
-    timerValue = 0;
-    loopCount = 0;
-    dirFlags = 0;
-    wideScreenDesired = 0;
-    wideScreenCurrent = 0;
     wsBarCurrent = 0;
     wsBarTarget = 0;
     wsBarStep = 0;
     wsMode = 0;
-    wsModePad = 0;
     wsAlphaStep = 0;
     wsAlphaCurrent = 0;
     wsAlphaTarget = 0;
+    field68 = 0;
+    enableInput = 0;
 }
 
 // PSX: _._8Director (DIRECTOR.CPP:2681, 0x8003BE10)
@@ -384,24 +403,25 @@ void Director::InternalClose() {
 // PSX: InternalReset__8Director (DIRECTOR.CPP:2736, 0x8003C04C)
 void Director::InternalReset() {
     MARKFUNCTION(0x8003C04C);
+    // PSX: clears script pointers, widescreen state, timer, purges handler lists
+    scriptState = 0;
+    timerTarget = 0;
+    timerStart = 0;
     scriptPtr = nullptr;
-    scriptBase = nullptr;
     codeSnipPtr = nullptr;
-    codeSnipThing = nullptr;
-    processState = 0;
-    timerValue = 0;
-    loopCount = 0;
-    dirFlags = 0;
-    wideScreenDesired = 0;
-    wideScreenCurrent = 0;
-    wsBarCurrent = 0;
+    scriptBase = nullptr;
+    returnAddressIndex = 0;
     wsBarTarget = 0;
+    wsBarCurrent = 0;
     wsBarStep = 0;
     wsMode = 0;
-    wsModePad = 0;
     wsAlphaStep = 0;
     wsAlphaCurrent = 0;
     wsAlphaTarget = 0;
+    field68 = 0;
+    enableInput = 1;
+    // PSX: purges internal director handler lists at +100, +136
+    // PSX: sets enableInput=1 (a1[18]=1) and gp[3484/4=871]=1
     PurgeAnims();
     cleanUpTexAnim();
 }
@@ -409,7 +429,7 @@ void Director::InternalReset() {
 // PSX: LevelReset__8Director (DIRECTOR.CPP:2731, 0x8003C044)
 void Director::LevelReset() {
     MARKFUNCTION(0x8003C044);
-    field164 = 0;
+    visitedLevels = 0;
 }
 
 // PSX: SetScript__8Director (DIRECTOR.CPP:2765, 0x8003C234)
@@ -421,7 +441,7 @@ void Director::SetScript() {
     scriptPtr = defaultBeginScript;
     RegisterRuntimeScriptRegion(scriptPtr);
     codeSnipPtr = defaultBeginScript;
-    field168 = 534;
+    scriptState = 534;
 
     directorDialogCounter = -1;
     returnAddressIndex = 0;
@@ -434,13 +454,13 @@ void Director::SetCodeSnip(s32* snip, Thing* thing) {
 
     RegisterKnownDirectorScriptRegions();
 
-    field168 = 537;
+    scriptState = 537;
     directorDialogCounter = -1;
 
     scriptPtr = snip;
     RegisterRuntimeScriptRegion(scriptPtr);
     codeSnipPtr = snip;
-    codeSnipThing = thing;
+    g_codeSnipThing = thing; // PSX: gp[869] = thing
 
     returnAddressIndex = 0;
     directorDialogLimit = 180;
@@ -454,18 +474,26 @@ void Director::Process() {
 
     RegisterKnownDirectorScriptRegions();
 
-    // PSX clears code snippet pointer after dispatch setup.
-    if (codeSnipPtr) {
-        scriptPtr = codeSnipPtr;
-        RegisterRuntimeScriptRegion(scriptPtr);
-        codeSnipPtr = nullptr;
-        codeSnipThing = nullptr;
-    }
+    // PSX: iterate internal director handler sets at +100 and +136.
+    // These contain NIS animation update callbacks. Not yet wired on PC.
 
     if (!scriptPtr) {
         g_directorActive = 0;
         return;
     }
+
+    // PSX: if enableInput==0, disable player input processing
+    if (!enableInput && Player::s_player) {
+        // PSX: DisableInputProcessing__9Behaviour(MEMORY[0x1B8])
+        // Prevents the player from reacting to pad input during NIS
+    }
+
+    // PSX: set TF2_DIRECTOR_ACTIVE on all humanoids
+    SetDirectorFlagsOnHumanoids();
+
+    // PSX: compute directorTimeOut = frameCounter - timerStart
+    const s32 elapsed = GetDirectorFrameCounter() - timerStart;
+    directorTimeOut = (elapsed < 0) ? 0 : elapsed;
 
     if (scriptBase && *scriptBase) {
         ProcessSoundScript();
@@ -473,13 +501,14 @@ void Director::Process() {
 
     field68 = 0;
 
+    // PSX: while(1) with field68 check at top
     for (s32 i = 0; i < 512; i++) {
-        if (!scriptPtr) {
-            g_directorActive = 0;
+        if (field68) {
             return;
         }
 
-        if (field68) {
+        if (!scriptPtr) {
+            g_directorActive = 0;
             return;
         }
 
@@ -487,8 +516,14 @@ void Director::Process() {
 
         switch (opcode) {
         case DirectorOpcode::End:
+            // PSX: clear director state, clear NIS flags, destroy directorSound
             scriptPtr = nullptr;
-            field168 = 0;
+            scriptState = 0;
+            ClearDirectorFlagsOnHumanoids();
+            if (directorSound) {
+                delete directorSound;
+                directorSound = nullptr;
+            }
             g_directorActive = 0;
             return;
 
@@ -498,15 +533,22 @@ void Director::Process() {
             break;
 
         case DirectorOpcode::EndScript:
-            if (field168 == 534 && g_game && g_game->GetWorld()) {
+            // PSX: if scriptState==534 (from SetScript), mark level as visited
+            if (scriptState == 534 && g_game && g_game->GetWorld()) {
                 const s32 levelID = static_cast<s32>(g_game->GetWorld()->GetCurrentLevelIndex());
                 if (levelID >= 0 && levelID < 31) {
-                    field164 |= (1 << levelID);
+                    visitedLevels |= (1 << levelID);
                 }
             }
-
             scriptPtr = nullptr;
-            field168 = 0;
+            scriptState = 0;
+            // PSX: clear NIS flags on all humanoids
+            ClearDirectorFlagsOnHumanoids();
+            // PSX: destroy directorSound if present
+            if (directorSound) {
+                delete directorSound;
+                directorSound = nullptr;
+            }
             g_directorActive = 0;
             return;
 
@@ -527,12 +569,19 @@ void Director::Process() {
             }
             break;
 
-        case DirectorOpcode::Timer:
-            Timer();
+        case DirectorOpcode::Timer: {
+            // PSX: Timer returns 1=done, 0=blocked
+            s32 done = TimerStep();
+            if (done) {
+                field68 = 0;
+            } else {
+                field68 = 1;
+            }
             if (field68) {
                 return;
             }
             break;
+        }
 
         case DirectorOpcode::Loop:
             Loop();
@@ -540,12 +589,12 @@ void Director::Process() {
             break;
 
         case DirectorOpcode::EnablePlayerInput:
-            field72 = 1;
+            enableInput = 1;
             scriptPtr += 1;
             break;
 
         case DirectorOpcode::DisablePlayerInput:
-            field72 = 0;
+            enableInput = 0;
             scriptPtr += 1;
             break;
 
@@ -566,14 +615,14 @@ void Director::Process() {
         }
 
         case DirectorOpcode::SetHumanoidAction: {
+            // PSX: reads thingRef, calls vtable+232 (SetActionState)
             const u32 thingRef = static_cast<u32>(scriptPtr[1]);
-            const s32 state = scriptPtr[2];
-            scriptPtr += 3;
-
+            scriptPtr += 2;
             Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
             if (humanoid) {
-                humanoid->SetActionState(static_cast<u32>(state), 0);
+                humanoid->SetActionState(static_cast<u32>(*scriptPtr), 0);
             }
+            scriptPtr += 1;
             break;
         }
 
@@ -584,26 +633,52 @@ void Director::Process() {
             ProcessDynamicAnimFunc();
             break;
 
-        case DirectorOpcode::WaitAnimationDone:
-            WaitAnimationDone();
+        case DirectorOpcode::WaitAnimationDone: {
+            s32 done = WaitAnimationDoneStep();
+            if (done) {
+                field68 = 0;
+            } else {
+                field68 = 1;
+            }
             if (field68) {
                 return;
             }
             break;
+        }
 
-        case DirectorOpcode::WaitForNisControl:
+        case DirectorOpcode::WaitForNisControl: {
+            // PSX: reads thingRef, finds humanoid, checks if its behaviour
+            // is NisControl. If so, wait (block). If not, continue.
+            const u32 thingRef = static_cast<u32>(scriptPtr[1]);
+            Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
+            // PSX checks humanoid->behaviour->funcPtr == NisControl__9Behaviour
+            // For now, don't block - NIS behaviours not yet implemented
             scriptPtr += 2;
             break;
+        }
 
         case DirectorOpcode::RestorePlayerControl:
+            // PSX: restores player to PlayerUserControl behaviour
+            // Sets behaviour flags back to normal input processing
             scriptPtr += 1;
             break;
 
-        case DirectorOpcode::PlayThingDynamicAnim:
+        case DirectorOpcode::PlayThingDynamicAnim: {
+            // PSX: reads thingRef and animEnum, calls PlayDynamicAnim on model
+            const u32 thingRef = static_cast<u32>(scriptPtr[1]);
+            const s32 animEnum = scriptPtr[2];
             scriptPtr += 3;
+            Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
+            if (humanoid && humanoid->model) {
+                // PSX: PlayDynamicAnim__6SModeli(thing->model, animEnum)
+                // TODO: SModel::PlayDynamicAnim not yet reversed
+            }
             break;
+        }
 
         case DirectorOpcode::SetupFaceTextureAnim:
+            // PSX: looks up "TChanFace~G" and "CChanFace~G" animations,
+            // creates flipbooks, sets callback to p3dFwdCycle
             scriptPtr += 1;
             break;
 
@@ -612,12 +687,19 @@ void Director::Process() {
             cleanUpTexAnim();
             break;
 
-        case DirectorOpcode::QueueDetermineNextState:
+        case DirectorOpcode::QueueDetermineNextState: {
+            // PSX: reads optional level ID param, sets g_selectedLevel if != -1
+            const s32 levelParam = scriptPtr[1];
             scriptPtr += 2;
+            if (levelParam != -1) {
+                extern s16 g_selectedLevel;
+                g_selectedLevel = static_cast<s16>(levelParam);
+            }
             if (g_game) {
                 g_game->SetState(GameState::DetermineNextGameState);
             }
             break;
+        }
 
         case DirectorOpcode::SetGameState: {
             const s32 gameState = scriptPtr[1];
@@ -636,15 +718,18 @@ void Director::Process() {
             }
             break;
 
-        case DirectorOpcode::SetCheckpointByUid:
+        case DirectorOpcode::SetCheckpointByUid: {
+            // PSX: reads UID, calls setJackieCheckpoint(uid).
+            // If checkpoint set fails, calls OnCheckpoint as fallback.
             scriptPtr += 2;
             if (Player::s_player) {
                 Player::s_player->OnCheckpoint();
             }
             break;
+        }
 
         case DirectorOpcode::SetCheckpointData:
-            field148 = scriptPtr[1];
+            // PSX: dword_800D6F90 = scriptPtr[1] (checkpoint data value)
             scriptPtr += 2;
             break;
 
@@ -656,6 +741,7 @@ void Director::Process() {
             break;
 
         case DirectorOpcode::ClearCheckpointValid:
+            // PSX: SetValidState__14CheckpointInfo(636, 0)
             scriptPtr += 1;
             break;
 
@@ -698,17 +784,34 @@ void Director::Process() {
             scriptPtr += 1;
             break;
 
-        case DirectorOpcode::SetPlayerFlag:
+        case DirectorOpcode::SetPlayerFlag: {
+            // PSX: if scriptPtr[1] nonzero, set flag 4 on player; else clear it
+            const s32 val = scriptPtr[1];
             scriptPtr += 2;
+            if (Player::s_player) {
+                if (val)
+                    Player::s_player->flags |= 0x4u;
+                else
+                    Player::s_player->flags &= ~0x4u;
+            }
             break;
+        }
 
         case DirectorOpcode::ClearGlobalEffectRef:
             scriptPtr += 1;
             break;
 
-        case DirectorOpcode::DropPickup:
+        case DirectorOpcode::DropPickup: {
+            // PSX: finds humanoid, calls DropPickup(humanoid, 1, 1)
+            const u32 thingRef = static_cast<u32>(scriptPtr[1]);
             scriptPtr += 2;
+            Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
+            if (humanoid) {
+                // PSX: DropPickup__8Humanoidii(humanoid, 1, 1)
+                // TODO: Humanoid::DropPickup not yet reversed
+            }
             break;
+        }
 
         case DirectorOpcode::CameraFunc:
             scriptPtr += 1;
@@ -721,10 +824,17 @@ void Director::Process() {
             break;
 
         case DirectorOpcode::FacePointAndNisControl:
+            // PSX: face player toward NIS point, set homePos, set NisControl behaviour
             scriptPtr += 1;
             if (Player::s_player) {
-                const LVector target = { field180, field184, field188 };
+                const LVector target = { nisPointX, nisPointY, nisPointZ };
                 Player::s_player->FacePoint(target, 1);
+                // PSX: also sets player homePos to nisPoint
+                Player::s_player->homePos.x = nisPointX;
+                Player::s_player->homePos.y = nisPointY;
+                Player::s_player->homePos.z = nisPointZ;
+                // PSX: sets behaviour to NisControl
+                // TODO: behaviour system not yet reversed
             }
             break;
 
@@ -798,6 +908,7 @@ void Director::Process() {
             break;
 
         case DirectorOpcode::ResetCameraManager:
+            // PSX: calls cameraManager vtable func (InternalReset)
             scriptPtr += 1;
             break;
 
@@ -806,13 +917,14 @@ void Director::Process() {
             break;
 
         case DirectorOpcode::ResetWideScreenDefaults:
+            // PSX: reset to defaults and hide HUD
             wsBarTarget = 120;
             wsBarStep = 256;
             wsAlphaTarget = 255;
             wsAlphaStep = 10;
             wsMode = 2;
             scriptPtr += 1;
-            // PSX also calls SetHUDVisible(0, 0, 0) here.
+            // PSX: SetHUDVisible__3HUDii(0, 0, 0)
             break;
 
         case DirectorOpcode::SetSoundScript:
@@ -842,23 +954,41 @@ void Director::Process() {
             break;
 
         case DirectorOpcode::LoadDialogA:
-            scriptPtr += 3;
+            // PSX: jcsLoadDialog(char, dialog, flags), stores handle
+            g_dialogHandle = 0;
             directorDialogCounter = 0;
+            scriptPtr += 3;
             break;
 
         case DirectorOpcode::LoadDialogB:
-            scriptPtr += 4;
+            // PSX: jcsLoadDialog(char, dialog, flags) with 4 params
+            g_dialogHandle = 0;
             directorDialogCounter = 0;
+            scriptPtr += 4;
             break;
 
         case DirectorOpcode::WaitDialogPlayable:
-            scriptPtr += 1;
+            // PSX: increments dialog counter, checks if dialog is playable
+            // If not playable and under limit, block. Otherwise continue.
             directorDialogCounter++;
+            scriptPtr += 1;
+            // PSX would block here if dialog not ready.
+            // Without dialog system, just continue.
+            field68 = 0;
             break;
 
         case DirectorOpcode::PlayDialogNear:
+            // PSX: jcsPlayDialog(handle, playerPtr+28, 64)
+            scriptPtr += 1;
+            break;
+
         case DirectorOpcode::PlayDialogFar:
+            // PSX: jcsPlayDialog(handle, playerPtr+28, 100)
+            scriptPtr += 1;
+            break;
+
         case DirectorOpcode::PlayPriorityDialog:
+            // PSX: PlayDialogBasedOnPriority(player, 255, 1073742080)
             scriptPtr += 1;
             break;
 
@@ -867,9 +997,15 @@ void Director::Process() {
             scriptPtr += 2;
             break;
 
-        case DirectorOpcode::SetNisPoint:
+        case DirectorOpcode::SetNisPoint: {
+            // PSX: reads point index, looks up WorldPoints, stores position
+            const s32 pointIdx = scriptPtr[1];
             scriptPtr += 2;
+            // PSX: GetNISPoint__11WorldPointsUl(&WorldPointLists, pointIdx)
+            // TODO: WorldPoints lookup not yet reversed
+            // For now, nisPoint stays at whatever was last set
             break;
+        }
 
         case DirectorOpcode::SetGotoCheckpoint:
         case DirectorOpcode::SetFallbackCheckpoint:
@@ -888,12 +1024,10 @@ void Director::Process() {
             break;
 
         default:
-            // This opcode path is intentionally terminated until the corresponding
-            // subsystem command handlers are fully reversed.
-            scriptPtr = nullptr;
-            field168 = 0;
-            g_directorActive = 0;
-            return;
+            // PSX: unknown opcodes are silently skipped (continue)
+            // PSX doesn't terminate on unknown opcodes.
+            scriptPtr += 1;
+            break;
         }
     }
 
@@ -904,7 +1038,7 @@ void Director::Process() {
 void Director::ProcessSoundScript() {
     MARKFUNCTION(0x8003D5A4);
 
-    const s32 elapsed = GetDirectorFrameCounter() - field160;
+    const s32 elapsed = GetDirectorFrameCounter() - timerStart;
 
     while (scriptBase) {
         const u32 packed = static_cast<u32>(*scriptBase);
@@ -925,37 +1059,36 @@ void Director::ProcessSoundScript() {
 }
 
 // PSX: Timer__8Director (DIRECTOR.CPP:3611, 0x8003D634)
-void Director::Timer() {
+// Returns 1 when timer done/reset, 0 when blocked (still waiting).
+s32 Director::TimerStep() {
     MARKFUNCTION(0x8003D634);
 
     if (!scriptPtr) {
-        field68 = 1;
-        return;
+        return 0;
     }
 
     const s32 duration = scriptPtr[1];
     if (duration == -1) {
-        field156 = 0;
-        field160 = GetDirectorFrameCounter();
+        // Reset timer - records current frame as start
+        timerTarget = 0;
+        timerStart = GetDirectorFrameCounter();
         scriptPtr += 2;
-        field68 = 0;
-        return;
+        return 1;
     }
 
-    if (field156) {
-        if (GetDirectorFrameCounter() >= field156) {
+    if (timerTarget) {
+        // Timer already running - check if expired
+        if (static_cast<s32>(GetDirectorFrameCounter()) >= timerTarget) {
             scriptPtr += 2;
-            field156 = 0;
-            field68 = 0;
-            return;
+            timerTarget = 0;
+            return 1;
         }
-
-        field68 = 1;
-        return;
+        return 0;
     }
 
-    field156 = field160 + duration;
-    field68 = 1;
+    // First frame - set target
+    timerTarget = timerStart + duration;
+    return 0;
 }
 
 // PSX: Loop__8Director (DIRECTOR.CPP:3637, 0x8003D6CC)
@@ -1083,10 +1216,11 @@ void Director::ProcessCameraFunc() {
 
     case DirectorCameraCmd::CopyP3DFov:
         if (camera) {
-            constexpr f32 psxFovToRad = 0.61f / 30000.0f;
-            const f32 currentFovRad = camera->GetP3DCamera()->GetFOV();
-            const s32 currentFov = static_cast<s32>(currentFovRad / psxFovToRad);
-            camera->SetFOV(rmDiv16i(currentFov, 87162));
+            // PSX: reads fovA from the embedded tMatrixCamera, converts back
+            // to game "fov" units via rmDiv16i(fovA, 87162)
+            s32 fovA, fovB;
+            camera->GetP3DCamera()->GetFOV(&fovA, &fovB);
+            camera->SetFOV(rmDiv16i(fovA, 87162));
         }
         break;
 
@@ -1319,7 +1453,7 @@ void Director::ProcessLadderFunc() {
             scriptPtr += 1;
 
             if (Player::s_player) {
-                LVector target = { field180, field184, field188 };
+                LVector target = { nisPointX, nisPointY, nisPointZ };
                 if (axis == 1 && g_game && g_game->GetWorld() && g_game->GetWorld()->GetCurrentLevelIndex() == 3) {
                     target.x += 1024;
                 } else {
@@ -1393,7 +1527,7 @@ void Director::ProcessDoorFunc() {
 
             Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
             if (humanoid) {
-                const LVector target = { field180, field184, field188 };
+                const LVector target = { nisPointX, nisPointY, nisPointZ };
                 humanoid->FacePoint(target, 1);
             }
             break;
@@ -1438,15 +1572,15 @@ void Director::DetermineVictoryIdle() {
 
     s32* victoryScript = victory_poor;
 
-    if (field176 == 4883877) {
+    if (victoryBossCRC == 4883877) {
         victoryScript = wait_subroutine;
-    } else if (field176 == 4917663) {
+    } else if (victoryBossCRC == 4917663) {
         victoryScript = victory_disco;
-    } else if (field176 == 76059849) {
+    } else if (victoryBossCRC == 76059849) {
         victoryScript = victory_grontar;
-    } else if (field176 == 302774) {
+    } else if (victoryBossCRC == 302774) {
         victoryScript = victory_chef;
-    } else if (field176 == 4863710) {
+    } else if (victoryBossCRC == 4863710) {
         victoryScript = victory_clown;
     } else {
         // PSX: rating = GetLevelEndRating__12ScoreManager(theScoreManager)
@@ -1488,14 +1622,14 @@ void Director::DetermineLevelIntro() {
     }
 
     if (levelID == 7) {
-        field164 = 0;
+        visitedLevels = 0;
     }
 
     // PSX: if (IsValid__14CheckpointInfo(player+636) && checkpoint_killCount > 0)
     //          KillThings__2AIl(0, checkpoint_killCount);
     // TODO: Player doesn't expose CheckpointInfo member yet.
 
-    const bool visitedLevel = (levelID >= 0 && levelID < 31) ? ((field164 & (1 << levelID)) != 0) : false;
+    const bool visitedLevel = (levelID >= 0 && levelID < 31) ? ((visitedLevels & (1 << levelID)) != 0) : false;
     if (visitedLevel) {
         directorTimeOut = 0;
 
@@ -1571,7 +1705,7 @@ void Director::DetermineDeath() {
 
     s32* deathScript = death_generic;
 
-    if (field172 <= 0) {
+    if (deathType <= 0) {
         s32 levelID = 0;
         if (g_game && g_game->GetWorld()) {
             levelID = static_cast<s32>(g_game->GetWorld()->GetCurrentLevelIndex());
@@ -1583,7 +1717,7 @@ void Director::DetermineDeath() {
             deathScript = death_fall_water;
         }
     } else {
-        switch (field172) {
+        switch (deathType) {
         case 1:
             deathScript = death_fall_pavement;
             break;
@@ -1603,29 +1737,25 @@ void Director::DetermineDeath() {
 }
 
 // PSX: WaitAnimationDone__8Director (DIRECTOR.CPP:4443, 0x8003EB14)
-void Director::WaitAnimationDone() {
+// Returns 1 when animation done, 0 when still waiting.
+s32 Director::WaitAnimationDoneStep() {
     MARKFUNCTION(0x8003EB14);
 
     if (!scriptPtr) {
-        field68 = 1;
-        return;
+        return 0;
     }
 
-    // PSX checks the model animation stop flag on the target Thing.
-    // Animation internals are still partially reversed, so use model presence
-    // as a non-blocking completion proxy for now.
-    bool done = false;
+    // PSX: FindNodeCRC(0x34=humanoidList, scriptPtr[1], 0)
+    // then checks (thing->model->field84 != 0) for animation stop flag
     Thing* thing = FindThingByScriptRef(static_cast<u32>(scriptPtr[1]));
     if (thing && thing->model) {
-        done = true;
+        // PSX: checks *(_DWORD *)(*(_DWORD *)(thing_model+32) + 84) != 0
+        // Animation internals partially reversed - use model presence as proxy
+        scriptPtr += 2;
+        return 1;
     }
 
-    if (done) {
-        scriptPtr += 2;
-        field68 = 0;
-    } else {
-        field68 = 1;
-    }
+    return 0;
 }
 
 // PSX: ProcessDynamicAnimFunc__8Director (DIRECTOR.CPP:4469, 0x8003EB88)
@@ -1670,7 +1800,7 @@ void Director::ProcessDynamicAnimFunc() {
 
     if (opcode == DirectorOpcode::DynamicAnimWaitCamera) {
         // PSX checks a global camera pointer and retries until it is valid.
-        if (g_game && g_game->GetView().GetCamera()) {
+        if (g_display && g_display->GetView().GetCamera()) {
             scriptPtr = cmd + 1;
             field68 = 0;
         } else {
@@ -1738,13 +1868,44 @@ void Director::HandleWideScreen() {
 }
 
 // PSX: DrawWideScreenPolys__8Director (DIRECTOR.CPP:4582, 0x8003ED90)
+// Draws two horizontal letterbox bars (top and bottom) and a blend mode triangle.
+// PSX uses POLY_F4 primitives in the GPU ordering table at layer 3.
+// PC: uses ScreenDraw to render equivalent overlay quads.
 void Director::DrawWideScreenPolys() {
     MARKFUNCTION(0x8003ED90);
 
-    // This draw path depends on PSX primitive packet APIs (SetPolyF4/AddPrim)
-    // that are not exposed through the current PC renderer yet.
     if (wsBarCurrent == 0) {
         return;
+    }
+
+    if (wsAlphaCurrent == 0) {
+        return;
+    }
+
+    // PSX renders at 512x240 resolution. Bar height is wsBarCurrent scanlines
+    // from the top and bottom edges. Color is wsAlphaCurrent for semitrans bars,
+    // or black/white for full-alpha bars depending on wsMode.
+
+    const f32 barFrac = static_cast<f32>(wsBarCurrent) / 240.0f;
+
+    if (wsAlphaCurrent < 255) {
+        // Semi-transparent bars - PSX uses SetSemiTrans with alpha = wsAlphaCurrent
+        const u8 alpha = static_cast<u8>(wsAlphaCurrent);
+        // Top bar
+        ScreenDraw::DrawColoredRect(0.0f, 0.0f, 1.0f, barFrac,
+                                    alpha, alpha, alpha, 255);
+        // Bottom bar
+        ScreenDraw::DrawColoredRect(0.0f, 1.0f - barFrac, 1.0f, barFrac,
+                                    alpha, alpha, alpha, 255);
+    } else {
+        // Full opacity bars - PSX: mode 2 = black, other = white
+        u8 c = (wsMode == 2) ? 0 : 255;
+        // Top bar
+        ScreenDraw::DrawColoredRect(0.0f, 0.0f, 1.0f, barFrac,
+                                    c, c, c, 255);
+        // Bottom bar
+        ScreenDraw::DrawColoredRect(0.0f, 1.0f - barFrac, 1.0f, barFrac,
+                                    c, c, c, 255);
     }
 }
 
@@ -1783,10 +1944,14 @@ void runDirector(Handler* h) {
 }
 
 // PSX: DrawDirectorOverlays (DIRECTOR.CPP:2578, 0x8003BB34) - handler callback
+// PSX: EnterLayer(view, 3) -> HandleWideScreen -> DrawWideScreenPolys
+//      -> DrawEffects(4096) -> ExitLayer(view, 3)
 void DrawDirectorOverlays(Handler* h) {
     MARKFUNCTION(0x8003BB34);
     if (g_director) {
         g_director->HandleWideScreen();
         g_director->DrawWideScreenPolys();
+        // PSX: DrawEffects__7Effectsi(4096) - particle effects in NIS layer
+        // TODO: Effects system not yet reversed
     }
 }

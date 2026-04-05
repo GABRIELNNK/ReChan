@@ -70,14 +70,15 @@ void tContext::Shutdown() {
 }
 
 void tContext::BeginFrame() {
-    if (display)       display->PollEvents();
-    if (inputManager)  inputManager->ServiceInput();
     if (renderContext) renderContext->BeginFrame();
 }
 
 void tContext::EndFrame() {
     if (renderContext) renderContext->EndFrame();
-    if (display)       display->SwapBuffers();
+}
+
+void tContext::SwapBuffers() {
+    if (display) display->SwapBuffers();
 }
 
 // tPlatform

@@ -16,51 +16,94 @@ static constexpr u16 BLOCK_UNASSIGNED = 0x1000;
 // PSX AI:: scope enums (namespace renamed to avoid class AI conflict)
 namespace AITypes {
 
-// ThingTypes - entity type IDs dispatched by AI::AddThingNoTagList
-// PSX: enum AI::ThingTypes (used for CharacterManager, etc.)
-enum ThingTypes : u16 {
-    TT_NONE            = 0,
-    // Humanoid types: 1-28
-    TT_PLAYER          = 1,
-    TT_THUG1           = 2,
-    TT_THUG2           = 3,
-    TT_THUG3           = 4,
-    TT_THUG4           = 5,
-    TT_THUG5           = 6,
-    TT_THUG6           = 7,
-    TT_THUG7           = 8,
-    TT_THUG8           = 9,
-    TT_GRONTAR         = 10,
-    TT_BUTCH           = 17,
-    TT_DANTE           = 12,
-    TT_PAUL            = 13,
-    TT_OSCAR           = 14,
-    TT_GRONTAR2        = 15,
-    // Object types: 101+
-    TT_COLLECTIBLE     = 101,
-    // Obstacle types: 301-328
-    TT_OBSTACLE_BASE   = 301,
-};
+    // ThingTypes - entity type IDs dispatched by AI::AddThingNoTagList
+    // PSX: enum AI::ThingTypes (used for CharacterManager, etc.)
+    // Values match PSX AddThingNoTagList dispatch at 0x80054404
+    enum ThingTypes : u16 {
+        TT_PLAYER = 0,
+        // Humanoid range: 1-28 (generic thugs + named bosses)
+        TT_HUMANOID_FIRST = 1,
+        TT_THUG1 = 1,
+        TT_THUG2 = 2,
+        TT_THUG3 = 3,
+        TT_THUG4 = 4,
+        TT_THUG5 = 5,
+        TT_THUG6 = 6,
+        TT_THUG7 = 7,
+        TT_THUG8 = 8,
+        TT_GRONTAR = 10,   // Grontar class (616 bytes)
+        TT_PAUL = 12,   // Paul class (616 bytes)
+        TT_OSCAR = 13,   // Oscar class (616 bytes)
+        TT_DANTE = 15,   // Dante class (684 bytes)
+        TT_BUTCH = 17,   // Butch class (620 bytes)
+        TT_HUMANOID_LAST = 28,
+        // Collectible (Pickup class, goes to pickupList)
+        TT_COLLECTIBLE = 101,
+        // Platform (goes to moveList)
+        TT_PLATFORM = 201,
+        // Obstacle range: 301-328 (Pickup class, goes to pickupList)
+        TT_OBSTACLE_FIRST = 301,
+        TT_OBSTACLE_LAST = 328,
+        // Interactive objects (go to moveList)
+        TT_LAUNCHER = 402,
+        TT_CONVEYOR = 404,
+        TT_SLIPPERYFLOOR = 405,
+        TT_HORIZONTALPOLE = 407,
+        TT_EXPLOSIVE = 410,
+        TT_DESTRUCTIBLE = 412,
+        TT_CRUSHER = 413,
+        TT_KNOCKDOWN = 420,
+        TT_STACK = 421,
+        TT_KICKNROLL = 422,
+        TT_DESTRUCTIBLE_DP = 424,  // with dead pool check
+        TT_UNTOUCHABLE = 435,
+        TT_COLLECTIBLE_OBJ = 436,
+        TT_TRIGGERTHING = 451,
+        TT_GENERATOR = 455,
+        TT_ENEMYGENERATOR = 456,
+        TT_EXPLOSIVE_OBJ = 457,
+        TT_BLAST = 459,
+        TT_THROWGENERATOR = 460,
+        TT_PUSHABLE = 462,
+        TT_DOOR = 463,
+        TT_TELEPORTER = 464,
+        TT_PENDULUM = 466,
+        TT_TRAPDOOR = 467,
+        TT_TABLE = 468,
+        TT_BOSS = 469,
+        TT_LADDER = 470,
+        TT_CHAIR = 471,
+        TT_ARROW = 472,
+        // Special analysis types (not real entities)
+        TT_LIGHTSPHERE = 65533,
+        TT_LIGHTSPHERE2 = 65534,
+        TT_MESHANALYSIS = 65535,
+    };
 
 } // namespace AITypes
 
 // Thing flags (u32 flags bitmask)
 enum ThingFlags : u32 {
-    TF_BIT1             = 0x0002,  // cleared each Think frame
+    TF_DEAD = 0x0001,  // marked for death transfer
+    TF_BIT1 = 0x0002,  // cleared each Think frame
     TF_NEEDS_ACTIVATION = 0x0004,  // needs activation check
-    TF_BIT3             = 0x0008,
-    TF_ACTIVATED        = 0x0010,  // currently activated
-    TF_BIT5             = 0x0020,
-    TF_MODEL_CREATED    = 0x0040,  // model has been created
-    TF_BIT8             = 0x0100,
-    TF_DYNAMIC          = 0x0800,  // is a DynamicThing
-    TF_ON_GROUND        = 0x1000,  // on ground
+    TF_BIT3 = 0x0008,
+    TF_ACTIVATED = 0x0010,  // currently activated
+    TF_BIT5 = 0x0020,
+    TF_MODEL_CREATED = 0x0040,  // model has been created
+    TF_BIT8 = 0x0100,
+    TF_DYNAMIC = 0x0800,  // is a DynamicThing
+    TF_ON_GROUND = 0x1000,  // on ground
 };
 
 // Thing secondary flags (u32 flags2 bitmask)
 enum ThingFlags2 : u32 {
     TF2_KILLED = 0x0001,  // marked for removal
-    TF2_BIT3   = 0x0008,  // cleared each Think frame
+    TF2_BIT3 = 0x0008,  // cleared each Think frame
+    TF2_NIS_ENTER = 0x0010,  // entered NIS control
+    TF2_NIS_FROZEN = 0x0020,  // NIS frozen (no movement)
+    TF2_NIS_MASK = 0x0070,  // mask for NIS state bits
+    TF2_DIRECTOR_ACTIVE = 0x0200,  // director sets on all humanoids during script
 };
 
 // Thing - base class for all game entities

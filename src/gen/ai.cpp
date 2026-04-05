@@ -95,32 +95,46 @@ void AI::AddActiveZone(DBVolume* vol) {
 // PSX: after creation, calls SetName, AnalyzeMesh(root), Reset(), AddNode(targetList)
 void AI::AddThingNoTagList(const char* name, u16 type,
                            const LVector* pos, const SVector* orient,
-                           const LVector* pos2, const DBRoot* root) {
+                           const char* modelName, const DBRoot* root) {
     MARKFUNCTION(0x80054404);
 
     Thing* thing = nullptr;
     ccList* targetList = &humanoidList; // default: humanoidList (offset +52)
 
-    // PSX: type 0 = Player
-    if (type == AITypes::TT_PLAYER) {
-        Player* player = new Player(pos);
-        thing = player;
-        if (orient) {
-            thing->orientation.x = orient->x;
-            thing->orientation.y = orient->y;
-            thing->orientation.z = orient->z;
-        }
-    }
     // PSX: types 1-28 = Humanoid enemies (Thug1-8, bosses, etc.)
-    else if (type >= AITypes::TT_THUG1 && type <= AITypes::TT_THUG8 + 20) {
+    if ((u16)(type - 1) < 28u) {
         Humanoid* h = new Humanoid(pos, type);
         thing = h;
     }
     // PSX: types 301-328 = Pickups (+ type 101 = collectible)
-    // Pickup class not yet reversed - skip creation
-
-    // PSX: types 201, 402-472 = moveList entities (platforms, generators, etc.)
-    // These classes not yet reversed - skip creation
+    else if ((u16)(type - 301) < 28u) {
+        // Pickup class not yet reversed - skip creation
+        targetList = &pickupList;
+    }
+    // PSX: all other types (0, 101, 201, 402-472, etc.)
+    else {
+        // Type 0 = Player
+        if (type == AITypes::TT_PLAYER) {
+            Player* player = new Player(pos);
+            thing = player;
+            if (orient) {
+                thing->orientation.x = orient->x;
+                thing->orientation.y = orient->y;
+                thing->orientation.z = orient->z;
+            }
+        }
+        // Type 101 = Collectible (Pickup class, goes to pickupList)
+        else if (type == AITypes::TT_COLLECTIBLE) {
+            // Pickup class not yet reversed - skip creation
+            targetList = &pickupList;
+        }
+        // Type 201 = Platform (goes to moveList)
+        // Types 402-472 = Interactive objects (go to moveList)
+        else if (type == AITypes::TT_PLATFORM || type >= 402) {
+            // These classes not yet reversed - skip creation
+            targetList = &moveList;
+        }
+    }
 
     if (!thing)
         return;
@@ -141,13 +155,18 @@ void AI::AddThingNoTagList(const char* name, u16 type,
     }
 
     // PSX: for humanoids (type 1-28), OpenCharacter + LoadCharacter
-    if (type >= AITypes::TT_THUG1 && type <= AITypes::TT_THUG8 + 20) {
+    if ((u16)(type - 1) < 28u) {
         if (g_characterManager) {
             g_characterManager->LoadCharacter(type);
         }
     }
 
-    // PSX: if block valid, call Reset via vtable
+    // PSX LABEL_162: CreateModel(modelName) then Reset()
+    // PSX: if (!type || GetBlockNumber(pos) != 4096) CreateModel(modelName);
+    if (!type || (g_blockManager && g_blockManager->GetBlockNumber(*pos) != 4096)) {
+        thing->CreateModel(modelName);
+    }
+
     thing->Reset();
 
     targetList->AddNodeTail(thing);
@@ -212,7 +231,7 @@ void AI::MoveThings() {
     for (ccMinNode* n = inactivePickupList.head; n;) {
         Thing* thing = static_cast<Thing*>(n);
         ccMinNode* next = n->next;
-        if (thing->flags & 0x0001) {
+        if (thing->flags & TF_DEAD) {
             inactivePickupList.RemNode(n);
             thingList.AddNodeTail(n);
         }
@@ -228,14 +247,14 @@ void AI::privMoveList(ccList& list) {
         ccMinNode* nextNode = n->next;
 
         u32 fl = thing->flags;
-        if (!(fl & 0x0001)) {
+        if (!(fl & TF_DEAD)) {
             if (!(fl & TF_ACTIVATED)) {
                 n = nextNode;
                 continue;
             }
             thing->Think();
             fl = thing->flags;
-            if (!(fl & 0x0001) || (fl & 0x0400)) {
+            if (!(fl & TF_DEAD) || (fl & 0x0400)) {
                 n = nextNode;
                 continue;
             }
@@ -312,8 +331,14 @@ void AI::Populate() {
         u16 subType = pt->subType;
 
         if (subType != 0) {
+            // PSX: attrib 5 = model name string for entity creation
+            const char* modelName = nullptr;
+            const DBAttrib* a5 = pt->FindAttrib(5);
+            if (a5) {
+                modelName = a5->strValue;
+            }
             AddThingNoTagList(pt->GetName(), subType, &pt->pos,
-                              (const SVector*)&pt->field40, nullptr, pt);
+                              (const SVector*)&pt->field40, modelName, pt);
         } else {
             // Player spawn point (type 6, subType 0)
             // PSX: player must already exist; Populate configures position/orientation.
@@ -348,12 +373,12 @@ void AI::Populate() {
         }
     }
 
-    // PSX: iterate meshes list
+    // PSX: iterate meshes list - passes mesh->fileName (+60) as modelName
     for (DBMesh* mesh = g_database->GetFirstMesh(); mesh; mesh = static_cast<DBMesh*>(mesh->next)) {
         if (mesh->type != 6)
             continue;
         AddThingNoTagList(mesh->GetName(), mesh->subType, &mesh->pos,
-                          nullptr, nullptr, mesh);
+                          (const SVector*)&mesh->field40, mesh->fileName, mesh);
     }
 
     // PSX: iterate lines list

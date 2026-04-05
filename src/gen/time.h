@@ -20,7 +20,7 @@ public:
 
     // PC: measured real delta time (seconds) and FPS, updated each frame.
     f32 deltaTime = 1.0f / 30.0f;
-    f32 fps       = 30.0f;
+    f32 fps = 30.0f;
 
     // PSX: __4Time (TIME.CPP, 0x80044950)
     Time() { MARKFUNCTION(0x80044950); }

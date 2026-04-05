@@ -33,6 +33,7 @@ public:
 
     void BeginFrame();
     void EndFrame();
+    void SwapBuffers();
 
 private:
     pddiDevice* device = nullptr;

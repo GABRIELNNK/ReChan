@@ -2,8 +2,14 @@
 // Original: C:\CHAN\GAME\SRC\GEN\CAMERA.CPP
 #include "gen/camera.h"
 #include "gen/control.h"
+#include "gen/charmgr.h"
+#include "gen/animstruct.h"
 #include "ai/thing.h"
 #include "p3d/p3dmath.h"
+#include "config.h"
+#include "p3d/keycode.h"
+#include "p3d/input.h"
+#include "p3d/context.h"
 #include <cstdlib>
 #include <cmath>
 
@@ -12,13 +18,11 @@
 
 
 static constexpr f32 PSX_ANGLE_TO_RAD = P3D_ANGLE_TO_RAD;
-static constexpr f32 PSX_ASPECT = 4.0f / 3.0f;
 
-// PSX FOV conversion: curFOV -> vertical FOV in radians
-// PSX computes fovV = (72744 * curFOV) >> 16 as a 16.16 half-angle tangent.
-static f32 psxFovToRad(s32 curFOV) {
-    f32 halfTan = (72744.0f * (f32)curFOV) / (65536.0f * 65536.0f);
-    return 2.0f * std::atan(halfTan);
+// PSX FOV push: converts curFOV (= desiredFOV * 3000) to tCamera fovA/fovB.
+// PSX: fovA = (87162 * curFOV) >> 16, fovB = (72744 * curFOV) >> 16
+static void pushFovToCamera(tCamera* cam, s32 curFOV) {
+    cam->SetFOV((s32)((87162LL * curFOV) >> 16), (s32)((72744LL * curFOV) >> 16));
 }
 
 static constexpr s32 TIME_SCALE = 1000;
@@ -116,7 +120,7 @@ void Camera::Reset() {
     fovVel = 0;
 
     // Push FOV to tCamera
-    p3dCamera.SetFOV(psxFovToRad(curFOV), PSX_ASPECT);
+    pushFovToCamera(&p3dCamera, curFOV);
 
     // Twist - PSX 8192 ≈ 45 degrees
     twist = 8192;
@@ -148,11 +152,19 @@ void Camera::Reset() {
     lookAtMode = 0;
     targetThing = nullptr;
 
-    // Anim
-    asyncAnimEnum = 0xFFFF;
-    asyncAnim = 0;
-    cameraAnim = 0;
-    cameraAnchor = 0;
+    // Anim - PSX: inline PurgeAnims/DeleteAsyncAnim logic at end of Reset
+    if (cameraAnim) {
+        delete cameraAnim;
+        cameraAnim = nullptr;
+    }
+    if (asyncAnimEnum != 0xFFFF) {
+        if (g_characterManager) {
+            g_characterManager->UnloadAnimationBatch(0, (s32)asyncAnimEnum);
+        }
+        asyncAnimEnum = 0xFFFF;
+        asyncAnim = nullptr;
+    }
+    cameraAnchor = nullptr;
 }
 
 
@@ -162,7 +174,7 @@ void Camera::Reset() {
 void Camera::Think() {
     MARKFUNCTION(0x80047F28);
 
-    if (cameraAnim == 0) {
+    if (cameraAnim == nullptr) {
         if (modeFunc != nullptr) {
             (this->*modeFunc)();
         }
@@ -190,7 +202,7 @@ void Camera::Move() {
     if (curFOV != targetFOV) {
         // PSX uses velocityMag.x (+344) for FOV time, not movementTime.x (+300)
         EvalCubic(&curFOV, &fovAccel, targetFOV, fovVel, velocityMag.x);
-        p3dCamera.SetFOV(psxFovToRad(curFOV), PSX_ASPECT);
+        pushFovToCamera(&p3dCamera, curFOV);
     }
 
     LVector nextPos = position;
@@ -241,9 +253,7 @@ void Camera::Move() {
         }
     }
 
-    // PSX writes interpolated result to prevPosition only, NOT position.
-    // Position stays at the snapped value from FollowPath's lookAtMode path.
-    // The camera stays put and only rotates via LookAtTarget angles.
+    // PSX writes interpolated position to prevPosition only.
     prevPosition = nextPos;
 
     if (flags & 0x02) {
@@ -263,21 +273,18 @@ void Camera::Move() {
 void Camera::Update() {
     MARKFUNCTION(0x800482DC);
 
-    if (cameraAnim != 0) {
-        // PSX 2-point camera path: build heading from camera->target,
-        // rotate around Z by twist, then fill translation.
-        LVector camPos = position;
-        LVector camTarget = targetPos;
+    if (cameraAnim != nullptr) {
+        // PSX: reads position/target/twist from G_2ptcam (set by t2PointCamFlip)
+        LVector camPos, camTarget;
+        G_2ptcam.GetPosition(&camPos);
+        G_2ptcam.GetTarget(&camTarget);
+        u16 camTwist = G_2ptcam.GetTwist();
 
         LVector headingFixed = {
             camTarget.x - camPos.x,
             camTarget.y - camPos.y,
             camTarget.z - camPos.z,
         };
-
-        if (headingFixed.x == 0 && headingFixed.y == 0 && headingFixed.z == 0) {
-            headingFixed.x = 0x10000;
-        }
 
         rmV3Normalize(&headingFixed, &headingFixed);
 
@@ -295,31 +302,35 @@ void Camera::Update() {
         p3dFillHeadingMatrix(heading, up, headingMatrix);
 
         Mat4 twistMatrix;
-        p3dBuildRotMatrixZ((f32)(twist & 0xFFFF) * PSX_ANGLE_TO_RAD, twistMatrix);
+        p3dBuildRotMatrixZ((f32)camTwist * PSX_ANGLE_TO_RAD, twistMatrix);
 
         Mat4 matrix = Mat4Multiply(twistMatrix, headingMatrix);
         p3dFillTransMatrix(camPos, matrix);
 
+        // PSX: GetFOV from G_2ptcam, SetCameraMatrix + SetFOV on embedded tMatrixCamera
+        s32 fovA, fovB;
+        G_2ptcam.GetFOV(&fovA, &fovB);
         p3dCamera.SetCameraMatrix(matrix);
-        p3dCamera.SetFOV(psxFovToRad(curFOV), PSX_ASPECT);
+        p3dCamera.SetFOV(fovA, fovB);
 
-        position = camPos;
-        curPos = camPos;
-        prevPosition = camPos;
+        // PSX: GetPosition from the tMatrixCamera to sync Camera fields
+        LVector matPos;
+        p3dCamera.GetPosition(&matPos);
+        position = matPos;
+        curPos = matPos;
+        prevPosition = matPos;
         prevTargetPos = camTarget;
         targetPos = camTarget;
         return;
     }
 
     // PSX euler path (cameraAnim == 0)
-    // p3dBuildRotMatrixZYX(*(u16*)(a1+380), *(u16*)(a1+384), *(u16*)(a1+388), &matrix)
-    // p3dFillTransMatrix(a1+28, &matrix)
-    // SetCameraMatrix(tMatrixCamera, &matrix)
-    // UpdateMatrix(tMatrixCamera)
+    // p3dBuildRotMatrixZYX, p3dFillTransMatrix, SetCameraMatrix, UpdateMatrix
     Mat4 matrix;
     p3dBuildRotMatrixZYX(camAngleX, camAngleY, camAngleZ, matrix);
     p3dFillTransMatrix(position, matrix);
     p3dCamera.SetCameraMatrix(matrix);
+    p3dCamera.UpdateMatrix();
 }
 
 
@@ -437,7 +448,8 @@ void Camera::SetFOV(s32 fov) {
 void Camera::SetCurFOV(s32 fov) {
     MARKFUNCTION(0x8004A464);
     curFOV = fov * 3000;
-    p3dCamera.SetFOV(psxFovToRad(curFOV), PSX_ASPECT);
+    // PSX: SetFOV(tCamera, (261486000*fov)>>16, (218232000*fov)>>16)
+    p3dCamera.SetFOV((s32)((261486000LL * fov) >> 16), (s32)((218232000LL * fov) >> 16));
 }
 
 
@@ -488,6 +500,58 @@ void Camera::ShakeCamera(s32 frames) {
 
 void Camera::DebugCam() {
     MARKFUNCTION(0x80048718);
+#if IMPROVED_DEBUG_CAM
+    // PC debug camera: mouse look + WASD movement + Q/E vertical + Shift speed
+    double mdx = 0, mdy = 0;
+    p3d::input->GetMouseDelta(mdx, mdy);
+
+    static constexpr s32 MOUSE_SENSITIVITY = 10;
+    if (p3d::input->IsMouseButtonDown(MOUSE_LEFT)) {
+        camAngleY += (s32)(mdx * MOUSE_SENSITIVITY);
+        camAngleX -= (s32)(mdy * MOUSE_SENSITIVITY);
+    }
+
+    s32 speed = 50;
+    if (p3d::input->IsKeyDown(KEY_LEFT_SHIFT)) {
+        speed = 200;
+    }
+
+    s32 ddx = 0;
+    s32 ddy = 0;
+    s32 ddz = 0;
+
+    if (p3d::input->IsKeyDown(KEY_W)) {
+        ddz += speed;
+    }
+    if (p3d::input->IsKeyDown(KEY_S)) {
+        ddz -= speed;
+    }
+    if (p3d::input->IsKeyDown(KEY_A)) {
+        ddx -= speed;
+    }
+    if (p3d::input->IsKeyDown(KEY_D)) {
+        ddx += speed;
+    }
+    if (p3d::input->IsKeyDown(KEY_E)) {
+        ddy += speed;
+    }
+    if (p3d::input->IsKeyDown(KEY_Q)) {
+        ddy -= speed;
+    }
+
+    if (ddx != 0 || ddy != 0 || ddz != 0) {
+        Mat4 rot;
+        p3dBuildRotMatrixZYX(camAngleX, camAngleY, camAngleZ, rot);
+        Vec3 delta = p3dVecTimesMatrix(Vec3((f32)ddx, (f32)ddy, (f32)ddz), rot);
+
+        position.x += (s32)delta.x;
+        position.y += (s32)delta.y;
+        position.z += (s32)delta.z;
+    }
+
+    curPos = position;
+    prevPosition = curPos;
+#else
     if (!g_inputManager) {
         return;
     }
@@ -544,6 +608,7 @@ void Camera::DebugCam() {
     curPos.x += static_cast<s32>(delta.x);
     curPos.y += static_cast<s32>(delta.y);
     curPos.z += static_cast<s32>(delta.z);
+#endif
 }
 
 
@@ -564,33 +629,19 @@ void Camera::FollowPath() {
     target->GetViewSpot(nullptr, &targetWorldPos);
 
     // Find two closest camera rail nodes to target position
-    if (!cameraAnchor) {
-        static bool loggedNoAnchor = false;
-        if (!loggedNoAnchor) {
-            LOG("[Camera] FollowPath: cameraAnchor is null");
-            loggedNoAnchor = true;
-        }
-        return;
-    }
-
     DBCameraPathNode* nodeA = nullptr;
     DBCameraPathNode* nodeB = nullptr;
-    s32 dist = cameraAnchor->FindClosestNodes(targetWorldPos, &nodeA, &nodeB);
-    (void)dist;
 
-    if (!nodeA) {
-        static bool loggedNoNode = false;
-        if (!loggedNoNode) {
-            LOG("[Camera] FollowPath: no closest nodes for target=(%d,%d,%d)",
-                targetWorldPos.x, targetWorldPos.y, targetWorldPos.z);
-            loggedNoNode = true;
-        }
+    if (cameraAnchor) {
+        s32 dist = cameraAnchor->FindClosestNodes(targetWorldPos, &nodeA, &nodeB);
+        (void)dist;
+    }
+
+    if (!nodeA)
         return;
-    }
-    if (!nodeB) {
+    
+    if (!nodeB)
         nodeB = nodeA;
-    }
-
     // Read node positions
     // sourcePos (+12) = camera eye position on rail
     // targetPos (+24) = look-at target position on rail
@@ -818,4 +869,163 @@ void Camera::CameraShake() {
     position.z += shakeZ;
 
     prevPosition = position;
+}
+
+
+// Camera::PurgeAnims (0x80047BE0)
+// Called during level unload to clean up camera animation state.
+// PSX: separate function body (not inlined DeleteAsyncAnim).
+
+void Camera::PurgeAnims() {
+    MARKFUNCTION(0x80047BE0);
+
+    if (cameraAnim) {
+        delete cameraAnim;
+        cameraAnim = nullptr;
+    }
+    if (asyncAnimEnum != 0xFFFF) {
+        if (g_characterManager) {
+            g_characterManager->UnloadAnimationBatch(0, (s32)asyncAnimEnum);
+        }
+        asyncAnimEnum = 0xFFFF;
+        asyncAnim = nullptr;
+    }
+}
+
+
+// Camera::UpdateAnim (0x80047EAC)
+// Per-frame animation update. Executes the AnimStructure handler,
+// retrieves the animated camera position/target, and calls LookAtTarget.
+
+void Camera::UpdateAnim() {
+    MARKFUNCTION(0x80047A0C);
+    if (cameraAnim) {
+        // PSX: ExecuteHandler(cameraAnim, 1) - advances camera animation frame
+        cameraAnim->ExecuteHandler(1);
+
+        // PSX: gets view position from targetThing via vtable+72 (GetViewSpot)
+        // and stores into prevTargetPos, copies to targetPos, then LookAtTarget.
+        if (targetThing) {
+            targetThing->GetViewSpot(nullptr, &prevTargetPos);
+            targetPos = prevTargetPos;
+            LookAtTarget(&targetPos);
+        }
+    }
+}
+
+
+// Camera::LoadAsyncAnim (0x8004A054)
+// Loads a camera animation by enum via CharacterManager.
+// Unloads any previously loaded async anim first.
+// PSX: creates a 16-byte callback that stores the loaded tAnimation*
+// into the camera's asyncAnim field when loading completes.
+
+// PSX: vtable at dword_800CCC98 - camera animation load callback
+struct CamAnimCallback : public CharMgrCallback {
+    s32 animEnum;
+    void** target; // pointer to camera's asyncAnim field
+
+    CamAnimCallback(s32 e, void** t) : animEnum(e), target(t) {}
+    void Callback() override {
+        if (target && g_characterManager) {
+            *target = g_characterManager->GetAnimation(0, animEnum);
+        }
+        done = 1;
+    }
+};
+
+void Camera::LoadAsyncAnim(s32 animEnum) {
+    MARKFUNCTION(0x8004A054);
+
+    if (asyncAnimEnum != 0xFFFF) {
+        if (g_characterManager) {
+            g_characterManager->UnloadAnimationBatch(0, (s32)asyncAnimEnum);
+        }
+        asyncAnim = nullptr;
+    }
+    asyncAnimEnum = (u16)animEnum;
+
+    CamAnimCallback* cb = new CamAnimCallback(animEnum, &asyncAnim);
+    if (g_characterManager) {
+        g_characterManager->LoadAnimationBatch(0, (s32)asyncAnimEnum, cb);
+    }
+    delete cb;
+}
+
+
+// Camera::PlayAsyncAnim (0x8004A0F0)
+// Creates AnimStructure from the loaded anim and starts playback.
+// PSX: AnimStructure ctor at 0x80070740 (MODEL.CPP:2335), 104 bytes
+// PSX: checks GetAnimationType() on the loaded anim:
+//   - 0x10002 (65538): single anim -> Attach t2PointCamFlip to G_2ptcam
+//   - 0x1000B (65547): composite anim -> Attach each sub-anim's flip
+// PSX: then calls StartAnimation on the AnimStructure's drawable
+
+void Camera::PlayAsyncAnim() {
+    MARKFUNCTION(0x8004A0F0);
+
+    if (!asyncAnim) {
+        return;
+    }
+
+    // PSX: cameraAnim = new AnimStructure(3, asyncAnim, 4, nullptr, nullptr)
+    cameraAnim = new AnimStructure(3, asyncAnim, 4, nullptr, nullptr);
+
+    // PSX: GetAnimationType on anim, then Attach t2PointCamFlip to G_2ptcam
+    // t2PointCamFlip is created inside the AnimStructure constructor for mode 3.
+    // The Attach call connects the flip to G_2ptcam so camera pos/target
+    // are updated during ExecuteHandler. Since we don't have the full
+    // Pure3D flip pipeline yet, the camera animation data won't actually
+    // drive position. This will work once tParamFlip is reversed.
+}
+
+
+// Camera::DeleteAsyncAnim (0x8004A220)
+// Cleans up camera animation: deletes AnimStructure, unloads animation.
+
+void Camera::DeleteAsyncAnim() {
+    MARKFUNCTION(0x8004A220);
+
+    if (cameraAnim) {
+        delete cameraAnim;
+        cameraAnim = nullptr;
+    }
+    if (asyncAnimEnum != 0xFFFF) {
+        if (g_characterManager) {
+            g_characterManager->UnloadAnimationBatch(0, (s32)asyncAnimEnum);
+        }
+        asyncAnim = nullptr;
+        asyncAnimEnum = 0xFFFF;
+    }
+}
+
+
+// Camera::GetCameraVector (0x80049F88)
+// Returns the camera's forward direction vector.
+// PSX extracts row 2 of the 3x3 rotation matrix (forward axis),
+// negates X and Z. Values in Q12 scale (4096 = 1.0).
+
+LVector Camera::GetCameraVector() const {
+    MARKFUNCTION(0x80049F88);
+
+    LVector result;
+
+    if (cameraAnim) {
+        // PSX: GetCameraMatrix(tMatrixCamera+24), extract row 2 of Q12 MATRIX
+        // Row 2 in column-major = m[2], m[6], m[10]
+        const Mat4& ctw = p3dCamera.GetCameraMatrix();
+        result.x = (s32)(-ctw.m[2] * 4096.0f);
+        result.y = (s32)(ctw.m[6] * 4096.0f);
+        result.z = (s32)(-ctw.m[10] * 4096.0f);
+    } else {
+        // PSX: p3dBuildRotMatrixZYX, extract row 2 (m[2][0..2]) from Q12 MATRIX
+        // Row 2 in column-major = m[2], m[6], m[10]
+        Mat4 matrix;
+        p3dBuildRotMatrixZYX(camAngleX, camAngleY, camAngleZ, matrix);
+        result.x = (s32)(-matrix.m[2] * 4096.0f);
+        result.y = (s32)(matrix.m[6] * 4096.0f);
+        result.z = (s32)(-matrix.m[10] * 4096.0f);
+    }
+
+    return result;
 }

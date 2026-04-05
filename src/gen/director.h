@@ -159,77 +159,70 @@ enum class DirectorEdisonCmd : s32 {
 // Director (212 bytes on PSX) - inherits Manager
 // PSX layout:
 //   +0:   Manager base (28 bytes)
-//   +28:  scriptPtr (ptr)           - current script instruction pointer
-//   +32:  scriptBase (ptr)          - script data base address
-//   +36:  codeSnipPtr (ptr)         - trigger code snippet
-//   +40:  codeSnipThing (ptr)       - Thing that triggered code snippet
-//   +44:  processState (s32)        - current script interpreter state
-//   +48:  timerValue (s32)          - countdown timer
-//   +52:  loopCount (s32)           - loop counter
-//   +56:  flags (u32)               - director flags
-//   +60:  wideScreenDesired (s32)   - widescreen letterbox target
-//   +64:  wideScreenCurrent (s32)   - current widescreen amount
-//   +68:  field68..+208             - various state fields
+//   +28:  scriptPtr (s32*)          - current script instruction pointer
+//   +32:  scriptBase (s32*)         - sound script base address
+//   +36:  codeSnipPtr (s32*)        - trigger code snippet pointer
+//   +40:  wsBarCurrent (s32)        - widescreen bar current height
+//   +44:  wsBarTarget (s32)         - widescreen bar target height
+//   +48:  wsBarStep (s32)           - widescreen bar step (256=instant)
+//   +52:  wsMode (u16)              - widescreen blend mode (0/1/2)
+//   +56:  wsAlphaStep (s32)         - widescreen alpha step
+//   +60:  wsAlphaCurrent (s32)      - widescreen alpha current
+//   +64:  wsAlphaTarget (s32)       - widescreen alpha target
+//   +68:  blocked (s32)             - script loop blocked flag
+//   +72:  enableInput (s32)         - player input enabled during NIS
+//   +76..+155: handler sets, internal lists
+//   +156: timerTarget (s32)         - timer end frame
+//   +160: timerStart (s32)          - timer start frame
+//   +164: visitedLevels (u32)       - bitmask of visited levels
+//   +168: scriptState (s32)         - 0=idle, 534=SetScript, 537=SetCodeSnip
+//   +172: deathType (s32)           - death cause for DetermineDeath
+//   +176: victoryBossCRC (u32)      - boss CRC for DetermineVictory
+//   +180: nisPointX (s32)           - NIS reference point X
+//   +184: nisPointY (s32)           - NIS reference point Y
+//   +188: nisPointZ (s32)           - NIS reference point Z
+//   +192: directorSound (ptr)       - CDirectorSound*
+//   +196: texAnimA (ptr)            - tAnimKeyFrame* for face anim A
+//   +200: flipbookA (ptr)           - tFlipbook* for face anim A
+//   +204: texAnimB (ptr)            - tAnimKeyFrame* for face anim B
+//   +208: flipbookB (ptr)           - tFlipbook* for face anim B
 class Director : public Manager {
 public:
-    s32* scriptPtr = nullptr;       // +28
-    s32* scriptBase = nullptr;      // +32
-    s32* codeSnipPtr = nullptr;     // +36
-    Thing* codeSnipThing = nullptr; // +40
-    s32 processState = 0;           // +44
-    s32 timerValue = 0;             // +48
-    s32 loopCount = 0;              // +52
-    u32 dirFlags = 0;               // +56
-    s32 wideScreenDesired = 0;      // +60
-    s32 wideScreenCurrent = 0;      // +64
+    s32* scriptPtr = nullptr;       // +28: current script instruction pointer
+    s32* scriptBase = nullptr;      // +32: sound script base address
+    s32* codeSnipPtr = nullptr;     // +36: trigger code snippet
 
-    // PC 64-bit safe widescreen state, replacing raw byte-offset writes.
-    s32 wsBarCurrent = 0;
-    s32 wsBarTarget = 0;
-    s32 wsBarStep = 0;
-    u16 wsMode = 0;
-    s16 wsModePad = 0;
-    s32 wsAlphaStep = 0;
-    s32 wsAlphaCurrent = 0;
-    s32 wsAlphaTarget = 0;
+    // +40..+64: widescreen letterbox state
+    s32 wsBarCurrent = 0;           // +40: bar height in PSX scanlines
+    s32 wsBarTarget = 0;            // +44: target bar height
+    s32 wsBarStep = 0;              // +48: step per frame (256=instant)
+    u16 wsMode = 0;                 // +52: blend mode (2=black, other=white)
+    s32 wsAlphaStep = 0;            // +56: alpha step per frame
+    s32 wsAlphaCurrent = 0;         // +60: current alpha (0..255)
+    s32 wsAlphaTarget = 0;          // +64: target alpha
 
-    // Additional fields to fill 212 bytes
-    s32 field68 = 0;
-    s32 field72 = 0;
-    s32 field76 = 0;
-    s32 field80 = 0;
-    s32 field84 = 0;
-    s32 field88 = 0;
-    s32 field92 = 0;
-    s32 field96 = 0;
-    s32 field100 = 0;
-    s32 field104 = 0;
-    s32 field108 = 0;
-    s32 field112 = 0;
-    s32 field116 = 0;
-    s32 field120 = 0;
-    s32 field124 = 0;
-    s32 field128 = 0;
-    s32 field132 = 0;
-    s32 field136 = 0;
-    s32 field140 = 0;
-    s32 field144 = 0;
-    s32 field148 = 0;
-    s32 field152 = 0;
-    s32 field156 = 0;
-    s32 field160 = 0;
-    s32 field164 = 0;
-    s32 field168 = 0;
-    s32 field172 = 0;
-    s32 field176 = 0;
-    s32 field180 = 0;
-    s32 field184 = 0;
-    s32 field188 = 0;
+    s32 field68 = 0;                // +68: script loop blocked flag
+    s32 enableInput = 0;            // +72: player input enabled (1=yes, 0=NIS disabled)
+
+    // +76..+155: handler sets, internal NIS animation lists
+    // PSX has two HandlerSets and supporting ccLists here.
+    // On PC these are currently unused placeholders.
+    s32 _pad76[20] = {};
+
+    s32 timerTarget = 0;            // +156: timer target frame (0 = inactive)
+    s32 timerStart = 0;             // +160: timer start frame
+    s32 visitedLevels = 0;          // +164: bitmask of previously visited levels
+    s32 scriptState = 0;            // +168: 0=idle, 534=SetScript, 537=SetCodeSnip
+    s32 deathType = 0;              // +172: death cause (0=fall, 1=pavement, 2=water, 4=goo)
+    u32 victoryBossCRC = 0;         // +176: boss CRC for DetermineVictory dispatch
+    s32 nisPointX = 0;              // +180: NIS reference point X
+    s32 nisPointY = 0;              // +184: NIS reference point Y
+    s32 nisPointZ = 0;              // +188: NIS reference point Z
     CDirectorSound* directorSound = nullptr; // +192: m_pDirectorSound
-    uintptr_t field196 = 0;
-    uintptr_t field200 = 0;
-    uintptr_t field204 = 0;
-    uintptr_t field208 = 0;
+    uintptr_t texAnimA = 0;         // +196: tAnimKeyFrame* for face anim A
+    uintptr_t flipbookA = 0;        // +200: tFlipbook* for face anim A
+    uintptr_t texAnimB = 0;         // +204: tAnimKeyFrame* for face anim B
+    uintptr_t flipbookB = 0;        // +208: tFlipbook* for face anim B
 
     // PSX: __8Director (DIRECTOR.CPP:2658, 0x800CA1B8)
     Director();
@@ -263,7 +256,8 @@ public:
     void ProcessSoundScript();
 
     // PSX: Timer__8Director (DIRECTOR.CPP:3611, 0x8003D634)
-    void Timer();
+    // Returns 1 when done/reset, 0 when blocked.
+    s32 TimerStep();
 
     // PSX: Loop__8Director (DIRECTOR.CPP:3637, 0x8003D6CC)
     void Loop();
@@ -302,7 +296,8 @@ public:
     void DetermineDeath();
 
     // PSX: WaitAnimationDone__8Director (DIRECTOR.CPP:4443, 0x8003EB14)
-    void WaitAnimationDone();
+    // Returns 1 when done, 0 when still waiting.
+    s32 WaitAnimationDoneStep();
 
     // PSX: ProcessDynamicAnimFunc__8Director (DIRECTOR.CPP:4469, 0x8003EB88)
     void ProcessDynamicAnimFunc();

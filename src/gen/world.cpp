@@ -1,5 +1,7 @@
 // world.cpp - Level world implementation
 #include "gen/world.h"
+#include "gen/ai.h"
+#include "gen/charmgr.h"
 #include "gen/database.h"
 #include "gen/director.h"
 #include "gen/geometry.h"
@@ -172,11 +174,208 @@ World::World() = default;
 
 World::~World() {
     Unload();
+    // Free level table data
+    if (levelList) { delete[] levelList; levelList = nullptr; }
+    if (highestPetal) { delete[] highestPetal; highestPetal = nullptr; }
+    if (levelNames) {
+        for (s32 i = 0; i < levelCount; i++)
+            delete[] levelNames[i];
+        delete[] levelNames;
+        levelNames = nullptr;
+    }
+    if (petalNames) {
+        for (s32 i = 0; i < levelCount; i++) {
+            if (petalNames[i]) {
+                s32 pc = levelList ? levelList[i * 2 + 1] : 0;
+                for (s32 j = 0; j <= pc; j++)
+                    delete[] petalNames[i][j];
+                delete[] petalNames[i];
+            }
+        }
+        delete[] petalNames;
+        petalNames = nullptr;
+    }
+    if (petalSoundIDs) {
+        for (s32 i = 0; i < levelCount; i++)
+            delete[] petalSoundIDs[i];
+        delete[] petalSoundIDs;
+        petalSoundIDs = nullptr;
+    }
+}
+
+// Simple tokenizer matching PSX GetNextToken__4Game
+static bool GetNextToken(char* out, char** cursor, const char* delims) {
+    char* p = *cursor;
+    while (*p && strchr(delims, *p))
+        p++;
+    if (!*p) {
+        *out = '\0';
+        return false;
+    }
+    char* dst = out;
+    while (*p && !strchr(delims, *p))
+        *dst++ = *p++;
+    *dst = '\0';
+    *cursor = p;
+    return true;
+}
+
+// PSX: LoadLevelNames__5World (WORLD.CPP:990, 0x80045700)
+void World::LoadLevelNames() {
+    // Local arrays matching PSX stack layout (max 16 levels, 16 petals each)
+    char* tmpLevNames[16] = {};
+    s32 tmpLevIDs[16] = {};
+    s32 tmpPetalIdx[16][16] = {};
+    s32 tmpSoundBytes[16][16] = {};
+    char* tmpPetalNames[16][16] = {};
+    s32 tmpPetalCounts[16] = {};
+
+    // Read RTARGET/GAME_LN.TXT
+    char filename[128];
+    std::snprintf(filename, sizeof(filename), "RTARGET/GAME_LN.TXT");
+
+    std::ifstream file(filename);
+    if (!file)
+        return;
+
+    std::string content((std::istreambuf_iterator<char>(file)),
+                         std::istreambuf_iterator<char>());
+    file.close();
+
+    levelCount = 0;
+    char* cursor = content.data();
+    char token[128];
+    s32 levIdx = -1;
+    s32 petalSeq = -1;
+
+    // PSX: tokenize with " \r\n\t", matching the comma-operator ++v4 pattern
+    while (GetNextToken(token, &cursor, " \r\n\t")) {
+        if (token[0] == 'L' || token[0] == 'l') {
+            // Level line: "levNN"
+            ++levIdx;
+            tmpLevIDs[levIdx] = atoi(token + 3);
+            GetNextToken(token, &cursor, "\r\n");
+            s32 len = (s32)strlen(token);
+            tmpLevNames[levIdx] = new char[len + 1];
+            memcpy(tmpLevNames[levIdx], token, len + 1);
+            petalSeq = -1;
+            ++levelCount;
+        } else {
+            // Petal line: <index> <soundByte> <name>
+            ++petalSeq;
+            tmpPetalIdx[levIdx][petalSeq] = atoi(token);
+            GetNextToken(token, &cursor, " \t");
+            tmpSoundBytes[levIdx][petalSeq] = atoi(token);
+            GetNextToken(token, &cursor, "\r\n");
+            s32 len = (s32)strlen(token);
+            tmpPetalNames[levIdx][petalSeq] = new char[len + 1];
+            memcpy(tmpPetalNames[levIdx][petalSeq], token, len + 1);
+            ++tmpPetalCounts[levIdx];
+        }
+    }
+
+    // Build levelList: pairs of {levelID, petalCount}
+    levelList = new s32[levelCount * 2];
+    highestPetal = new s32[levelCount];
+    for (s32 i = 0; i < levelCount; i++) {
+        levelList[i * 2] = tmpLevIDs[i];
+        levelList[i * 2 + 1] = tmpPetalCounts[i];
+    }
+
+    // Build levelNames
+    levelNames = new char*[levelCount + 1];
+    levelNames[levelCount] = nullptr;
+
+    // Build petalNames sub-arrays (null-initialized)
+    petalNames = new char**[levelCount + 1];
+    petalNames[levelCount] = nullptr;
+    for (s32 i = 0; i <= levelCount; i++) {
+        if (i == levelCount) break;
+        s32 pc = tmpPetalCounts[i];
+        petalNames[i] = new char*[pc + 1];
+        for (s32 j = 0; j <= pc; j++)
+            petalNames[i][j] = nullptr;
+    }
+
+    // Copy level names, petal names, and compute highestPetal
+    for (s32 i = 0; i < levelCount; i++) {
+        s32 len = (s32)strlen(tmpLevNames[i]);
+        levelNames[i] = new char[len + 1];
+        memcpy(levelNames[i], tmpLevNames[i], len + 1);
+        delete[] tmpLevNames[i];
+
+        s32 pc = tmpPetalCounts[i];
+        for (s32 j = 0; j < pc; j++) {
+            s32 pidx = tmpPetalIdx[i][j];
+            s32 nlen = (s32)strlen(tmpPetalNames[i][j]);
+            petalNames[i][pidx] = new char[nlen + 1];
+            memcpy(petalNames[i][pidx], tmpPetalNames[i][j], nlen + 1);
+            delete[] tmpPetalNames[i][j];
+        }
+
+        highestPetal[i] = tmpPetalIdx[i][pc - 1];
+    }
+
+    // Build petalSoundIDs (u8 arrays, sequential order)
+    petalSoundIDs = new u8*[levelCount];
+    for (s32 i = 0; i < levelCount; i++) {
+        s32 pc = tmpPetalCounts[i];
+        petalSoundIDs[i] = new u8[pc];
+        for (s32 j = 0; j < pc; j++)
+            petalSoundIDs[i][j] = (u8)tmpSoundBytes[i][j];
+    }
+}
+
+// PSX: LoadPermanent__5World (WORLD.CPP:1062, 0x80045D6C)
+void World::LoadPermanent() {
+    LoadLevelNames();
+
+    // PSX: LoadLevel__12LevelManager() - empty stub on PSX
+    // PSX: PurgeLevelP3DInventory__12LevelManager() - also empty stub
+
+    // PSX: OpenCharacter(type=0), EnableCache(type=0, 1)
+    if (g_characterManager) {
+        g_characterManager->OpenCharacter(0);
+        g_characterManager->EnableCache(0, 1);
+
+        // PSX: allocate CharMgrCallback, LoadCharacter(type=0, callback), spin until done
+        CharMgrCallback* callback = new CharMgrCallback();
+        g_characterManager->LoadCharacter(0, callback);
+        // PSX spins: while (!callback->done) rDoTaskList(rMainTaskList, 0);
+        // PC: LoadCharacter is synchronous, callback already fired
+
+        // PSX: LoadAnimation(type=0, animEnum=0, hash=124, callback), spin until done
+        callback->done = 0;
+        g_characterManager->LoadAnimation(0, 0, 124, callback);
+        // PSX spins again - PC is synchronous
+
+        // PSX: LoadAnimation(type=0, animEnum=0, hash=124, nullptr) - fire and forget
+        g_characterManager->LoadAnimation(0, 0, 124, nullptr);
+
+        // PSX: EnableCache(type=0, 0), delete callback
+        g_characterManager->EnableCache(0, 0);
+        delete callback;
+    }
+
+    // PSX: AddThingNoTagList("Jackie", 0, {0,0,0}, {0,0,0}, "JACKIELOHIER", nullptr)
+    if (g_ai) {
+        LVector zeroPos = {0, 0, 0};
+        SVector zeroOrient = {0, 0, 0};
+        g_ai->AddThingNoTagList("Jackie", 0, &zeroPos, &zeroOrient, "JACKIELOHIER", nullptr);
+    }
 }
 
 // PSX: LoadLevel__5WorldUl (WORLD.CPP:1389, 0x8004624C)
 bool World::LoadLevelIndex(u32 levelIndex) {
     MARKFUNCTION(0x8004624C);
+
+    // PSX: clamp levelIndex to valid range
+    if (levelCount > 0 && levelIndex >= (u32)levelCount)
+        levelIndex = (u32)(levelCount - 1);
+
+    u32 prevLevel = currentLevelIndex;
+    currentLevelIndex = levelIndex;
+    previousLevelIndex = prevLevel;
 
     targetLevelIndex = levelIndex;
 
@@ -184,28 +383,57 @@ bool World::LoadLevelIndex(u32 levelIndex) {
     StartLogo("RUNFIRST.TIM");
     FillMeter(100);
 
+    // PSX: rSPrintf(v8, "%slev%02d.lcf", "RTARGET\\", levelList[levelIndex * 2])
     char levelPath[64];
-    std::snprintf(levelPath, sizeof(levelPath), "RTARGET/LEV%02u.LCF", levelIndex + 1);
+    s32 levNum = (levelList && levelCount > 0) ? levelList[levelIndex * 2] : (s32)(levelIndex + 1);
+    std::snprintf(levelPath, sizeof(levelPath), "RTARGET/LEV%02d.LCF", levNum);
     if (!Load(levelPath)) {
         StopLogo();
         return false;
     }
 
-    currentLevelIndex = targetLevelIndex;
     currentPetalIndex = targetPetalIndex;
 
-    // PSX: rsEvent(4, soundLocation, 0, 0) - set sound location
-    // PSX reads soundLocation from petalByteTables[level][petal] - 1.
-    // LoadPermanent (which loads the table) isn't reversed yet.
-    // Use petal index as sound location (works for Chinatown area: 0=CHINA1, 1=CHINA2, etc.).
-    // TODO: extract full level-to-soundLocation table from PSX LoadPermanent data.
-    rsEvent(RS_SET_LOCATION, (s32)currentPetalIndex, 0, 0);
+    // PSX: rsEvent(4, petalSoundIDs[levelIndex][targetPetalIndex] - 1, 0, 0)
+    if (petalSoundIDs && levelIndex < (u32)levelCount) {
+        s32 soundLocation = (s32)petalSoundIDs[levelIndex][targetPetalIndex] - 1;
+        rsEvent(RS_SET_LOCATION, soundLocation, 0, 0);
+    }
 
     // PSX: ExecuteLoadCallbacks -> cameraLoadFunc -> SetupPaths
     // (handled by gsQueueLevelLoad on PC)
 
-    // PSX: Construct(world)
-    // (block geometry already loaded above)
+    // PSX: Construct__5World (WORLD.CPP:1399, 0x80046E80)
+    // On PSX this is a separate function called after LoadLevel.
+    // It initializes fighting collision, effects, populates AI entities,
+    // loads backgrounds, resets Director, and sets up the level script.
+    // We inline the steps we can handle here.
+
+    // PSX: Init__17FightingCollision, InsertHumanoid (player)
+    // TODO: FightingCollision not yet reversed
+
+    // PSX: CheckpointInfo, WorldEffects, PWorldEffects, ParticleSystem
+    // TODO: not yet reversed
+
+    // PSX: Populate__2AI(0) - spawn entities from WDB database
+    if (g_ai) {
+        g_ai->Populate();
+    }
+
+    // PSX: LoadBG, InitBG - background rendering
+    // TODO: BackG not yet reversed
+
+    // PSX: ScoreManager::SetPar
+    // TODO: not yet reversed
+
+    // PSX: Director->Reset() then Director->SetScript()
+    if (g_director) {
+        g_director->Reset();
+        g_director->SetScript();
+    }
+
+    // PSX: SetupModelAmbientLighting, ProcessSwitches
+    // TODO: not yet reversed
 
     // PSX: rsEvent(5, 0, 0, 0) - start music for current location
     rsEvent(RS_LEVEL_BEGIN, 0, 0, 0);
@@ -699,9 +927,21 @@ void World::UnloadPetal() {
 void World::LoadPetal(u32 petalIndex) {
     MARKFUNCTION(0x8004604C);
 
+    // PSX: if current level is DestSelect (lev07), save as previous
+    if (levelList && currentLevelIndex < (u32)levelCount) {
+        if (levelList[currentLevelIndex * 2] == 7)
+            previousLevelIndex = currentLevelIndex;
+    }
+
     // PSX: EstimateLoadTime, StartLogo, FillMeter(100)
     StartLogo("RUNFIRST.TIM");
     FillMeter(100);
+
+    // PSX: rsEvent(4, petalSoundIDs[currentLevelIndex][petalIndex] - 1, 0, 0)
+    if (petalSoundIDs && currentLevelIndex < (u32)levelCount) {
+        s32 soundLocation = (s32)petalSoundIDs[currentLevelIndex][petalIndex] - 1;
+        rsEvent(RS_SET_LOCATION, soundLocation, 0, 0);
+    }
 
     targetPetalIndex = petalIndex;
     currentPetalIndex = petalIndex;

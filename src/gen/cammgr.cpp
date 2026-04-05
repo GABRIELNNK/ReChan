@@ -418,9 +418,11 @@ void CameraManager::SetupPaths() {
 
     if (g_database) {
         // Pass 1: add source paths (type 155 = 0x9B)
+        // PSX checks *(_WORD *)(path->points.head + 26) - first child point's subType
         DBPath* path = g_database->GetFirstPath();
         while (path) {
-            if (path->subType == 155) {
+            DBPoint* fp = static_cast<DBPoint*>(path->points.GetFirst());
+            if (fp && fp->subType == 155) {
                 anchor->AddCameraSourcePath(path);
                 sourcePathCount++;
             }
@@ -430,7 +432,8 @@ void CameraManager::SetupPaths() {
         // Pass 2: add target paths (type 156 = 0x9C)
         path = g_database->GetFirstPath();
         while (path) {
-            if (path->subType == 156) {
+            DBPoint* fp = static_cast<DBPoint*>(path->points.GetFirst());
+            if (fp && fp->subType == 156) {
                 anchor->AddCameraTargetPath(path);
                 targetPathCount++;
             }

@@ -7,9 +7,10 @@
 #include "common.h"
 #include "gen/manager.h"
 #include "gen/handler.h"
-#include "gen/camera.h"
 #include "gen/control.h"
-#include "p3d/view.h"
+
+class Camera;
+class tView;
 
 // Forward declarations - managers created in InternalOpen
 class World;
@@ -82,8 +83,8 @@ public:
 
     // Access
     World* GetWorld() const;
-    Camera& GetCamera() { return gameCamera; }
-    tView& GetView() { return view; }
+    Camera& GetCamera();
+    tView& GetView();
     HandlerSet& GetHandlerSet1() { return handlerSet1; }
     HandlerSet& GetHandlerSet2() { return handlerSet2; }
     s32 GetControlVal(s32 pad) const { return controlVal[pad]; }
@@ -106,10 +107,6 @@ private:
     HandlerSet handlerSet2;                     // +92: draw handlers
     s32 controlVal[2] = {};                     // +128: per-pad button state
     s32 field136 = 0;                           // +136
-
-    // PC: Camera/tView needed until CameraManager + oxScreenManager reversed
-    Camera gameCamera;
-    tView view;
 
     // PSX globals stored per-game instance
     s32 introTimer = 0;                         // frame counter for intro screens

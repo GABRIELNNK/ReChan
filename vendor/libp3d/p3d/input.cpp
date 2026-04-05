@@ -4,8 +4,9 @@
 
 void PlatformInput::TrackKey(int key) {
     if (prevKeys.find(key) == prevKeys.end()) {
+        // Set prev=false so the first press triggers correctly
         prevKeys[key] = false;
-        currKeys[key] = false;
+        currKeys[key] = display ? display->IsKeyDown(key) : false;
     }
 }
 

@@ -1,6 +1,7 @@
 // loadanim.cpp - PSX VBlankLogo loading bar
 // PSX source: C:\CHAN\GAME\SRC\FE\LOADANIM.CPP
 #include "fe/loadanim.h"
+#include "gen/display.h"
 #include "pc/tim.h"
 #include "gen/config.h"
 #include "p3d/context.h"
@@ -64,19 +65,20 @@ static void DrawLoadingScreen(u8 fill) {
 }
 
 static void PresentLoadingFrame(u8 fill) {
-    p3d::context->BeginFrame();
-    p3d::context->Clear(PDDI_BUFFER_ALL);
+    g_display->BeginFrame();
     DrawLoadingScreen(fill);
-    p3d::context->EndFrame();
-    p3d::display->SwapBuffers();
+    g_display->EndFrame();
+}
+
+static void PresentLoadingFrame_Tex(tTexture* tex) {
+    g_display->BeginFrame();
+    ScreenDraw::DrawFullscreen(tex);
+    g_display->EndFrame();
 }
 
 // PSX: StartLogo__10VBlankLogol (LOADANIM.CPP:167, 0x80047968)
 void StartLogo(const char* timFile) {
     MARKFUNCTION(0x80047968);
-
-    // End the in-progress frame from main loop
-    p3d::context->EndFrame();
 
     // Load background TIM
     if (!s_logo.bgTexture) {
@@ -148,13 +150,10 @@ void StopLogo() {
         s_logo.bgTexture = nullptr;
     }
     s_logo.active = false;
-
-    // Start a new frame so the main loop's EndFrame call is balanced
-    p3d::context->BeginFrame();
-    p3d::context->Clear(PDDI_BUFFER_ALL);
 }
 
 // PSX: DisplayTIM__FPCc (GAME.CPP:862, 0x80029200)
+// PSX: ClearImage + LoadImage (direct VRAM ops). PC: draw fullscreen quad.
 void DisplayTIM(const char* filename) {
     MARKFUNCTION(0x80029200);
 
@@ -168,17 +167,8 @@ void DisplayTIM(const char* filename) {
     if (!tex)
         return;
 
-    p3d::context->EndFrame();
-
-    p3d::context->BeginFrame();
-    p3d::context->Clear(PDDI_BUFFER_ALL);
-    ScreenDraw::DrawFullscreen(tex);
-    p3d::context->EndFrame();
-    p3d::display->SwapBuffers();
-
-    p3d::context->BeginFrame();
-    p3d::context->Clear(PDDI_BUFFER_ALL);
-    ScreenDraw::DrawFullscreen(tex);
+    // Present the image (double-buffer: draw twice, swap once)
+    PresentLoadingFrame_Tex(tex);
 
     tex->Release();
 }

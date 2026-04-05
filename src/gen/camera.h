@@ -5,9 +5,10 @@
 #include "common.h"
 #include "p3d/lvector.h"
 #include "gen/cammgr.h" // CameraAnchor
-#include "p3d/camera.h" // tCamera
+#include "p3d/camera.h" // tCamera, tMatrixCamera, t2PointMatrixCamera, G_2ptcam
 
 class Thing;
+class AnimStructure;
 
 // Camera mode identifiers (PSX SetMode parameter)
 enum CameraMode : s32 {
@@ -30,6 +31,8 @@ public:
     Camera& operator=(const Camera&) = delete;
 
     void Reset();                              // 0x80047C5C
+    void PurgeAnims();                         // 0x80047BE0
+    void UpdateAnim();                         // 0x80047A0C
 
     void Think();                              // 0x80047F28
     void Move();                               // 0x80047FD4
@@ -45,8 +48,14 @@ public:
     void SetLookAtTarget(Thing* thing, u16 mode); // 0x80049DC0
     void ShakeCamera(s32 frames);              // 0x80049DE4
 
+    // Camera animation (used by Director for cutscene cameras)
+    void LoadAsyncAnim(s32 animEnum);          // 0x8004A054
+    void PlayAsyncAnim();                      // 0x8004A0F0
+    void DeleteAsyncAnim();                    // 0x8004A220
+    LVector GetCameraVector() const;           // 0x80049F88
+
     // Accessors
-    tCamera* GetP3DCamera() { return &p3dCamera; }
+    tMatrixCamera* GetP3DCamera() { return &p3dCamera; }
     const LVector& GetPosition() const { return position; }  // +28
     CameraMode GetMode() const { return currentMode; }
 
@@ -167,17 +176,17 @@ private:
     // +400: shake frames remaining
     s32 shakeFrames = 0;
 
-    // +404: embedded tMatrixCamera = on PC we use tCamera directly
-    tCamera p3dCamera;
+    // +404: embedded tMatrixCamera (PSX: 56 bytes)
+    tMatrixCamera p3dCamera;
 
     // +460: async anim enum (0xFFFF = none)
     u16 asyncAnimEnum = 0xFFFF;
 
-    // +464: async anim pointer (0 = none)
-    s32 asyncAnim = 0;
+    // +464: async anim pointer (0 = none) - raw animation data from CharacterManager
+    void* asyncAnim = nullptr;
 
-    // +468: camera anim pointer (0 = none -> use angle-based path in Update)
-    s32 cameraAnim = 0;
+    // +468: camera anim (AnimStructure*, nullptr = use angle-based path in Update)
+    AnimStructure* cameraAnim = nullptr;
 
     // +472: flags bitfield
     // bit 0: path-follow position mode (1 = skip position interpolation in Move)

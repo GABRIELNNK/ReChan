@@ -54,9 +54,10 @@ public:
 
     // PSX: AddThingNoTagList (AI.CPP:365, 0x80054404) - enormous 4000-byte function
     // Creates a Thing from type + parameters and adds to thingList.
+    // PSX 6th param is mangled as const LVector* but actually used as const char* model name.
     void AddThingNoTagList(const char* name, u16 type,
                            const LVector* pos, const SVector* orient,
-                           const LVector* pos2, const DBRoot* root);
+                           const char* modelName, const DBRoot* root);
 
     // PSX: MoveThings__2AI (AI.CPP:1268, 0x80055D10)
     // Per-frame: Think → Move → UpdatePosition for all active entities

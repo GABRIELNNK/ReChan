@@ -1,6 +1,8 @@
 // game.cpp
 #include "common.h"
 #include "gen/game.h"
+#include "gen/display.h"
+#include "gen/camera.h"
 #include <chrono>
 #include "gen/world.h"
 #include "gen/block.h"
@@ -23,6 +25,9 @@
 #include "fe/xcfont.h"
 #include "radmovie/movieplayer.h"
 #include "pc/tim.h"
+#include "p3d/keycode.h"
+#include "p3d/input.h"
+#include "p3d/context.h"
 #include "fe/loadanim.h"
 #include "config.h"
 #include "p3d/context.h"
@@ -83,7 +88,7 @@ Game::Game() {
     // PSX: Game constructor creates 4 handlers in handlerSet2
     // BeginFrameHandler (pri=64), DrawEverythingHandler (pri=-16),
     // AnimateEverythingHandler (pri=-48), EndFrameHandler (pri=-64)
-    // For now we register the ones we have:
+    // Display::InternalOpen adds dispBeginFrameHandler (62) and dispEndFrameHandler (-62)
     handlerSet2.AddHandler(BeginFrameHandler, 64);
     handlerSet2.AddHandler(DrawEverythingHandlerCB, -16);
     handlerSet2.AddHandler(EndFrameHandler, -64);
@@ -144,7 +149,15 @@ void Game::InternalOpen() {
     managerList.AddNodePri(world);
 
     // 6. EnvironmentManager (140) - environment effects (TODO)
-    // 7. Display (32) - PSX display (not needed on PC)
+
+    // 7. Display (32) - owns tView, BeginFrame/EndFrame, frame counter
+    Display* disp = new Display();
+    disp->SetName("Display", 0);
+    managerList.AddNodePri(disp);
+    // PSX: Display::InternalOpen registers dispBeginFrameHandler (pri=62)
+    // and dispEndFrameHandler (pri=-62) into handlerSet2.
+    handlerSet2.AddHandler(Display::dispBeginFrameHandler, 62);
+    handlerSet2.AddHandler(Display::dispEndFrameHandler, -62);
 
     // 8. Director (212) - scripting/cutscenes
     g_director = new Director();
@@ -179,8 +192,10 @@ void Game::InternalOpen() {
     managerList.AddNodePri(camMgr);
 
     // 14. BlockManager (PSX: 168 bytes)
+    // BlockManager is currently owned by World, so we don't create a separate instance.
+    // TODO: extract from World when block loading is decoupled
 
-    // 15. AnimationManager (PSX: 40 bytes)
+    // 15. AnimationManager (40) - animation playback (TODO)
 
     // 16. CharacterManager (PSX: 3004 bytes)
     g_characterManager = new CharacterManager();
@@ -249,6 +264,14 @@ void Game::ProcessHandlers() {
     }
 }
 
+Camera& Game::GetCamera() {
+    return *g_display->GetCamera();
+}
+
+tView& Game::GetView() {
+    return g_display->GetView();
+}
+
 // Helper: get World from manager list
 World* Game::GetWorld() const {
     // World is the first manager in the list (for now)
@@ -260,13 +283,17 @@ World* Game::GetWorld() const {
 }
 
 // Handler callbacks
+// PSX: BeginFrameHandler (GAME.CPP:2192, pri=64 in handlerSet2)
+// Resets render counter. Frame begin/end is handled by Display handlers.
 void Game::BeginFrameHandler(Handler*) {
     MARKFUNCTION(0x8002B408);
+    // PSX: gp[3404] = 0 (reset render counter)
 }
 
 // PSX: DrawEverythingHandler__FP7Handler (GAME.CPP:2211, 0x8002A98C)
 // 1532 bytes, 91 blocks. Sorts blocks by distance, renders world geometry,
 // characters, items, shadows per-block. Uses tView layers for ordering.
+// NOTE: tView::BeginRender/EndRender are handled by Display's handlers (pri 62/-62).
 void Game::DrawEverythingHandlerCB(Handler*) {
     MARKFUNCTION(0x8002A98C);
     if (!g_game) return;
@@ -281,16 +308,12 @@ void Game::DrawEverythingHandlerCB(Handler*) {
     p3d::context->SetBlendMode(PDDI_BLEND_NONE);
     p3d::context->SetCullMode(PDDI_CULL_NONE);
 
-    g_game->view.BeginRender();
-
-    const LVector& camPos = g_game->gameCamera.GetPosition();
+    const LVector& camPos = g_display->GetCamera()->GetPosition();
     world->Render(&camPos);
 
     if (Player::s_player) {
         Player::s_player->Draw();
     }
-
-    g_game->view.EndRender();
 }
 
 // PSX: MenuRender__FP7MenuMgr (GAME.CPP:1714, 0x80029D68)
@@ -299,8 +322,11 @@ static void MenuRender(MenuMgr* menuMgr) {
     MARKFUNCTION(0x80029D68);
     // PSX: DrawEverythingHandler(null)
     Game::DrawEverythingHandlerCB(nullptr);
+    // PSX: DrawDirectorOverlays(null)
     DrawDirectorOverlays(nullptr);
     // PSX: HUD::Display()
+    // TODO: g_hud->Display();
+    // PSX: if menuMgr: menuMgr->Render() (via oxScreenManager)
     if (menuMgr) {
         menuMgr->Render();
     }
@@ -316,16 +342,26 @@ static s32 MenuDraw(MenuMgr* menuMgr) {
     } else {
         result = 1;
     }
+    // PSX: Display::BeginFrame, MenuRender, Display::EndFrame
+    g_display->BeginFrame();
     MenuRender(menuMgr);
+    g_display->EndFrame();
     return result;
 }
 
+// PSX: EndFrameHandler (GAME.CPP:2205, pri=-64 in handlerSet2)
+// Noop on PSX - Display's dispEndFrameHandler does the real work.
 void Game::EndFrameHandler(Handler*) {
     MARKFUNCTION(0x8002B420);
 }
 
 bool Game::Step() {
     MARKFUNCTION(0x8002B65C); // Step__4Game
+
+    // Poll platform-level keyboard/mouse state before anything reads it
+    if (p3d::input) {
+        p3d::input->ServiceInput();
+    }
 
 #if PAD_KEYBOARD_EMULATION
     if (g_inputManager) {
@@ -390,9 +426,11 @@ bool Game::gsIntroState(Game* game) {
 
     // Phase 1: 300-frame wait (any button breaks)
     if (game->introPhase == 1) {
+        g_display->BeginFrame();
         if (game->introTexture) {
             ScreenDraw::DrawFullscreen(game->introTexture);
         }
+        g_display->EndFrame();
         game->introTimer++;
 
         g_inputManager->Step();
@@ -482,6 +520,7 @@ bool Game::gsTitleLoopState(Game* game) {
     // PSX uses blocking inline fade loops. PC animates one step per frame.
     if (game->titleFadeType != 0) {
         // Continue rendering title screen behind the fade overlay
+        g_display->BeginFrame();
         if (game->titleScreen) {
             game->titleScreen->Update();
             game->titleScreen->Render();
@@ -489,6 +528,7 @@ bool Game::gsTitleLoopState(Game* game) {
 
         s32 stillFading = FadeUpdate();
         FadeRender();
+        g_display->EndFrame();
 
         if (!stillFading) {
             FadeEnd();
@@ -521,10 +561,12 @@ bool Game::gsTitleLoopState(Game* game) {
         return true;
     }
 
+    g_display->BeginFrame();
     if (game->titleScreen) {
         game->titleScreen->Update();
         game->titleScreen->Render();
     }
+    g_display->EndFrame();
 
     // PSX: InputManager::Step, GetControlVal(0)
     g_inputManager->Step();
@@ -567,7 +609,10 @@ bool Game::gsInitState(Game* game) {
     // PSX: if firstBoot (gp[80]): LoadPermanent(), clear firstBoot
     if (game->firstBoot) {
         // PSX: MEMSTAT(24, 1)
-        // PSX: world->LoadPermanent()
+        World* world = game->GetWorld();
+        if (world) {
+            world->LoadPermanent();
+        }
         // PSX: MEMSTAT(24, 2)
         game->firstBoot = 0;
     }
@@ -627,56 +672,49 @@ bool Game::gsPrePlayState(Game* game) {
     MARKFUNCTION(0x80029AC0); // gsPrePlayState
 
     // PSX: 432 bytes, 27 blocks.
-    // Loads overlay based on level type, calls Director::DetermineLevelIntro,
-    // sets up rsEvent for level audio, checks checkpoint, resets HUD,
-    // sets up input control modes, then SetState(Play=8).
+    // Loads overlay, shows menu, calls DetermineLevelIntro, sets up audio
+    // listener, checks checkpoint, resets HUD, input control modes,
+    // then transitions to Play state.
 
-    // PSX: GetCurLevelID(world)
-    // PSX: if level 7 (boss): LoadOverlay(1), feMenuMgr->Activate, feMenuMgr->Render
+    World* world = game->GetWorld();
+    s32 levelID = (world) ? world->GetCurLevelID() : 0;
+
+    // PSX: level 7 (hub): LoadOverlay(1), feMenuMgr->ShowNewGameMenu, feMenuMgr->OpenDoors
     // PSX: else: gameMenu->ShowPauseMenu(), LoadOverlay(0)
-    if (g_gameMenu) {
-        g_gameMenu->ShowPauseMenu();
+    if (levelID == 7) {
+        // PSX: LoadOverlay(1) - load boss overlay for hub
+        if (g_feMenuMgr) {
+            g_feMenuMgr->ShowNewGameMenu();
+            g_feMenuMgr->OpenDoors();
+        }
+    } else {
+        if (g_gameMenu) {
+            g_gameMenu->ShowPauseMenu();
+        }
+        // PSX: LoadOverlay(0) - load normal overlay
     }
 
-    // PSX: Director->DetermineLevelIntro() via vtable
+    // PSX: Director->DetermineLevelIntro() (vtable dispatch)
     if (g_director) {
         g_director->DetermineLevelIntro();
     }
 
     // PSX: rsEvent(21, player+28, cameraManager+384, 0) - set 3D audio listener
+    // The args are pointers to player position and camera matrix for 3D audio.
+    // On PC we pass zeros - audio spatialization not yet wired.
     rsEvent(21, 0, 0, 0);
 
-    // PSX: rsEvent(5, 0, 0, 0) - start music
-    // Music is normally started by LoadLevel (World::LoadLevelIndex), but if the
-    // Director intro script would override/restart it, ensure it's playing now.
-    rsEvent(RS_LEVEL_BEGIN, 0, 0, 0);
+    // PSX: if CheckpointInfo::IsValid(player+636): cameraManager field364 = 1
+    // TODO: CheckpointInfo not yet reversed
 
-    // PSX: CheckpointInfo::IsValid(player+636) -> if valid, cameraMgr+364 = 1
-
-    // PSX: AI::Populate - spawns entities from WDB database
-    if (g_ai) {
-        g_ai->Populate();
-    }
-
-    // PSX: SetLookAtTarget(theCamera, thePlayer, 1) - camera follows player
-    if (Player::s_player) {
-        game->gameCamera.SetLookAtTarget(Player::s_player, 1);
-        LOG("[PrePlay] Player pos=(%d,%d,%d)", 
-            Player::s_player->pos.x, Player::s_player->pos.y, Player::s_player->pos.z);
-    } else {
-        LOG("[PrePlay] WARNING: Player::s_player is null after Populate!");
-    }
-
-    LOG("[PrePlay] Camera pos=(%d,%d,%d) cameraManager=%p",
-        game->gameCamera.GetPosition().x, game->gameCamera.GetPosition().y,
-        game->gameCamera.GetPosition().z, (void*)g_cameraManager);
-
+    // PSX: SetState(Play=8)
     game->SetState(GameState::Play);
 
     // PSX: g_directorActive = 1 (gp+20)
     g_directorActive = 1;
 
     // PSX: HUD->InternalReset()
+    // TODO: HUD not yet reversed
 
     // PSX: clear controlVal
     game->controlVal[0] = 0;
@@ -690,7 +728,10 @@ bool Game::gsPrePlayState(Game* game) {
         }
     }
 
-    // PSX: if level != 7: HUD->SetHUDVisible(1, 1)
+    // PSX: if level != 7: SetHUDVisible(0, 1, 1)
+    // TODO: HUD not yet reversed
+
+    // PSX: MEMSTAT_NEW_PRINT, SetMemoryState(1)
 
     return true;
 }
@@ -699,11 +740,14 @@ bool Game::gsPlayState(Game* game) {
     MARKFUNCTION(0x80029C6C); // gsPlayState
 
     // PSX: check g_directorActive (gp+20). If active, Director runs the
-    // intro script and we skip normal gameplay.
+    // intro script and we skip normal gameplay processing.
     if (g_directorActive) {
         if (g_director) {
             g_director->Process();
         }
+        // PSX: VBlank interrupt handles display/camera updates automatically.
+        // PC: we must still run ProcessHandlers so draw handlers fire each frame.
+        game->ProcessHandlers();
         return true;
     }
 
@@ -717,21 +761,30 @@ bool Game::gsPlayState(Game* game) {
     // PSX: ProcessHandlers(game) - runs handlerSet1 (think) + handlerSet2 (draw)
     game->ProcessHandlers();
 
-    // PSX: if state changed during handlers, return early
-    if (game->state != GameState::Play) return true;
-
-    // PSX: check if director is not busy (field168 < 1) AND Start pressed
-    // PSX uses 0x0800 (remapped Start in gameplay control mode)
-    s32 canPause = 0;
-    if (g_director && g_director->field168 < 1) {
-        canPause = 1;
-    } else if (!g_director) {
-        canPause = 1;
+    // PSX: check state==Play AND director scriptState==0 for pause eligibility
+    if (game->state == GameState::Play) {
+        s32 canPause = (!g_director || g_director->scriptState == 0);
+        if (canPause && (game->controlVal[0] & kControlStartAction)) {
+            game->SetState(GameState::Menu);
+            // PSX: Shock(18) - controller vibration on pause
+            // TODO: Shock not yet reversed
+        }
     }
 
-    if (canPause && (game->controlVal[0] & kControlStartAction)) {
-        game->SetState(GameState::Menu);
+    // PSX: Update__7Profile() - PSX profiling system, not applicable on PC
+
+#if IMPROVED_DEBUG_CAM
+    // CTRL+B: toggle between debug camera and follow camera
+    if (p3d::input->IsKeyDown(KEY_LEFT_CONTROL) && p3d::input->IsKeyTriggered(KEY_B)) {
+        Camera* cam = g_display->GetCamera();
+
+        if (cam->GetMode() == CAM_MODE_DEFAULT) {
+            cam->SetMode(CAM_MODE_FOLLOW);
+        } else {
+            cam->SetMode(CAM_MODE_DEFAULT);
+        }
     }
+#endif
 
     return true;
 }
@@ -757,15 +810,31 @@ bool Game::gsEndLevelLoopState(Game* game) {
 bool Game::gsEndLevelExitState(Game* game) {
     MARKFUNCTION(0x8002B744); // gsEndLevelExitState
 
-    // PSX: 660 bytes - handles level progression
+    // PSX: 660 bytes - handle level end scoring and progression
+
     // PSX: ScoreManager::HandleLevelEnd()
     if (g_scoreManager) {
         g_scoreManager->HandleLevelEnd();
     }
-    // PSX: checks if next petal exists, determines QueuePetalLoad vs QueueLevelLoad
-    // PSX: handles boss level win, level complete movies, etc.
 
-    game->SetState(GameState::DetermineNextGameState);
+    World* world = game->GetWorld();
+    if (!world) {
+        game->SetState(GameState::QueueLevelLoad);
+        return true;
+    }
+
+    // PSX: check if next petal exists for current level
+    s32 nextPetal = (s32)world->GetCurrentPetalIndex() + 1;
+    if (nextPetal < world->GetCurLevelPetals()) {
+        // PSX: ScoreManager::OpenPetal(currentLevelIndex, nextPetal)
+        // TODO: ScoreManager::OpenPetal not yet reversed
+    }
+
+    // PSX: always return to hub (level 7) after level completion
+    s32 hubIndex = world->LevelIDToIndex(7);
+    world->SetTargetLevelPetal((u32)hubIndex, 0);
+
+    game->SetState(GameState::QueueLevelLoad);
     return true;
 }
 
@@ -854,15 +923,21 @@ bool Game::gsQueueLevelLoad(Game* game) {
     MARKFUNCTION(0x80029574); // gsQueueLevelLoad
 
     // PSX: 520 bytes, 33 blocks.
-    // rsEvent(6,0,0,0) - stop music
+
+    // PSX: rsEvent(6,0,0,0) - stop music
     rsEvent(RS_STOP_MUSIC, 0, 0, 0);
 
-    // PSX: Shock(18), MenuFade() - blocking fade
-    // PSX: HUD->SetHUDVisible(0, 1)
+    // PSX: Shock(18) - controller vibration pulse
+    // TODO: Shock not yet reversed
+
+    // PSX: MenuFade() - blocking fade to black
+    // TODO: MenuFade not yet reversed (blocking inline loop on PSX)
+
+    // PSX: SetHUDVisible(0, 0, 1) - hide HUD during load
+    // TODO: HUD not yet reversed
+
     // PSX: SetMemoryState(0), MEMSTAT_CLEAR, MEMSTAT_MIN_CLEAR, MEMSTAT_NEW_RESET
-    // PSX: world->UnloadLevel(), world->UnloadLevelPart2()
-    // PSX: DeletePlayerBlendAndAnimData(), FreeDynamicPrimBuffers()
-    // PSX: AllocateDynamicPrimBuffers(0)
+    // PSX memory tracking - not applicable on PC
 
     World* world = game->GetWorld();
     if (!world) {
@@ -870,47 +945,62 @@ bool Game::gsQueueLevelLoad(Game* game) {
         return true;
     }
 
+    // PSX: UnloadLevel(world), UnloadLevelPart2(world)
     world->Unload();
+    // TODO: UnloadLevelPart2 not yet reversed (additional cleanup)
 
-    // PSX: DisplayTIM(gp[24])
+    // PSX: DeletePlayerBlendAndAnimData() - free player blend tree memory
+    // TODO: not yet reversed
+
+    // PSX: FreeDynamicPrimBuffers(), AllocateDynamicPrimBuffers(0)
+    // PSX GPU primitive buffers - not applicable on PC
+
+    // PSX: DisplayTIM(gp[24]) - show loading screen background
     DisplayTIM("RUNFIRST.TIM");
-    // PSX: gameMenu->ShowLoadingScreenText(world->levelId, world->petalLoadTarget)
-    // PSX: determine overlay based on level type (7=boss->overlay 1, else overlay 0)
-    // PSX: LoadOverlay(overlayId)
 
-    // PSX: LoadLevel(world, world->targetLevelIndex)
-    // PSX LoadLevel internally calls StartLogo/FillMeter/StopLogo
+    // PSX: ShowLoadingScreenText(gameMenu, levelId, petalTarget)
+    // TODO: gameMenu::ShowLoadingScreenText not yet reversed
+
+    // PSX: LoadOverlay(levelType==7) - load code overlay
+    // PSX: BossAI overlay switch for levels 1-7 vs 8,11-14
+    // Not applicable on PC - all code is statically linked
+
+    // PSX: LoadLevel(world, targetLevelIndex) - internally calls Construct
+    // which spawns AI entities, resets Director, sets level script
     if (!world->LoadLevelIndex(world->GetTargetLevelIndex())) {
         game->SetState(GameState::Error);
         return true;
     }
 
-    // PSX: Camera::Reset is called first, then the load chain fires
-    // cameraLoadFunc -> CameraManager::SetupPaths, which assigns the anchor.
-    game->gameCamera.Reset();
-
-    // PSX: LoadLevel fires the load chain, which triggers cameraLoadFunc
-    // -> CameraManager::SetupPaths. On PC, call it directly now.
-    // Must come AFTER Reset() since Reset sets cameraAnchor = 0.
+    // PSX: Camera setup through ExecuteLoadCallbacks chain
+    // which fires cameraLoadFunc -> CameraManager::SetupPaths.
+    g_display->GetCamera()->Reset();
     if (g_cameraManager) {
         g_cameraManager->SetupPaths();
-        game->gameCamera.SetCameraAnchor(g_cameraManager->GetAnchor());
+        g_display->GetCamera()->SetCameraAnchor(g_cameraManager->GetAnchor());
     }
 
-    tCamera* cam = game->gameCamera.GetP3DCamera();
+    tMatrixCamera* cam = g_display->GetCamera()->GetP3DCamera();
     cam->SetNearPlane(100.0f);
     cam->SetFarPlane(500000.0f);
 
-    game->view.SetCamera(game->gameCamera.GetP3DCamera());
-    game->view.SetBackgroundColour(pddiColour(30, 30, 35));
-    game->view.SetClearMask(PDDI_BUFFER_ALL);
+    g_display->GetView().SetCamera(g_display->GetCamera()->GetP3DCamera());
+    g_display->GetView().SetBackgroundColour(pddiColour(30, 30, 35));
+    g_display->GetView().SetClearMask(PDDI_BUFFER_ALL);
 
-    // PSX: Player creation happens in AI::Populate via AddThingNoTagList(type 0)
+    // PSX: SetLookAtTarget via CameraManager path system.
+    // Player was created by AI::Populate inside World::LoadLevelIndex -> Construct.
+    if (Player::s_player) {
+        g_display->GetCamera()->SetLookAtTarget(Player::s_player, 1);
+    }
 
-    // PSX 0x80029574 transitions to PrePlay (state 7) after load completes.
+    // PSX: SetState(PrePlay=7)
     game->SetState(GameState::PrePlay);
 
-    // PSX: jcsStartDialog(), InputManager::Step(), GetControlVal(0)
+    // PSX: jcsStartDialog() - initialize dialog/subtitle system
+    // TODO: jcsStartDialog not yet reversed
+
+    // PSX: InputManager::Step(), GetControlVal(0) - flush input buffer
     g_inputManager->Step();
     g_inputManager->GetControlVal(0);
 
@@ -920,8 +1010,12 @@ bool Game::gsQueueLevelLoad(Game* game) {
 bool Game::gsQueuePetalLoad(Game* game) {
     MARKFUNCTION(0x8002977C); // gsQueuePetalLoad
 
-    // PSX: rsEvent(6,0,0,0)
+    // PSX: rsEvent(6,0,0,0) - stop music
     rsEvent(RS_STOP_MUSIC, 0, 0, 0);
+
+    // PSX: Shock(18), MenuFade(), SetHUDVisible(0, 0, 1)
+    // PSX: SetMemoryState(0), MEMSTAT_CLEAR()
+    // TODO: not yet reversed
 
     World* world = game->GetWorld();
     if (!world) {
@@ -929,18 +1023,25 @@ bool Game::gsQueuePetalLoad(Game* game) {
         return true;
     }
 
+    // PSX: UnloadPetal(world)
     world->UnloadPetal();
 
     // PSX: DisplayTIM(gp[24])
     DisplayTIM("RUNFIRST.TIM");
 
-    // PSX: LoadPetal internally calls StartLogo/FillMeter/StopLogo
+    // PSX: ShowLoadingScreenText(gameMenu, currentLevelIndex, targetPetalIndex)
+    // TODO: not yet reversed
+
+    // PSX: LoadPetal(world, targetPetalIndex)
     world->LoadPetal(world->GetTargetPetalIndex());
 
-    // PSX 0x8002977C transitions to PrePlay (state 7).
+    // PSX: SetState(PrePlay=7)
     game->SetState(GameState::PrePlay);
 
-    // PSX: InputManager::Step(), GetControlVal(0)
+    // PSX: jcsStartDialog()
+    // TODO: not yet reversed
+
+    // PSX: InputManager::Step(), GetControlVal(0) - flush input buffer
     g_inputManager->Step();
     g_inputManager->GetControlVal(0);
 
@@ -969,6 +1070,10 @@ bool Game::gsQueueLevelPetalLoad(Game* game) {
         game->SetState(GameState::QueuePetalLoad);
     }
 
+    // PSX: jcsStartDialog()
+    // TODO: not yet reversed
+
+    // PSX: InputManager::Step(), GetControlVal(0)
     if (g_inputManager) {
         g_inputManager->Step();
         g_inputManager->GetControlVal(0);
@@ -979,6 +1084,9 @@ bool Game::gsQueueLevelPetalLoad(Game* game) {
 
 bool Game::gsDetermineNextGameState(Game* game) {
     MARKFUNCTION(0x80029924); // gsDetermineNextGameState
+
+    // PSX: Shock(18) - controller vibration on death
+    // TODO: Shock not yet reversed
 
     // PSX: decrement lives and branch to EndGame if depleted, else QueuePetalLoad.
     if (Player::s_player) {
@@ -1035,6 +1143,8 @@ bool Game::gsEndGameState(Game* game) {
 bool Game::gsEndGameLoopState(Game* game) {
     MARKFUNCTION(0x8002C22C); // gsEndGameLoopState
 
+    // PSX: BeginFrame -> oxScreenManager::Update + Render -> EndFrame
+    g_display->BeginFrame();
     if (game->gameOverScreen) {
         game->gameOverScreen->Update();
         game->gameOverScreen->Render();
@@ -1043,6 +1153,7 @@ bool Game::gsEndGameLoopState(Game* game) {
     if (game->gameOverFadeType != 0) {
         s32 stillFading = FadeUpdate();
         FadeRender();
+        g_display->EndFrame();
 
         if (!stillFading) {
             FadeEnd();
@@ -1061,6 +1172,8 @@ bool Game::gsEndGameLoopState(Game* game) {
         }
         return true;
     }
+
+    g_display->EndFrame();
 
     g_inputManager->Step();
     u32 buttons = g_inputManager->GetControlVal(0);
@@ -1098,7 +1211,13 @@ void Game::PlayMovie(const char* name, s32 skippable, s32 unloadLevel) {
 
     LOG("[Game] PlayMovie(\"%s\", skip=%d, unload=%d)", name, skippable, unloadLevel);
 
-    // PSX: rsEvent(4, 24, 0, 0)
+    // PSX: display sync / GTE setup calls (func_800366E8, func_80026C04, func_80027638)
+    // PC: not needed
+
+    // PSX: if (unloadLevel) { world->UnloadLevel(); LoadOverlay(1); }
+    // PC: overlay system not used, but world unload may be relevant later
+
+    // PSX: rsEvent(4, 24, 0, 0) -- SetSFXVol(24)
     rsEvent(4, 24, 0, 0);
     // PSX: rsEvent(5, 0, 0, 0) -- LevelBegin/StopMusic
     rsEvent(5, 0, 0, 0);
@@ -1119,6 +1238,8 @@ void Game::PlayMovie(const char* name, s32 skippable, s32 unloadLevel) {
         goto cleanup;
     }
 
+    // PSX: Play(0x80014534) with skip callback (0x80039330) if skippable
+    // PC: blocking frame loop
     {
         using Clock = std::chrono::steady_clock;
         auto prevFrame = Clock::now();
@@ -1132,10 +1253,12 @@ void Game::PlayMovie(const char* name, s32 skippable, s32 unloadLevel) {
 
             p3d::display->PollEvents();
 
+            // PSX: skip callback checks Start button
+            // PC: Enter (Start), Escape, or Space to skip
             if (skippable) {
-                if (p3d::display->IsKeyDown(257) ||  // GLFW_KEY_ENTER
-                    p3d::display->IsKeyDown(256) ||  // GLFW_KEY_ESCAPE
-                    p3d::display->IsKeyDown(32)) {   // GLFW_KEY_SPACE
+                if (p3d::display->IsKeyDown(KEY_ENTER) ||
+                    p3d::display->IsKeyDown(KEY_ESCAPE) ||
+                    p3d::display->IsKeyDown(KEY_SPACE)) {
                     LOG("[Game] PlayMovie: skipped by user");
                     break;
                 }
@@ -1143,11 +1266,9 @@ void Game::PlayMovie(const char* name, s32 skippable, s32 unloadLevel) {
 
             player->AdvanceFrame();
 
-            p3d::context->BeginFrame();
-            p3d::context->Clear(PDDI_BUFFER_ALL);
+            g_display->BeginFrame();
             player->Render();
-            p3d::context->EndFrame();
-            p3d::display->SwapBuffers();
+            g_display->EndFrame();
         }
     }
 
@@ -1155,13 +1276,12 @@ void Game::PlayMovie(const char* name, s32 skippable, s32 unloadLevel) {
     delete player;
 
 cleanup:
+    // PSX: if (unloadLevel) { LoadOverlay(0); ReloadFont("xc/fonts.1"); LoadCharTexture(0); }
     if (unloadLevel) {
         if (g_oxFontFile) {
             g_oxFontFile->ReloadFont("XC/FONTS.1");
         }
-        if (g_characterManager) {
-            g_characterManager->LoadCharTexture(0);
-        }
+        // PSX: LoadCharTexture(g_charMgr, 0) -- TODO when charMgr is reversed
     }
 
     // PSX: rsEvent(13, 7, 0, 0) -- cleanup
@@ -1279,5 +1399,8 @@ s32 Game::FadeUpdate() {
 // Draws a fullscreen black POLY_F4 with alpha=fadeCounter at layer 5.
 void Game::FadeRender() {
     MARKFUNCTION(0x8002C9F8);
+    // PSX: EnterLayer(view, 5), setup POLY_F4 (512x240),
+    // set RGB to fadeCounter, render primitive, ExitLayer(view, 5)
+    // PC: draw a fullscreen colored quad with alpha blending
     ScreenDraw::DrawColoredQuad(0, 0, 0, s_fadeCounter);
 }

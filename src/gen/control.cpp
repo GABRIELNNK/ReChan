@@ -1,10 +1,11 @@
 // control.cpp = from C:\CHAN\GAME\SRC\GEN\CONTROL.CPP
 // InputManager / Control / Button implementations
 #include "gen/control.h"
+#include "config.h"
+#include "p3d/keycode.h"
 
 #if PAD_KEYBOARD_EMULATION
 #include "p3d/input.h"    // PlatformInput (PC keyboard/mouse)
-#include "pddi/pddidev.h"  // pddiInput key constants
 #endif
 
 // Global singleton (PSX: 0x800DD69C)
@@ -269,17 +270,6 @@ struct KeyPadBinding {
     u32 padBit;
 };
 
-static constexpr int kKeyEscape = 256;
-static constexpr int kKeyEnter = 257;
-static constexpr int kKeyTab = 258;
-static constexpr int kKeyBackspace = 259;
-static constexpr int kKeyRight = 262;
-static constexpr int kKeyLeft = 263;
-static constexpr int kKeyDown = 264;
-static constexpr int kKeyUp = 265;
-static constexpr int kKeySpace = 32;
-static constexpr int kKeyLeftControl = 341;
-
 // Default keyboard -> PSX pad bindings
 // Movement:     WASD + Arrow Keys -> D-pad Up/Left/Down/Right
 // Face buttons: I/J/K/L + V/Z/X/C + Space/Ctrl -> Triangle/Square/Cross/Circle
@@ -288,38 +278,37 @@ static constexpr int kKeyLeftControl = 341;
 // Stick clicks: N/M -> L3/R3
 static const KeyPadBinding s_keyBindings[] = {
     // D-pad
-    { 'W',  PsxPad::Up       },
-    { 'A',  PsxPad::Left     },
-    { 'S',  PsxPad::Down     },
-    { 'D',  PsxPad::Right    },
-    { kKeyUp,    PsxPad::Up    },
-    { kKeyLeft,  PsxPad::Left  },
-    { kKeyDown,  PsxPad::Down  },
-    { kKeyRight, PsxPad::Right },
+    { KEY_W,  PsxPad::Up       },
+    { KEY_A,  PsxPad::Left     },
+    { KEY_S,  PsxPad::Down     },
+    { KEY_D,  PsxPad::Right    },
+    { KEY_UP,    PsxPad::Up    },
+    { KEY_LEFT,  PsxPad::Left  },
+    { KEY_DOWN,  PsxPad::Down  },
+    { KEY_RIGHT, PsxPad::Right },
     // Face buttons
-    { 'I',  PsxPad::Triangle },
-    { 'K',  PsxPad::Cross    },
-    { 'J',  PsxPad::Square   },
-    { 'L',  PsxPad::Circle   },
-    { 'V',  PsxPad::Triangle },
-    { 'X',  PsxPad::Cross    },
-    { 'Z',  PsxPad::Square   },
-    { 'C',  PsxPad::Circle   },
-    { kKeySpace,       PsxPad::Cross },
-    { kKeyLeftControl, PsxPad::Cross },
+    { KEY_I,  PsxPad::Triangle },
+    { KEY_K,  PsxPad::Cross    },
+    { KEY_J,  PsxPad::Square   },
+    { KEY_L,  PsxPad::Circle   },
+    { KEY_V,  PsxPad::Triangle },
+    { KEY_X,  PsxPad::Cross    },
+    { KEY_Z,  PsxPad::Square   },
+    { KEY_C,  PsxPad::Circle   },
+    { KEY_SPACE,        PsxPad::Cross },
     // Shoulders
-    { 'U',  PsxPad::L1       },
-    { 'O',  PsxPad::R1       },
-    { 'Y',  PsxPad::L2       },
-    { 'P',  PsxPad::R2       },
+    { KEY_U,  PsxPad::L1       },
+    { KEY_O,  PsxPad::R1       },
+    { KEY_Y,  PsxPad::L2       },
+    { KEY_P,  PsxPad::R2       },
     // Start / Select
-    { kKeyEnter,     PsxPad::Start  },
-    { kKeyEscape,    PsxPad::Start  },
-    { kKeyBackspace, PsxPad::Select },
-    { kKeyTab,       PsxPad::Select },
+    { KEY_ENTER,     PsxPad::Start  },
+    { KEY_ESCAPE,    PsxPad::Start  },
+    { KEY_BACKSPACE, PsxPad::Select },
+    { KEY_TAB,       PsxPad::Select },
     // Stick clicks
-    { 'N',  PsxPad::L3       },
-    { 'M',  PsxPad::R3       },
+    { KEY_N,  PsxPad::L3       },
+    { KEY_M,  PsxPad::R3       },
 };
 
 static constexpr int s_numKeyBindings = sizeof(s_keyBindings) / sizeof(s_keyBindings[0]);

@@ -2,6 +2,7 @@
 // Reversed from PSX MODEL.CPP / MHUMAN.CPP
 #include "gen/model.h"
 #include "gen/animmat.h"
+#include "gen/animstruct.h"
 #include "p3d/context.h"
 #include "p3d/matrix.h"
 #include "pddi/pddi.h"
@@ -176,8 +177,10 @@ void SModel::Show(u32 flags) {
 // PSX: Animate__6SModel (MODEL.CPP:1416, 0x8006F640)
 void SModel::Animate() {
     MARKFUNCTION(0x8006F640);
-    // PSX: if animStructure, call ExecuteHandler
-    // Animation not yet implemented
+    if (animStructure) {
+        AnimStructure* anim = (AnimStructure*)animStructure;
+        anim->ExecuteHandler(1);
+    }
 }
 
 // PSX: SetOriginalSTree__6SModelP13OriginalSTreeP10tAnimation (MODEL.CPP:1026, 0x8006EDD4)

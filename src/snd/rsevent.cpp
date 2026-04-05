@@ -12,34 +12,34 @@ static s32 g_soundDisabled = 0;
 // which determines which music track plays when RS_LEVEL_BEGIN fires.
 s32 g_currentSoundLocation = 0;
 
-// PSX music file table indexed by sound location
-// Location 22 = title screen music
+// PSX music file table indexed by sound location (LocInfo at 0x800D6588)
+// Matches PSX LocInfo[n][1] ordering exactly
 static const char* s_musicTable[] = {
-    "SOUND/MUSIC/CHINA1.FAG",    //  0
-    "SOUND/MUSIC/CHINA2.FAG",    //  1
-    "SOUND/MUSIC/CHINA3.FAG",    //  2
-    "SOUND/MUSIC/CHINAB.FAG",    //  3
-    "SOUND/MUSIC/FACTORY1.FAG",  //  4
-    "SOUND/MUSIC/FACTORY2.FAG",  //  5
-    "SOUND/MUSIC/FACTORY3.FAG",  //  6
-    "SOUND/MUSIC/FACTORYB.FAG",  //  7
-    "SOUND/MUSIC/ROOF1.FAG",     //  8
-    "SOUND/MUSIC/ROOF2.FAG",     //  9
-    "SOUND/MUSIC/ROOF3.FAG",     // 10
-    "SOUND/MUSIC/ROOFB.FAG",     // 11
-    "SOUND/MUSIC/SEWER1.FAG",    // 12
-    "SOUND/MUSIC/SEWER2.FAG",    // 13
-    "SOUND/MUSIC/SEWER3.FAG",    // 14
-    "SOUND/MUSIC/SEWERB.FAG",    // 15
-    "SOUND/MUSIC/WATER1.FAG",    // 16
-    "SOUND/MUSIC/WATER2.FAG",    // 17
-    "SOUND/MUSIC/WATER3.FAG",    // 18
-    "SOUND/MUSIC/WATERB.FAG",    // 19
-    "SOUND/MUSIC/TEMPLE.FAG",    // 20
-    "SOUND/MUSIC/GAMEOVER.FAG",  // 21
-    "SOUND/MUSIC/TITLE.FAG",     // 22
-    "SOUND/MUSIC/DESTSEL.FAG",   // 23
-    nullptr,                      // 24 (movie music - no FAG)
+    "SOUND/MUSIC/CHINA1.FAG",    //  0: Chinatown petal 1
+    "SOUND/MUSIC/CHINA2.FAG",    //  1: Chinatown petal 2
+    "SOUND/MUSIC/CHINA3.FAG",    //  2: Chinatown petal 3
+    "SOUND/MUSIC/CHINAB.FAG",    //  3: Chinatown boss
+    "SOUND/MUSIC/WATER1.FAG",    //  4: Waterfront petal 1
+    "SOUND/MUSIC/WATER2.FAG",    //  5: Waterfront petal 2
+    "SOUND/MUSIC/WATER3.FAG",    //  6: Waterfront petal 3
+    "SOUND/MUSIC/WATERB.FAG",    //  7: Waterfront boss
+    "SOUND/MUSIC/SEWER1.FAG",    //  8: Sewer petal 1
+    "SOUND/MUSIC/SEWER2.FAG",    //  9: Sewer petal 2
+    "SOUND/MUSIC/SEWER3.FAG",    // 10: Sewer petal 3
+    "SOUND/MUSIC/SEWERB.FAG",    // 11: Sewer boss
+    "SOUND/MUSIC/ROOF1.FAG",     // 12: Rooftop petal 1
+    "SOUND/MUSIC/ROOF2.FAG",     // 13: Rooftop petal 2
+    "SOUND/MUSIC/ROOF3.FAG",     // 14: Rooftop petal 3
+    "SOUND/MUSIC/ROOFB.FAG",     // 15: Rooftop boss
+    "SOUND/MUSIC/FACTORY1.FAG",  // 16: Factory petal 1
+    "SOUND/MUSIC/FACTORY2.FAG",  // 17: Factory petal 2
+    "SOUND/MUSIC/FACTORY3.FAG",  // 18: Factory petal 3
+    "SOUND/MUSIC/FACTORYB.FAG",  // 19: Factory boss
+    "SOUND/MUSIC/TEMPLE.FAG",    // 20: Temple
+    "SOUND/MUSIC/DESTSEL.FAG",   // 21: Destination select
+    "SOUND/MUSIC/TITLE.FAG",     // 22: Title screen
+    "SOUND/MUSIC/GAMEOVER.FAG",  // 23: Game over
+    nullptr,                      // 24: movie (no FAG)
 };
 static constexpr s32 MUSIC_TABLE_COUNT = 25;
 

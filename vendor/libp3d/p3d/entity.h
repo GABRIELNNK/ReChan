@@ -1,20 +1,17 @@
-// entity.h — tRefCounted + tEntity base classes
+// entity.h - tRefCounted + tEntity base classes
 #pragma once
 
 #include "core.h"
+#include "p3d/hash.h"
 #include <string>
 
 // UID hash type
 using tUID = u32;
 
+// PSX v11.3: MakeUID calls p3dHash (PJW/hashpjw)
+// TENTITY.CPP:114
 inline tUID MakeUID(const char* name) {
-    // djb2 hash
-    tUID hash = 5381;
-    while (*name) {
-        hash = ((hash << 5) + hash) + static_cast<u8>(*name);
-        ++name;
-    }
-    return hash;
+    return p3dHash(name);
 }
 
 // Reference-counted base

@@ -107,7 +107,7 @@ void Thing::Draw() {
     f32 cz = (f32)pos.z;
 
     f32 x0 = cx - hw, x1 = cx + hw;
-    f32 y0 = cy,      y1 = cy + hh;
+    f32 y0 = cy, y1 = cy + hh;
     f32 z0 = cz - hd, z1 = cz + hd;
 
     // 12 edges of a box = 24 line vertices, 24 indices
@@ -122,26 +122,26 @@ void Thing::Draw() {
     f32 cb = (thingType == AITypes::TT_PLAYER) ? 0.0f : 0.3f;
 
     // Helper macro to push a line
-    #define PUSHLINE(ax,ay,az,bx,by,bz) \
+#define PUSHLINE(ax,ay,az,bx,by,bz) \
         indices[vi] = (u16)vi; verts[vi] = {ax,ay,az,cr,cg,cb}; vi++; \
         indices[vi] = (u16)vi; verts[vi] = {bx,by,bz,cr,cg,cb}; vi++;
 
     // Bottom face
-    PUSHLINE(x0,y0,z0, x1,y0,z0);
-    PUSHLINE(x1,y0,z0, x1,y0,z1);
-    PUSHLINE(x1,y0,z1, x0,y0,z1);
-    PUSHLINE(x0,y0,z1, x0,y0,z0);
+    PUSHLINE(x0, y0, z0, x1, y0, z0);
+    PUSHLINE(x1, y0, z0, x1, y0, z1);
+    PUSHLINE(x1, y0, z1, x0, y0, z1);
+    PUSHLINE(x0, y0, z1, x0, y0, z0);
     // Top face
-    PUSHLINE(x0,y1,z0, x1,y1,z0);
-    PUSHLINE(x1,y1,z0, x1,y1,z1);
-    PUSHLINE(x1,y1,z1, x0,y1,z1);
-    PUSHLINE(x0,y1,z1, x0,y1,z0);
+    PUSHLINE(x0, y1, z0, x1, y1, z0);
+    PUSHLINE(x1, y1, z0, x1, y1, z1);
+    PUSHLINE(x1, y1, z1, x0, y1, z1);
+    PUSHLINE(x0, y1, z1, x0, y1, z0);
     // Verticals
-    PUSHLINE(x0,y0,z0, x0,y1,z0);
-    PUSHLINE(x1,y0,z0, x1,y1,z0);
-    PUSHLINE(x1,y0,z1, x1,y1,z1);
-    PUSHLINE(x0,y0,z1, x0,y1,z1);
-    #undef PUSHLINE
+    PUSHLINE(x0, y0, z0, x0, y1, z0);
+    PUSHLINE(x1, y0, z0, x1, y1, z0);
+    PUSHLINE(x1, y0, z1, x1, y1, z1);
+    PUSHLINE(x0, y0, z1, x0, y1, z1);
+#undef PUSHLINE
 
     pddiPrimBufferDesc desc(PDDI_PRIM_LINES,
                             PDDI_V_POSITION | PDDI_V_COLOUR,
@@ -223,7 +223,8 @@ void Thing::CreateModel(const char* name) {
     s32 modelHash;
     if (name) {
         modelHash = (s32)p3dHash(name);
-    } else {
+    }
+    else {
         modelHash = (s32)(uintptr_t)field76;
         if (!modelHash)
             return;
@@ -246,7 +247,8 @@ void Thing::CreateModel(const char* name) {
         if (modelType == 1) {
             sm->SetOriginalSTree(static_cast<OriginalSTree*>(found));
         }
-    } else if (modelType == 1) {
+    }
+    else if (modelType == 1) {
         // Create new SModel for STree type
         sm = new SModel();
         sm->SetOriginalSTree(static_cast<OriginalSTree*>(found));
@@ -321,8 +323,8 @@ void Thing::GetViewSpot(LVector* outPos, LVector* /*outTarget*/) {
 // PSX: Kill__5Thing (THING.HPP:518)
 void Thing::Kill() {
     MARKFUNCTION(0x800628D0);
-    // Mark for removal
-    flags2 |= TF2_KILLED;
+    // PSX: *(a1+88) |= 1 - sets bit 0 of flags (offset 88)
+    flags |= TF_DEAD;
 }
 
 // PSX: GetSoundPosPtr__5Thing (THING.HPP:516)
@@ -414,7 +416,7 @@ void Thing::GetObjectToWorldSpaceVector(const SVector& in, SVector& out) {
     MARKFUNCTION(0x80062874);
     // PSX: reads orientation as u16 angles, builds YZX rotation matrix, transforms
     Mat4 rot;
-    p3dBuildRotMatrixYZX(orientation.x, orientation.z, orientation.y, rot);
+    p3dBuildRotMatrixYZX(orientation.x, orientation.y, orientation.z, rot);
 
     Vec3 v((f32)in.x, (f32)in.y, (f32)in.z);
     Vec3 result = p3dVecTimesRotMatrix(v, rot);
@@ -515,11 +517,13 @@ void DynamicThing::Move() {
             s32 abs_cfx = contactForce.x * sign_cfx;
             s32 divided = rmDiv16i(abs_cfx, stateCounter) >> 16;
             localForce.x = (divided * sign_cfx) + friction_x;
-        } else {
+        }
+        else {
             s32 av = (velocity.x >= 0) ? velocity.x : -velocity.x;
             if (av < 2) {
                 velocity.x = 0;
-            } else if (friction_x != 0) {
+            }
+            else if (friction_x != 0) {
                 localForce.x = friction_x;
             }
         }
@@ -534,11 +538,13 @@ void DynamicThing::Move() {
             s32 abs_cfz = contactForce.z * sign_cfz;
             s32 divided = rmDiv16i(abs_cfz, stateCounter) >> 16;
             localForce.z = (divided * sign_cfz) + friction_z;
-        } else {
+        }
+        else {
             s32 av = (velocity.z >= 0) ? velocity.z : -velocity.z;
             if (av < 2) {
                 velocity.z = 0;
-            } else if (friction_z != 0) {
+            }
+            else if (friction_z != 0) {
                 localForce.z = friction_z;
             }
         }
@@ -630,7 +636,8 @@ void DynamicThing::UpdatePosition() {
             u16 newBlock = g_blockManager->GetBlockNumber(homePos);
             if (newBlock != BLOCK_UNASSIGNED) {
                 blockNum = newBlock;
-            } else if (!(flags & TF_BIT5)) {
+            }
+            else if (!(flags & TF_BIT5)) {
                 // Left all blocks and bit5 not set: deactivate
                 flags &= ~TF_ACTIVATED;
             }

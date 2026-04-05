@@ -42,6 +42,16 @@ int main() {
 
     auto prevTime = Clock::now();
 
+    // PSX main (MAIN.CPP:519, 0x8002635C):
+    //   while (!quit) {
+    //       while (Step(game) && !quit) rDoTaskList();
+    //       SetLivesLeft(player, 4); SetState(game, QueueLevelLoad);
+    //   }
+    // PSX main does NOT call BeginFrame/EndFrame - that is the
+    // responsibility of the game states via Display handler callbacks
+    // in ProcessHandlers, or inline in menu states like MenuDraw.
+    // PC mirrors this: main.cpp only does timing, events, and swap.
+
     while (!p3d::display->ShouldClose()) {
         auto frameStart = Clock::now();
 
@@ -51,8 +61,7 @@ int main() {
         g_time->Tick(realDt);
         g_time->Step();
 
-        ctx->BeginFrame();
-        p3d::context->Clear(PDDI_BUFFER_ALL);
+        p3d::display->PollEvents();
 
         bool running = game.Step();
         if (!running) {
@@ -61,8 +70,6 @@ int main() {
             // PSX: SetLivesLeft(g_player, savedLives)
             game.SetState(GameState::QueueLevelLoad);
         }
-
-        ctx->EndFrame();
 
         // Sleep to maintain target framerate (0 = uncapped)
         f32 targetDt = g_time->GetTargetDt();

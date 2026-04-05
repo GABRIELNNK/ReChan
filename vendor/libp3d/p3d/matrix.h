@@ -17,6 +17,24 @@ struct Mat4 {
     }
 
     const f32* Data() const { return m; }
+
+    // Column accessors (basis vectors when used as a transform)
+    // Column 0 = right (X axis)
+    f32 RightX()   const { return m[0]; }
+    f32 RightY()   const { return m[1]; }
+    f32 RightZ()   const { return m[2]; }
+    // Column 1 = up (Y axis)
+    f32 UpX()      const { return m[4]; }
+    f32 UpY()      const { return m[5]; }
+    f32 UpZ()      const { return m[6]; }
+    // Column 2 = forward (Z axis)
+    f32 ForwardX() const { return m[8]; }
+    f32 ForwardY() const { return m[9]; }
+    f32 ForwardZ() const { return m[10]; }
+    // Column 3 = translation (position)
+    f32 AtX()      const { return m[12]; }
+    f32 AtY()      const { return m[13]; }
+    f32 AtZ()      const { return m[14]; }
 };
 
 inline Mat4 Mat4Multiply(const Mat4& a, const Mat4& b) {

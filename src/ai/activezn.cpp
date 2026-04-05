@@ -45,7 +45,8 @@ ActiveZone::ActiveZone(DBVolume* vol) {
                 overlordID = a7->value;
             else
                 overlordID = 0;
-        } else {
+        }
+        else {
             overlordValue = 0;
         }
     }
