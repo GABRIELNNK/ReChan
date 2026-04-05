@@ -49,94 +49,124 @@ DBRoot::~DBRoot() {
 u32* DBRoot::Process(u32* data, const u32* end) {
     MARKFUNCTION(0x8003859C);
 
-    // Read type and subType (each u16 in its own 4-byte word)
-    type = static_cast<u16>(data[0] & 0xFFFF);
-    data++;
-    subType = static_cast<u16>(data[0] & 0xFFFF);
-    data++;
+    const u8* endBytes = nullptr;
+    if (end) {
+        endBytes = reinterpret_cast<const u8*>(end);
+    }
 
-    // Read position
-    pos.x = static_cast<s32>(data[0]); data++;
-    pos.y = static_cast<s32>(data[0]); data++;
-    pos.z = static_cast<s32>(data[0]); data++;
+    u16* stream16 = reinterpret_cast<u16*>(data);
 
-    // Read 3 extra fields
-    field40 = static_cast<s32>(data[0]); data++;
-    field44 = static_cast<s32>(data[0]); data++;
-    field48 = static_cast<s32>(data[0]); data++;
+    // PSX reads type/subType as two u16 values, each in its own u32 slot.
+    type = stream16[0];
+    stream16 += 2;
+    subType = stream16[0];
+    stream16 += 2;
 
-    // Read attribute count and allocate array
-    u32 count = data[0]; data++;
+    auto readS32 = [&stream16]() -> s32 {
+        s32 value = 0;
+        memcpy(&value, stream16, sizeof(value));
+        stream16 += 2;
+        return value;
+    };
+
+    pos.x = readS32();
+    pos.y = readS32();
+    pos.z = readS32();
+
+    field40 = readS32();
+    field44 = readS32();
+    field48 = readS32();
+
+    u32 count = 0;
+    memcpy(&count, stream16, sizeof(count));
+    stream16 += 2;
+
     attribCount = count;
-
     if (count > 0) {
         attribs = new DBAttrib[count]();
     }
 
-    // Parse each attribute
+    // PSX walks attribute payloads by byte count (no u32 rounding).
+    u8* cursor = reinterpret_cast<u8*>(stream16);
     u32 nameAttribs = 0;
-    for (u32 i = 0; i < count; i++) {
-        if (end && data + 2 > end) { data = const_cast<u32*>(end); break; }
-        u32 header = data[0]; data++;
-        u32 dataSize = data[0]; data++;
 
-        // Sanity check dataSize against remaining buffer
-        if (end) {
-            u32 dataWords = (dataSize + 3) / 4;
-            if (data + dataWords > end) { data = const_cast<u32*>(end); break; }
+    for (u32 i = 0; i < count; i++) {
+        if (endBytes && cursor + 8 > endBytes) {
+            cursor = const_cast<u8*>(endBytes);
+            break;
+        }
+
+        u32 header = 0;
+        u32 dataSize = 0;
+        memcpy(&header, cursor, sizeof(header));
+        cursor += sizeof(header);
+        memcpy(&dataSize, cursor, sizeof(dataSize));
+        cursor += sizeof(dataSize);
+
+        const u8* payload = cursor;
+        if (endBytes && payload + dataSize > endBytes) {
+            cursor = const_cast<u8*>(endBytes);
+            break;
         }
 
         u16 attrId = static_cast<u16>(header & 0xFFFF);
         u16 attrType = static_cast<u16>((header >> 16) & 0xFFFF);
 
         if (attrId == 0) {
-            // Name attribute: copy string and set node name
-            u32 len = dataSize;
-            if (len > 0) {
-                char* str = new char[len + 1];
-                memcpy(str, data, len);
-                str[len] = '\0';
-                SetName(str, 0);
-                delete[] str;
+            u32 len = 0;
+            while (len < dataSize && payload[len] != '\0') {
+                len++;
             }
+
+            char* str = new char[len + 1];
+            if (len > 0) {
+                memcpy(str, payload, len);
+            }
+            str[len] = '\0';
+
+            SetName(str, 0);
+            delete[] str;
+
             nameAttribs++;
         } else if (attrType == 0) {
-            // String attribute
             u32 idx = i - nameAttribs;
             if (idx < count) {
                 DBAttrib& a = attribs[idx];
                 a.id = attrId;
                 a.type = 0;
-                u32 len = dataSize;
-                if (len > 0) {
-                    char* str = new char[len + 1];
-                    memcpy(str, data, len);
-                    str[len] = '\0';
-                    a.strValue = str;
+
+                u32 len = 0;
+                while (len < dataSize && payload[len] != '\0') {
+                    len++;
                 }
+
+                char* str = new char[len + 1];
+                if (len > 0) {
+                    memcpy(str, payload, len);
+                }
+                str[len] = '\0';
+                a.strValue = str;
             }
         } else if (attrType == 1) {
-            // Numeric attribute
             u32 idx = i - nameAttribs;
             if (idx < count) {
                 DBAttrib& a = attribs[idx];
                 a.id = attrId;
                 a.type = 1;
-                if (dataSize >= 4) {
-                    a.value = data[0];
+
+                if (dataSize >= sizeof(u32)) {
+                    u32 value = 0;
+                    memcpy(&value, payload, sizeof(value));
+                    a.value = value;
                 }
             }
         }
 
-        // Advance past data (round up to u32 boundary)
-        u32 dataWords = (dataSize + 3) / 4;
-        data += dataWords;
+        cursor += dataSize;
     }
 
-    // Adjust attribCount: subtract name attribs
     attribCount = count - nameAttribs;
-
-    return data;
+    return reinterpret_cast<u32*>(cursor);
 }
 
 // PSX: AllocatePermanentAttributeArray__6DBRootUl (DATABASE.CPP:394)
@@ -320,9 +350,9 @@ void Database::PreScan() {
 // Tag 2: DBVolume (84 bytes)
 // Tag 3: DBSphere (64 bytes)
 // Tag 4: DBLine (76 bytes)
-// Tag 5: DBPath (76 bytes)
-// Tag 6: DBMesh (64 bytes)
-// Tag 7: reserved
+// Tag 5: reserved
+// Tag 6: DBPath (76 bytes)
+// Tag 7: DBMesh (64 bytes)
 void Database::Scan(const u8* data, u32 size) {
     MARKFUNCTION(0x80038B48);
 
@@ -331,8 +361,13 @@ void Database::Scan(const u8* data, u32 size) {
 
     while (stream < end) {
         u32 tag = *stream++;
-        if (tag >= 8 || tag == 0) continue;
+        if (tag >= 8 || tag == 0) {
+            LOG("[Database] Scan: skipping unknown tag %u at offset 0x%X", tag, (u32)((const u8*)(stream - 1) - data));
+            continue;
+        }
         if (stream >= end) break;
+
+        LOG("[Database] Scan: tag=%u at offset 0x%X", tag, (u32)((const u8*)(stream - 1) - data));
 
         switch (tag) {
         case 1: {
@@ -368,6 +403,7 @@ void Database::Scan(const u8* data, u32 size) {
 
             if (obj->subType == 0) {
                 // Block volume
+                LOG("[Database] Scan: volume subType=0 (block) type=%u name=%s", obj->type, obj->GetName() ? obj->GetName() : "null");
                 blockList.AddNodeTail(obj);
 
                 // Check attrib 15 for script info
@@ -424,6 +460,10 @@ void Database::Scan(const u8* data, u32 size) {
             break;
         }
         case 5: {
+            // Reserved on PSX
+            break;
+        }
+        case 6: {
             // DBPath
             if (stream + 9 > end) goto done;
             DBPath* obj = new DBPath();
@@ -453,7 +493,7 @@ void Database::Scan(const u8* data, u32 size) {
             pathList.AddNodeTail(obj);
             break;
         }
-        case 6: {
+        case 7: {
             // DBMesh
             if (stream + 9 > end) goto done;
             DBMesh* obj = new DBMesh();
@@ -625,16 +665,19 @@ DBPoint* Database::FindPoint(const char* name) {
 }
 
 // PSX: FindPath__8DatabaseUl (DATABASE.CPP:978)
-// Finds a path by CRC hash. On PSX this uses FindNodeCRC.
-// For PC we convert to a name comparison (CRC not implemented yet).
+// Finds a path by CRC hash.
 DBPath* Database::FindPathByCRC(u32 crc) {
     MARKFUNCTION(0x80039258);
     if (crc == 0) {
         return nullptr;
     }
-    // TODO: implement CRC comparison if needed
-    // For now, return first path (placeholder)
-    return GetFirstPath();
+
+    ccNode* node = pathList.FindNodeCRC(crc);
+    if (!node) {
+        return nullptr;
+    }
+
+    return static_cast<DBPath*>(node);
 }
 
 // PSX: GetPointsList__8Database (DATABASE.CPP:992)

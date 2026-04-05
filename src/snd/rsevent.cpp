@@ -153,6 +153,23 @@ s32 jcsHandleControlEvent(s32 event, s32 param1, s32 param2, s32 param3) {
             break;
         }
 
+        case 20: // jcsSetAmbienceSpace + optional crossfade
+            LOG("[rsEvent] SetAmbienceSpace(%d, crossfade=%d)", param1, param2);
+            break;
+
+        case 21: // jcsSetListener(playerPos, cameraData) - 3D audio listener
+            LOG("[rsEvent] SetListener (stub)");
+            break;
+
+        case 22: // jcsFadeOutEngine(-1) - fade out all
+            LOG("[rsEvent] FadeOutAll");
+            g_sound->StopMusic();
+            break;
+
+        case 23: // jcsFadeInEngine(-1) - fade in all
+            LOG("[rsEvent] FadeInAll");
+            break;
+
         default:
             LOG("[rsEvent] Unhandled control event %d (p1=%d, p2=%d, p3=%d)",
                 event, param1, param2, param3);

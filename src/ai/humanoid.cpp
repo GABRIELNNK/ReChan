@@ -2,6 +2,7 @@
 // Reversed from PSX C:\CHAN\GAME\SRC\AI\HUMANOID.CPP
 #include "ai/humanoid.h"
 #include "ai/player.h"
+#include "gen/model.h"
 #include "p3d/p3dmath.h"
 
 // PSX: __8HumanoidPC10tagLVectorUs (HUMANOID.CPP:350)
@@ -167,11 +168,31 @@ void Humanoid::Move() {
     // PSX: CheckSwitches for trigger volumes (world system not yet implemented)
 }
 
-// PSX: CreateModel__8HumanoidPCc (HUMANOID.CPP:795)
+// PSX: CreateModel__8HumanoidPCc (HUMANOID.CPP:795, 0x80063248)
+// PSX: creates HumanoidModel if not exists, creates Behaviour, then calls Thing::CreateModel
 void Humanoid::CreateModel(const char* name) {
     MARKFUNCTION(0x800632B4);
-    // PSX: CharacterManager::LoadCharacter, set up animation, etc.
+
+    // PSX: if model == null, create HumanoidModel(136)
+    if (!model) {
+        HumanoidModel* hm = new HumanoidModel();
+        model = hm;
+        hm->backPtr = this;
+    }
+
+    // PSX: creates Behaviour if not exists (AI system)
+    // Behaviour system not yet reversed - skip
+
+    // PSX: calls Thing::CreateModel which does the LevelManager lookup
     Thing::CreateModel(name);
+
+    // PSX: after CreateModel, calls ApplyAnimToModel and InitSemiTransMode
+    // Animation system not yet reversed - skip for now
+    Model* m = static_cast<Model*>(model);
+    if (m) {
+        SModel* sm = static_cast<SModel*>(m);
+        sm->InitSemiTransMode();
+    }
 }
 
 // PSX: DeleteModel__8Humanoid (HUMANOID.CPP:910)

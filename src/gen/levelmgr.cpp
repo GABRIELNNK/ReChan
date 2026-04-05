@@ -2,19 +2,18 @@
 // PSX source: C:\CHAN\GAME\SRC\GEN\LEVELMGR.CPP
 #include "gen/levelmgr.h"
 #include "gen/charmgr.h"
+#include "gen/model.h"
 
 namespace {
 
-// OriginalBasic fields are not fully typed yet.
+// OriginalBasic fields accessed via proper struct methods now.
 // PSX access patterns use +16 (u16 list type) and +19 (s8 store ID).
 static u16 GetOriginalListType(const OriginalBasic* original) {
-    const u8* bytes = reinterpret_cast<const u8*>(original);
-    return *reinterpret_cast<const u16*>(bytes + 16);
+    return original->GetType();
 }
 
-static s8 GetOriginalStoreID(const ccMinNode* node) {
-    const u8* bytes = reinterpret_cast<const u8*>(node);
-    return *reinterpret_cast<const s8*>(bytes + 19);
+static s8 GetOriginalStoreID(const OriginalBasic* node) {
+    return node->GetStoreID();
 }
 
 } // namespace
@@ -116,7 +115,8 @@ void LevelManager::DeleteOriginalModelsByID(s32 id) {
         ccMinNode* n = modelLists[i].head;
         while (n) {
             ccMinNode* next = n->next;
-            if (GetOriginalStoreID(n) == matchID) {
+            OriginalBasic* ob = static_cast<OriginalBasic*>(static_cast<ccNode*>(n));
+            if (GetOriginalStoreID(ob) == matchID) {
                 modelLists[i].RemNode(n);
                 delete n;
             }
@@ -194,23 +194,44 @@ void LevelManager::DeleteOriginal(OriginalBasic* original) {
 }
 
 // PSX: FindModel__12LevelManagerQ212LevelManager13ModelListEnuml (0x80059268)
-void* LevelManager::FindModel(ModelListEnum listType, s32 id) {
+OriginalBasic* LevelManager::FindModel(ModelListEnum listType, s32 id) {
     MARKFUNCTION(0x80059268);
     s32 idx = static_cast<s32>(listType);
     if (idx < 0 || idx > 3) return nullptr;
-    // PSX uses FindNodeCRC on the list
-    // TODO: implement CRC-based lookup when OriginalBasic has nameCRC
-    (void)id;
+    // PSX: FindNodeCRC on the list - search by nameCRC
+    u32 crc = static_cast<u32>(id);
+    for (ccMinNode* n = modelLists[idx].head; n; n = n->next) {
+        OriginalBasic* ob = static_cast<OriginalBasic*>(static_cast<ccNode*>(n));
+        if (ob->nameCRC == crc) return ob;
+    }
     return nullptr;
 }
 
 // PSX: FindModel__12LevelManagerl (0x800592A0)
-void* LevelManager::FindModel(s32 id) {
+// PSX searches 4 lists starting at offset +52: modelLists[2], modelLists[3], streeList, etreeList
+OriginalBasic* LevelManager::FindModel(s32 id) {
     MARKFUNCTION(0x800592A0);
-    // Search all 4 lists
+    u32 crc = static_cast<u32>(id);
+
+    // PSX: iterates from a1+52 with step 12, 4 times
+    // That's modelLists[2], modelLists[3], streeList, etreeList
+    ccMinList* lists[] = { &modelLists[2], &modelLists[3], &streeList, &etreeList };
     for (s32 i = 0; i < 4; i++) {
-        void* result = FindModel(static_cast<ModelListEnum>(i), id);
-        if (result) return result;
+        for (ccMinNode* n = lists[i]->head; n; n = n->next) {
+            OriginalBasic* ob = static_cast<OriginalBasic*>(static_cast<ccNode*>(n));
+            if (ob->nameCRC == crc) return ob;
+        }
+    }
+    return nullptr;
+}
+
+// PSX: FindSTree__12LevelManagerl (0x80059338)
+OriginalBasic* LevelManager::FindSTree(s32 id) {
+    MARKFUNCTION(0x80059338);
+    u32 crc = static_cast<u32>(id);
+    for (ccMinNode* n = streeList.head; n; n = n->next) {
+        OriginalBasic* ob = static_cast<OriginalBasic*>(static_cast<ccNode*>(n));
+        if (ob->nameCRC == crc) return ob;
     }
     return nullptr;
 }

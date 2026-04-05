@@ -1,6 +1,9 @@
 // charmgr.cpp - CharacterManager reversed from PSX C:\CHAN\GAME\SRC\GEN\CHARMGR.CPP
 // PC port: .RR files loaded from disk (assets/RCHARS/) via standard file I/O.
 #include "gen/charmgr.h"
+#include "gen/model.h"
+#include "gen/levelmgr.h"
+#include "gen/geometry.h"
 #include "p3d/hash.h"
 #include "p3d/loadmanager.h"
 #include "p3d/texture.h"
@@ -443,11 +446,42 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
     std::free(dataBuf);
 
     // PSX: CharDataLoadCallback post-processing:
-    // 1. Frees the P3D data buffer (done above)
-    // 2. Looks up the loaded model in p3d::inventory by name hash
-    // 3. For player: finds model in LevelManager, creates OriginalSTree (skeleton copy)
-    // 4. Associates textures with the model
-    // TODO: post-load model lookup and OriginalSTree creation
+    // 1. Creates OriginalSTree from the mesh data
+    // 2. Sets rendering callbacks on the tPrimGeom
+    // 3. Registers OriginalSTree in LevelManager for FindModel lookup
+    // PC: parse slot.dataBuffer as tPrimGeom, convert to pddiPrimBuffer
+    if (slot.dataBuffer && g_levelManager) {
+        // Compute the model name hash: "RCHARS\<name>.P3D"
+        // PSX: GetCompositeAnimationNameHash uses this format
+        char nameBuf[96];
+        snprintf(nameBuf, sizeof(nameBuf), "RCHARS\\%s.P3D", g_charNameTable[type]);
+        u32 nameHash = p3dHash(nameBuf);
+
+        // Check if OriginalSTree already exists in LevelManager
+        OriginalBasic* existing = g_levelManager->FindModel((s32)nameHash);
+        if (!existing) {
+            // Parse tPrimGeom data from dataBuffer into pddiPrimBuffer
+            // The dataBuffer IS the tPrimGeom binary (same format as BLK geometry)
+            s32 bufSize = rrSize(cf->rrHeader, rrIdx - 1);
+            pddiPrimBuffer* meshBuf = ParseBLKPrims(
+                (const u8*)slot.dataBuffer, (u32)bufSize);
+
+            if (meshBuf) {
+                OriginalSTree* original = new OriginalSTree();
+                original->nameCRC = nameHash;
+                original->SetStoreID(type == 0 ? 0 : 2);
+                original->meshBuffer = meshBuf;
+
+                // Register in LevelManager's streeList
+                g_levelManager->AddOriginal(original, 0);
+
+                LOG("[CharMgr] Created OriginalSTree for '%s' (hash 0x%08X, mesh %p)",
+                    nameBuf, nameHash, meshBuf);
+            } else {
+                LOG("[CharMgr] Failed to parse mesh for '%s'", nameBuf);
+            }
+        }
+    }
 
     LOG("[CharMgr] Loaded character type %u into slot %d", type, slotIdx);
 

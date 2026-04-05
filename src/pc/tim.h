@@ -22,6 +22,10 @@ namespace Tim {
     // Returns nullptr on failure. Caller owns the result.
     TimImage* LoadFromFile(const char* path);
 
+    // Decode a TIM from a memory buffer.
+    // Returns nullptr on failure. Caller owns the result.
+    TimImage* LoadFromMemory(const u8* data, u32 size);
+
     // Create a tTexture from a TimImage (uploads to GPU).
     // Caller owns the returned texture.
     tTexture* CreateTexture(const TimImage* img);

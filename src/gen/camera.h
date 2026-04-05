@@ -7,6 +7,8 @@
 #include "gen/cammgr.h" // CameraAnchor
 #include "p3d/camera.h" // tCamera
 
+class Thing;
+
 // Camera mode identifiers (PSX SetMode parameter)
 enum CameraMode : s32 {
     CAM_MODE_DEFAULT  = 0, // _DebugCam = free-look via pad input
@@ -40,13 +42,16 @@ public:
     void SetCurFOV(s32 fov);                   // 0x8004A464 = sets curFOV + pushes to tCamera
     void SetMovementTime(const LVector* t);    // 0x8004A400
     void SetTrackingTime(const LVector* t);    // 0x8004A39C
-    void SetLookAtTarget(void* thing, u16 mode); // 0x80049DC0
+    void SetLookAtTarget(Thing* thing, u16 mode); // 0x80049DC0
     void ShakeCamera(s32 frames);              // 0x80049DE4
 
     // Accessors
     tCamera* GetP3DCamera() { return &p3dCamera; }
     const LVector& GetPosition() const { return position; }  // +28
     CameraMode GetMode() const { return currentMode; }
+
+    // PSX: theCamera+0x188 = cameraAnchor assigned by CameraManager::SetupPaths
+    void SetCameraAnchor(CameraAnchor* a) { cameraAnchor = a; }
 
     // Set all position fields at once (for initial placement)
     void SetPosition(s32 x, s32 y, s32 z) {
@@ -102,7 +107,7 @@ private:
 
     // +288,+292,+296: (unused/reserved in reversal)
 
-    // +300,+304,+308: movement time per axis (SetMovementTime: input * 992)
+    // +300,+304,+308: movement time per axis (SetMovementTime: input * 1000)
     LVector movementTime = {};
 
     // +312,+316,+320: tracking time per axis
@@ -126,8 +131,8 @@ private:
     // +344,+348,+352: velocity magnitudes per axis (init 1966 in Reset)
     LVector velocityMag = {};
 
-    // +356: pointer to target Thing (not used until character system exists)
-    void* targetThing = nullptr;
+    // +356: pointer to target Thing
+    Thing* targetThing = nullptr;
 
     // +360: look-at joint index (-1 = none)
     s32 lookAtJoint = -1;
@@ -184,7 +189,4 @@ private:
     // +480,+484,+488: shake strength per axis (init 100 in Reset)
     LVector shakeStrength = {};
 
-    // PC-only: when true, DebugCam already set the camera matrix directly.
-    // Update() will skip its own matrix build.
-    bool directMatrix = false;
 };

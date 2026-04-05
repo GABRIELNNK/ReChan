@@ -12,9 +12,9 @@ struct OriginalBasic;
 
 // PSX: ModelListEnum - selects which entity list to search
 enum class ModelListEnum : s32 {
-    Default = 0,
-    Type1   = 1,
-    Type2   = 2,
+    Geo     = 0,
+    ETree   = 1,
+    STree   = 2,
     Type3   = 3,
 };
 
@@ -63,8 +63,10 @@ public:
     void DeleteOriginal(OriginalBasic* original);
 
     // PSX: FindModel (0x80059268, 0x800592A0)
-    void* FindModel(ModelListEnum listType, s32 id);
-    void* FindModel(s32 id);
+    OriginalBasic* FindModel(ModelListEnum listType, s32 id);
+    OriginalBasic* FindModel(s32 id);
+    // PSX: FindSTree__12LevelManagerl (0x80059338)
+    OriginalBasic* FindSTree(s32 id);
 
     // PSX: AddPermMemory__12LevelManagerPcl (0x800590D8)
     void* AddPermMemory(s32 size, s32 id);
@@ -79,6 +81,7 @@ private:
     void DeleteOriginalModelsByID(s32 id);
     void DeleteInventoryByID(s32 id);
 
+public:
     ccMinList modelLists[4];    // +28: entity lists by type
     ccMinList streeList;        // +76: spatial tree nodes
     ccMinList etreeList;        // +88: export tree nodes

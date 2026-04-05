@@ -1,6 +1,6 @@
-// p3dmath.h — PC float equivalents of PSX Pure3D math functions
+// p3dmath.h - PC float equivalents of PSX Pure3D math functions
 // Original PSX: _RMVECT16 (3×s32), MATRIX (3×5 s16 Q12 fixed-point)
-// PC: Vec3 (3×f32), Mat4 (4×4 f32) — same results, float precision
+// PC: Vec3 (3×f32), Mat4 (4×4 f32) - same results, float precision
 //
 // PSX function names preserved for 1:1 mapping with decompiled code.
 #pragma once
@@ -14,15 +14,12 @@
 // PSX math function equivalents (float versions)
 // Names match decompiled PSX code for easy cross-reference.
 
-
 // PSX binary angle: 65536 = 2π. Convert to/from radians.
 constexpr f32 P3D_ANGLE_TO_RAD = (2.0f * 3.14159265358979323846f) / 65536.0f;
 constexpr f32 P3D_RAD_TO_ANGLE = 65536.0f / (2.0f * 3.14159265358979323846f);
 
-// --------------------------------------------------------------------------
-// p3dBuildRotMatrixZ / Y / X — single-axis rotation into Mat4
+// p3dBuildRotMatrixZ / Y / X - single-axis rotation into Mat4
 // PSX: builds into 3×5 s16 Q12 MATRIX. PC: builds into 4×4 float Mat4.
-// --------------------------------------------------------------------------
 inline void p3dBuildRotMatrixZ(f32 angle, Mat4& m) {
     f32 c = std::cos(angle), s = std::sin(angle);
     m = Mat4(); // identity
@@ -44,11 +41,10 @@ inline void p3dBuildRotMatrixX(f32 angle, Mat4& m) {
     m.m[9] = -s; m.m[10] = c;
 }
 
-// --------------------------------------------------------------------------
-// p3dBuildRotMatrixZYX — compose Z*Y*X rotation (PSX Euler order)
-// PSX: 0x80093D58 — composes three rotation matrices
+
+// p3dBuildRotMatrixZYX - compose Z*Y*X rotation (PSX Euler order)
+// PSX: 0x80093D58 - composes three rotation matrices
 // PC: builds directly from combined trig (avoids 3 matrix multiplies)
-// --------------------------------------------------------------------------
 inline void p3dBuildRotMatrixZYX(f32 az, f32 ay, f32 ax, Mat4& m) {
     f32 cx = std::cos(ax), sx = std::sin(ax);
     f32 cy = std::cos(ay), sy = std::sin(ay);
@@ -68,7 +64,7 @@ inline void p3dBuildRotMatrixZYX(f32 az, f32 ay, f32 ax, Mat4& m) {
     m.m[10] = cx * cy;
 }
 
-// Overload taking PSX angle units (s32) — converts internally
+// Overload taking PSX angle units (s32) - converts internally
 inline void p3dBuildRotMatrixZYX(s32 az, s32 ay, s32 ax, Mat4& m) {
     p3dBuildRotMatrixZYX(
         static_cast<f32>(az & 0xFFFF) * P3D_ANGLE_TO_RAD,
@@ -105,10 +101,9 @@ inline void p3dBuildRotMatrixYZX(s32 ay, s32 az, s32 ax, Mat4& m) {
         static_cast<f32>(ax & 0xFFFF) * P3D_ANGLE_TO_RAD,
         m);
 }
-// --------------------------------------------------------------------------
-// p3dVecTimesMatrix — transform vector by matrix (rotation + translation)
-// PSX: 0x80094568 — result = vec * rotPart + translation
-// --------------------------------------------------------------------------
+
+// p3dVecTimesMatrix - transform vector by matrix (rotation + translation)
+// PSX: 0x80094568 - result = vec * rotPart + translation
 inline Vec3 p3dVecTimesMatrix(const Vec3& v, const Mat4& m) {
     return {
         v.x * m.m[0] + v.y * m.m[4] + v.z * m.m[8]  + m.m[12],
@@ -117,10 +112,9 @@ inline Vec3 p3dVecTimesMatrix(const Vec3& v, const Mat4& m) {
     };
 }
 
-// --------------------------------------------------------------------------
-// p3dVecTimesRotMatrix — rotation only (no translation)
+
+// p3dVecTimesRotMatrix - rotation only (no translation)
 // PSX: 0x800945EC
-// --------------------------------------------------------------------------
 inline Vec3 p3dVecTimesRotMatrix(const Vec3& v, const Mat4& m) {
     return {
         v.x * m.m[0] + v.y * m.m[4] + v.z * m.m[8],
@@ -129,19 +123,27 @@ inline Vec3 p3dVecTimesRotMatrix(const Vec3& v, const Mat4& m) {
     };
 }
 
-// --------------------------------------------------------------------------
-// p3dBuildTransMatrix — set translation part of matrix
-// PSX: writes to MATRIX translation columns
-// --------------------------------------------------------------------------
+
+// p3dBuildTransMatrix - build identity + translation
 inline void p3dBuildTransMatrix(f32 x, f32 y, f32 z, Mat4& m) {
     m = Mat4();
     m.m[12] = x; m.m[13] = y; m.m[14] = z;
 }
 
-// --------------------------------------------------------------------------
-// p3dFillHeadingMatrix — build orientation matrix from heading + up vectors
-// PSX: 0x800947F0 — builds right/up/forward basis
-// --------------------------------------------------------------------------
+
+// p3dFillTransMatrix - fill translation into existing matrix (PSX: 0x800946D0)
+// PSX: writes ONLY the translation part, leaves rotation untouched.
+// PSX MATRIX layout: t[0..2] at DWORD offsets [5],[6],[7].
+// PC Mat4 layout: translation at m[12],m[13],m[14].
+inline void p3dFillTransMatrix(const LVector& pos, Mat4& m) {
+    m.m[12] = (f32)pos.x;
+    m.m[13] = (f32)pos.y;
+    m.m[14] = (f32)pos.z;
+}
+
+
+// p3dFillHeadingMatrix - build orientation matrix from heading + up vectors
+// PSX: 0x800947F0 - builds right/up/forward basis
 inline void p3dFillHeadingMatrix(const Vec3& heading, const Vec3& up, Mat4& m) {
     Vec3 fwd = heading.Normalized();
     Vec3 right = up.Cross(fwd);
@@ -154,44 +156,34 @@ inline void p3dFillHeadingMatrix(const Vec3& heading, const Vec3& up, Mat4& m) {
     m.m[8] = fwd.x;     m.m[9] = fwd.y;     m.m[10] = fwd.z;
 }
 
-// --------------------------------------------------------------------------
-// fixmul16 — 16.16 fixed-point multiply: (a * b) >> 16
+// fixmul16 - 16.16 fixed-point multiply: (a * b) >> 16
 // PSX: implemented inline via MIPS mult + shift
-// --------------------------------------------------------------------------
 inline s32 fixmul16(s32 a, s32 b) {
     return (s32)(((s64)a * (s64)b) >> 16);
 }
 
-// --------------------------------------------------------------------------
-// rmMag2 — 2D magnitude (PSX: 0x80113984)
-// --------------------------------------------------------------------------
+// rmMag2 - 2D magnitude (PSX: 0x80113984)
 inline f32 rmMag2(f32 x, f32 y) {
     return std::sqrt(x * x + y * y);
 }
 
-// --------------------------------------------------------------------------
-// rmMag3 — 3D magnitude (PSX: 0x80113B90)
-// --------------------------------------------------------------------------
+// rmMag3 - 3D magnitude (PSX: 0x80113B90)
 inline f32 rmMag3(f32 x, f32 y, f32 z) {
     return std::sqrt(x * x + y * y + z * z);
 }
 
-// --------------------------------------------------------------------------
-// rmDiv16i — 16.16 fixed-point division (PSX: 0x8007D8B4)
+// rmDiv16i - 16.16 fixed-point division (PSX: 0x8007D8B4)
 // Returns (a << 16) / b as a 16.16 fixed-point result.
 // Source: C:\chan\devsys\psx\radlib\SOURCE\MATH\MULTDIV\DIVIDE.C:30
-// --------------------------------------------------------------------------
 inline s32 rmDiv16i(s32 a, s32 b) {
     if (b == 0) return (a >= 0) ? 0x7FFFFFFF : -0x7FFFFFFF;
     return (s32)(((s64)a << 16) / b);
 }
 
-// --------------------------------------------------------------------------
-// rmV3Normalize — normalize integer vector to 16.16 fixed-point unit vector
-// PSX: 0x8009DA64 — calls rmMag3, rmInverse16, then scales components.
+// rmV3Normalize - normalize integer vector to 16.16 fixed-point unit vector
+// PSX: 0x8009DA64 - calls rmMag3, rmInverse16, then scales components.
 // If magnitude is zero, returns {0x10000, 0, 0}.
 // Source: C:\chan\devsys\psx\radlib\SOURCE\MATH\VECTOR\VECT3D.CPP:22
-// --------------------------------------------------------------------------
 inline void rmV3Normalize(LVector* out, const LVector* in) {
     s32 mag = (s32)rmMag3((f32)in->x, (f32)in->y, (f32)in->z);
     if (mag == 0) {
@@ -203,20 +195,18 @@ inline void rmV3Normalize(LVector* out, const LVector* in) {
     out->z = (s32)(((s64)in->z << 16) / mag);
 }
 
-// --------------------------------------------------------------------------
-// rmATan216 — two-argument arctangent returning PSX binary angle (0..65535)
+
+// rmATan216 - two-argument arctangent returning PSX binary angle (0..65535)
 // PSX: 0x80113CF0
-// --------------------------------------------------------------------------
 inline u16 rmATan216(f32 x, f32 y) {
     f32 rad = std::atan2(y, x);
     s32 angle = static_cast<s32>(rad * P3D_RAD_TO_ANGLE) & 0xFFFF;
     return static_cast<u16>(angle);
 }
 
-// --------------------------------------------------------------------------
+
 // Convenience: build a LookAt view matrix (used by PC improved debug cam)
-// Not a PSX function — wraps the existing LookAt from core.h for Vec3.
-// --------------------------------------------------------------------------
+// Not a PSX function - wraps the existing LookAt from core.h for Vec3.
 inline Mat4 p3dLookAt(const Vec3& eye, const Vec3& target, const Vec3& up) {
     return LookAt(eye.x, eye.y, eye.z, target.x, target.y, target.z, up.x, up.y, up.z);
 }

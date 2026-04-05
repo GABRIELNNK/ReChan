@@ -50,18 +50,24 @@ TimImage* Tim::LoadFromFile(const char* path) {
     fread(data, 1, fileSize, f);
     fclose(f);
 
-    if (fileSize < 8) {
-        LOG("[Tim] File too small: %s", path);
-        delete[] data;
-        return nullptr;
-    }
+    TimImage* img = Tim::LoadFromMemory(data, (u32)fileSize);
+    delete[] data;
 
-    TimHeader* hdr = reinterpret_cast<TimHeader*>(data);
-    if (hdr->magic != 0x10) {
-        LOG("[Tim] Bad magic 0x%08X in %s", hdr->magic, path);
-        delete[] data;
-        return nullptr;
+    if (img) {
+        LOG("[Tim] Loaded %s: %dx%d", path, img->width, img->height);
+    } else {
+        LOG("[Tim] Failed to decode: %s", path);
     }
+    return img;
+}
+
+TimImage* Tim::LoadFromMemory(const u8* data, u32 fileSize) {
+    if (!data || fileSize < 8)
+        return nullptr;
+
+    const TimHeader* hdr = reinterpret_cast<const TimHeader*>(data);
+    if (hdr->magic != 0x10)
+        return nullptr;
 
     u32 depth = hdr->flags & 0x07;
     bool hasClut = (hdr->flags & 0x08) != 0;
@@ -71,8 +77,8 @@ TimImage* Tim::LoadFromFile(const char* path) {
     u16* clut = nullptr;
     s32 clutColors = 0;
     if (hasClut) {
-        if (pos + 12 > (u32)fileSize) { delete[] data; return nullptr; }
-        TimSection* cs = reinterpret_cast<TimSection*>(data + pos);
+        if (pos + 12 > (u32)fileSize) { return nullptr; }
+        const TimSection* cs = reinterpret_cast<const TimSection*>(data + pos);
         clutColors = cs->w * cs->h;
         clut = new u16[clutColors];
         memcpy(clut, data + pos + 12, clutColors * 2);
@@ -82,10 +88,9 @@ TimImage* Tim::LoadFromFile(const char* path) {
     // Parse image section
     if (pos + 12 > (u32)fileSize) {
         delete[] clut;
-        delete[] data;
         return nullptr;
     }
-    TimSection* is = reinterpret_cast<TimSection*>(data + pos);
+    const TimSection* is = reinterpret_cast<const TimSection*>(data + pos);
     u16 iw = is->w; // in 16-bit halfword units
     u16 ih = is->h;
     const u8* imgData = data + pos + 12;
@@ -99,9 +104,7 @@ TimImage* Tim::LoadFromFile(const char* path) {
         case 2: pixW = iw;     break;  // 16bpp: 1 pixel per halfword
         case 3: pixW = (iw * 2) / 3; break; // 24bpp
         default:
-            LOG("[Tim] Unknown depth %d in %s", depth, path);
             delete[] clut;
-            delete[] data;
             return nullptr;
     }
 
@@ -163,9 +166,6 @@ TimImage* Tim::LoadFromFile(const char* path) {
     }
 
     delete[] clut;
-    delete[] data;
-
-    LOG("[Tim] Loaded %s: %dx%d depth=%d", path, pixW, pixH, depth);
     return img;
 }
 

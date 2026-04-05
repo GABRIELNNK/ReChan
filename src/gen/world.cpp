@@ -5,6 +5,7 @@
 #include "gen/geometry.h"
 #include "gen/levelmgr.h"
 #include "snd/rsevent.h"
+#include "fe/loadanim.h"
 #include "p3d/context.h"
 #include "p3d/stream.h"
 #include "pddi/pddi.h"
@@ -179,14 +180,38 @@ bool World::LoadLevelIndex(u32 levelIndex) {
 
     targetLevelIndex = levelIndex;
 
+    // PSX: EstimateLoadTime, StartLogo, FillMeter(100)
+    StartLogo("RUNFIRST.TIM");
+    FillMeter(100);
+
     char levelPath[64];
     std::snprintf(levelPath, sizeof(levelPath), "RTARGET/LEV%02u.LCF", levelIndex + 1);
     if (!Load(levelPath)) {
+        StopLogo();
         return false;
     }
 
     currentLevelIndex = targetLevelIndex;
     currentPetalIndex = targetPetalIndex;
+
+    // PSX: rsEvent(4, soundLocation, 0, 0) - set sound location
+    // PSX reads soundLocation from petalByteTables[level][petal] - 1.
+    // LoadPermanent (which loads the table) isn't reversed yet.
+    // Use petal index as sound location (works for Chinatown area: 0=CHINA1, 1=CHINA2, etc.).
+    // TODO: extract full level-to-soundLocation table from PSX LoadPermanent data.
+    rsEvent(RS_SET_LOCATION, (s32)currentPetalIndex, 0, 0);
+
+    // PSX: ExecuteLoadCallbacks -> cameraLoadFunc -> SetupPaths
+    // (handled by gsQueueLevelLoad on PC)
+
+    // PSX: Construct(world)
+    // (block geometry already loaded above)
+
+    // PSX: rsEvent(5, 0, 0, 0) - start music for current location
+    rsEvent(RS_LEVEL_BEGIN, 0, 0, 0);
+
+    // PSX: StopLogo after load completes
+    StopLogo();
     return true;
 }
 
@@ -231,65 +256,24 @@ bool World::Load(const std::string& lcfPath) {
     // Parse WDB entries using Database::Scan (PSX HandleWDBChunk)
     // Each WDB has block numbers starting from 0 - they are local to that WDB's
     // BLK group. Count BLK entries between WDB entries to compute the base offset.
-    std::vector<DBVolume*> blockVolumes(blkCount, nullptr);
-    // We need the Database alive so DBVolume pointers remain valid
-    Database db;
-    {
-        // Build list of (wdbIndex, blkBaseOffset) pairs
-        // LCF stream interleaves: WDB#0 BLK*N0 WDB#1 BLK*N1 WDB#2 BLK*N2 ...
-        struct WDBGroup { u32 entryIdx; u32 blkBase; u32 blocksBefore; };
-        std::vector<WDBGroup> wdbGroups;
-        u32 blkAccum = 0;
-        for (u32 i = 0; i < entries.size(); i++) {
-            if (strncmp(entries[i].magic, ".WDB", 4) == 0) {
-                wdbGroups.push_back({i, blkAccum, 0});
-            } else if (strncmp(entries[i].magic, ".BLK", 4) == 0) {
-                blkAccum++;
-            }
-        }
+    // Use the global Database (created in Game::InternalOpen) so entities
+    // remain accessible to AI::Populate after this function returns.
+    g_database->Close();
 
-        // Count existing block volumes before each scan so we can
-        // attribute newly added volumes to the correct WDB group
-        u32 prevCount = 0;
-        for (size_t gi = 0; gi < wdbGroups.size(); gi++) {
-            wdbGroups[gi].blocksBefore = prevCount;
-            const auto& e = entries[wdbGroups[gi].entryIdx];
-            if (e.offset + e.size > dataSize) continue;
-            db.Scan(data + e.offset, e.size);
-
-            // Count how many block volumes are in the database now
-            u32 curCount = 0;
-            DBRoot* v = db.GetFirstBlock();
-            while (v) { curCount++; v = static_cast<DBRoot*>(v->next); }
-
-            // The new volumes from this WDB group are indices [prevCount..curCount)
-            // Their attrib 15 values are local, offset by blkBase
-            u32 idx = 0;
-            v = db.GetFirstBlock();
-            while (v) {
-                if (idx >= wdbGroups[gi].blocksBefore) {
-                    DBVolume* dbVol = static_cast<DBVolume*>(v);
-                    const DBAttrib* a = dbVol->FindAttrib(15);
-                    if (a) {
-                        u32 globalIdx = wdbGroups[gi].blkBase + a->value;
-                        if (globalIdx < blkCount) {
-                            blockVolumes[globalIdx] = dbVol;
-                        }
-                    }
-                }
-                idx++;
-                v = static_cast<DBRoot*>(v->next);
-            }
-            prevCount = curCount;
-
-            LOG("[World] WDB group at entry %u: blkBase=%u, %u volumes",
-                   wdbGroups[gi].entryIdx, wdbGroups[gi].blkBase, curCount - wdbGroups[gi].blocksBefore);
-        }
-
-        u32 totalParsed = 0;
-        for (auto* v : blockVolumes) { if (v) totalParsed++; }
-        LOG("[World] Parsed %u DBVolumes from %u WDB entries", totalParsed, (u32)wdbGroups.size());
+    // Scan all WDB entries into the database
+    for (const auto& e : entries) {
+        if (strncmp(e.magic, ".WDB", 4) != 0) continue;
+        if (e.offset + e.size > dataSize) continue;
+        g_database->Scan(data + e.offset, e.size);
     }
+
+    // PSX _LoadBlocksFunc: iterate GetFirstBlock linked list to build volume list.
+    // PSX iterates the database block list sequentially - no index mapping needed.
+    std::vector<DBVolume*> blockVolumes;
+    for (DBRoot* v = g_database->GetFirstBlock(); v; v = static_cast<DBRoot*>(v->next)) {
+        blockVolumes.push_back(static_cast<DBVolume*>(v));
+    }
+    LOG("[World] Parsed %u block volumes from WDB", (u32)blockVolumes.size());
 
     // Initialize blocks from volumes (PSX _LoadBlocksFunc - Block::Init)
     blockMgr.LoadBlocksFunc(blockVolumes);
@@ -715,6 +699,10 @@ void World::UnloadPetal() {
 void World::LoadPetal(u32 petalIndex) {
     MARKFUNCTION(0x8004604C);
 
+    // PSX: EstimateLoadTime, StartLogo, FillMeter(100)
+    StartLogo("RUNFIRST.TIM");
+    FillMeter(100);
+
     targetPetalIndex = petalIndex;
     currentPetalIndex = petalIndex;
 
@@ -723,6 +711,9 @@ void World::LoadPetal(u32 petalIndex) {
     }
 
     rsEvent(RS_LEVEL_BEGIN, 0, 0, 0);
+
+    // PSX: StopLogo after load completes
+    StopLogo();
 }
 
 // PSX: ResetLevel__5World (WORLD.CPP:1918, 0x80046DE0)

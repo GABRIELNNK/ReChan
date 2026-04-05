@@ -3,6 +3,8 @@
 #include "ai/player.h"
 #include "gen/game.h"
 #include "gen/control.h"
+#include "gen/model.h"
+#include "gen/animmat.h"
 #include "p3d/p3dmath.h"
 
 // Command bit positions (matching PSX Behaviour output → commandBits)
@@ -142,11 +144,37 @@ void Player::Move() {
     }
 }
 
-// PSX: CreateModel__6PlayerPCc (PLAYER.CPP:1111)
+// PSX: CreateModel__6PlayerPCc (PLAYER.CPP:1111, 0x8002FD34)
+// PSX: creates PlayerModel if not exists, calls Thing::CreateModel (NOT Humanoid::CreateModel),
+// stores OriginalSTree_omPlayer global, calls InitBlendPose
 void Player::CreateModel(const char* name) {
     MARKFUNCTION(0x8002FD34);
-    // PSX: CharacterManager::LoadCharacter, set up animation matrices, etc.
-    Humanoid::CreateModel(name);
+
+    // PSX: if model == null, create PlayerModel(136)
+    if (!model) {
+        PlayerModel* pm = new PlayerModel();
+        model = pm;
+        pm->backPtr = this;
+    }
+
+    // PSX: calls Thing::CreateModel directly (skips Humanoid::CreateModel)
+    Thing::CreateModel(name);
+
+    // PSX: virtual calls for animation setup (ApplyAnimToModel etc.)
+    // Animation system not yet reversed - skip
+
+    // PSX: OriginalSTree_omPlayer = model->drawable->original
+    // Used for suit-change system - skip global for now
+
+    // PSX: InitBlendPose - animation blending
+    // Not yet reversed - skip
+
+    // PSX: InitSemiTransMode (called via Humanoid path, also needed here)
+    Model* m = static_cast<Model*>(model);
+    if (m) {
+        SModel* sm = static_cast<SModel*>(m);
+        sm->InitSemiTransMode();
+    }
 }
 
 // PSX: SetActionState__6PlayerUll (PLAYER.CPP:1579)
@@ -164,12 +192,45 @@ void Player::SetActionState(u32 state, s32 param) {
 // PSX: GetViewSpot__6PlayerP10tagLVectorT1 (PLAYER.CPP:1460)
 void Player::GetViewSpot(LVector* outPos, LVector* outTarget) {
     MARKFUNCTION(0x8003027C);
+
+    s32 state = actionState;
+
     if (outPos) {
-        *outPos = homePos;
+        if (state == 18) {
+            *outPos = pos;
+        } else {
+            *outPos = homePos;
+        }
     }
+
     if (outTarget) {
-        *outTarget = homePos;
-        outTarget->y += 450;
+        if (state == 18) {
+            *outTarget = pos;
+        } else if (state == 23) {
+            bool usedAnimMatrix = false;
+
+            if (model) {
+                Model* baseModel = static_cast<Model*>(model);
+                HumanoidModel* humanoidModel = static_cast<HumanoidModel*>(baseModel);
+                if (humanoidModel->animMatrices) {
+                    const s32* joint5 = humanoidModel->animMatrices->GetMatrix(5);
+                    if (joint5) {
+                        outTarget->x = joint5[5];
+                        outTarget->y = joint5[6];
+                        outTarget->z = joint5[7];
+                        usedAnimMatrix = true;
+                    }
+                }
+            }
+
+            if (!usedAnimMatrix) {
+                *outTarget = homePos;
+                outTarget->y += 450;
+            }
+        } else {
+            *outTarget = homePos;
+            outTarget->y += 450;
+        }
     }
 }
 

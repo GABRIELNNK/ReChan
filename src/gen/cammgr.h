@@ -21,9 +21,9 @@
 // +46: zoom (s16 - attrib 11)
 // +48: speed (s16 - attrib 12)
 // +50: flags (u8 - attrib 13)
-// +52: param0 (s32 - attrib 14)
-// +56: param1 (s32 - attrib 15)
-// +60: param2 (s32 - attrib 16)
+// +52: param0 (s32 - attrib 20)
+// +56: param1 (s32 - attrib 21)
+// +60: param2 (s32 - attrib 22)
 struct DBCameraPathNode : public ccMinNode {
     // PSX +12: source (eye) position
     LVector sourcePos = {};
@@ -41,9 +41,9 @@ struct DBCameraPathNode : public ccMinNode {
     // PSX +50
     u8 flags = 0;       // attrib 13
     // PSX +52, +56, +60
-    s32 param0 = 0;     // attrib 14
-    s32 param1 = 0;     // attrib 15
-    s32 param2 = 0;     // attrib 16
+    s32 param0 = 0;     // attrib 20
+    s32 param1 = 0;     // attrib 21
+    s32 param2 = 0;     // attrib 22
 
     DBCameraPathNode();
     ~DBCameraPathNode() override;

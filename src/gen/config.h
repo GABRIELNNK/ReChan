@@ -11,7 +11,7 @@
 // Replace the OG PSX DebugCam (pad-only) with a PC-friendly camera:
 // WASD to move, LMB+drag to look, Shift for speed boost, Q/E for up/down.
 // When disabled, DebugCam uses the original PSX pad-button controls.
-#define IMPROVED_DEBUG_CAM 1
+#define IMPROVED_DEBUG_CAM 0
 
 // Skip initial intros and goes straight into title screen
 #define SKIP_INTRO 1

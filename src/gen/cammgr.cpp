@@ -1,6 +1,9 @@
 // cammgr.cpp - CameraManager
 // Original: C:\CHAN\GAME\SRC\GEN\CAMMGR.CPP
 #include "gen/cammgr.h"
+#include "gen/blockmgr.h"
+#include "gen/world.h"
+#include "gen/game.h"
 #include "p3d/p3dmath.h"
 
 // PSX global
@@ -42,9 +45,9 @@ void DBCameraPath::AddSourceNode(DBPoint* point) {
         case 11: node->zoom      = (s16)val; break;
         case 12: node->speed     = (s16)val; break;
         case 13: node->flags     = (u8)val;  break;
-        case 14: node->param0    = (s32)val; break;
-        case 15: node->param1    = (s32)val; break;
-        case 16: node->param2    = (s32)val; break;
+        case 20: node->param0    = (s32)val; break;
+        case 21: node->param1    = (s32)val; break;
+        case 22: node->param2    = (s32)val; break;
         default: break;
         }
     }
@@ -112,9 +115,9 @@ s32 DBCameraPath::InRange(LVector pos) {
 }
 
 // DBCameraPath::FindClosestNodes (0x8004AFB0)
-// Finds the two closest nodes to 'pos'. Returns squared distance to closest,
-// or -1 if no nodes exist. outNodeA = closest, outNodeB = second closest
-// (or the adjacent node based on projection direction).
+// Finds the closest node to 'pos' and an adjacent node on the same path.
+// Returns squared distance to closest, or -1 if no valid nodes exist.
+// outNodeA/outNodeB are ordered along path direction around the closest node.
 //
 // PSX algorithm:
 //   1. Walk all nodes, compute dist2 = (|dx|>>5)^2 + (|dy|>>5)^2 + (|dz|>>5)^2
@@ -135,15 +138,15 @@ s32 DBCameraPath::FindClosestNodes(LVector pos,
     // Find closest node by squared distance (>>5 scale to avoid overflow)
     DBCameraPathNode* node = static_cast<DBCameraPathNode*>(nodes.GetFirst());
     while (node) {
-        s32 dx = pos.x - node->sourcePos.x;
+        s32 dx = pos.x - node->targetPos.x;
         if (dx < 0) dx = -dx;
         dx >>= 5;
 
-        s32 dy = pos.y - node->sourcePos.y;
+        s32 dy = pos.y - node->targetPos.y;
         if (dy < 0) dy = -dy;
         dy >>= 5;
 
-        s32 dz = pos.z - node->sourcePos.z;
+        s32 dz = pos.z - node->targetPos.z;
         if (dz < 0) dz = -dz;
         dz >>= 5;
 
@@ -154,13 +157,13 @@ s32 DBCameraPath::FindClosestNodes(LVector pos,
             closest = node;
         } else if (dist == minDist && closest) {
             // Equal distance - use rmMag3 to pick closer of the two candidates
-            s32 vecA_x = (pos.x - node->sourcePos.x) << 16;
-            s32 vecA_y = (pos.y - node->sourcePos.y) << 16;
-            s32 vecA_z = (pos.z - node->sourcePos.z) << 16;
+            s32 vecA_x = (pos.x - node->targetPos.x) << 16;
+            s32 vecA_y = (pos.y - node->targetPos.y) << 16;
+            s32 vecA_z = (pos.z - node->targetPos.z) << 16;
 
-            s32 vecB_x = (pos.x - closest->sourcePos.x) << 16;
-            s32 vecB_y = (pos.y - closest->sourcePos.y) << 16;
-            s32 vecB_z = (pos.z - closest->sourcePos.z) << 16;
+            s32 vecB_x = (pos.x - closest->targetPos.x) << 16;
+            s32 vecB_y = (pos.y - closest->targetPos.y) << 16;
+            s32 vecB_z = (pos.z - closest->targetPos.z) << 16;
 
             s32 magA = (s32)rmMag3((f32)vecA_x, (f32)vecA_y, (f32)vecA_z);
             s32 magB = (s32)rmMag3((f32)vecB_x, (f32)vecB_y, (f32)vecB_z);
@@ -173,12 +176,21 @@ s32 DBCameraPath::FindClosestNodes(LVector pos,
         node = static_cast<DBCameraPathNode*>(node->next);
     }
 
-    // TODO: Validate block proximity (PSX checks BlockManager)
-    // blockA = BlockManager::GetBlockNumber(closest->sourcePos)
-    // blockB = BlockManager::GetBlockNumber(pos)
-    // If closest is null OR blockA is invalid OR |blockA - blockB| >= 3
-    //   (unless level 7), mark as out-of-range.
     bool outOfRange = (closest == nullptr);
+
+    if (!outOfRange && g_blockManager) {
+        u32 blockA = g_blockManager->GetBlockNumber(closest->targetPos);
+        u32 blockB = g_blockManager->GetBlockNumber(pos);
+
+        // PSX: skip block-distance check on level 7
+        bool levelException = (g_game && g_game->GetWorld() &&
+                               g_game->GetWorld()->GetCurrentLevelIndex() == 7);
+        bool farBlocks = !levelException &&
+                         ((blockA - blockB) >= 3u) && ((blockB - blockA) >= 3u);
+        if (!g_blockManager->IsValidBlockNumber(blockA) || farBlocks) {
+            outOfRange = true;
+        }
+    }
 
     if (outOfRange) {
         *outNodeA = nullptr;
@@ -186,75 +198,62 @@ s32 DBCameraPath::FindClosestNodes(LVector pos,
         return -1;
     }
 
-    // Determine the neighbor node (outNodeB)
-    DBCameraPathNode* prevNode = static_cast<DBCameraPathNode*>(closest->prev);
     DBCameraPathNode* nextNode = static_cast<DBCameraPathNode*>(closest->next);
+    DBCameraPathNode* prevNode = static_cast<DBCameraPathNode*>(closest->prev);
 
-    if (!prevNode && !nextNode) {
+    if (nextNode) {
+        if (prevNode) {
+            // PSX order: segA = NEXT direction, segB = PREV direction
+            // Dot product = (nextNorm - prevNorm) . toPos
+            s32 segA_x = (nextNode->targetPos.x - closest->targetPos.x) << 16;
+            s32 segA_y = (nextNode->targetPos.y - closest->targetPos.y) << 16;
+            s32 segA_z = (nextNode->targetPos.z - closest->targetPos.z) << 16;
+
+            s32 segB_x = (prevNode->targetPos.x - closest->targetPos.x) << 16;
+            s32 segB_y = (prevNode->targetPos.y - closest->targetPos.y) << 16;
+            s32 segB_z = (prevNode->targetPos.z - closest->targetPos.z) << 16;
+
+            s32 toPos_x = (pos.x - closest->targetPos.x) << 16;
+            s32 toPos_y = (pos.y - closest->targetPos.y) << 16;
+            s32 toPos_z = (pos.z - closest->targetPos.z) << 16;
+
+            s32 magA = (s32)rmMag3((f32)segA_x, (f32)segA_y, (f32)segA_z);
+            if (magA > 0) {
+                segA_x = rmDiv16i(segA_x, magA);
+                segA_y = rmDiv16i(segA_y, magA);
+                segA_z = rmDiv16i(segA_z, magA);
+            }
+
+            s32 magB = (s32)rmMag3((f32)segB_x, (f32)segB_y, (f32)segB_z);
+            if (magB > 0) {
+                segB_x = rmDiv16i(segB_x, magB);
+                segB_y = rmDiv16i(segB_y, magB);
+                segB_z = rmDiv16i(segB_z, magB);
+            }
+
+            s64 dot =
+                (((s64)(segA_x - segB_x) * (s64)toPos_x) >> 16) +
+                (((s64)(segA_y - segB_y) * (s64)toPos_y) >> 16) +
+                (((s64)(segA_z - segB_z) * (s64)toPos_z) >> 16);
+
+            if ((s32)dot < 0) {
+                *outNodeA = prevNode;
+                *outNodeB = closest;
+            } else {
+                *outNodeA = closest;
+                *outNodeB = nextNode;
+            }
+            return minDist;
+        }
+
+        *outNodeA = closest;
+        *outNodeB = nextNode;
+    } else if (prevNode) {
+        *outNodeA = prevNode;
+        *outNodeB = closest;
+    } else {
         *outNodeA = closest;
         *outNodeB = nullptr;
-        return minDist;
-    }
-
-    if (!prevNode) {
-        *outNodeA = nextNode;
-        *outNodeB = closest;
-        return minDist;
-    }
-
-    if (!nextNode) {
-        *outNodeA = closest;
-        *outNodeB = prevNode;
-        return minDist;
-    }
-
-    // Both neighbors exist - use dot product to determine direction
-    // PSX builds two segment vectors, normalizes via rmDiv16i, then computes
-    // a 64-bit dot product. If dot < 0, position is "behind" closest
-    // relative to prev, so use (nextNode, closest); else (prevNode, closest).
-    s32 segA_x = (prevNode->sourcePos.x - closest->sourcePos.x) << 16;
-    s32 segA_y = (prevNode->sourcePos.y - closest->sourcePos.y) << 16;
-    s32 segA_z = (prevNode->sourcePos.z - closest->sourcePos.z) << 16;
-
-    s32 segB_x = (nextNode->sourcePos.x - closest->sourcePos.x) << 16;
-    s32 segB_y = (nextNode->sourcePos.y - closest->sourcePos.y) << 16;
-    s32 segB_z = (nextNode->sourcePos.z - closest->sourcePos.z) << 16;
-
-    s32 toPos_x = (pos.x - closest->sourcePos.x) << 16;
-    s32 toPos_y = (pos.y - closest->sourcePos.y) << 16;
-    s32 toPos_z = (pos.z - closest->sourcePos.z) << 16;
-
-    // Normalize segA
-    s32 magA = (s32)rmMag3((f32)segA_x, (f32)segA_y, (f32)segA_z);
-    if (magA > 0) {
-        segA_x = (s32)(((s64)segA_x << 16) / magA);
-        segA_y = (s32)(((s64)segA_y << 16) / magA);
-        segA_z = (s32)(((s64)segA_z << 16) / magA);
-    }
-
-    // Normalize segB
-    s32 magB = (s32)rmMag3((f32)segB_x, (f32)segB_y, (f32)segB_z);
-    if (magB > 0) {
-        segB_x = (s32)(((s64)segB_x << 16) / magB);
-        segB_y = (s32)(((s64)segB_y << 16) / magB);
-        segB_z = (s32)(((s64)segB_z << 16) / magB);
-    }
-
-    // (segA - segB) dot toPos
-    s32 diff_x = segA_x - segB_x;
-    s32 diff_y = segA_y - segB_y;
-    s32 diff_z = segA_z - segB_z;
-
-    s64 dot = (s64)diff_x * (s64)toPos_x
-            + (s64)diff_y * (s64)toPos_y
-            + (s64)diff_z * (s64)toPos_z;
-
-    if (dot < 0) {
-        *outNodeA = closest;
-        *outNodeB = prevNode;
-    } else {
-        *outNodeA = nextNode;
-        *outNodeB = closest;
     }
 
     return minDist;
@@ -394,13 +393,13 @@ CameraManager::~CameraManager() {
 }
 
 // CameraManager::InternalOpen (0x8004A5F4)
-// PSX creates a Callback node with cameraLoadFunc as the callback,
-// stores 'this' at node+32, and registers it with the load system.
-// On PC we call SetupPaths directly when Database integration is ready.
+// PSX creates a Callback node with cameraLoadFunc that calls SetupPaths
+// when the load chain fires (after LoadLevel). On PC, gsQueueLevelLoad
+// calls SetupPaths explicitly after loading the level.
 void CameraManager::InternalOpen() {
     MARKFUNCTION(0x8004A5F4);
-
-    SetupPaths();
+    // PSX: register cameraLoadFunc callback in load chain
+    // PC: SetupPaths is called from gsQueueLevelLoad after level data is available
 }
 
 // CameraManager::SetupPaths (0x8004A668)
@@ -414,13 +413,16 @@ void CameraManager::SetupPaths() {
     anchor = new CameraAnchor();
     anchor->SetName("CamAnchor", 0);
 
+    u32 sourcePathCount = 0;
+    u32 targetPathCount = 0;
+
     if (g_database) {
         // Pass 1: add source paths (type 155 = 0x9B)
         DBPath* path = g_database->GetFirstPath();
         while (path) {
-            DBPoint* firstPt = static_cast<DBPoint*>(path->points.GetFirst());
-            if (firstPt && firstPt->subType == 155) {
+            if (path->subType == 155) {
                 anchor->AddCameraSourcePath(path);
+                sourcePathCount++;
             }
             path = static_cast<DBPath*>(path->next);
         }
@@ -428,12 +430,28 @@ void CameraManager::SetupPaths() {
         // Pass 2: add target paths (type 156 = 0x9C)
         path = g_database->GetFirstPath();
         while (path) {
-            DBPoint* firstPt = static_cast<DBPoint*>(path->points.GetFirst());
-            if (firstPt && firstPt->subType == 156) {
+            if (path->subType == 156) {
                 anchor->AddCameraTargetPath(path);
+                targetPathCount++;
             }
             path = static_cast<DBPath*>(path->next);
         }
     }
+
+    u32 builtPathCount = 0;
+    u32 builtNodeCount = 0;
+    DBCameraPath* builtPath = static_cast<DBCameraPath*>(anchor->sourcePaths.GetFirst());
+    while (builtPath) {
+        builtPathCount++;
+        DBCameraPathNode* node = static_cast<DBCameraPathNode*>(builtPath->nodes.GetFirst());
+        while (node) {
+            builtNodeCount++;
+            node = static_cast<DBCameraPathNode*>(node->next);
+        }
+        builtPath = static_cast<DBCameraPath*>(builtPath->next);
+    }
+
+    LOG("[CameraManager] SetupPaths: source=%u target=%u builtPaths=%u builtNodes=%u",
+        sourcePathCount, targetPathCount, builtPathCount, builtNodeCount);
 }
 

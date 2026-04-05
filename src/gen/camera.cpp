@@ -2,94 +2,68 @@
 // Original: C:\CHAN\GAME\SRC\GEN\CAMERA.CPP
 #include "gen/camera.h"
 #include "gen/control.h"
-#include "ai/player.h"
-#include "config.h"
-#include "p3d/p3dmath.h"     // Vec3, Mat4, p3dBuildRotMatrixZYX, etc.
-#include "p3d/input.h"       // PlatformInput
-#include "p3d/context.h"     // p3d::input
-#include "pddi/pddidev.h"    // pddiInput key codes
-#include "gen/time.h"        // g_time (delta time)
+#include "ai/thing.h"
+#include "p3d/p3dmath.h"
+#include <cstdlib>
+#include <cmath>
 
 
 // PSX math helpers
 
 
 static constexpr f32 PSX_ANGLE_TO_RAD = P3D_ANGLE_TO_RAD;
-static constexpr f32 PSX_FOV_TO_RAD = 0.61f / 30000.0f;
 static constexpr f32 PSX_ASPECT = 4.0f / 3.0f;
 
+// PSX FOV conversion: curFOV -> vertical FOV in radians
+// PSX computes fovV = (72744 * curFOV) >> 16 as a 16.16 half-angle tangent.
+static f32 psxFovToRad(s32 curFOV) {
+    f32 halfTan = (72744.0f * (f32)curFOV) / (65536.0f * 65536.0f);
+    return 2.0f * std::atan(halfTan);
+}
+
 static constexpr s32 TIME_SCALE = 1000;
+static constexpr s32 MAX_CAM_POS_DELTA = 32;
+static constexpr s32 MAX_VIEW_POS_DELTA_X = 32;
+static constexpr s32 MAX_VIEW_POS_DELTA_Y = 32;
+static constexpr s32 MAX_VIEW_POS_DELTA_Z = 32;
+static constexpr s32 RESTING_DIST = 3200;
+static constexpr s32 HEIGHT_OFFSET = 2000;
+static constexpr s32 SPIN_RATE = 6500;
+
+static s32 rmRandom0() {
+    return std::rand();
+}
+
+static s32 rmSin16Local(s32 angle) {
+    f32 rad = (f32)(angle & 0xFFFF) * PSX_ANGLE_TO_RAD;
+    return (s32)(std::sin(rad) * 65536.0f);
+}
 
 bool EvalCubic(s32* curValue, s32* accel, s32 target, s32 velocity, s32 time) {
-    if (time == 0) {
-        *curValue = target;
-        *accel = velocity;
-        return true;
-    }
+    s32 v7 = *accel;
+    s32 v8 = *curValue;
+    s32 v9 = v7 + velocity;
+    s32 v10 = target - v8;
+    s32 v11 = v9 - v10 - v10;
+    s32 v12 = 3 * v10 - v9 - v7;
 
-    s64 cur = *curValue;
-    s64 acc = *accel;
-    s64 tgt = target;
-    s64 vel = velocity;
-    s64 t   = time;
+    *curValue = v8 + (s32)(((s64)(v7 + (s32)(((s64)(v12 + (s32)(((s64)v11 * time) >> 16)) * time) >> 16)) * time) >> 16);
+    *accel = v7 + (s32)(((s64)(2 * v12 + (s32)(((s64)(3 * v11) * time) >> 16)) * time) >> 16);
 
-    // Hermite basis coefficients
-    s64 delta = tgt - cur;
-    s64 sum   = acc + vel;
-    s64 B     = sum - 2 * delta;       // a1 in PSX
-    s64 A     = 3 * delta - sum - acc;  // a0 in PSX
-
-    s64 temp1 = (B * t) >> 16;
-    s64 step2 = ((A + temp1) * t) >> 16;
-    s64 step3 = ((3 * B) * t) >> 16;
-    s64 newAcc = acc + step3 + step2 * 2; // simplified combination
-    s64 pos_delta = ((acc + step2) * t) >> 16;
-    s64 newCur = cur + pos_delta;
-
-    s64 r1_full = B * t;
-    s32 r1 = (s32)(r1_full >> 16);
-
-    s64 r2_full = (A + r1) * t;
-    s32 r2 = (s32)(r2_full >> 16);
-
-    s64 r3_full = ((s64)(3 * B) * t);  // not exactly right but close enough for 32-bit
-    f64 tn = (f64)time / 65536.0;
-
-    f64 fDelta = (f64)delta;
-    f64 fAcc   = (f64)acc;
-    f64 fVel   = (f64)vel;
-    f64 fCur   = (f64)cur;
-
-    f64 fB = fAcc + fVel - 2.0 * fDelta;
-    f64 fA = 3.0 * fDelta - 2.0 * fAcc - fVel;
-
-    // Cubic: new_pos = A*t^3 + B*t^2 + acc*t + cur
-    f64 newPos = fA * tn * tn * tn + fB * tn * tn + fAcc * tn + fCur;
-    // Derivative (new accel/tangent): 3*A*t^2 + 2*B*t + acc
-    f64 newAccF = 3.0 * fA * tn * tn + 2.0 * fB * tn + fAcc;
-
-    s32 result = (s32)newPos;
-    s32 resultAcc = (s32)newAccF;
-
-    // Clamp: if overshot target
-    bool wasBefore = (*curValue < target);
-    *curValue = result;
-    *accel = resultAcc;
-
-    if (wasBefore) {
-        if (*curValue >= target) {
-            *curValue = target;
-            *accel = velocity;
-            return true;
-        }
+    bool crossed;
+    if (v8 >= target) {
+        crossed = (*curValue < target);
     } else {
-        if (*curValue <= target) {
-            *curValue = target;
-            *accel = velocity;
-            return true;
-        }
+        crossed = (target < *curValue);
     }
-    return false;
+
+    if (!crossed) {
+        return false;
+    }
+
+    *curValue = target;
+    *accel = velocity;
+    return true;
 }
 
 
@@ -129,12 +103,10 @@ void Camera::Reset() {
     velocityMag.y = 1966;
     velocityMag.z = 1966;
 
-    // Default movement/tracking times - PSX calls Set*Time with default vectors
-    // PSX Reset passes {8,8,8} to SetMovementTime and {4,4,4} to SetTrackingTime
-    LVector defaultMovTime = {8, 8, 8};
-    LVector defaultTrackTime = {4, 4, 4};
-    SetMovementTime(&defaultMovTime);
-    SetTrackingTime(&defaultTrackTime);
+    // Default movement/tracking times in Reset are {6,6,6}.
+    LVector defaultTime = {6, 6, 6};
+    SetMovementTime(&defaultTime);
+    SetTrackingTime(&defaultTime);
 
     // FOV
     SetFOV(10); // desiredFOV = 10
@@ -144,9 +116,7 @@ void Camera::Reset() {
     fovVel = 0;
 
     // Push FOV to tCamera
-    f32 fovRad = (f32)curFOV * PSX_FOV_TO_RAD;
-    if (fovRad < 0.01f) fovRad = 0.7f; // fallback
-    p3dCamera.SetFOV(fovRad, PSX_ASPECT);
+    p3dCamera.SetFOV(psxFovToRad(curFOV), PSX_ASPECT);
 
     // Twist - PSX 8192 ≈ 45 degrees
     twist = 8192;
@@ -157,6 +127,9 @@ void Camera::Reset() {
     camAngleZ = 0;
     quadrantYZ = 0;
     quadrantXZ = 0;
+
+    // Reset camera flags before selecting mode.
+    flags = 0;
 
     // Mode: Follow (PSX SetMode(1))
     SetMode(CAM_MODE_FOLLOW);
@@ -179,8 +152,6 @@ void Camera::Reset() {
     asyncAnimEnum = 0xFFFF;
     asyncAnim = 0;
     cameraAnim = 0;
-    flags = 0;
-
     cameraAnchor = 0;
 }
 
@@ -191,14 +162,14 @@ void Camera::Reset() {
 void Camera::Think() {
     MARKFUNCTION(0x80047F28);
 
-    // If camera anim is active, skip mode dispatch
-    if (cameraAnim == 0 && modeFunc != nullptr) {
-        (this->*modeFunc)();
-    }
+    if (cameraAnim == 0) {
+        if (modeFunc != nullptr) {
+            (this->*modeFunc)();
+        }
 
-    // Move (position interpolation) if collision enabled
-    if (hasCollision != 0) {
-        Move();
+        if (hasCollision != 0) {
+            Move();
+        }
     }
 
     // Camera shake
@@ -215,74 +186,66 @@ void Camera::Think() {
 void Camera::Move() {
     MARKFUNCTION(0x80047FD4);
 
-    // --- FOV interpolation ---
-    s32 targetFOV = desiredFOV * 3000; // expanded target
+    s32 targetFOV = desiredFOV * 3000;
     if (curFOV != targetFOV) {
-        EvalCubic(&curFOV, &fovAccel, targetFOV, velocityMag.x, movementTime.x);
-        // Push to tCamera
-        f32 fovRad = (f32)curFOV * PSX_FOV_TO_RAD;
-        if (fovRad > 0.01f) {
-            p3dCamera.SetFOV(fovRad, PSX_ASPECT);
-        }
+        // PSX uses velocityMag.x (+344) for FOV time, not movementTime.x (+300)
+        EvalCubic(&curFOV, &fovAccel, targetFOV, fovVel, velocityMag.x);
+        p3dCamera.SetFOV(psxFovToRad(curFOV), PSX_ASPECT);
     }
 
-    // Save current position for prevPosition
-    LVector savedPos = position;
+    LVector nextPos = position;
 
-    // --- Position interpolation ---
-    // If path-follow flag (bit 0) is NOT set, interpolate position
     if (!(flags & 0x01)) {
-        // X axis
-        s32 deltaX = savedPos.x - curPos.x;
-        if (deltaX < 0) deltaX = -deltaX;
-        // PSX compares |delta| against a global threshold (gp+1380).
-        // We use a small threshold equivalent.
-        constexpr s32 POS_THRESHOLD = 1;
-        if (deltaX >= POS_THRESHOLD) {
-            EvalCubic(&savedPos.x, &movementAccel.x, curPos.x, movementVel.x, movementTime.x);
+        s32 deltaX = nextPos.x - curPos.x;
+        if (deltaX < 0) {
+            deltaX = -deltaX;
+        }
+        if (deltaX >= MAX_CAM_POS_DELTA) {
+            EvalCubic(&nextPos.x, &movementAccel.x, curPos.x, movementVel.x, movementTime.x);
         }
 
-        // Y axis
-        if (savedPos.y != curPos.y) {
-            EvalCubic(&savedPos.y, &movementAccel.y, curPos.y, movementVel.y, movementTime.y);
+        if (nextPos.y != curPos.y) {
+            EvalCubic(&nextPos.y, &movementAccel.y, curPos.y, movementVel.y, movementTime.y);
         }
 
-        // Z axis
-        s32 deltaZ = savedPos.z - curPos.z;
-        if (deltaZ < 0) deltaZ = -deltaZ;
-        if (deltaZ >= POS_THRESHOLD) {
-            EvalCubic(&savedPos.z, &movementAccel.z, curPos.z, movementVel.z, movementTime.z);
+        s32 deltaZ = nextPos.z - curPos.z;
+        if (deltaZ < 0) {
+            deltaZ = -deltaZ;
         }
-
-        // --- Target position interpolation ---
-        // PSX compares |targetPos - prevTargetPos| against per-axis thresholds
-        constexpr s32 TGT_THRESHOLD = 1;
+        if (deltaZ >= MAX_CAM_POS_DELTA) {
+            EvalCubic(&nextPos.z, &movementAccel.z, curPos.z, movementVel.z, movementTime.z);
+        }
 
         s32 dtx = targetPos.x - prevTargetPos.x;
-        if (dtx < 0) dtx = -dtx;
-        if (dtx >= TGT_THRESHOLD) {
+        if (dtx < 0) {
+            dtx = -dtx;
+        }
+        if (dtx >= MAX_VIEW_POS_DELTA_X) {
             EvalCubic(&targetPos.x, &trackingAccel.x, prevTargetPos.x, trackingVel.x, trackingTime.x);
         }
 
         s32 dty = targetPos.y - prevTargetPos.y;
-        if (dty < 0) dty = -dty;
-        if (dty >= TGT_THRESHOLD) {
+        if (dty < 0) {
+            dty = -dty;
+        }
+        if (dty >= MAX_VIEW_POS_DELTA_Y) {
             EvalCubic(&targetPos.y, &trackingAccel.y, prevTargetPos.y, trackingVel.y, trackingTime.y);
         }
 
         s32 dtz = targetPos.z - prevTargetPos.z;
-        if (dtz < 0) dtz = -dtz;
-        if (dtz >= TGT_THRESHOLD) {
+        if (dtz < 0) {
+            dtz = -dtz;
+        }
+        if (dtz >= MAX_VIEW_POS_DELTA_Z) {
             EvalCubic(&targetPos.z, &trackingAccel.z, prevTargetPos.z, trackingVel.z, trackingTime.z);
         }
     }
 
-    // Write back
-    prevPosition = position;
-    position = savedPos;
+    // PSX writes interpolated result to prevPosition only, NOT position.
+    // Position stays at the snapped value from FollowPath's lookAtMode path.
+    // The camera stays put and only rotates via LookAtTarget angles.
+    prevPosition = nextPos;
 
-    // --- LookAtTarget ---
-    // If flags bit 1 is set, compute look-at angles from target position
     if (flags & 0x02) {
         LookAtTarget(&targetPos);
     }
@@ -293,65 +256,70 @@ void Camera::Move() {
 // Builds the world-to-camera matrix and pushes it to tCamera.
 // Two paths: angle-based (cameraAnim==0) or point-based (cameraAnim!=0).
 
+// Camera::Update (0x800482DC)
+// PSX: builds camera-to-world matrix and sets it on tMatrixCamera.
+// Two paths: euler angles (cameraAnim==0) or 2-point camera (cameraAnim!=0).
+
 void Camera::Update() {
     MARKFUNCTION(0x800482DC);
 
-    // PC improved cam already set the matrix directly - skip
-    if (directMatrix) {
-        directMatrix = false;
+    if (cameraAnim != 0) {
+        // PSX 2-point camera path: build heading from camera->target,
+        // rotate around Z by twist, then fill translation.
+        LVector camPos = position;
+        LVector camTarget = targetPos;
+
+        LVector headingFixed = {
+            camTarget.x - camPos.x,
+            camTarget.y - camPos.y,
+            camTarget.z - camPos.z,
+        };
+
+        if (headingFixed.x == 0 && headingFixed.y == 0 && headingFixed.z == 0) {
+            headingFixed.x = 0x10000;
+        }
+
+        rmV3Normalize(&headingFixed, &headingFixed);
+
+        Vec3 heading(
+            (f32)headingFixed.x / 65536.0f,
+            (f32)headingFixed.y / 65536.0f,
+            (f32)headingFixed.z / 65536.0f);
+
+        Vec3 up(0.0f, 1.0f, 0.0f);
+        if (headingFixed.x == 0 && headingFixed.z == 0) {
+            up = Vec3(1.0f, 0.0f, 0.0f);
+        }
+
+        Mat4 headingMatrix;
+        p3dFillHeadingMatrix(heading, up, headingMatrix);
+
+        Mat4 twistMatrix;
+        p3dBuildRotMatrixZ((f32)(twist & 0xFFFF) * PSX_ANGLE_TO_RAD, twistMatrix);
+
+        Mat4 matrix = Mat4Multiply(twistMatrix, headingMatrix);
+        p3dFillTransMatrix(camPos, matrix);
+
+        p3dCamera.SetCameraMatrix(matrix);
+        p3dCamera.SetFOV(psxFovToRad(curFOV), PSX_ASPECT);
+
+        position = camPos;
+        curPos = camPos;
+        prevPosition = camPos;
+        prevTargetPos = camTarget;
+        targetPos = camTarget;
         return;
     }
 
-    if (cameraAnim == 0) {
-        // PSX: p3dBuildRotMatrixZYX(camAngleZ, camAngleY, camAngleX, &matrix)
-        Mat4 rot;
-        p3dBuildRotMatrixZYX(camAngleZ, camAngleY, camAngleX, rot);
-
-        // Translation from position
-        rot.m[12] = (f32)position.x;
-        rot.m[13] = (f32)position.y;
-        rot.m[14] = (f32)position.z;
-
-        p3dCamera.SetCameraMatrix(rot);
-        return;
-    }
-
-    Vec3 eye((f32)curPos.x, (f32)curPos.y, (f32)curPos.z);
-    Vec3 tgt((f32)targetPos.x, (f32)targetPos.y, (f32)targetPos.z);
-
-    // Direction vector (target - eye)
-    Vec3 fwd = (tgt - eye).Normalized();
-
-    // Up hint - PSX uses p3dFillHeadingMatrix with twist-rotated up
-    // If forward is nearly vertical, use X as up hint
-    Vec3 up(0.0f, 1.0f, 0.0f);
-    if (fabs(fwd.x) < 0.001f && fabs(fwd.z) < 0.001f)
-        up.Set(1.0f, 0.0f, 0.0f);
-
-    // Build view matrix: right/up/forward basis
-    Vec3 right = fwd.Cross(up);
-    right.Normalize();
-    Vec3 realUp = right.Cross(fwd);
-
-    Mat4 view;
-    view.m[0] = right.x;  view.m[4] = right.y;  view.m[8]  = right.z;
-    view.m[1] = realUp.x;  view.m[5] = realUp.y;  view.m[9]  = realUp.z;
-    view.m[2] = -fwd.x;    view.m[6] = -fwd.y;    view.m[10] = -fwd.z;
-    view.m[3] = 0;          view.m[7] = 0;          view.m[11] = 0;
-
-    view.m[12] = -right.Dot(eye);
-    view.m[13] = -realUp.Dot(eye);
-    view.m[14] = fwd.Dot(eye);
-    view.m[15] = 1.0f;
-
-    p3dCamera.SetCameraMatrix(view);
-
-    // Update all position fields (PSX copies back from tMatrixCamera GetPosition)
-    position = curPos;
-    prevPosition = curPos;
-
-    // Copy target position chain
-    prevTargetPos = targetPos;
+    // PSX euler path (cameraAnim == 0)
+    // p3dBuildRotMatrixZYX(*(u16*)(a1+380), *(u16*)(a1+384), *(u16*)(a1+388), &matrix)
+    // p3dFillTransMatrix(a1+28, &matrix)
+    // SetCameraMatrix(tMatrixCamera, &matrix)
+    // UpdateMatrix(tMatrixCamera)
+    Mat4 matrix;
+    p3dBuildRotMatrixZYX(camAngleX, camAngleY, camAngleZ, matrix);
+    p3dFillTransMatrix(position, matrix);
+    p3dCamera.SetCameraMatrix(matrix);
 }
 
 
@@ -365,58 +333,59 @@ void Camera::LookAtTarget(const LVector* target) {
     s32 dy = target->y - position.y;
     s32 dz = target->z - position.z;
 
-    // PSX: rmMag2(dx, dz)
-    f32 hMag = rmMag2((f32)dx, (f32)dz);
+    s32 mag = (s32)rmMag2((f32)dx, (f32)dz);
+    camAngleX = rmATan216((f32)-dy, (f32)mag);
 
-    // Pitch: PSX rmATan2(-dy, hMag) stored at +380
-    f32 pitchRad = atan2(-(f32)dy, hMag);
-    s32 pitchAngle = (s32)(pitchRad / PSX_ANGLE_TO_RAD);
-
-    // Determine quadrants (PSX uses sign of dy and dz)
     quadrantYZ = 0;
-    if (dy < 0) quadrantYZ = 1;
-    if (dz < 0) quadrantYZ = (s16)(quadrantYZ + 2);
+    if (dy < 0) {
+        quadrantYZ = 1;
+    }
+    if (dz < 0) {
+        quadrantYZ = (s16)(quadrantYZ + 2);
+    }
 
-    // Adjust pitch for quadrant
+    s32 orientX = camAngleX;
+
     if (quadrantYZ < 2) {
-        // Front quadrants: camAngleX = pitch + 16384 (90°)
-        camAngleX = pitchAngle + 16384;
-        camAngleZ = 0x8000; // 180°
+        camAngleZ = 0x8000;
+        camAngleX = camAngleX + 0x4000;
     } else {
-        // Back quadrants: camAngleX = 16384 - pitch
-        camAngleX = 16384 - pitchAngle;
         camAngleZ = 0;
+        camAngleX = 0x4000 - camAngleX;
     }
 
-    // Yaw: angle in XZ plane
     quadrantXZ = 0;
-    if (dx < 0) quadrantXZ = 1;
-    if (dz < 0) quadrantXZ = (s16)(quadrantXZ + 2);
-
-    // PSX: rmATan2 with quadrant-dependent sign flips
-    f32 yawRad;
-    switch (quadrantXZ) {
-        case 0: // +x, +z
-            yawRad = atan2(-(f32)dx, (f32)dz);
-            camAngleY = (s32)(yawRad / PSX_ANGLE_TO_RAD) + 16384;
-            break;
-        case 1: // -x, +z
-            yawRad = atan2(-(f32)dx, (f32)dz);
-            camAngleY = (s32)(yawRad / PSX_ANGLE_TO_RAD) + 16384;
-            break;
-        case 2: // +x, -z
-            yawRad = atan2(-(f32)dz, -(f32)dx);
-            camAngleY = (s32)(yawRad / PSX_ANGLE_TO_RAD) + 0x8000;
-            break;
-        case 3: // -x, -z
-            yawRad = atan2(-(f32)dz, -(f32)dx);
-            camAngleY = (s32)(yawRad / PSX_ANGLE_TO_RAD) + 0x8000;
-            break;
+    if (dx < 0) {
+        quadrantXZ = 1;
+    }
+    if (dz < 0) {
+        quadrantXZ = (s16)(quadrantXZ + 2);
     }
 
-    // Store to orientation
-    orientAngles.x = camAngleX;
-    orientAngles.y = camAngleY;
+    s32 orientY = orientAngles.y;
+    s32 xzQuad = quadrantXZ;
+    if (xzQuad == 1) {
+        s32 dxFixed = (s32)(-65536LL * dx);
+        s32 dzFixed = (s32)((s64)dz << 16);
+        camAngleY = rmATan216((f32)dxFixed, (f32)dzFixed) + 0x4000;
+        orientY = camAngleY + 0x8000;
+    } else if (xzQuad < 2) {
+        if (quadrantXZ == 0) {
+            s32 dxFixed = (s32)(-65536LL * dx);
+            s32 dzFixed = (s32)((s64)dz << 16);
+            s32 a = rmATan216((f32)dxFixed, (f32)dzFixed);
+            camAngleY = a + 0x4000;
+            orientY = a - 0x4000;
+        }
+    } else if (xzQuad < 4) {
+        s32 dzFixed = (s32)(-65536LL * dz);
+        s32 dxFixed = (s32)(-65536LL * dx);
+        camAngleY = rmATan216((f32)dzFixed, (f32)dxFixed) + 0x8000;
+        orientY = camAngleY;
+    }
+
+    orientAngles.x = orientX;
+    orientAngles.y = orientY;
     orientAngles.z = camAngleZ;
 }
 
@@ -428,22 +397,28 @@ void Camera::SetMode(CameraMode mode) {
 
     currentMode = mode;
     switch (mode) {
-        case CAM_MODE_DEFAULT:
+        case CAM_MODE_DEFAULT: {
             modeFunc = &Camera::DebugCam;
             flags &= ~0x02u; // clear look-at flag
+            LVector mt = {6, 6, 6};
+            SetMovementTime(&mt);
             break;
-        case CAM_MODE_FOLLOW:
+        }
+        case CAM_MODE_FOLLOW: {
             modeFunc = &Camera::FollowPath;
             flags |= 0x02u;  // enable look-at
+            LVector mt = {8, 10, 8};
+            SetMovementTime(&mt);
             break;
-        case CAM_MODE_RIGID:
+        }
+        case CAM_MODE_RIGID: {
             modeFunc = &Camera::RigidCam;
             flags |= 0x02u;
+            LVector mt = {6, 6, 6};
+            SetMovementTime(&mt);
             break;
+        }
     }
-
-    // PSX also calls SetMovementTime with current position data after SetMode
-    // (updates the movement time based on current global state)
 }
 
 
@@ -462,10 +437,7 @@ void Camera::SetFOV(s32 fov) {
 void Camera::SetCurFOV(s32 fov) {
     MARKFUNCTION(0x8004A464);
     curFOV = fov * 3000;
-    f32 fovRad = (f32)curFOV * PSX_FOV_TO_RAD;
-    if (fovRad > 0.01f) {
-        p3dCamera.SetFOV(fovRad, PSX_ASPECT);
-    }
+    p3dCamera.SetFOV(psxFovToRad(curFOV), PSX_ASPECT);
 }
 
 
@@ -492,7 +464,7 @@ void Camera::SetTrackingTime(const LVector* t) {
 
 // Camera::SetLookAtTarget (0x80049DC0)
 
-void Camera::SetLookAtTarget(void* thing, u16 mode) {
+void Camera::SetLookAtTarget(Thing* thing, u16 mode) {
     MARKFUNCTION(0x80049DC0);
     targetThing = thing;
     if (mode == 1) {
@@ -516,105 +488,62 @@ void Camera::ShakeCamera(s32 frames) {
 
 void Camera::DebugCam() {
     MARKFUNCTION(0x80048718);
-
-#if IMPROVED_DEBUG_CAM
-    PlatformInput* pi = p3d::input;
-    if (!pi) return;
-
-    static Vec3 pos;
-    static f32 yaw   = 0.0f;
-    static f32 pitch = 0.0f;
-    static bool posInited = false;
-
-    // Sync float position from Camera on first call
-    if (!posInited) {
-        pos.Set((f32)curPos.x, (f32)curPos.y, (f32)curPos.z);
-        posInited = true;
+    if (!g_inputManager) {
+        return;
     }
 
-    const f32 sensitivity = 0.003f;
-    const f32 dt = g_time ? g_time->GetDeltaTime() : (1.0f / 30.0f);
-    f32 speed = 3000.0f;
-
-    // Mouse rotation (LMB held)
-    if (pi->IsMouseButtonDown(pddiInput::MouseLeft)) {
-        double mx, my;
-        pi->GetMouseDelta(mx, my);
-        yaw   += static_cast<f32>(mx) * sensitivity;
-        pitch -= static_cast<f32>(my) * sensitivity;
-        if (pitch >  1.55f) pitch =  1.55f;
-        if (pitch < -1.55f) pitch = -1.55f;
-    }
-
-    // Speed boost (Shift)
-    if (pi->IsKeyDown(pddiInput::KeyLeftShift))
-        speed *= 4.0f;
-
-    f32 spd = speed * dt;
-
-    // Build forward/right vectors from yaw+pitch
-    f32 cy = cos(yaw), sy = sin(yaw);
-    f32 cp = cos(pitch), sp = sin(pitch);
-
-    Vec3 fwd(sy * cp, sp, cy * cp);
-    Vec3 right(cy, 0.0f, -sy);
-
-    // Accumulate movement
-    if (pi->IsKeyDown('W')) pos += fwd * spd;
-    if (pi->IsKeyDown('S')) pos -= fwd * spd;
-    if (pi->IsKeyDown('A')) pos -= right * spd;
-    if (pi->IsKeyDown('D')) pos += right * spd;
-    if (pi->IsKeyDown('Q')) pos.y += spd;
-    if (pi->IsKeyDown('E')) pos.y -= spd;
-
-    // Build a proper LookAt view matrix directly
-    Vec3 target = pos + fwd;
-    Mat4 view = p3dLookAt(pos, target, Vec3(0.0f, 1.0f, 0.0f));
-    p3dCamera.SetCameraMatrix(view);
-    directMatrix = true;
-
-    // Keep position/curPos in sync for any code that reads them
-    position.x = static_cast<s32>(pos.x);
-    position.y = static_cast<s32>(pos.y);
-    position.z = static_cast<s32>(pos.z);
-    curPos = position;
-    prevPosition = position;
-
-#else
-    if (!g_inputManager) return;
     u32 pad = g_inputManager->GetRawButtons(0);
 
-    // PSX: if R3 is down, skip debug camera (guard button)
-    if (pad & PsxPad::R3) return;
+    if (pad & PsxPad::R3) {
+        return;
+    }
 
-    // Angle adjustments (PSX: ±511 per frame)
-    if (pad & PsxPad::Square)   camAngleY -= 511;
-    if (pad & PsxPad::Circle)   camAngleY += 511;
-    if (pad & PsxPad::Triangle) camAngleX += 511;
-    if (pad & PsxPad::Cross)    camAngleX -= 511;
+    // Angle adjustments are driven by D-pad in the original path.
+    if (pad & PsxPad::Left) {
+        camAngleY -= 511;
+    }
+    if (pad & PsxPad::Right) {
+        camAngleY += 511;
+    }
+    if (pad & PsxPad::Up) {
+        camAngleX += 511;
+    }
+    if (pad & PsxPad::Down) {
+        camAngleX -= 511;
+    }
 
-    // Build local movement delta (PSX: sp+16, sp+20, sp+24)
-    s32 ddx = 0, ddy = 0, ddz = 0;
+    s32 ddx = 0;
+    s32 ddy = 0;
+    s32 ddz = 0;
 
-    if (pad & PsxPad::Left)   ddx -= 50;
-    if (pad & PsxPad::Right)  ddx += 50;
-    if (pad & PsxPad::Up)     ddy += 50;
-    if (pad & PsxPad::Down)   ddy -= 50;
-    if (pad & PsxPad::Start)  ddz -= 50;
-    if (pad & PsxPad::L3)     ddz += 50;
+    if (pad & PsxPad::Square) {
+        ddx -= 50;
+    }
+    if (pad & PsxPad::Circle) {
+        ddx += 50;
+    }
+    if (pad & PsxPad::Triangle) {
+        ddy += 50;
+    }
+    if (pad & PsxPad::R1) {
+        ddy -= 50;
+        ddz -= 50;
+    }
+    if (pad & PsxPad::R2) {
+        ddz += 50;
+    }
 
-    // If no movement, skip rotation + translation
-    if (ddx == 0 && ddy == 0 && ddz == 0) return;
+    if (ddx == 0 && ddy == 0 && ddz == 0) {
+        return;
+    }
 
-    // Rotate delta by camera angles (PSX: p3dBuildRotMatrixZYX + p3dVecTimesRotMatrix)
     Mat4 rot;
-    p3dBuildRotMatrixZYX(camAngleZ, camAngleY, camAngleX, rot);
-    Vec3 delta = p3dVecTimesRotMatrix(Vec3((f32)ddx, (f32)ddy, (f32)ddz), rot);
+    p3dBuildRotMatrixZYX(camAngleX, camAngleY, camAngleZ, rot);
+    Vec3 delta = p3dVecTimesMatrix(Vec3((f32)ddx, (f32)ddy, (f32)ddz), rot);
 
     curPos.x += static_cast<s32>(delta.x);
     curPos.y += static_cast<s32>(delta.y);
     curPos.z += static_cast<s32>(delta.z);
-#endif // IMPROVED_DEBUG_CAM
 }
 
 
@@ -626,50 +555,197 @@ void Camera::DebugCam() {
 void Camera::FollowPath() {
     MARKFUNCTION(0x80048AC0);
 
-    // PC: simple player-follow camera until full spline path system is wired.
-    // Places camera behind and above the player, looking at player center.
-    // Uses direct smooth-follow (not EvalCubic) to avoid drift from the
-    // Hermite interpolator accumulating stale accel state.
-    if (!Player::s_player) return;
+    Thing* target = targetThing;
+    if (!target) {
+        return;
+    }
 
-    const LVector& ppos = Player::s_player->pos;
-    s32 pOrientY = Player::s_player->orientation.y;
+    LVector targetWorldPos = {};
+    target->GetViewSpot(nullptr, &targetWorldPos);
 
-    // Camera offset: behind player in facing direction, raised up
-    f32 rad = (f32)pOrientY * P3D_ANGLE_TO_RAD;
-    constexpr f32 behindDist = 3000.0f;
-    constexpr f32 heightOfs  = 2000.0f;
+    // Find two closest camera rail nodes to target position
+    if (!cameraAnchor) {
+        static bool loggedNoAnchor = false;
+        if (!loggedNoAnchor) {
+            LOG("[Camera] FollowPath: cameraAnchor is null");
+            loggedNoAnchor = true;
+        }
+        return;
+    }
 
-    // Desired camera position (behind player)
-    s32 goalX = ppos.x - (s32)(sin(rad) * behindDist);
-    s32 goalY = ppos.y + (s32)heightOfs;
-    s32 goalZ = ppos.z - (s32)(cos(rad) * behindDist);
+    DBCameraPathNode* nodeA = nullptr;
+    DBCameraPathNode* nodeB = nullptr;
+    s32 dist = cameraAnchor->FindClosestNodes(targetWorldPos, &nodeA, &nodeB);
+    (void)dist;
 
-    // Smooth follow via exponential lerp (per 30 fps tick, ~15% per frame)
-    constexpr f32 followSpeed = 0.15f;
+    if (!nodeA) {
+        static bool loggedNoNode = false;
+        if (!loggedNoNode) {
+            LOG("[Camera] FollowPath: no closest nodes for target=(%d,%d,%d)",
+                targetWorldPos.x, targetWorldPos.y, targetWorldPos.z);
+            loggedNoNode = true;
+        }
+        return;
+    }
+    if (!nodeB) {
+        nodeB = nodeA;
+    }
 
-    position.x += (s32)((goalX - position.x) * followSpeed);
-    position.y += (s32)((goalY - position.y) * followSpeed);
-    position.z += (s32)((goalZ - position.z) * followSpeed);
-    curPos = position;
-    prevPosition = position;
+    // Read node positions
+    // sourcePos (+12) = camera eye position on rail
+    // targetPos (+24) = look-at target position on rail
+    LVector nodeA_src = nodeA->sourcePos;
+    LVector nodeA_tgt = nodeA->targetPos;
+    LVector nodeB_src = nodeB->sourcePos;
+    LVector nodeB_tgt = nodeB->targetPos;
 
-    // Look-at target: smoothed toward player center
-    LVector goalTarget = {ppos.x, ppos.y + 400, ppos.z};
-    targetPos.x += (s32)((goalTarget.x - targetPos.x) * followSpeed);
-    targetPos.y += (s32)((goalTarget.y - targetPos.y) * followSpeed);
-    targetPos.z += (s32)((goalTarget.z - targetPos.z) * followSpeed);
-    prevTargetPos = targetPos;
+    // Compute parametric t: projection of targetWorldPos onto segment nodeA_tgt -> nodeB_tgt
+    // PSX: uses 16.16 fixed-point (0x10000 = 1.0)
+    s32 segX = nodeB_tgt.x - nodeA_tgt.x;
+    s32 segY = nodeB_tgt.y - nodeA_tgt.y;
+    s32 segZ = nodeB_tgt.z - nodeA_tgt.z;
 
-    // Skip EvalCubic in Move() — we handle interpolation here.
-    flags |= 0x01;
+    s32 toAx = targetWorldPos.x - nodeA_tgt.x;
+    s32 toAy = targetWorldPos.y - nodeA_tgt.y;
+    s32 toAz = targetWorldPos.z - nodeA_tgt.z;
 
-    // Build and set view matrix directly
-    Vec3 eye((f32)position.x, (f32)position.y, (f32)position.z);
-    Vec3 tgt((f32)targetPos.x, (f32)targetPos.y, (f32)targetPos.z);
-    Mat4 view = p3dLookAt(eye, tgt, Vec3(0.0f, 1.0f, 0.0f));
-    p3dCamera.SetCameraMatrix(view);
-    directMatrix = true;
+    s32 toBx = targetWorldPos.x - nodeB_tgt.x;
+    s32 toBy = targetWorldPos.y - nodeB_tgt.y;
+    s32 toBz = targetWorldPos.z - nodeB_tgt.z;
+
+    s32 dotA = segX * toAx + segY * toAy + segZ * toAz;
+    s32 dotB = segX * toBx + segY * toBy + segZ * toBz;
+    s32 denom = dotA - dotB;
+
+    s32 t = 0;
+    if (denom != 0)
+        t = rmDiv16i(dotA, denom);
+    if (t < 0) t = 0;
+    if (t > 0x10000) t = 0x10000;
+
+    s32 oneMinusT = 0x10000 - t;
+
+    // Interpolate node attributes (16.16 lerp)
+    s32 fovInterp     = (s32)(((s64)nodeA->fov * oneMinusT + (s64)nodeB->fov * t) >> 16);
+    s32 angleYInterp  = (s32)(((s64)nodeA->camAngleY * oneMinusT + (s64)nodeB->camAngleY * t) >> 16);
+    s32 angleXInterp  = (s32)(((s64)nodeA->camAngleX * oneMinusT + (s64)nodeB->camAngleX * t) >> 16);
+    s32 angleZInterp  = (s32)(((s64)nodeA->camAngleZ * oneMinusT + (s64)nodeB->camAngleZ * t) >> 16);
+    s32 zoomInterp    = (s32)(((s64)nodeA->zoom * oneMinusT + (s64)nodeB->zoom * t) >> 16);
+    s32 speedInterp   = (s32)(((s64)nodeA->speed * oneMinusT + (s64)nodeB->speed * t) >> 16);
+    s32 flagsInterp   = (s32)(((s64)(u8)nodeA->flags * oneMinusT + (s64)(u8)nodeB->flags * t) >> 16);
+
+    // Interpolate param offset vectors
+    s32 offsetX = (s32)(((s64)nodeA->param0 * oneMinusT + (s64)nodeB->param0 * t) >> 16);
+    s32 offsetY = (s32)(((s64)nodeA->param1 * oneMinusT + (s64)nodeB->param1 * t) >> 16);
+    s32 offsetZ = (s32)(((s64)nodeA->param2 * oneMinusT + (s64)nodeB->param2 * t) >> 16);
+
+    // PSX: desiredFOV = flagsInterp
+    desiredFOV = flagsInterp;
+
+    // Interpolate camera eye position along rail (from targetPos = look-at rail)
+    // prevTargetPos = nodeA_tgt + seg * t (the look-at goal position)
+    prevTargetPos.x = nodeA_tgt.x + (s32)(((s64)segX * t) >> 16);
+    prevTargetPos.y = nodeA_tgt.y + (s32)(((s64)segY * t) >> 16);
+    prevTargetPos.z = nodeA_tgt.z + (s32)(((s64)segZ * t) >> 16);
+
+    // Interpolate look-at target along rail (from sourcePos = camera eye rail)
+    s32 srcSegX = nodeB_src.x - nodeA_src.x;
+    s32 srcSegY = nodeB_src.y - nodeA_src.y;
+    s32 srcSegZ = nodeB_src.z - nodeA_src.z;
+
+    curPos.x = nodeA_src.x + (s32)(((s64)srcSegX * t) >> 16);
+    curPos.y = nodeA_src.y + (s32)(((s64)srcSegY * t) >> 16);
+    curPos.z = nodeA_src.z + (s32)(((s64)srcSegZ * t) >> 16);
+
+    // Compute offset from look-at rail interpolation to player position.
+    // PSX: both prevTargetPos and curPos clampings use this same base offset.
+    s32 offBaseX = targetWorldPos.x - prevTargetPos.x;
+    s32 offBaseY = targetWorldPos.y - prevTargetPos.y;
+    s32 offBaseZ = targetWorldPos.z - prevTargetPos.z;
+
+    // Clamp offset for prevTargetPos (look-at goal)
+    // PSX: clamp XZ by angleXInterp (+42), Y by angleZInterp (+44)
+    s32 offEyeX = offBaseX;
+    s32 offEyeY = offBaseY;
+    s32 offEyeZ = offBaseZ;
+
+    if (offEyeX > angleXInterp) offEyeX = angleXInterp;
+    else if (offEyeX < -angleXInterp) offEyeX = -angleXInterp;
+
+    if (offEyeZ > angleXInterp) offEyeZ = angleXInterp;
+    else if (offEyeZ < -angleXInterp) offEyeZ = -angleXInterp;
+
+    if (offEyeY > angleZInterp) offEyeY = angleZInterp;
+    else if (offEyeY < -angleZInterp) offEyeY = -angleZInterp;
+
+    prevTargetPos.x += offEyeX;
+    prevTargetPos.y += offEyeY;
+    prevTargetPos.z += offEyeZ;
+
+    // Clamp offset for curPos (camera eye goal) - same base offset, different limits.
+    // PSX: clamp XZ by zoomInterp (+46), Y by speedInterp (+48)
+    s32 offTgtX = offBaseX;
+    s32 offTgtY = offBaseY;
+    s32 offTgtZ = offBaseZ;
+
+    if (offTgtX > zoomInterp) offTgtX = zoomInterp;
+    else if (offTgtX < -zoomInterp) offTgtX = -zoomInterp;
+
+    if (offTgtZ > zoomInterp) offTgtZ = zoomInterp;
+    else if (offTgtZ < -zoomInterp) offTgtZ = -zoomInterp;
+
+    if (offTgtY > speedInterp) offTgtY = speedInterp;
+    else if (offTgtY < -speedInterp) offTgtY = -speedInterp;
+
+    curPos.x += offTgtX;
+    curPos.y += offTgtY;
+    curPos.z += offTgtZ;
+
+    // Normalize segment direction and apply parallel offset
+    s32 normX = segX << 16;
+    s32 normY = segY << 16;
+    s32 normZ = segZ << 16;
+    s32 mag = (s32)rmMag3((f32)normX, (f32)normY, (f32)normZ);
+    if (mag) {
+        normX = rmDiv16i(normX, mag);
+        normY = rmDiv16i(normY, mag);
+        normZ = rmDiv16i(normZ, mag);
+    }
+
+    // Camera eye parallel offset: segDirNorm * fovInterp + param offset
+    s32 parEyeX = (s32)(((s64)normX * fovInterp) >> 16) + offsetX;
+    s32 parEyeY = (s32)(((s64)normY * fovInterp) >> 16) + offsetY;
+    s32 parEyeZ = (s32)(((s64)normZ * fovInterp) >> 16) + offsetZ;
+
+    prevTargetPos.x += parEyeX;
+    prevTargetPos.y += parEyeY;
+    prevTargetPos.z += parEyeZ;
+
+    // Look-at target parallel offset: segDirNorm * angleYInterp
+    curPos.x += (s32)(((s64)normX * angleYInterp) >> 16);
+    curPos.y += (s32)(((s64)normY * angleYInterp) >> 16);
+    curPos.z += (s32)(((s64)normZ * angleYInterp) >> 16);
+
+    // PSX: if lookAtMode is set, snap camera and compute angles
+    if (lookAtMode) {
+        // Copy prevTargetPos to targetPos (look-at target for LookAtTarget)
+        targetPos = prevTargetPos;
+        LookAtTarget(&targetPos);
+
+        // Copy curPos to position (camera eye)
+        position = curPos;
+        prevPosition = curPos;
+
+        SetCurFOV(desiredFOV);
+
+        // Zero all interpolation state (snap to position)
+        movementVel = {0, 0, 0};
+        movementAccel = {0, 0, 0};
+        trackingVel = {0, 0, 0};
+        trackingAccel = {0, 0, 0};
+
+        lookAtMode = 0;
+    }
 }
 
 
@@ -678,8 +754,41 @@ void Camera::FollowPath() {
 
 void Camera::RigidCam() {
     MARKFUNCTION(0x8004897C);
-    if (targetThing == nullptr) return;
-    // TODO: implement rigid camera offset when Thing/Character system exists
+    if (targetThing == nullptr) {
+        return;
+    }
+
+    LVector viewPos = {};
+    targetThing->GetViewSpot(&viewPos, &prevTargetPos);
+
+    s32 followAngle = orientAngles.y;
+    s32 deltaToZero = -followAngle;
+    if (followAngle != 0) {
+        if (deltaToZero > 0x8000) {
+            deltaToZero += -65535;
+        } else if (deltaToZero < -32768) {
+            deltaToZero += 0xFFFF;
+        }
+
+        if (deltaToZero < 0) {
+            followAngle = (s16)(followAngle - SPIN_RATE);
+            if (-deltaToZero < SPIN_RATE) {
+                followAngle = 0;
+            }
+        } else {
+            followAngle = (s16)(followAngle + SPIN_RATE);
+            if (deltaToZero < SPIN_RATE) {
+                followAngle = 0;
+            }
+        }
+    }
+
+    s32 sinYaw = rmSin16Local(followAngle);
+    curPos.x = viewPos.x - fixmul16(sinYaw, RESTING_DIST);
+    curPos.y = viewPos.y + HEIGHT_OFFSET;
+
+    s32 sinYaw90 = rmSin16Local(followAngle + 0x4000);
+    curPos.z = viewPos.z - fixmul16(sinYaw90, RESTING_DIST);
 }
 
 
@@ -690,14 +799,23 @@ void Camera::CameraShake() {
     MARKFUNCTION(0x80049DEC);
     shakeFrames--;
 
-    // PSX: random() % shakeStrength per axis, adds to curPos
+    s32 shakeX = 0;
+    s32 shakeY = 0;
+    s32 shakeZ = 0;
+
     if (shakeStrength.x != 0) {
-        curPos.x += (std::rand() % shakeStrength.x) - shakeStrength.x / 2;
+        shakeX = rmRandom0() % shakeStrength.x;
     }
     if (shakeStrength.y != 0) {
-        curPos.y += (std::rand() % shakeStrength.y) - shakeStrength.y / 2;
+        shakeY = rmRandom0() % shakeStrength.y;
     }
     if (shakeStrength.z != 0) {
-        curPos.z += (std::rand() % shakeStrength.z) - shakeStrength.z / 2;
+        shakeZ = rmRandom0() % shakeStrength.z;
     }
+
+    position.x += shakeX;
+    position.y += shakeY;
+    position.z += shakeZ;
+
+    prevPosition = position;
 }

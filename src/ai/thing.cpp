@@ -3,6 +3,8 @@
 #include "ai/thing.h"
 #include "gen/blockmgr.h"
 #include "gen/database.h"
+#include "gen/model.h"
+#include "gen/levelmgr.h"
 #include "p3d/hash.h"
 #include "p3d/p3dmath.h"
 #include "p3d/context.h"
@@ -78,11 +80,19 @@ void Thing::Think() {
 }
 
 // PSX: Draw__5Thing (THING.CPP:487)
-// Sets model position/orientation from Thing fields, then calls model->Display
+// Sets model position/orientation from Thing fields, then calls model->Show
 void Thing::Draw() {
     MARKFUNCTION(0x800616EC);
     if (model) {
-        // TODO: set model transform from pos/orientation and call Display
+        // PSX: copies pos/orientation to model, then calls Show
+        Model* m = static_cast<Model*>(model);
+        m->posX = pos.x;
+        m->posY = pos.y;
+        m->posZ = pos.z;
+        m->rotX = (u16)(orientation.x & 0xFFFF);
+        m->rotY = (u16)(orientation.y & 0xFFFF);
+        m->rotZ = (u16)(orientation.z & 0xFFFF);
+        m->Show(0);
         return;
     }
 
@@ -200,20 +210,68 @@ void Thing::Move() {
     MARKFUNCTION(0x80061D60);
 }
 
-// PSX: CreateModel__5ThingPCc (THING.CPP:585)
-void Thing::CreateModel(const char* /*name*/) {
+// PSX: CreateModel__5ThingPCc (THING.CPP:585, 0x800618E0)
+// PSX: looks up model by hash in LevelManager, creates SModel/GModel/EModel
+// based on type, links drawable to the OriginalSTree/OriginalGeo data.
+void Thing::CreateModel(const char* name) {
     MARKFUNCTION(0x800618E0);
-    // PSX: loads model from CharacterManager / resource system
-    // PC: character model loading not yet implemented
-    // Mark model as created
-    flags |= TF_MODEL_CREATED;
+
+    if (!g_levelManager)
+        return;
+
+    // PSX: if name provided, hash it; else use field76 (nameHash from AnalyzeMesh)
+    s32 modelHash;
+    if (name) {
+        modelHash = (s32)p3dHash(name);
+    } else {
+        modelHash = (s32)(uintptr_t)field76;
+        if (!modelHash)
+            return;
+    }
+
+    // PSX: FindModel__12LevelManagerl(theLevelMgr, hash)
+    OriginalBasic* found = g_levelManager->FindModel(modelHash);
+    if (!found) {
+        LOG("[Thing::CreateModel] Model not found for hash 0x%08X", (u32)modelHash);
+        flags |= TF_MODEL_CREATED;
+        return;
+    }
+
+    // PSX: check type at OriginalBasic+16 (0=Geo, 1=STree, 2=ETree)
+    u16 modelType = found->GetType();
+    SModel* sm = static_cast<SModel*>(static_cast<Model*>(model));
+
+    if (sm) {
+        // Model already exists - just update the drawable
+        if (modelType == 1) {
+            sm->SetOriginalSTree(static_cast<OriginalSTree*>(found));
+        }
+    } else if (modelType == 1) {
+        // Create new SModel for STree type
+        sm = new SModel();
+        sm->SetOriginalSTree(static_cast<OriginalSTree*>(found));
+        model = sm;
+    }
+
+    if (model) {
+        // PSX: copy the loaded model's nameHash to model+20
+        Model* m = static_cast<Model*>(model);
+        m->nameCRC = found->nameCRC;
+        // PSX: set backPtr to this Thing
+        m->backPtr = this;
+    }
+
+    // PSX: flags |= 0x50 (TF_MODEL_CREATED | TF_ACTIVATED)
+    flags |= (TF_MODEL_CREATED | TF_ACTIVATED);
 }
 
 // PSX: DeleteModel__5Thing (THING.CPP:689)
 void Thing::DeleteModel() {
     MARKFUNCTION(0x80061AAC);
-    // PSX: releases model reference
+    // PSX: calls model destructor through vtable: (*(model+8+8))(model, 3)
     if (model) {
+        Model* m = static_cast<Model*>(model);
+        delete m;
         model = nullptr;
     }
     flags &= ~TF_MODEL_CREATED;
