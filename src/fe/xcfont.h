@@ -69,10 +69,11 @@ public:
     // PSX: FindLetter__6xcFontCFUs (XCFONT.CPP:254, 0x80091AC8)
     const xcSpriteLetter* FindLetter(u16 ch) const;
 
-    // PC: Draw text at screen position (PSX pixel coords)
-    void DrawText(const char* text, s32 screenX, s32 screenY, u32 color = 0xFFFFFFFF) const;
+    // PC: Draw text at 512x240 overlay position with xcJustify flags
+    void DrawText(const char* text, s32 screenX, s32 screenY,
+                  u32 color = 0xFFFFFFFF, u8 justify = 0, s32 lineSpacing = 0) const;
 
-    // PC: Measure text width in pixels (320-coord font pixels)
+    // PC: Measure text width in 512-space pixels
     s32 MeasureText(const char* text) const;
 
 private:

@@ -147,61 +147,32 @@ xcCellImage::~xcCellImage() {
     }
 }
 
-// CELL raw data header (32 bytes):
-//   +0:  "CELL" magic (4)
-//   +4:  u32 totalSize (including magic+size)
-//   +8:  s16 hotX
-//   +10: s16 hotY
-//   +12: u16 pixelW (full image width)
-//   +14: u16 pixelH (full image height)
-//   +16: u8  cellW (cell tile width in pixels)
-//   +17: u8  cellH (cell tile height in pixels)
-//   +18: u8  bppCode (1=8bpp, 2=4bpp)
-//   +19: u8  pad
-//   +20: u16 compressedClutSize
-//   +22: u16 clutEntries
-//   +24: u16 cellsPerFrame (alloc hint)
-//   +26: u16 paletteCount
-//   +28: u32 frameCount
-//   +32: [CLUT data] [frame data...]
-
 bool xcCellImage::Decode(const u8* cellData) {
-    // Check magic
     if (std::memcmp(cellData, "CELL", 4) != 0) {
         LOG("[xcCellImage] Bad CELL magic");
         return false;
     }
 
-    u32 totalSize = *(const u32*)(cellData + 4);
-    u16 pixelW = *(const u16*)(cellData + 12);
-    u16 pixelH = *(const u16*)(cellData + 14);
-    u8  cellW = cellData[16];
-    u8  cellH = cellData[17];
-    u8  bpp = cellData[18];
-    u16 compClut = *(const u16*)(cellData + 20);
-    u16 clutEntries = *(const u16*)(cellData + 22);
-    u16 cellsPerFr = *(const u16*)(cellData + 24);
-    u32 frameCount = *(const u32*)(cellData + 28);
+    auto* hdr = reinterpret_cast<const xcCellHeader*>(cellData);
 
-    bppCode = bpp;
+    bppCode = hdr->bppCode;
 
-    if (frameCount == 0 || clutEntries == 0) {
-        LOG("[xcCellImage] No frames or no CLUT (frames=%u clut=%u)", frameCount, clutEntries);
+    if (hdr->frameCount == 0 || hdr->clutEntries == 0) {
+        LOG("[xcCellImage] No frames or no CLUT (frames=%u clut=%u)", hdr->frameCount, hdr->clutEntries);
         return false;
     }
 
     // Decode CLUT
-    u32 clutDataSize = clutEntries * 2;
-    const u8* clutSrc = cellData + 32;
-    u8 clutBuf[1024]; // max 512 bytes for 256-entry CLUT, plus safety margin
+    u32 clutDataSize = hdr->clutEntries * 2;
+    const u8* clutSrc = cellData + sizeof(xcCellHeader);
+    u8 clutBuf[1024];
     const u8* clutRaw;
     u32 clutAdvance;
 
-    if (compClut < clutDataSize) {
-        // SQU-compressed CLUT
+    if (hdr->compressedClutSize < clutDataSize) {
         SquExpandData(clutBuf, clutSrc);
         clutRaw = clutBuf;
-        clutAdvance = compClut;
+        clutAdvance = hdr->compressedClutSize;
     }
     else {
         clutRaw = clutSrc;
@@ -210,41 +181,41 @@ bool xcCellImage::Decode(const u8* cellData) {
 
     // Build RGBA palette
     u32 palette[256] = {};
-    for (u32 i = 0; i < clutEntries && i < 256; i++) {
+    for (u32 i = 0; i < hdr->clutEntries && i < 256; i++) {
         u16 c = *(const u16*)(clutRaw + i * 2);
         palette[i] = psxColorToRGBA(c);
     }
 
     // Compute per-cell dimensions
     s32 vramW;
-    if (bpp == 2) { // 4bpp
-        vramW = cellW >> 2;
+    if (hdr->bppCode == 2) { // 4bpp
+        vramW = hdr->cellW >> 2;
     }
-    else if (bpp == 1) { // 8bpp
-        vramW = cellW >> 1;
+    else if (hdr->bppCode == 1) { // 8bpp
+        vramW = hdr->cellW >> 1;
     }
     else {
-        vramW = cellW;
+        vramW = hdr->cellW;
     }
 
-    s32 frameByteSz = vramW * cellH * 2;
-    s32 frameDecompSz = frameByteSz * cellsPerFr;
+    s32 frameByteSz = vramW * hdr->cellH * 2;
+    s32 frameDecompSz = frameByteSz * hdr->cellsPerFrame;
 
     // Allocate output image
-    width = cellsPerFr * cellW;
-    height = frameCount * cellH;
+    width = hdr->cellsPerFrame * hdr->cellW;
+    height = hdr->frameCount * hdr->cellH;
     rgba = new u32[width * height];
     std::memset(rgba, 0, width * height * sizeof(u32));
 
     LOG("[xcCellImage] Decoding %dx%d, %u frames x %u cells, bpp=%u",
-        width, height, frameCount, cellsPerFr, bpp);
+        width, height, hdr->frameCount, hdr->cellsPerFrame, hdr->bppCode);
 
     // Decompress and decode frames
-    u8 expandBuf[16384]; // max 8192 per frame, with safety margin
+    u8 expandBuf[16384];
     const u8* framePtr = clutSrc + clutAdvance;
 
-    for (u32 fi = 0; fi < frameCount; fi++) {
-        if (framePtr + 4 > cellData + totalSize) break;
+    for (u32 fi = 0; fi < hdr->frameCount; fi++) {
+        if (framePtr + 4 > cellData + hdr->totalSize) break;
 
         u32 compSize = *(const u32*)framePtr;
         const u8* frameSrc = framePtr + 4;
@@ -259,20 +230,20 @@ bool xcCellImage::Decode(const u8* cellData) {
         }
 
         // Place cells into image grid
-        for (u32 ci = 0; ci < cellsPerFr; ci++) {
+        for (u32 ci = 0; ci < hdr->cellsPerFrame; ci++) {
             s32 cellDataOff = ci * frameByteSz;
-            s32 baseX = ci * cellW;
-            s32 baseY = fi * cellH;
+            s32 baseX = ci * hdr->cellW;
+            s32 baseY = fi * hdr->cellH;
 
-            for (s32 cy = 0; cy < cellH; cy++) {
-                for (s32 cx = 0; cx < cellW; cx++) {
+            for (s32 cy = 0; cy < hdr->cellH; cy++) {
+                for (s32 cx = 0; cx < (s32)hdr->cellW; cx++) {
                     u8 idx = 0;
-                    if (bpp == 1) { // 8bpp
+                    if (hdr->bppCode == 1) { // 8bpp
                         s32 byteOff = cellDataOff + cy * vramW * 2 + cx;
                         if (byteOff < frameDecompSz)
                             idx = pixelData[byteOff];
                     }
-                    else if (bpp == 2) { // 4bpp
+                    else if (hdr->bppCode == 2) { // 4bpp
                         s32 byteOff = cellDataOff + cy * vramW * 2 + cx / 2;
                         if (byteOff < frameDecompSz) {
                             u8 b = pixelData[byteOff];
@@ -490,9 +461,8 @@ void xcSection::GotoScreen(xcScreenData* scr) {
     if (currentScreen)
         UnloadOverlays();
 
-    // PSX: LoadOverlays__8xcScreen - sets visibility on screen's overlays
     if (scr) {
-        u32* refs = reinterpret_cast<u32*>(reinterpret_cast<u8*>(scr) + 4);
+        const u32* refs = scr->GetOverlayRefs();
         for (u32 i = 0; i < scr->overlayCount; i++) {
             xcOverlayData* ovl = FindOverlay(refs[i]);
             if (ovl) ovl->visibility = 1;
@@ -537,15 +507,12 @@ void xcSection::Draw() {
         xcOverlayData* ovl = reinterpret_cast<xcOverlayData*>(rawData + offset);
         if (ovl->visibility == 0) continue;
 
-        u8* ovlBase = rawData + offset;
-        u32 primCount = ovl->primCount;
-
-        for (u32 pi = 0; pi < primCount; pi++) {
-            u32 primOffset = *(u32*)(ovlBase + 8 + pi * 8 + 4);
+        const xcOverlayItem* primItems = ovl->GetItems();
+        for (u32 pi = 0; pi < ovl->primCount; pi++) {
+            u32 primOffset = primItems[pi].dataOffset;
             if (primOffset + 4 > rawSize) continue;
 
-            u8* primData = rawData + primOffset;
-            DrawPrimObj(primData);
+            DrawPrimObj(rawData + primOffset);
         }
     }
 }
@@ -556,7 +523,7 @@ void xcSection::DrawPrimObj(u8* primData) {
     if (hdr->subtype == 5) return;
 
     switch (hdr->type) {
-        case 16:
+        case XC_PRIM_POLYF4:
         {
             auto* prim = reinterpret_cast<xcPolyF4Prim*>(primData);
             s16 x0, y0, x1, y1;
@@ -570,7 +537,7 @@ void xcSection::DrawPrimObj(u8* primData) {
             ScreenDraw::DrawColoredRect(nx, ny, nw, nh, prim->r, prim->g, prim->b, 255);
             break;
         }
-        case 17:
+        case XC_PRIM_POLYG4:
         {
             auto* prim = reinterpret_cast<xcPolyG4Prim*>(primData);
             s16 x0, y0, x1, y1;
@@ -586,7 +553,7 @@ void xcSection::DrawPrimObj(u8* primData) {
             ScreenDraw::DrawColoredRect(nx, ny, nw, nh, r, g, b, 255);
             break;
         }
-        case 9:
+        case XC_PRIM_SPRITE:
         {
             auto* prim = reinterpret_cast<xcSpritePrim*>(primData);
             if (prim->numImages == 0) break;
@@ -608,7 +575,7 @@ void xcSection::DrawPrimObj(u8* primData) {
                                  prim->colorR, prim->colorG, prim->colorB, prim->colorA);
             break;
         }
-        case 10:
+        case XC_PRIM_TEXT:
         {
             auto* prim = reinterpret_cast<xcTextPrim*>(primData);
             if (prim->numStrings == 0) break;
@@ -620,15 +587,11 @@ void xcSection::DrawPrimObj(u8* primData) {
             if (sectionMan) font = sectionMan->FindFont(prim->fontHash);
             if (!font) break;
 
-            // Map from 512x240 overlay space to 320x240 font space
-            s32 fontX = prim->mtx.GetX() * PSX_FONT_WIDTH / PSX_SCREEN_WIDTH;
-            s32 fontY = prim->mtx.GetY() * PSX_FONT_HEIGHT / PSX_SCREEN_HEIGHT;
+            s32 posX = prim->mtx.GetX();
+            s32 posY = prim->mtx.GetY();
 
-            // Center text horizontally at the given X position
-            s32 textW = font->MeasureText(str);
-            fontX -= textW / 2;
-
-            font->DrawText(str, fontX, fontY, prim->GetColor());
+            font->DrawText(str, posX, posY, prim->GetColor(),
+                           prim->hdr.flags, (s32)prim->lineSpacing);
             break;
         }
         default:
@@ -639,12 +602,10 @@ void xcSection::DrawPrimObj(u8* primData) {
 // PSX: GetPrimObj__9xcOverlayUl11xcChunkEnum (XCSOS.CPP:109)
 // Finds a prim object by hash and expected type within this overlay.
 u8* xcOverlayData::GetPrimObj(u32 hash, u8 type, u8* rawData) const {
-    const u8* ovlBase = reinterpret_cast<const u8*>(this);
+    const xcOverlayItem* items = GetItems();
     for (u32 i = 0; i < primCount; i++) {
-        u32 itemHash = *(u32*)(ovlBase + 8 + i * 8);
-        u32 itemOffset = *(u32*)(ovlBase + 8 + i * 8 + 4);
-        if (itemHash == hash) {
-            u8* prim = rawData + itemOffset;
+        if (items[i].hash == hash) {
+            u8* prim = rawData + items[i].dataOffset;
             if (prim[0] == type)
                 return prim;
         }
@@ -654,12 +615,12 @@ u8* xcOverlayData::GetPrimObj(u32 hash, u8 type, u8* rawData) const {
 
 // PSX: GetTextObj__9xcOverlayUl (XCSOS.CPP:148, 0x8005E9D0)
 u8* xcOverlayData::GetTextObj(u32 hash, u8* rawData) const {
-    return GetPrimObj(hash, 10, rawData); // type 10 = xcTextObj
+    return GetPrimObj(hash, XC_PRIM_TEXT, rawData);
 }
 
 // PSX: GetSprite__9xcOverlayUl (XCSOS.CPP:136, 0x8005E9B0)
 u8* xcOverlayData::GetSprite(u32 hash, u8* rawData) const {
-    return GetPrimObj(hash, 9, rawData); // type 9 = xcSprite
+    return GetPrimObj(hash, XC_PRIM_SPRITE, rawData);
 }
 
 // Find raw overlay data by hash
@@ -700,7 +661,7 @@ void xcSection::ShowScreen(u32 hash) {
     xcScreenData* scr = FindScreen(hash);
     if (!scr) return;
 
-    u32* refs = reinterpret_cast<u32*>(reinterpret_cast<u8*>(scr) + 4);
+    const u32* refs = scr->GetOverlayRefs();
     for (u32 i = 0; i < scr->overlayCount; i++) {
         xcOverlayData* ovl = FindOverlay(refs[i]);
         if (ovl) ovl->visibility = 1;
@@ -712,7 +673,7 @@ void xcSection::HideScreen(u32 hash) {
     xcScreenData* scr = FindScreen(hash);
     if (!scr) return;
 
-    u32* refs = reinterpret_cast<u32*>(reinterpret_cast<u8*>(scr) + 4);
+    const u32* refs = scr->GetOverlayRefs();
     for (u32 i = 0; i < scr->overlayCount; i++) {
         xcOverlayData* ovl = FindOverlay(refs[i]);
         if (ovl) ovl->visibility = 0;

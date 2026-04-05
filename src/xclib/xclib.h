@@ -80,13 +80,54 @@ struct xcCellImage {
     tTexture* GetTexture();
 };
 
+// CELL file header (32 bytes on disk)
+// PSX: xcCellImage constructor reads this at the start of each CELL block
+struct xcCellHeader {
+    u8  magic[4];           // +0:  "CELL"
+    u32 totalSize;          // +4:  total block size including header
+    s16 hotX;               // +8:  hotspot X
+    s16 hotY;               // +10: hotspot Y
+    u16 pixelW;             // +12: full image width in pixels
+    u16 pixelH;             // +14: full image height in pixels
+    u8  cellW;              // +16: cell tile width
+    u8  cellH;              // +17: cell tile height
+    u8  bppCode;            // +18: 1=8bpp, 2=4bpp
+    u8  pad;                // +19
+    u16 compressedClutSize; // +20: compressed CLUT size (0 = uncompressed)
+    u16 clutEntries;        // +22: number of CLUT palette entries
+    u16 cellsPerFrame;      // +24: cells per frame (tile count)
+    u16 paletteCount;       // +26
+    u32 frameCount;         // +28: number of animation frames
+    // CLUT data follows at +32, then frame data
+};
+
 // xcPrimObj (XCDO.CPP)
+
+// PSX: xcPrimObj type field (byte +0)
+enum xcPrimType : u8 {
+    XC_PRIM_SPRITE = 9,
+    XC_PRIM_TEXT   = 10,
+    XC_PRIM_POLYF4 = 16,
+    XC_PRIM_POLYG4 = 17,
+};
+
+// PSX: justification flags in xcPrimHeader::flags (byte +1)
+// Used by xcFontDC::PushJustTrans and xcImageDC::FindJust
+enum xcJustify : u8 {
+    XC_JUST_LEFT    = 0,
+    XC_JUST_RIGHT   = 0x02,  // (flags & 2) - right-align
+    XC_JUST_CENTER  = 0x03,  // (flags & 3) == 3 - center
+    XC_JUST_BOTTOM  = 0x08,  // (flags & 8) - bottom-align
+    XC_JUST_VCENTER = 0x0C,  // (flags & 0xC) == 0xC - vertical center
+    XC_JUST_HMASK   = 0x03,
+    XC_JUST_VMASK   = 0x0C,
+};
+
 // PSX: xcPrimObj base header (4 bytes), followed by type-specific data.
-// All prim objects begin with this header.
 // PSX: Draw__9xcPrimObj dispatches by type byte[0].
 struct xcPrimHeader {
-    u8 type;        // +0: prim type (9=sprite, 10=text, 16=POLY_F4, 17=POLY_G4)
-    u8 flags;       // +1: flags/layer info
+    u8 type;        // +0: xcPrimType
+    u8 flags;       // +1: xcJustify bits
     u8 subtype;     // +2: OT layer / clipping (5=clip, skip drawing)
     u8 pad;         // +3
 };
@@ -121,6 +162,7 @@ struct xcSpritePrim {
         s32 idx = (paletteIdx < numImages) ? paletteIdx : 0;
         return reinterpret_cast<const u32*>(reinterpret_cast<const u8*>(this) + 48)[idx];
     }
+    u32 GetColor() const { return *(const u32*)(reinterpret_cast<const u8*>(this) + 40); }
 };
 
 // PSX: xcTextObj (XCDO.CPP:241, 0x800AE828) - 60+ bytes
@@ -137,14 +179,13 @@ struct xcTextPrim {
     u8 pad0;                // +46
     u8 pad1;                // +47
     u32 fontHash;           // +48: xcFont hash
-    u32 pad2;               // +52
+    u32 lineSpacing;        // +52: inter-line spacing for multiline text
 
     u32* StringHashes() { return reinterpret_cast<u32*>(reinterpret_cast<u8*>(this) + 56); }
     u32 GetStringHash() const {
         s32 idx = (paletteIdx < numStrings) ? paletteIdx : 0;
         return reinterpret_cast<const u32*>(reinterpret_cast<const u8*>(this) + 56)[idx];
     }
-    // Packed RGBA as u32 (little-endian: R in low byte)
     u32 GetColor() const { return *(const u32*)(reinterpret_cast<const u8*>(this) + 40); }
 };
 
@@ -192,19 +233,23 @@ struct xcPolyG4Prim {
 
 // xcOverlayData (XCSOS.CPP:55)
 
+// Item entry within an xcOverlayData - references a prim object.
+struct xcOverlayItem {
+    u32 hash;
+    u32 dataOffset;  // offset from file base to prim data
+};
+
 // Raw overlay data within .1 file (cast from rawData + offset).
-// PSX: xcOverlay (C:\devsys\psx\xclib\psx\SRC\XCSOS.CPP)
-// Layout:
-//   +0: visibility (u32) - 0=hidden, non-zero=visible
-//   +4: primCount (u32) - number of display objects
-//   +8: items[N] stride 8: { hash(u32), dataOffset(u32) }
+// PSX: xcOverlay (XCSOS.CPP)
 struct xcOverlayData {
     u32 visibility;
     u32 primCount;
-    // items follow at +8: { hash(u32), dataOffset(u32) } * primCount
+    // xcOverlayItem items[primCount] follows at +8
+
+    xcOverlayItem* GetItems() { return reinterpret_cast<xcOverlayItem*>(this + 1); }
+    const xcOverlayItem* GetItems() const { return reinterpret_cast<const xcOverlayItem*>(this + 1); }
 
     // PSX: GetPrimObj__9xcOverlayUl11xcChunkEnum (XCSOS.CPP:109)
-    // Finds a prim object by hash and type within this overlay.
     u8* GetPrimObj(u32 hash, u8 type, u8* rawData) const;
 
     // PSX: GetTextObj__9xcOverlayUl (XCSOS.CPP:148, 0x8005E9D0)
@@ -217,13 +262,13 @@ struct xcOverlayData {
 // xcScreenData (XCSOS.CPP:250)
 
 // Raw screen data within .1 file (cast from rawData + offset).
-// PSX: xcScreen (C:\devsys\psx\xclib\psx\SRC\XCSOS.CPP)
-// Layout:
-//   +0: overlayCount (u32)
-//   +4: overlayRef[N] (u32 each) - overlay hashes
+// PSX: xcScreen (XCSOS.CPP)
 struct xcScreenData {
     u32 overlayCount;
-    // overlay hashes follow at +4
+    // u32 overlayRefs[overlayCount] follows at +4
+
+    u32* GetOverlayRefs() { return reinterpret_cast<u32*>(this + 1); }
+    const u32* GetOverlayRefs() const { return reinterpret_cast<const u32*>(this + 1); }
 };
 
 // xcSection (XCSOS.CPP:295)

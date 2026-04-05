@@ -7,4 +7,8 @@ assets/
 *.lib
 *.user
 *.suo
+*.log
+*.i64
+*.idb
+scripts/
 .vs/

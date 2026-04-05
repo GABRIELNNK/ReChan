@@ -2,6 +2,7 @@
 // PSX TIM format: magic(4) + flags(4) + [CLUT section] + image section
 // Converts 4/8/16/24bpp PSX format to RGBA32 for PC.
 #include "pc/tim.h"
+#include "gen/config.h"
 #include "p3d/texture.h"
 #include "p3d/shader.h"
 #include "p3d/matrix.h"
@@ -188,7 +189,34 @@ static void EnsureShader() {
 static Mat4 BeginOverlay() {
     EnsureShader();
     Mat4 prev = p3d::context->GetProjectionMatrix();
-    p3d::context->SetProjectionMatrix(Ortho(0.0f, 1.0f, 0.0f, 1.0f, -1.0f, 1.0f));
+
+    f32 left = 0.0f, right = 1.0f, bottom = 0.0f, top = 1.0f;
+
+#if CORRECT_UI_ASPECT
+    int winW = p3d::display->GetWidth();
+    int winH = p3d::display->GetHeight();
+    if (winW > 0 && winH > 0) {
+        f32 windowAspect = (f32)winW / (f32)winH;
+        f32 contentAspect = 4.0f / 3.0f;
+        if (windowAspect > contentAspect) {
+            // Pillarbox - window wider than 4:3
+            f32 scale = contentAspect / windowAspect;
+            f32 range = 1.0f / scale;
+            f32 offset = (range - 1.0f) * 0.5f;
+            left = -offset;
+            right = 1.0f + offset;
+        } else if (windowAspect < contentAspect) {
+            // Letterbox - window taller than 4:3
+            f32 scale = windowAspect / contentAspect;
+            f32 range = 1.0f / scale;
+            f32 offset = (range - 1.0f) * 0.5f;
+            bottom = -offset;
+            top = 1.0f + offset;
+        }
+    }
+#endif
+
+    p3d::context->SetProjectionMatrix(Ortho(left, right, bottom, top, -1.0f, 1.0f));
     p3d::context->EnableZBuffer(false);
     p3d::context->SetCullMode(PDDI_CULL_NONE);
     return prev;

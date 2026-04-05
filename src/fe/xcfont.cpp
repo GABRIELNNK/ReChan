@@ -317,9 +317,10 @@ const xcSpriteLetter* xcFont::FindLetter(u16 ch) const {
     return nullptr;
 }
 
-// PC: Draw text at PSX screen coordinates
-// This is the PC equivalent of PSX xcFontDC::Draw + MakePolys + GPU rendering.
-void xcFont::DrawText(const char* text, s32 screenX, s32 screenY, u32 color) const {
+// PC: Draw text at 512x240 overlay coordinates with xcJustify flags
+// PSX: xcFontDC::Draw + PushJustTrans + MakePolys (XCFONTDC.CPP)
+void xcFont::DrawText(const char* text, s32 screenX, s32 screenY,
+                      u32 color, u8 justify, s32 lineSpacing) const {
     if (!text || !sprites || numTextures == 0) return;
 
     u8 cr = (u8)(color & 0xFF);
@@ -327,13 +328,42 @@ void xcFont::DrawText(const char* text, s32 screenX, s32 screenY, u32 color) con
     u8 cb = (u8)((color >> 16) & 0xFF);
     u8 ca = (u8)((color >> 24) & 0xFF);
 
+    // Vertical justification
+    if (justify & XC_JUST_BOTTOM) {
+        s32 numLines = 1;
+        for (const char* p = text; *p; p++) {
+            if (*p == '\n') numLines++;
+        }
+        s32 totalH = (s32)lineHeight * numLines + lineSpacing * (numLines - 1);
+        if ((justify & XC_JUST_VMASK) == XC_JUST_VCENTER)
+            screenY -= totalH / 2;
+        else
+            screenY -= totalH;
+    }
+
+    // Horizontal justification per line (PSX PushJustTrans)
     f32 curX = (f32)screenX;
     f32 curY = (f32)screenY;
 
+    if (justify & XC_JUST_RIGHT) {
+        s32 lineW = MeasureText(text);
+        if ((justify & XC_JUST_HMASK) == XC_JUST_CENTER)
+            curX -= (f32)(lineW / 2);
+        else
+            curX -= (f32)lineW;
+    }
+
     for (const char* p = text; *p; p++) {
         if (*p == '\n') {
+            curY += (f32)((s32)lineHeight + lineSpacing);
             curX = (f32)screenX;
-            curY += (f32)lineHeight;
+            if (justify & XC_JUST_RIGHT) {
+                s32 lineW = MeasureText(p + 1);
+                if ((justify & XC_JUST_HMASK) == XC_JUST_CENTER)
+                    curX -= (f32)(lineW / 2);
+                else
+                    curX -= (f32)lineW;
+            }
             continue;
         }
         if (*p == ' ') {
@@ -357,10 +387,11 @@ void xcFont::DrawText(const char* text, s32 screenX, s32 screenY, u32 color) con
         f32 th = (f32)texHeights[tIdx];
         if (tw <= 0 || th <= 0) { curX += (f32)spr->w; continue; }
 
-        f32 nx = FONT_NORM_X(curX);
-        f32 ny = 1.0f - FONT_NORM_Y(curY + (f32)spr->h);
-        f32 nw = FONT_NORM_W((f32)spr->w);
-        f32 nh = FONT_NORM_H((f32)spr->h);
+        // Normalize in 512x240 overlay space (same as sprites)
+        f32 nx = PSX_NORM_X(curX);
+        f32 ny = 1.0f - PSX_NORM_Y(curY + (f32)spr->h);
+        f32 nw = PSX_NORM_W((f32)spr->w);
+        f32 nh = PSX_NORM_H((f32)spr->h);
 
         f32 u0 = (f32)spr->u0 / tw;
         f32 v0 = (f32)spr->v0 / th;
