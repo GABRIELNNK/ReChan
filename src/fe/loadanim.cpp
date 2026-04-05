@@ -26,10 +26,10 @@ static s32 s_pulseDir = 0;
 // Y = dispEnv.y + 140, tile 8x6, scale gp+3540 = 2.28 (16.16)
 // Left edge: ((-50.0 * scale) >> 32) + 233 = 119
 // Right edge at 100%: computed from FillMeter target = 339
-static constexpr f32 kBarY = 140.0f;
+static constexpr f32 kBarY = 138.5f;
 static constexpr f32 kBarH = 6.0f;
 static constexpr f32 kBarLeftX = 119.0f;
-static constexpr f32 kBarMaxW = 220.0f; // 339 - 119
+static constexpr f32 kBarMaxW = 229.0f;
 
 // PSX: Update__10VBlankLogoP6_RTASK (LOADANIM.CPP:85, 0x80047778)
 static void DrawLoadingScreen(u8 fill) {
@@ -110,8 +110,10 @@ void FillMeter(u8 target) {
 
         // PSX: target increments by +1 each call until it reaches the requested value
         if (s_logo.targetFill < target) {
+			s_logo.currentFill++;
             s_logo.targetFill++;
         } else {
+			s_logo.currentFill--;
             s_logo.targetFill--;
         }
 
