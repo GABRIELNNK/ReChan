@@ -54,6 +54,8 @@ public:
     void PurgeLevel();
     // PSX: PurgePetal__12LevelManager (0x80058DB4)
     void PurgePetal();
+    // PSX: LoadPetal__12LevelManager (0x80058E68)
+    void LoadPetal();
 
     // PSX: AddOriginal__12LevelMangerP13OriginalBasicl (0x80058F84)
     void AddOriginal(OriginalBasic* original, s32 param);
@@ -72,6 +74,11 @@ public:
     void DeletePermMemID(s32 id);
 
 private:
+    // PSX helpers used by PurgeLevel/PurgePetal.
+    // C++ signatures preserved as internal helpers.
+    void DeleteOriginalModelsByID(s32 id);
+    void DeleteInventoryByID(s32 id);
+
     ccMinList modelLists[4];    // +28: entity lists by type
     ccMinList streeList;        // +76: spatial tree nodes
     ccMinList etreeList;        // +88: export tree nodes

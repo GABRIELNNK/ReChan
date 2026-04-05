@@ -629,10 +629,6 @@ void xcSection::DrawPrimObj(u8* primData) {
             fontX -= textW / 2;
 
             font->DrawText(str, fontX, fontY, prim->GetColor());
-            static int textDbg = 0;
-            if (textDbg++ < 10)
-                LOG("[DrawText] str='%s' colorR=%d G=%d B=%d A=%d raw=0x%08X",
-                    str, prim->colorR, prim->colorG, prim->colorB, prim->colorA, prim->GetColor());
             break;
         }
         default:

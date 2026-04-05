@@ -69,18 +69,22 @@ void CFrontEndSound::ProcessSoundEvent(s32 event) {
                 PlayTransient(253, 8, 0);
                 return;
             case 7: // event 26: BeginPersistent(0, &persistent1)
-                // PSX: BeginPersistent__6CSoundUcPP23CGenericPersistentSound
-                // PC: persistent sound stubs (not implemented yet)
+                BeginPersistent(0, &persistent1);
                 return;
             case 8: // event 27: EndPersistent(&persistent1)
+                EndPersistent(&persistent1);
                 return;
             case 9: // event 28: BeginPersistent(1, &persistent2)
+                BeginPersistent(1, &persistent2);
                 return;
             case 10: // event 29: EndPersistent(&persistent2)
+                EndPersistent(&persistent2);
                 return;
             case 11: // event 30: BeginPersistent(2, &persistent3)
+                BeginPersistent(2, &persistent3);
                 return;
             case 12: // event 31: EndPersistent(&persistent3)
+                EndPersistent(&persistent3);
                 return;
         }
     }

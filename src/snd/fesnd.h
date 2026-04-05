@@ -6,6 +6,8 @@
 
 #include "snd/basesnd.h"
 
+class CGenericPersistentSound;
+
 // PSX: FrontEndSoundEvent enum (from FESND.CPP usage)
 // These are the event IDs passed to ProcessSoundEvent.
 enum FrontEndSoundEvent : s32 {
@@ -48,9 +50,9 @@ enum FrontEndSoundEvent : s32 {
 //   +28: fadeState (u32, init=0)
 class CFrontEndSound : public CSound {
 public:
-    void* persistent1;  // +16
-    void* persistent2;  // +20
-    void* persistent3;  // +24
+    CGenericPersistentSound* persistent1;  // +16
+    CGenericPersistentSound* persistent2;  // +20
+    CGenericPersistentSound* persistent3;  // +24
     u32 fadeState;       // +28: 0 or 1 (set by HandleCursorEvent)
 
     // PSX: __14CFrontEndSound (FESND.CPP:121, 0x800535FC)

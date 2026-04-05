@@ -3,6 +3,8 @@
 #include "gen/database.h"
 #include "gen/director.h"
 #include "gen/geometry.h"
+#include "gen/levelmgr.h"
+#include "snd/rsevent.h"
 #include "p3d/context.h"
 #include "p3d/stream.h"
 #include "pddi/pddi.h"
@@ -692,6 +694,35 @@ void World::Unload() {
         p3d::context->DestroyVRAMTexture(vramHandle);
         vramHandle = 0;
     }
+}
+
+// PSX: UnloadPetal__5World (WORLD.CPP:1176, 0x80045F34)
+void World::UnloadPetal() {
+    MARKFUNCTION(0x80045F34);
+
+    if (g_director) {
+        g_director->PurgeAnims();
+    }
+
+    if (g_levelManager) {
+        g_levelManager->PurgePetal();
+    }
+
+    rsEvent(RS_UNLOAD_LEVEL, 0, 0, 0);
+}
+
+// PSX: LoadPetal__5WorldUl (WORLD.CPP:1222, 0x8004604C)
+void World::LoadPetal(u32 petalIndex) {
+    MARKFUNCTION(0x8004604C);
+
+    targetPetalIndex = petalIndex;
+    currentPetalIndex = petalIndex;
+
+    if (g_levelManager) {
+        g_levelManager->LoadPetal();
+    }
+
+    rsEvent(RS_LEVEL_BEGIN, 0, 0, 0);
 }
 
 // PSX: ResetLevel__5World (WORLD.CPP:1918, 0x80046DE0)

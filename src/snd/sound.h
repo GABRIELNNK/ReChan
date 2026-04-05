@@ -7,9 +7,11 @@
 #include "gen/manager.h"
 #include "pc/audio.h"
 
-// Max WAX banks (RS0000..RS0015 + extras)
-static constexpr u32 MAX_WAX_BANKS = 24;
-static constexpr u32 MAX_SAMPLES_PER_BANK = 128;
+// WAX banks: RS0000..RS0015 = 22 banks total (hex names)
+// PSX architecture: all banks share SPU base 0x1010, 71 descriptors each.
+// Only ONE bank is active at a time, selected by sound location.
+static constexpr u32 MAX_WAX_BANKS = 22;
+static constexpr u32 MAX_SAMPLES_PER_BANK = 71;
 
 // Sound (44 bytes on PSX) - audio manager
 // PSX layout:
@@ -25,13 +27,17 @@ public:
     s16 flag2 = -1;     // +36: init 0xFFFF
     u32 activeFlag = 1; // +40: 1 = active
 
-    // PC: per-bank sample handles
+    // PC: per-bank sample handles (22 banks x 71 slots)
     struct BankInfo {
         AudioSample samples[MAX_SAMPLES_PER_BANK] = {};
         u32 numSamples = 0;
     };
     BankInfo banks[MAX_WAX_BANKS] = {};
     u32 numWaxBanks = 0;
+
+    // PSX: only one bank active at a time. Index into banks[].
+    // Set by RS_SET_LOCATION event. Location 0-20 -> bank 0-20, 21+ -> bank 21.
+    s32 activeSfxBank = -1;
 
     // PC: music sample (decoded FAG loaded as one big sample)
     AudioSample musicSample = AUDIO_SAMPLE_INVALID;
@@ -59,6 +65,7 @@ public:
     // PC: play a specific sample from a WAX bank
     AudioVoice PlayWaxSample(u32 bankIndex, u32 sampleIndex, f32 volume = 1.0f, f32 pan = 0.0f);
     u32 GetBankSampleCount(u32 bankIndex) const;
+    AudioSample GetBankSample(u32 bankIndex, u32 sampleIndex) const;
 
     // PC: music control
     bool PlayMusicTrack(const char* fagPath, f32 volume = 1.0f);

@@ -1,6 +1,23 @@
 // levelmgr.cpp - LevelManager reversed from PSX LEVELMGR.CPP
 // PSX source: C:\CHAN\GAME\SRC\GEN\LEVELMGR.CPP
 #include "gen/levelmgr.h"
+#include "gen/charmgr.h"
+
+namespace {
+
+// OriginalBasic fields are not fully typed yet.
+// PSX access patterns use +16 (u16 list type) and +19 (s8 store ID).
+static u16 GetOriginalListType(const OriginalBasic* original) {
+    const u8* bytes = reinterpret_cast<const u8*>(original);
+    return *reinterpret_cast<const u16*>(bytes + 16);
+}
+
+static s8 GetOriginalStoreID(const ccMinNode* node) {
+    const u8* bytes = reinterpret_cast<const u8*>(node);
+    return *reinterpret_cast<const s8*>(bytes + 19);
+}
+
+} // namespace
 
 // PSX: gp+0xEE8
 LevelManager* g_levelManager = nullptr;
@@ -38,28 +55,25 @@ void LevelManager::InternalReset() {
 void LevelManager::PurgeLevel() {
     MARKFUNCTION(0x80058CC8);
 
-    // PSX: DeleteListID(p3d_inventory, 1), DeleteListID(p3d_inventory, 2)
-    // PSX: CharacterManager::PurgeLevel()
-    // PSX: DeleteInventoryByID(this, 1), DeleteInventoryByID(this, 2)
-    // PSX: clear modelLists[0]
-    // PSX: EnvironmentManager::Reset()
-    // PSX: DeletePermMemID(this, 1), DeletePermMemID(this, 2)
-    // PSX: AnimationManager::PurgeLevel()
-
-    // Clear all model lists
-    for (s32 i = 0; i < 4; i++) {
-        while (ccMinNode* n = modelLists[i].RemHead()) {
-            delete n;
-        }
+    // PSX: DeleteListID(p3d_inventory, INVMAT, 1/2)
+    // TODO: list-ID based P3D inventory purge is not implemented in the PC inventory.
+    if (g_characterManager) {
+        g_characterManager->PurgeLevel();
     }
 
-    // Clear tree/geo lists
-    while (ccMinNode* n = streeList.RemHead()) { delete n; }
-    while (ccMinNode* n = etreeList.RemHead()) { delete n; }
-    while (ccMinNode* n = geoList.RemHead()) { delete n; }
+    DeleteInventoryByID(1);
+    DeleteInventoryByID(2);
 
+    // PSX only clears modelLists[0] here.
+    while (ccMinNode* n = modelLists[0].RemHead()) {
+        delete n;
+    }
+
+    // PSX: EnvironmentManager::Reset()
     DeletePermMemID(1);
     DeletePermMemID(2);
+
+    // PSX: AnimationManager::PurgeLevel()
 
     LOG("[LevelManager] PurgeLevel");
 }
@@ -67,30 +81,114 @@ void LevelManager::PurgeLevel() {
 // PSX: PurgePetal__12LevelManager (0x80058DB4)
 void LevelManager::PurgePetal() {
     MARKFUNCTION(0x80058DB4);
-    // PSX: lighter cleanup than PurgeLevel - clears petal section only
-    // TODO: implement petal-specific purge when petal loading is wired
+
+    // PSX: DeleteListID(p3d_inventory, INVMAT, 2)
+    // TODO: list-ID based P3D inventory purge is not implemented in the PC inventory.
+    if (g_characterManager) {
+        g_characterManager->PurgeLevel();
+    }
+
+    DeleteInventoryByID(2);
+
+    // PSX: PurgePetal clears modelLists[0].
+    while (ccMinNode* n = modelLists[0].RemHead()) {
+        delete n;
+    }
+
+    // PSX: EnvironmentManager::Reset()
+    // PSX: AnimationManager::PurgePetal()
+    // PSX: Obstacle::ClearPetalAnimList()
+
     LOG("[LevelManager] PurgePetal");
+}
+
+// PSX: LoadPetal__12LevelManager (0x80058E68)
+void LevelManager::LoadPetal() {
+    MARKFUNCTION(0x80058E68);
+}
+
+// PSX: DeleteOriginalModelsByID__12LevelManagerl (0x80058E70)
+void LevelManager::DeleteOriginalModelsByID(s32 id) {
+    MARKFUNCTION(0x80058E70);
+
+    const s8 matchID = static_cast<s8>(id);
+    for (s32 i = 0; i < 4; i++) {
+        ccMinNode* n = modelLists[i].head;
+        while (n) {
+            ccMinNode* next = n->next;
+            if (GetOriginalStoreID(n) == matchID) {
+                modelLists[i].RemNode(n);
+                delete n;
+            }
+            n = next;
+        }
+    }
+}
+
+// PSX: DeleteInventoryByID__12LevelManagerl (0x80058F30)
+void LevelManager::DeleteInventoryByID(s32 id) {
+    MARKFUNCTION(0x80058F30);
+
+    // PSX: DeleteAllListsID(p3d_inventory, id)
+    // TODO: list-ID based P3D inventory purge is not implemented in the PC inventory.
+    DeleteOriginalModelsByID(id);
+    DeletePermMemID(id);
 }
 
 // PSX: AddOriginal__12LevelManagerP13OriginalBasicl (0x80058F84)
 void LevelManager::AddOriginal(OriginalBasic* original, s32 /*param*/) {
     MARKFUNCTION(0x80058F84);
-    // PSX routes to different modelLists based on OriginalBasic::field_16
-    // For now add to default list
-    modelLists[0].AddNode(modelLists[0].tail, (ccMinNode*)original);
+
+    if (!original) {
+        return;
+    }
+
+    ccMinList* list = nullptr;
+    switch (GetOriginalListType(original)) {
+    case 0:
+        list = &modelLists[2];
+        break;
+    case 1:
+        list = &streeList;
+        break;
+    case 2:
+        list = &modelLists[3];
+        break;
+    default:
+        return;
+    }
+
+    list->AddNode(list->tail, reinterpret_cast<ccMinNode*>(original));
 }
 
 // PSX: DeleteOriginal__12LevelManagerP13OriginalBasic (0x80058FF0)
 void LevelManager::DeleteOriginal(OriginalBasic* original) {
     MARKFUNCTION(0x80058FF0);
-    // Try to find and remove from all lists
-    for (s32 i = 0; i < 4; i++) {
-        for (ccMinNode* n = modelLists[i].head; n; n = n->next) {
-            if (n == (ccMinNode*)original) {
-                modelLists[i].RemNode(n);
-                delete n;
-                return;
-            }
+
+    if (!original) {
+        return;
+    }
+
+    ccMinList* list = nullptr;
+    switch (GetOriginalListType(original)) {
+    case 0:
+        list = &modelLists[2];
+        break;
+    case 1:
+        list = &streeList;
+        break;
+    case 2:
+        list = &modelLists[3];
+        break;
+    default:
+        return;
+    }
+
+    for (ccMinNode* n = list->head; n; n = n->next) {
+        if (n == reinterpret_cast<ccMinNode*>(original)) {
+            list->RemNode(n);
+            delete n;
+            return;
         }
     }
 }

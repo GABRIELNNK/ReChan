@@ -7,7 +7,154 @@
 #include "gen/manager.h"
 #include "gen/handler.h"
 
+class CDirectorSound;
 class Thing;
+
+enum class DirectorOpcode : s32 {
+    End = 0,
+    ResetTimeout = 1,
+    EndScript = 2,
+    Call = 3,
+    Return = 4,
+    Timer = 6,
+    Loop = 7,
+    EnablePlayerInput = 8,
+    DisablePlayerInput = 9,
+    DetermineLevelIntro = 0x0A,
+    FaceThing = 0x0C,
+    SetHumanoidAction = 0x0E,
+    DynamicAnimLoad = 0x0F,
+    DynamicAnimWaitLoaded = 0x10,
+    WaitAnimationDone = 0x11,
+    DynamicAnimWaitCamera = 0x12,
+    WaitForNisControl = 0x13,
+    RestorePlayerControl = 0x14,
+    PlayThingDynamicAnim = 0x15,
+    DynamicAnimUnload = 0x16,
+    SetupFaceTextureAnim = 0x17,
+    CleanupFaceTextureAnim = 0x18,
+    QueueDetermineNextState = 0x19,
+    SetGameState = 0x1A,
+    SetCheckpoint = 0x1B,
+    SetCheckpointByUid = 0x1C,
+    SetCheckpointData = 0x1D,
+    TriggerCheckpoint = 0x1E,
+    ClearCheckpointValid = 0x1F,
+    SpawnEffectFromMatrix = 0x20,
+    SpawnEffectFromAttack = 0x21,
+    SpawnEffectAtPosA = 0x22,
+    SpawnEffectAtPosB = 0x23,
+    SpawnEffectByUidAtPos = 0x24,
+    SpawnFwEffectAtPos = 0x25,
+    DestroyDestructible = 0x26,
+    RemoveNisEffect = 0x27,
+    SetPlayerFlag = 0x28,
+    ClearGlobalEffectRef = 0x29,
+    DropPickup = 0x2A,
+    CameraFunc = 0x2B,
+    DoorFunc = 0x38,
+    FacePointAndNisControl = 0x40,
+    LadderFunc = 0x41,
+    ModelFunc = 0x47,
+    HudFunc = 0x49,
+    SetThingFlag08 = 0x4E,
+    SetThingFlag28 = 0x4F,
+    ClearThingFlagsAndKill = 0x50,
+    KillThingType52 = 0x51,
+    KillThingType88 = 0x52,
+    KillThingsIfCombat = 0x53,
+    HumanoidFunc = 0x54,
+    ResetCameraManager = 0x5E,
+    SetDesiredWideScreen = 0x62,
+    ResetWideScreenDefaults = 0x69,
+    SetSoundScript = 0x6A,
+    EdisonFunc = 0x6B,
+    SoundCdYield = 0x71,
+    SoundCdAccess = 0x72,
+    LoadDialogA = 0x73,
+    LoadDialogB = 0x74,
+    WaitDialogPlayable = 0x75,
+    PlayDialogNear = 0x76,
+    PlayDialogFar = 0x77,
+    PlayPriorityDialog = 0x78,
+    SetDialogTimeout = 0x79,
+    SetNisPoint = 0x7A,
+    SetGotoCheckpoint = 0x7B,
+    SetFallbackCheckpoint = 0x7C,
+    SetBlockCheckpoint = 0x7D,
+    DetermineVictory = 0x7E,
+    DetermineDeath = 0x7F,
+};
+
+enum class DirectorWideScreenCmd : s32 {
+    End = 5,
+    SetAlphaTarget = 'c',
+    SetAlphaCurrent = 'd',
+    SetAlphaStep = 'e',
+    SetBarTarget = 'f',
+    SetBarStep = 'g',
+    SetMode = 'h',
+};
+
+enum class DirectorCameraCmd : s32 {
+    EnableNisCamera = ',',
+    ClearCameraFlag = '-',
+    SetCameraFlag = '.',
+    CopyP3DFov = '/',
+    ResetCameraFov = '0',
+    SetCameraMode = '1',
+    LoadAsyncAnim = '2',
+    DeleteAsyncAnim = '3',
+    PlayAsyncAnim = '4',
+    ShakeCamera = '5',
+    LookAtNisPoint = '6',
+    SetCameraAndLookAt = '7',
+};
+
+enum class DirectorHudCmd : s32 {
+    HideHud = 'J',
+    ShowHud = 'K',
+    DisplayTally = 'L',
+    ShowBossHealth = 'M',
+};
+
+enum class DirectorHumanoidCmd : s32 {
+    End = 5,
+    EnterNis = 'U',
+    EnterNisMove = 'V',
+    ExitNis = 'W',
+    FaceAngleDegrees = 'X',
+    StandFacingZero = 'Y',
+    SetPosition = 'Z',
+    PlayDynamicAnim = '[',
+    SetStandState = '\\',
+    SetPositionByCurrent = ']',
+};
+
+enum class DirectorLadderCmd : s32 {
+    End = 5,
+    FaceLadderPoint = 'B',
+    TeleportPlayer = 'C',
+    CameraLookAtHatch = 'D',
+    CloseHatch = 'E',
+    ClearNis = 'F',
+};
+
+enum class DirectorDoorCmd : s32 {
+    End = 5,
+    SetDoor = '9',
+    OpenDoor = ':',
+    SetDoorState = ';',
+    FaceDoorPoint = '<',
+    FaceDoorAngle = '=',
+    AttachToDoor = '>',
+    TeleportThroughDoor = '?',
+};
+
+enum class DirectorEdisonCmd : s32 {
+    PlayTransient = 108,
+    StopMusic = 109,
+};
 
 // Director (212 bytes on PSX) - inherits Manager
 // PSX layout:
@@ -35,6 +182,16 @@ public:
     u32 dirFlags = 0;               // +56
     s32 wideScreenDesired = 0;      // +60
     s32 wideScreenCurrent = 0;      // +64
+
+    // PC 64-bit safe widescreen state, replacing raw byte-offset writes.
+    s32 wsBarCurrent = 0;
+    s32 wsBarTarget = 0;
+    s32 wsBarStep = 0;
+    u16 wsMode = 0;
+    s16 wsModePad = 0;
+    s32 wsAlphaStep = 0;
+    s32 wsAlphaCurrent = 0;
+    s32 wsAlphaTarget = 0;
 
     // Additional fields to fill 212 bytes
     s32 field68 = 0;
@@ -68,11 +225,11 @@ public:
     s32 field180 = 0;
     s32 field184 = 0;
     s32 field188 = 0;
-    s32 field192 = 0;
-    s32 field196 = 0;
-    s32 field200 = 0;
-    s32 field204 = 0;
-    s32 field208 = 0;
+    CDirectorSound* directorSound = nullptr; // +192: m_pDirectorSound
+    uintptr_t field196 = 0;
+    uintptr_t field200 = 0;
+    uintptr_t field204 = 0;
+    uintptr_t field208 = 0;
 
     // PSX: __8Director (DIRECTOR.CPP:2658, 0x800CA1B8)
     Director();

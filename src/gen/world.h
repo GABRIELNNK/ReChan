@@ -45,8 +45,10 @@ public:
 
     bool Load(const std::string& lcfPath);
     bool LoadLevelIndex(u32 levelIndex);
+    void LoadPetal(u32 petalIndex);
     void Render(const LVector* camPos);
     void Unload();
+    void UnloadPetal();
     void ResetLevel();
 
     u32 GetCurrentLevelIndex() const { return currentLevelIndex; }

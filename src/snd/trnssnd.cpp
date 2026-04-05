@@ -1,0 +1,217 @@
+// trnssnd.cpp - CGenericTransientSound reversed from PSX TRNSSND.CPP
+// PSX source: C:\CHAN\GAME\SRC\SND\TRNSSND.CPP
+#include "snd/trnssnd.h"
+#include "snd/sndmath.h"
+#include "snd/rsdworld.h"
+#include <cstdlib>
+
+// PSX: g_transData (0x800DAACC) - extracted from GAME_REL.CPE binary
+// 256 entries, each 2 x u32 (8 bytes), accessed as byte arrays
+u32 g_transData[512] = {
+    2147483174, 157566226, 2147483173, 73680151, 2115, 73680144, 2147483172, 375670037,
+    2147483144, 6553600, 2147483144, 6553600, 2056, 6553600, 2147483144, 6553600,
+    2147483171, 6553650, 2147483173, 73680158, 2147483172, 375670046, 2147483171, 6553650,
+    2147483160, 6553633, 2147483163, 6553633, 2147483164, 6553633, 16777262, 174325775,
+    2147483162, 90439690, 2147483170, 90439710, 2147483169, 90439710, 2147483168, 90439710,
+    2147483162, 174336020, 2147483171, 140773938, 2147483167, 6553630, 14683716, 509873970,
+    551608375, 174333450, 974910, 174333500, 2147483171, 308551206, 2147483171, 90119725,
+    2147483171, 90119725, 2147483171, 124657192, 2147483159, 342108205, 2147483158, 342108205,
+    2147483157, 342108205, 1048623, 342108205, 2147483155, 174336060, 2147483156, 174336060,
+    2147483153, 174336060, 2147483154, 174336060, 2147483136, 174336060, 239992892, 107216956,
+    4152, 174194760, 2147483160, 342104355, 2147483163, 342104345, 2147483164, 342104345,
+    2075, 342104345, 2147483144, 207880200, 249621024, 174332190, 249621039, 174332220,
+    249621039, 174332210, 250539552, 174332195, 250539569, 6560030, 250539569, 174332185,
+    8, 6553600, 8, 6553600, 8, 6553600, 8, 6553600,
+    8, 6553600, 8, 6553600, 239733792, 174332190, 239733807, 174332210,
+    239733807, 174332195, 5153, 174332200, 5184, 174332220, 5187, 174332205,
+    281626, 174332193, 281669, 174332225, 281669, 174332220, 82707488, 174332180,
+    82707513, 174332210, 82707513, 174332200, 167906337, 174332195, 167906359, 174332190,
+    167906359, 174332200, 57370, 174332180, 57370, 174332200, 57370, 174332200,
+    5153, 174332185, 5175, 174332200, 5175, 174332195, 536870946, 174332195,
+    536870959, 174332210, 536870968, 174332200, 14680096, 174332195, 14680111, 174332210,
+    14680111, 174332200, 65569, 174332190, 134283317, 174332210, 65600, 174332200,
+    234881570, 174332200, 234881583, 174332215, 234881583, 174332205, 3105, 174332185,
+    3127, 174332200, 3127, 174332200, 34, 174332190, 56, 174332210,
+    56, 174332205, 536928288, 174332190, 536928305, 174332200, 536928305, 174332195,
+    235012129, 174332190, 235012160, 174332215, 235012163, 174332205, 32, 174332185,
+    57, 174332210, 45, 174332205, 14680096, 174332190, 14680113, 174332210,
+    14680113, 174332200, 14681120, 174332195, 14681114, 174332205, 14681114, 174332200,
+    14680096, 174332193, 14680111, 174332230, 14680120, 174332200, 536870944, 174332190,
+    536870959, 174332210, 536870959, 174332195, 249749536, 174332190, 249749551, 174332210,
+    249753647, 174332200, 49152034, 174332190, 49152047, 174332210, 49152047, 174332205,
+    15597600, 174332190, 15597617, 174332210, 15597617, 174332205, 235798561, 174332190,
+    235798583, 174332210, 235798583, 174332205, 2099720, 6553660, 2147483143, 90439735,
+    2097214, 6553660, 2147483151, 90465290, 2097212, 90439710, 2147483152, 174351400,
+    2147483151, 174351400, 2147483150, 174351400, 2147483141, 174351410, 2147483152, 174351410,
+    2147483151, 174351410, 2147483152, 174351400, 2147483151, 174351400, 2147483150, 174351400,
+    2147483138, 174351410, 2147483139, 174351410, 2147483140, 174351410, 142639169, 6553670,
+    4194373, 6553645, 2097170, 6553650, 33554487, 6553635, 1048622, 6553675,
+    65590, 174325770, 655429, 174336040, 67108922, 6553650, 4142, 6553675,
+    2147483166, 90439720, 2147483165, 90439725, 2147483146, 90439730, 247881758, 4653106,
+    247881757, 4325426, 249622041, 509879065, 250539545, 509879065, 416280089, 509879065,
+    920601, 509879065, 250085913, 509879065, 2097177, 509879065, 25, 509879065,
+    25, 509879065, 568, 7208995, 4194329, 509879065, 5111833, 509879065,
+    568331832, 425989654, 2073, 509879065, 138944537, 509879065, 545259576, 6553630,
+    16777241, 509879065, 2147483161, 509879065, 12594713, 509879065, 12594716, 174325787,
+    14740530, 90439710, 12643868, 90439710, 264242, 174325787, 131634, 174325787,
+    134217778, 174325787, 264242, 174325787, 8249, 174325785, 24642, 174325775,
+    201384002, 174325775, 49209, 174325835, 66, 174325795, 8388672, 6225970,
+    2147483164, 174325800, 2147483161, 509879065, 958532, 174336008, 2114, 174332210,
+    68, 174336008, 234881053, 255197249, 57400, 6553640, 319552, 6553655,
+    2620, 6553675, 2622, 425990465, 2112, 6553670, 11403318, 174328348,
+    6294582, 174328355, 6291510, 6553616, 6291515, 6553614, 50184, 6553600,
+    50238, 6553640, 235667506, 174325800, 247513147, 6553620, 146834490, 174194728,
+    48270394, 174325785, 268435504, 174325785, 268435503, 174325787, 2147483163, 173998130,
+    2147483164, 173998130, 1073741868, 6553650, 1073741867, 6553650, 1073741882, 6553635,
+    1073741881, 6553635, 1073741313, 6553635, 2147483137, 6553650, 1073741313, 6553640,
+    1073741884, 6553640, 1073741883, 6553640, 1073741313, 6553635, 1073741882, 6553635,
+    1073741881, 6553635, 1073741356, 6553610, 1073741880, 6553610, 1073741879, 6553610,
+    1073741355, 6553635, 1073741878, 6553640, 1073741877, 6553640, 1073741355, 6553640,
+    1073741875, 6553630, 1073741874, 6553630, 1073741357, 6553650, 1073741873, 6553635,
+    1073741872, 6553635, 1073741357, 6553635, 1073741871, 6553635, 1073741869, 6553635,
+    1073741357, 6553640, 1073741871, 6553640, 1073741869, 6553640, 2147483142, 6553700,
+    2147483137, 6553650, 2147483137, 6553655, 2147483137, 6553655, 2147483148, 6553645,
+    2147483148, 5898298, 2147483148, 6553645, 2147483148, 6553645, 2147483148, 5898298
+};
+
+// PSX: rmRangedRandom (0x80078404)
+// Simple PRNG returning value in [0, range)
+static u32 g_randomSeed = 0x12345678;
+static u32 rmRangedRandom(u32 range) {
+    if (range == 0)
+    {
+        return 0;
+    }
+    g_randomSeed ^= 0x1D872B41;
+    g_randomSeed ^= (g_randomSeed >> 5);
+    g_randomSeed ^= (g_randomSeed << 27);
+    return g_randomSeed % range;
+}
+
+// PSX: _22CGenericTransientSound (TRNSSND.CPP:18, 0x800AA804)
+CGenericTransientSound::CGenericTransientSound() {
+    MARKFUNCTION(0x800AA804);
+    // PSX: CSound base, then set vtable, leftVol=100, rightVol=100, soundId=-1
+    loadData = 0;
+    soundId = 0xFFFF;
+    leftVol = 100;
+    rightVol = 100;
+}
+
+// PSX: __22CGenericTransientSound (TRNSSND.CPP:27, 0x800AA84C)
+CGenericTransientSound::~CGenericTransientSound() {
+    MARKFUNCTION(0x800AA84C);
+}
+
+// PSX: Initialize__22CGenericTransientSoundPC10tagLVectorUs (TRNSSND.CPP:43, 0x800AA8A0)
+s32 CGenericTransientSound::Initialize(void* pos, u16 f) {
+    MARKFUNCTION(0x800AA8A0);
+    flags = f;
+    posPtr = pos;
+    return 0;
+}
+
+// PSX: InitializeStereo__22CGenericTransientSoundUcUc (TRNSSND.CPP:54, 0x800AA8C0)
+s32 CGenericTransientSound::InitializeStereo(u8 left, u8 right) {
+    MARKFUNCTION(0x800AA8C0);
+    leftVol = left;
+    rightVol = right;
+    posPtr = nullptr;
+    return 0;
+}
+
+// PSX: Trigger__22CGenericTransientSoundUs (TRNSSND.CPP:62, 0x800AA8E8)
+s32 CGenericTransientSound::Trigger(u16 pan) {
+    MARKFUNCTION(0x800AA8E8);
+    if (posPtr) {
+        return TriggerPositional(pan);
+    }
+    return TriggerNotPositional(pan);
+}
+
+// PSX: TriggerDialogWorld__22CGenericTransientSoundUs (TRNSSND.CPP:74, 0x800AA938)
+s32 CGenericTransientSound::TriggerDialogWorld(u16 pan) {
+    MARKFUNCTION(0x800AA938);
+
+    const u8* data = reinterpret_cast<const u8*>(&g_transData[2 * soundId]);
+    u32 vol = data[4];
+
+    // PSX: if (volumeVariation - 1 < 100) apply random reduction
+    if (data[5] >= 1 && data[5] <= 100) {
+        vol = vol * (100 - rmRangedRandom(data[5])) / 100;
+    }
+
+    s32 pitch = data[6];
+    // PSX: if (pitchVariation - 1 < 100) apply random offset
+    if (data[7] >= 1 && data[7] <= 100) {
+        pitch += (s32)rmRangedRandom(data[7]) - (data[7] >> 1);
+    }
+
+    u8 sampleId = data[0];
+    u16 psxVol = PsxVol100(vol);
+    s16 psxPitch = PsxPitch200(pitch);
+
+    return rsdWorld::PlayTransientPositional(sampleId, posPtr, psxVol, psxPitch, pan, 0);
+}
+
+// PSX: TriggerPositional__22CGenericTransientSoundUs (TRNSSND.CPP:104, 0x800AAA68)
+s32 CGenericTransientSound::TriggerPositional(u16 pan) {
+    MARKFUNCTION(0x800AAA68);
+
+    const u8* data = reinterpret_cast<const u8*>(&g_transData[2 * soundId]);
+    u32 vol = data[4];
+
+    if (data[5] >= 1 && data[5] <= 100) {
+        vol = vol * (100 - rmRangedRandom(data[5])) / 100;
+    }
+
+    s32 pitch = data[6];
+    if (data[7] >= 1 && data[7] <= 100) {
+        pitch += (s32)rmRangedRandom(data[7]) - (data[7] >> 1);
+    }
+
+    u8 sampleId = data[0];
+    u16 psxVol = PsxVol100(vol);
+    s16 psxPitch = PsxPitch200(pitch);
+
+    return rsdWorld::PlayTransientPositional(sampleId, posPtr, psxVol, psxPitch, pan, flags);
+}
+
+// PSX: TriggerNotPositional__22CGenericTransientSoundUs (TRNSSND.CPP:134, 0x800AAB9C)
+s32 CGenericTransientSound::TriggerNotPositional(u16 pan) {
+    MARKFUNCTION(0x800AAB9C);
+
+    const u8* data = reinterpret_cast<const u8*>(&g_transData[2 * soundId]);
+    u32 baseVol = data[4];
+
+    // PSX: scale base volume by per-channel volumes
+    u32 volR = (u32)rightVol * baseVol / 100;
+    u32 volL = (u32)leftVol * baseVol / 100;
+
+    // PSX: apply random volume variation to both channels
+    if (data[5] >= 1 && data[5] <= 100) {
+        u32 reduction = rmRangedRandom(data[5]);
+        volR = volR * (100 - reduction) / 100;
+        volL = volL * (100 - reduction) / 100;
+    }
+
+    s32 pitch = data[6];
+    if (data[7] >= 1 && data[7] <= 100) {
+        pitch += (s32)rmRangedRandom(data[7]) - (data[7] >> 1);
+    }
+
+    u8 sampleId = data[0];
+    u16 psxVolL = PsxVol100(volL);
+    u16 psxVolR = PsxVol100(volR);
+    s16 psxPitch = PsxPitch200(pitch);
+
+    return rsdWorld::PlayTransientNonPositional(sampleId, psxVolL, psxVolR, psxPitch, pan);
+}
+
+// PSX: Load__22CGenericTransientSoundPCc (TRNSSND.CPP:169, 0x800AAD4C)
+s32 CGenericTransientSound::Load(const void* data) {
+    MARKFUNCTION(0x800AAD4C);
+    // PSX: *(_DWORD *)(a1 + 16) = *a2; - copies 4 bytes at +16
+    loadData = *reinterpret_cast<const u32*>(data);
+    return 0;
+}

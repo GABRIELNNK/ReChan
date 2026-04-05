@@ -9,10 +9,10 @@
 
 namespace RsdFormat {
 
-// TLV block tags (from rsdLoadData switch table)
-static constexpr u32 TAG_ADPCM_BLOCK = 16;  // contains SPU ADPCM data
-static constexpr u32 TAG_SAMPLE_TABLE = 17; // per-sample SPU address table
-static constexpr u32 TAG_HEADER = 32;       // bank header info
+// TLV block tags (from rsdLoadData switch table, RSDBACH.CPP)
+static constexpr u32 TAG_ADPCM_BLOCK = 16;  // 0x10: SPU ADPCM data block
+static constexpr u32 TAG_SAMPLE_TABLE = 17; // 0x11: per-sample descriptor table
+static constexpr u32 TAG_HEADER = 32;       // 0x20: bank header
 
 // Per-sample descriptor from tag=17 blocks
 struct SampleDesc {
@@ -50,13 +50,12 @@ inline WaxBank LoadWax(const u8* fileData, u32 fileSize) {
             // Header block: data[0]=numSamples, data[1]=???, data[2]=???
             bank.numBankSamples = *(const u32*)(data);
         } else if (tag == TAG_ADPCM_BLOCK && dataSize > 4) {
-            // ADPCM block: data[0] = offset within data to ADPCM start
+            // PSX: data[0..3] = SPU destination address, data[4..] = ADPCM data
+            // rsdLoadData passes (i+3, i[1]-4) to rsdLoad, skipping the 4-byte SPU addr
             bank.adpcmOffset = *(const u32*)(data);
-            if (bank.adpcmOffset < dataSize) {
-                adpcmPtr = data + bank.adpcmOffset;
-                adpcmLen = dataSize - bank.adpcmOffset;
-                bank.adpcmSize = adpcmLen;
-            }
+            adpcmPtr = data + 4;
+            adpcmLen = dataSize - 4;
+            bank.adpcmSize = adpcmLen;
         } else if (tag == TAG_SAMPLE_TABLE && dataSize >= 16) {
             // Sample table: array of {spuAddr, params, flags, spuAddr2}
             u32 numSamples = dataSize / 16;
@@ -67,8 +66,23 @@ inline WaxBank LoadWax(const u8* fileData, u32 fileSize) {
         pos += 8 + dataSize;
     }
 
-    // Decode ADPCM into individual samples (split at END flags)
-    if (adpcmPtr && adpcmLen > 0) {
+    // Decode ADPCM into individual samples using descriptor SPU addresses
+    // Descriptors map sample index -> SPU address within the ADPCM block.
+    // Samples are NOT stored sequentially by index, so END-flag splitting won't work.
+    if (adpcmPtr && adpcmLen > 0 && !bank.sampleDescs.empty()) {
+        u32 spuBase = bank.adpcmOffset;
+        u32 numDescs = (u32)bank.sampleDescs.size();
+        bank.pcmSamples.resize(numDescs);
+
+        for (u32 i = 0; i < numDescs; i++) {
+            u32 spuAddr = bank.sampleDescs[i].spuAddr;
+            if (spuAddr < spuBase) continue;
+            u32 byteOff = spuAddr - spuBase;
+            if (byteOff >= adpcmLen) continue;
+            bank.pcmSamples[i] = SpuAdpcm::Decode(adpcmPtr + byteOff, adpcmLen - byteOff, true);
+        }
+    } else if (adpcmPtr && adpcmLen > 0) {
+        // Fallback: no descriptors, split at END flags
         bank.pcmSamples = SpuAdpcm::DecodeSamples(adpcmPtr, adpcmLen);
     }
 

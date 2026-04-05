@@ -87,9 +87,14 @@ s32 jcsHandleControlEvent(s32 event, s32 param1, s32 param2, s32 param3) {
             g_sound->StopMusic();
             break;
 
-        case RS_SET_LOCATION: // 4 - set sound location (music track index)
+        case RS_SET_LOCATION: // 4 - set sound location (music + SFX bank)
             LOG("[rsEvent] SetSoundLocation(%d)", param1);
             g_currentSoundLocation = param1;
+            // PSX: LocInfo[loc][0] -> GAME.WAP location table -> bank index.
+            // Mapping: location 0-20 -> bank 0-20, location 21+ -> bank 21.
+            if (g_sound) {
+                g_sound->activeSfxBank = (param1 < 21) ? param1 : 21;
+            }
             break;
 
         case RS_LEVEL_BEGIN: // 5 - start music for current location

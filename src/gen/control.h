@@ -10,45 +10,54 @@
 class PlatformInput; // PC platform input (keyboard/mouse via GLFW)
 
 
-// PSX pad button bits (from Sony libpad, active-high after NOT by ReadSonyPads)
+// PSX game-side pad bits after ReadSonyPads byte-swap + NOT processing.
 // These are the bit positions in Control::rawButtons and GetControlVal() output.
 
 namespace PsxPad {
-    static constexpr u32 Select   = 0x0001;
-    static constexpr u32 L3       = 0x0002;
-    static constexpr u32 R3       = 0x0004;
-    static constexpr u32 Start    = 0x0008;
-    static constexpr u32 Up       = 0x0010;
-    static constexpr u32 Right    = 0x0020;
-    static constexpr u32 Down     = 0x0040;
-    static constexpr u32 Left     = 0x0080;
-    static constexpr u32 L2       = 0x0100;
-    static constexpr u32 R2       = 0x0200;
-    static constexpr u32 L1       = 0x0400;
-    static constexpr u32 R1       = 0x0800;
-    static constexpr u32 Triangle = 0x1000;
-    static constexpr u32 Circle   = 0x2000;
-    static constexpr u32 Cross    = 0x4000;
-    static constexpr u32 Square   = 0x8000;
+    static constexpr u32 Select   = 0x0100;
+    static constexpr u32 L3       = 0x0200;
+    static constexpr u32 R3       = 0x0400;
+    static constexpr u32 Start    = 0x0800;
+    static constexpr u32 Up       = 0x1000;
+    static constexpr u32 Right    = 0x2000;
+    static constexpr u32 Down     = 0x4000;
+    static constexpr u32 Left     = 0x8000;
+    static constexpr u32 L2       = 0x0001;
+    static constexpr u32 R2       = 0x0002;
+    static constexpr u32 L1       = 0x0004;
+    static constexpr u32 R1       = 0x0008;
+    static constexpr u32 Triangle = 0x0010;
+    static constexpr u32 Circle   = 0x0020;
+    static constexpr u32 Cross    = 0x0040;
+    static constexpr u32 Square   = 0x0080;
 }
+
+// PSX control mode tables used by gameplay and menu systems.
+const s16* GameControlModeArray();
+const s16* TitleControlModeArray();
+const s16* MenuControlModeArray();
 
 
 // Button = individual button state tracker (PSX: 40 bytes per instance)
 // 16 per Control, at Control+52, stride 40
 
-enum ButtonMode : s32 {
-    BUTTON_MODE_RAW     = 0, // GetState = true while held
-    BUTTON_MODE_ONESHOT = 1, // GetState = true on first press frame only
+enum ButtonMode : s16 {
+    BUTTON_MODE_RAW = 0,
+    BUTTON_MODE_ANALOG = 1,
+    BUTTON_MODE_DEFAULT = 2,
+    BUTTON_MODE_ONESHOT = 3,
+    BUTTON_MODE_REPEAT = 5,
 };
 
 struct Button {
     s32 rawInput  = 0;    // current raw input (0 or 1)
-    s32 prevInput = 0;    // previous frame raw input (for oneshot)
-    ButtonMode mode = BUTTON_MODE_RAW;
+    s32 prevInput = 0;    // previous frame raw input
+    s32 state = 0;        // current reported state
+    ButtonMode mode = BUTTON_MODE_DEFAULT;
 
     void Input(s32 bit);                // 0x8002D8C4 = process raw bit
     s32  GetState() const;              // 0x8002D898 = return state by mode
-    void SetMode(ButtonMode m);         // 0x8002D9E8 = set button mode
+    void SetMode(s16 m);                // 0x8002D9E8 = set button mode
 };
 
 
@@ -78,12 +87,16 @@ struct Control {
     // +708: logical->physical button map (16 entries)
     u8 controlMap[16] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15};
 
+    // +48: pointer to 16-entry button mode table (s16 each)
+    const s16* modeMap = nullptr;
+
     // +724: connected pad detected flag
     s32 hasConnectedPad = 0;
 
     void Input(u32 buttonBits);         // 0x8002DCF0 = dispatch bits to Buttons
     u32  GetMask() const;               // 0x8002DDEC = combined bitmask from Buttons
     void SetControlMapArray(const u8* map);
+    void ApplyCurrentModeMap();         // 0x8002DE88
 };
 
 
@@ -112,6 +125,10 @@ public:
 
     // --- Configuration ---
     void SetControlMapArray(s16 padIndex, const u8* map);   // 0x8002E2F0
+    void SetControlModeArray(s16 padIndex, const s16* modeMap); // 0x8002E33C
+    const u8* PlayerMapArray() const;                        // 0x8002E73C
+    const u8* DefaultMapArray() const;                       // 0x8002E460
+    void SetPlayerConfig(u8 config);                         // 0x8002E3F0
     void InternalReset() override;                        // 0x8002E550
 
 #if PAD_KEYBOARD_EMULATION
@@ -124,6 +141,10 @@ public:
 
 private:
     s32 controlValFlags[2] = {};   // per-frame query flags (PSX: at +1484)
+    u8 playerConfig = 0;
+    u8 reverseMap[16] = {};
+
+    void UpdateReverseMap();
 };
 
 // PSX: 0x800DD69C, defined in control.cpp

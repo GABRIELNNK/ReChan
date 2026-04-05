@@ -214,7 +214,12 @@ void MenuMgr::Activate() {
     // PSX: ProcessSoundEvent(0, 10)
     // PSX: if soundFlag, play ambient music (rsEvent(30, ...))
     state = 1;
-    // PSX: SetControlModeArray/SetControlMapArray for 2 players
+    if (g_inputManager) {
+        for (s16 pad = 0; pad < 2; ++pad) {
+            g_inputManager->SetControlModeArray(pad, MenuControlModeArray());
+            g_inputManager->SetControlMapArray(pad, g_inputManager->DefaultMapArray());
+        }
+    }
     // PSX: save MEMORY[0x1C] into savedControl
     if (topMenu) {
         topMenu->DynSetup();
@@ -233,7 +238,12 @@ void MenuMgr::Deactivate() {
     active = 0;
     // PSX: ProcessSoundEvent(0, 11) — menu close sound
     // PSX: rsEvent(11, 0, 0, 0)
-    // PSX: restore control modes for 2 players (game mode)
+    if (g_inputManager) {
+        for (s16 pad = 0; pad < 2; ++pad) {
+            g_inputManager->SetControlModeArray(pad, GameControlModeArray());
+            g_inputManager->SetControlMapArray(pad, g_inputManager->PlayerMapArray());
+        }
+    }
     screenStackDepth = 0;
     // PSX: MEMORY[0x1C] = savedControl
 }

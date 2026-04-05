@@ -4,6 +4,7 @@
 #include "fe/hdmenu.h"
 #include "xclib/xclib.h"
 #include "gen/game.h"
+#include "gen/scoremgr.h"
 #include "gen/control.h"
 
 // Global feMenuMgr pointer
@@ -40,6 +41,9 @@ static s32 ResumeGame(hdMenuItem* item) {
 static s32 NewGameCallback(hdMenuItem* item) {
     (void)item;
     // PSX: HandleGameBegin__12ScoreManager(0)
+    if (g_scoreManager) {
+        g_scoreManager->HandleGameBegin();
+    }
     // PSX: UnloadLevel__5World(0)
     // PSX: UnloadLevelPart2__5World(0)
     // PSX: UnloadPermanent__5World()

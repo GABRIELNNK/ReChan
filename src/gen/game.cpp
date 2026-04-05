@@ -11,6 +11,7 @@
 #include "gen/time.h"
 #include "gen/ai.h"
 #include "gen/director.h"
+#include "gen/scoremgr.h"
 #include "snd/sound.h"
 #include "snd/rsevent.h"
 #include "snd/fesnd.h"
@@ -36,6 +37,9 @@ Game* g_game = nullptr;
 s16 g_selectedLevel = -1;   // gp+44: queued level ID (-1 = none)
 s32 g_directorActive = 0;   // gp+20: director intro script active
 s32 g_feInitialized = 0;    // gp+88: FE memory puddle initialized
+
+static constexpr u32 kControlStartAction = PsxPad::Start;
+static constexpr u32 kControlConfirmAction = PsxPad::Cross;
 
 const Game::StateFunc Game::sStateTable[static_cast<int>(GameState::COUNT)] = {
     gsNullState,
@@ -185,7 +189,10 @@ void Game::InternalOpen() {
     g_characterManager->SetName("CharacterManager", 0);
     managerList.AddNodePri(g_characterManager);
 
-    // 17. ScoreManager (504) - score/collectibles (TODO)
+    // 17. ScoreManager (504) - score/collectibles
+    g_scoreManager = new ScoreManager();
+    g_scoreManager->SetName("ScoreManager", 0);
+    managerList.AddNodePri(g_scoreManager);
 
     // Open all managers in list
     for (ccMinNode* n = managerList.head; n; n = n->next) {
@@ -334,6 +341,15 @@ void Game::EndFrameHandler(Handler*) {
 
 bool Game::Step() {
     MARKFUNCTION(0x8002B65C); // Step__4Game
+
+#if PAD_KEYBOARD_EMULATION
+    if (g_inputManager) {
+        // PSX services pad input from VBlank every frame. On PC we mirror that
+        // behavior by feeding keyboard state once per game Step.
+        g_inputManager->UpdateFromKeyboard(p3d::input, 0);
+    }
+#endif
+
     if (stateFunc)
         return stateFunc(this);
     return false;
@@ -394,9 +410,6 @@ bool Game::gsIntroState(Game* game) {
         }
         game->introTimer++;
 
-#if PAD_KEYBOARD_EMULATION
-        g_inputManager->UpdateFromKeyboard(p3d::input, 0);
-#endif
         g_inputManager->Step();
         u32 buttons = g_inputManager->GetControlVal(0);
 
@@ -439,11 +452,15 @@ bool Game::gsTitleState(Game* game) {
     game->titleScreen->Init("XC/TITLE.1", g_oxFontFile);
 
     // PSX: poll input to clear buffer
-#if PAD_KEYBOARD_EMULATION
-    g_inputManager->UpdateFromKeyboard(p3d::input, 0);
-#endif
     g_inputManager->Step();
     g_inputManager->GetControlVal(0);
+
+    // PSX: setup title control mode for both pads
+    if (g_inputManager) {
+        for (s16 pad = 0; pad < 2; pad++) {
+            g_inputManager->SetControlModeArray(pad, TitleControlModeArray());
+        }
+    }
 
     // PSX: rsEvent(4, 22, 0, 0) - set sound location to title music
     rsEvent(RS_SET_LOCATION, 22, 0, 0);
@@ -525,9 +542,6 @@ bool Game::gsTitleLoopState(Game* game) {
     }
 
     // PSX: InputManager::Step, GetControlVal(0)
-#if PAD_KEYBOARD_EMULATION
-    g_inputManager->UpdateFromKeyboard(p3d::input, 0);
-#endif
     g_inputManager->Step();
     u32 buttons = g_inputManager->GetControlVal(0);
     game->controlVal[0] = (s32)buttons;
@@ -541,7 +555,7 @@ bool Game::gsTitleLoopState(Game* game) {
         return true;
     }
 
-    if (buttons & PsxPad::Start) {
+    if (buttons & kControlStartAction) {
         // PSX: ProcessSoundEvent(gp[72], 8)
         if (g_frontEndSound) {
             g_frontEndSound->ProcessSoundEvent(FE_SND_MENU_OPEN);
@@ -572,7 +586,13 @@ bool Game::gsInitState(Game* game) {
     }
 
     // PSX: setup input control mode arrays for both pads (loop i=0,1)
-    // PSX: SetControlModeArray(inputMgr, pad, modeArray) x2
+    if (g_inputManager) {
+        for (s16 pad = 0; pad < 2; pad++) {
+            g_inputManager->SetControlModeArray(pad, GameControlModeArray());
+            g_inputManager->SetControlMapArray(pad, g_inputManager->PlayerMapArray());
+        }
+    }
+
     // PSX: VBlankLogo::StopLogo
 
     game->SetState(GameState::Title);
@@ -651,6 +671,12 @@ bool Game::gsPrePlayState(Game* game) {
     game->controlVal[1] = 0;
 
     // PSX: loop i=0..1: SetControlModeArray, PlayerMapArray, SetControlMapArray
+    if (g_inputManager) {
+        for (s16 pad = 0; pad < 2; pad++) {
+            g_inputManager->SetControlModeArray(pad, GameControlModeArray());
+            g_inputManager->SetControlMapArray(pad, g_inputManager->PlayerMapArray());
+        }
+    }
 
     // PSX: if level != 7: HUD->SetHUDVisible(1, 1)
 
@@ -670,9 +696,6 @@ bool Game::gsPlayState(Game* game) {
     }
 
     // PSX: InputManager::Step, then loop 2 pads storing GetControlVal
-#if PAD_KEYBOARD_EMULATION
-    g_inputManager->UpdateFromKeyboard(p3d::input, 0);
-#endif
     g_inputManager->Step();
 
     for (s32 pad = 0; pad < 2; pad++) {
@@ -694,7 +717,7 @@ bool Game::gsPlayState(Game* game) {
         canPause = 1;
     }
 
-    if (canPause && (game->controlVal[0] & PsxPad::Start)) {
+    if (canPause && (game->controlVal[0] & kControlStartAction)) {
         game->SetState(GameState::Menu);
     }
 
@@ -724,6 +747,9 @@ bool Game::gsEndLevelExitState(Game* game) {
 
     // PSX: 660 bytes - handles level progression
     // PSX: ScoreManager::HandleLevelEnd()
+    if (g_scoreManager) {
+        g_scoreManager->HandleLevelEnd();
+    }
     // PSX: checks if next petal exists, determines QueuePetalLoad vs QueueLevelLoad
     // PSX: handles boss level win, level complete movies, etc.
 
@@ -894,9 +920,26 @@ bool Game::gsQueueLevelLoad(Game* game) {
 bool Game::gsQueuePetalLoad(Game* game) {
     MARKFUNCTION(0x8002977C); // gsQueuePetalLoad
 
-    // PSX loads only the target petal and then transitions to PrePlay.
-    // Petal streaming is not reversed yet, so reuse full level load path.
-    return gsQueueLevelLoad(game);
+    // PSX: rsEvent(6,0,0,0)
+    rsEvent(RS_STOP_MUSIC, 0, 0, 0);
+
+    World* world = game->GetWorld();
+    if (!world) {
+        game->SetState(GameState::Error);
+        return true;
+    }
+
+    world->UnloadPetal();
+    world->LoadPetal(world->GetTargetPetalIndex());
+
+    // PSX 0x8002977C transitions to PrePlay (state 7).
+    game->SetState(GameState::PrePlay);
+
+    // PSX: InputManager::Step(), GetControlVal(0)
+    g_inputManager->Step();
+    g_inputManager->GetControlVal(0);
+
+    return true;
 }
 
 bool Game::gsQueueLevelPetalLoad(Game* game) {
@@ -1016,15 +1059,12 @@ bool Game::gsEndGameLoopState(Game* game) {
         return true;
     }
 
-#if PAD_KEYBOARD_EMULATION
-    g_inputManager->UpdateFromKeyboard(p3d::input, 0);
-#endif
     g_inputManager->Step();
     u32 buttons = g_inputManager->GetControlVal(0);
     game->controlVal[0] = (s32)buttons;
 
-    // PSX: check Start (0x0800) or Cross (0x0040):  0x0840
-    if (buttons & (PsxPad::Start | PsxPad::Cross)) {
+    // PSX: check start-action (0x0800) or confirm-action (0x0040): 0x0840
+    if (buttons & (kControlStartAction | kControlConfirmAction)) {
         // PSX: ProcessSoundEvent(frontEndSound, 19) = FE_SND_JT_0
         if (g_frontEndSound) {
             g_frontEndSound->ProcessSoundEvent(FE_SND_JT_0);

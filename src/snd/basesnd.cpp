@@ -1,115 +1,150 @@
 // basesnd.cpp - CSound base class reversed from PSX BASESND.CPP
 // PSX source: C:\CHAN\GAME\SRC\SND\BASESND.CPP
 #include "snd/basesnd.h"
-#include "snd/sound.h"
+#include "snd/sndfact.h"
+#include "snd/trnssnd.h"
+#include "snd/prstsnd.h"
 
 // PSX: __6CSound (BASESND.CPP:31, 0x800A1E18)
 CSound::CSound() {
     MARKFUNCTION(0x800A1E18);
-    // PSX: refCount=1, posPtr=0, flags=0, factoryTable=0x800D3BA8
     refCount = 1;
     posPtr = nullptr;
     flags = 0;
     pad12 = 0;
-    // PSX: calls ObjectCreated__13CSoundFactory (bookkeeping, no-op on PC)
 }
 
 CSound::~CSound() {
 }
 
-// PSX: Release__6CSound (BASESND.CPP:174, 0x800A1F54)
-// PSX: refCount -= 2; if (refCount <= 0 && this != null) vtable[12]->destroy(3)
-void CSound::Release() {
-    MARKFUNCTION(0x800A1F54);
-    if (refCount >= 2) {
-        refCount -= 2;
-    } else {
-        refCount = 0;
-    }
-    // PSX: destroy via vtable if refCount <= 0
-    // PC: caller manages lifetime
+// PSX: Initialize__6CSoundPC10tagLVector (BASESND.CPP:152, 0x800A1F48)
+s32 CSound::Initialize(void* pos) {
+    MARKFUNCTION(0x800A1F48);
+    posPtr = pos;
+    return 0;
 }
 
-// PC helper: convert PSX global sample ID to WAX bank/sample pair
-// PSX loads banks RS0000..RS0015 sequentially. Each bank has a variable
-// number of samples. The global sample ID is a flat index across all banks.
-bool CSound::GlobalSampleToWax(u16 globalId, u32& outBank, u32& outSample) {
-    if (!g_sound) return false;
+// PSX: GetPosPtr__C6CSound (BASESND.CPP:202, 0x800A1FAC)
+void* CSound::GetPosPtr() const {
+    MARKFUNCTION(0x800A1FAC);
+    return posPtr;
+}
 
-    u32 remaining = globalId;
-    for (u32 bank = 0; bank < MAX_WAX_BANKS; bank++) {
-        u32 count = g_sound->GetBankSampleCount(bank);
-        if (count == 0) continue;
-        if (remaining < count) {
-            outBank = bank;
-            outSample = remaining;
-            return true;
-        }
-        remaining -= count;
+// PSX: Release__6CSound (BASESND.CPP:174, 0x800A1F54)
+// PSX: refCount -= 2; if (refCount <= 0 && this != null) vtable[12]+12 -> destroy(3)
+void CSound::Release() {
+    MARKFUNCTION(0x800A1F54);
+    refCount -= 2;
+    if ((s32)refCount <= 0) {
+        delete this;
     }
-    return false;
 }
 
 // PSX: PlayTransient__6CSoundUsUlUs (BASESND.CPP:309, 0x800A2088)
 // PSX flow:
-//   CreateObject(10070, &tmpObj, soundId)
-//   Initialize(tmpObj, this->posPtr, this->flags)
-//   if (triggerFlags & 8):
-//     if (triggerFlags & 1): Trigger(tmpObj, pan)
-//     else: TriggerDialogWorld(tmpObj, pan)
-//   Release(tmpObj)
-// PC: map global sample ID to WAX bank/sample, play via Sound
+//   CreateObject(10070, &tmp, soundId) -> Initialize(tmp, posPtr, flags)
+//   if (triggerFlags & 8): Trigger(tmp, pan)
+//   elif (triggerFlags & 1): TriggerDialogWorld(tmp, pan)
+//   destroy(tmp)
 s32 CSound::PlayTransient(u16 soundId, u32 triggerFlags, u16 pan) {
     MARKFUNCTION(0x800A2088);
 
-    if (!g_sound) return -1000;
-
-    u32 bank, sample;
-    if (!GlobalSampleToWax(soundId, bank, sample)) {
-        return -1000; // PSX: returns error if CreateObject fails
+    CSound* tmp = nullptr;
+    s32 result = CSoundFactory::CreateObject(10070, &tmp, soundId);
+    if (result < 0)
+    {
+        return result;
     }
 
-    // PSX: Initialize sets position and flags, then Trigger plays the sound
-    // Only play if trigger flag bit 3 is set (PSX: flags & 0x08)
-    if (triggerFlags & 0x08) {
-        // PSX pan is 0-127 center, normalized to -1..1 for PC
-        f32 pcPan = 0.0f;
-        if (pan > 0) {
-            pcPan = ((f32)pan - 64.0f) / 64.0f;
+    CGenericTransientSound* trans = static_cast<CGenericTransientSound*>(tmp);
+    s32 err = trans->Initialize(posPtr, flags);
+    if (err >= 0) {
+        if (triggerFlags & 0x08) {
+            err = trans->Trigger(pan);
+        } else {
+            err = -1000;
+            if (triggerFlags & 0x01) {
+                err = trans->TriggerDialogWorld(pan);
+            }
         }
-        g_sound->PlayWaxSample(bank, sample, 1.0f, pcPan);
     }
 
-    return 0;
+    // PSX: destroy via vtable
+    delete trans;
+    return err;
 }
 
 // PSX: PlayTransientStereo__6CSoundUsUs (BASESND.CPP:360, 0x800A2164)
 // PSX flow:
 //   CreateObject(10070, &objL, sndL)
 //   CreateObject(10070, &objR, sndR)
-//   InitializeStereo(objL, 100, 0)  // left channel
-//   InitializeStereo(objR, 0, 100)  // right channel
-//   Trigger(objL, 0)
-//   Trigger(objR, 0)
-//   Release(objL), Release(objR)
-// PC: play both samples with stereo panning
+//   InitializeStereo(objL, 100, 0) - full left
+//   InitializeStereo(objR, 0, 100) - full right
+//   Trigger(objL, 0), Trigger(objR, 0)
+//   destroy both
 s32 CSound::PlayTransientStereo(u16 sndL, u16 sndR) {
     MARKFUNCTION(0x800A2164);
 
-    if (!g_sound) return -1000;
+    CSound* tmpL = nullptr;
+    CSound* tmpR = nullptr;
+    CSoundFactory::CreateObject(10070, &tmpL, sndL);
+    CSoundFactory::CreateObject(10070, &tmpR, sndR);
 
-    u32 bankL, sampleL;
-    u32 bankR, sampleR;
+    if (tmpR) {
+        CGenericTransientSound* transL = static_cast<CGenericTransientSound*>(tmpL);
+        CGenericTransientSound* transR = static_cast<CGenericTransientSound*>(tmpR);
 
-    if (GlobalSampleToWax(sndL, bankL, sampleL)) {
-        // PSX: InitializeStereo(100, 0) = full left
-        g_sound->PlayWaxSample(bankL, sampleL, 1.0f, -1.0f);
+        transL->InitializeStereo(100, 0);
+        transR->InitializeStereo(0, 100);
+        transL->Trigger(0);
+        transR->Trigger(0);
     }
 
-    if (GlobalSampleToWax(sndR, bankR, sampleR)) {
-        // PSX: InitializeStereo(0, 100) = full right
-        g_sound->PlayWaxSample(bankR, sampleR, 1.0f, 1.0f);
+    if (tmpL)
+    {
+        delete tmpL;
+    }
+    if (tmpR)
+    {
+        delete tmpR;
+    }
+    return 0;
+}
+
+// PSX: BeginPersistent__6CSoundUcPP23CGenericPersistentSound (BASESND.CPP:229, 0x800A1FB8)
+s32 CSound::BeginPersistent(u8 soundId, CGenericPersistentSound** outObj) {
+    MARKFUNCTION(0x800A1FB8);
+
+    if (*outObj)
+    {
+        return -3000;
     }
 
+    CSound* tmp = nullptr;
+    s32 result = CSoundFactory::CreateObject(10080, &tmp, soundId);
+    if (result < 0)
+    {
+        return result;
+    }
+
+    *outObj = static_cast<CGenericPersistentSound*>(tmp);
+    (*outObj)->Initialize(posPtr, flags);
+    (*outObj)->Begin();
+    return 0;
+}
+
+// PSX: EndPersistent__6CSoundPP23CGenericPersistentSound (BASESND.CPP:275, 0x800A2038)
+s32 CSound::EndPersistent(CGenericPersistentSound** obj) {
+    MARKFUNCTION(0x800A2038);
+
+    if (!*obj)
+    {
+        return -3001;
+    }
+
+    // PSX: vtable[12]+8 = End virtual call
+    (*obj)->End();
+    delete *obj;
+    *obj = nullptr;
     return 0;
 }

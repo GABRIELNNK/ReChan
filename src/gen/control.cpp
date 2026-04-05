@@ -10,6 +10,52 @@
 // Global singleton (PSX: 0x800DD69C)
 InputManager* g_inputManager = nullptr;
 
+// PSX: 4Game_con_GameMode and 7MenuMgr_sControlMode expanded to 16 s16 entries.
+static const s16 sGameControlMode[16] = {
+    3, 2, 3, 3,
+    3, 3, 3, 3,
+    3, 1, 1, 3,
+    2, 2, 2, 2,
+};
+
+static const s16 sTitleControlMode[16] = {
+    3, 3, 3, 3,
+    3, 3, 3, 3,
+    3, 1, 1, 3,
+    3, 3, 3, 3,
+};
+
+static const s16 sMenuControlMode[16] = {
+    3, 3, 3, 3,
+    3, 3, 3, 3,
+    3, 3, 3, 3,
+    3, 3, 3, 3,
+};
+
+const s16* GameControlModeArray() {
+    return sGameControlMode;
+}
+
+const s16* TitleControlModeArray() {
+    return sTitleControlMode;
+}
+
+const s16* MenuControlModeArray() {
+    return sMenuControlMode;
+}
+
+// PSX: 12InputManager_sDefaultMapArray / 12InputManager_sPlayerMap
+static const u8 sDefaultMapArray[16] = {
+    0, 1, 2, 3, 4, 5, 6, 7,
+    8, 9, 10, 11, 12, 13, 14, 15
+};
+
+static const u8 sPlayerMap[3][16] = {
+    { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 },
+    { 0, 2, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 },
+    { 1, 2, 0, 3, 5, 6, 4, 7, 8, 9, 10, 11, 12, 13, 14, 15 },
+};
+
 
 // Button
 
@@ -18,26 +64,29 @@ InputManager* g_inputManager = nullptr;
 void Button::Input(s32 bit) {
     prevInput = rawInput;
     rawInput = bit;
+
+    if (mode == BUTTON_MODE_ONESHOT || mode == BUTTON_MODE_REPEAT) {
+        state = (rawInput && !prevInput) ? 1 : 0;
+    } else {
+        state = rawInput ? 1 : 0;
+    }
 }
 
 // Button::GetState (0x8002D898) = return state based on mode
 s32 Button::GetState() const {
-    switch (mode) {
-        case BUTTON_MODE_RAW:
-            return rawInput;
-        case BUTTON_MODE_ONESHOT:
-            // True only on the frame the button is first pressed
-            return (rawInput && !prevInput) ? 1 : 0;
-        default:
-            return rawInput;
+    s32 out = state;
+    if (mode == BUTTON_MODE_ONESHOT || mode == BUTTON_MODE_REPEAT) {
+        const_cast<Button*>(this)->state = 0;
     }
+    return out;
 }
 
 // Button::SetMode (0x8002D9E8)
-void Button::SetMode(ButtonMode m) {
-    mode = m;
+void Button::SetMode(s16 m) {
+    mode = static_cast<ButtonMode>(m);
     rawInput = 0;
     prevInput = 0;
+    state = 0;
 }
 
 
@@ -50,8 +99,8 @@ void Button::SetMode(ButtonMode m) {
 void Control::Input(u32 buttonBits) {
     for (int i = 0; i < 16; ++i) {
         int mapped = controlMap[i];
-        s32 bit = (buttonBits >> mapped) & 1;
-        buttons[i].Input(bit);
+        s32 bit = ((buttonBits & (1u << i)) != 0) ? 1 : 0;
+        buttons[mapped].Input(bit);
     }
 }
 
@@ -73,12 +122,23 @@ void Control::SetControlMapArray(const u8* map) {
     }
 }
 
+void Control::ApplyCurrentModeMap() {
+    if (!modeMap) {
+        return;
+    }
+
+    for (int i = 0; i < 16; ++i) {
+        buttons[i].SetMode(modeMap[i]);
+    }
+}
+
 
 // InputManager
 
 
 // InputManager::InputManager (0x8002DF74)
 InputManager::InputManager() {
+    UpdateReverseMap();
     InternalReset();
 }
 
@@ -150,14 +210,45 @@ void InputManager::SetControlMapArray(s16 padIndex, const u8* map) {
     controls[padIndex].SetControlMapArray(map);
 }
 
+void InputManager::SetControlModeArray(s16 padIndex, const s16* modeMap) {
+    if (padIndex < 0 || padIndex > 1 || !modeMap) {
+        return;
+    }
+
+    Control& ctrl = controls[padIndex];
+    ctrl.modeMap = modeMap;
+    ctrl.ApplyCurrentModeMap();
+}
+
+const u8* InputManager::PlayerMapArray() const {
+    return sPlayerMap[playerConfig % 3];
+}
+
+const u8* InputManager::DefaultMapArray() const {
+    return sDefaultMapArray;
+}
+
+void InputManager::SetPlayerConfig(u8 config) {
+    playerConfig = config % 3;
+    UpdateReverseMap();
+}
+
+void InputManager::UpdateReverseMap() {
+    const u8* map = PlayerMapArray();
+    for (u8 i = 0; i < 16; ++i) {
+        reverseMap[map[i]] = i;
+    }
+}
+
 // InputManager::InternalReset (0x8002E550)
 void InputManager::InternalReset() {
-    // PSX: sets button modes from config bytes at this+744 and this+747
-    // Default: all buttons in RAW mode
+    // PSX default resets map and button state, then applies mode map later.
     for (int p = 0; p < 2; ++p) {
         for (int i = 0; i < 16; ++i) {
-            controls[p].buttons[i].SetMode(BUTTON_MODE_RAW);
+            controls[p].buttons[i].SetMode(BUTTON_MODE_DEFAULT);
         }
+        controls[p].SetControlMapArray(sDefaultMapArray);
+        controls[p].modeMap = nullptr;
         controls[p].flags = 0;
         controls[p].rawButtons = 0;
         controls[p].hasConnectedPad = 0;
@@ -178,11 +269,22 @@ struct KeyPadBinding {
     u32 padBit;
 };
 
+static constexpr int kKeyEscape = 256;
+static constexpr int kKeyEnter = 257;
+static constexpr int kKeyTab = 258;
+static constexpr int kKeyBackspace = 259;
+static constexpr int kKeyRight = 262;
+static constexpr int kKeyLeft = 263;
+static constexpr int kKeyDown = 264;
+static constexpr int kKeyUp = 265;
+static constexpr int kKeySpace = 32;
+static constexpr int kKeyLeftControl = 341;
+
 // Default keyboard -> PSX pad bindings
-// Movement:     WASD -> D-pad Up/Left/Down/Right
-// Face buttons: I/J/K/L -> Triangle/Square/Cross/Circle
+// Movement:     WASD + Arrow Keys -> D-pad Up/Left/Down/Right
+// Face buttons: I/J/K/L + V/Z/X/C + Space/Ctrl -> Triangle/Square/Cross/Circle
 // Shoulders:    U/O -> L1/R1,  Y/P -> L2/R2
-// Start/Select: Enter/Backspace
+// Start/Select: Enter/Escape and Backspace/Tab
 // Stick clicks: N/M -> L3/R3
 static const KeyPadBinding s_keyBindings[] = {
     // D-pad
@@ -190,19 +292,31 @@ static const KeyPadBinding s_keyBindings[] = {
     { 'A',  PsxPad::Left     },
     { 'S',  PsxPad::Down     },
     { 'D',  PsxPad::Right    },
+    { kKeyUp,    PsxPad::Up    },
+    { kKeyLeft,  PsxPad::Left  },
+    { kKeyDown,  PsxPad::Down  },
+    { kKeyRight, PsxPad::Right },
     // Face buttons
     { 'I',  PsxPad::Triangle },
     { 'K',  PsxPad::Cross    },
     { 'J',  PsxPad::Square   },
     { 'L',  PsxPad::Circle   },
+    { 'V',  PsxPad::Triangle },
+    { 'X',  PsxPad::Cross    },
+    { 'Z',  PsxPad::Square   },
+    { 'C',  PsxPad::Circle   },
+    { kKeySpace,       PsxPad::Cross },
+    { kKeyLeftControl, PsxPad::Cross },
     // Shoulders
     { 'U',  PsxPad::L1       },
     { 'O',  PsxPad::R1       },
     { 'Y',  PsxPad::L2       },
     { 'P',  PsxPad::R2       },
     // Start / Select
-    { 257,  PsxPad::Start    },  // GLFW_KEY_ENTER
-    { 259,  PsxPad::Select   },  // GLFW_KEY_BACKSPACE
+    { kKeyEnter,     PsxPad::Start  },
+    { kKeyEscape,    PsxPad::Start  },
+    { kKeyBackspace, PsxPad::Select },
+    { kKeyTab,       PsxPad::Select },
     // Stick clicks
     { 'N',  PsxPad::L3       },
     { 'M',  PsxPad::R3       },

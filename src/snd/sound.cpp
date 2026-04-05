@@ -55,12 +55,12 @@ void Sound::InternalClose() {
 void Sound::SetupSound() {
     MARKFUNCTION(0x800598D8);
 
-    // Load WAX sound effect banks
+    // Load WAX sound effect banks (RS0000..RS0015 = 0x00..0x15 = 22 banks, hex naming)
     numWaxBanks = 0;
     u32 totalSamples = 0;
     char path[256];
-    for (u32 i = 0; i < 16; i++) {
-        snprintf(path, sizeof(path), "SOUND/FX/RS%04u.WAX", i);
+    for (u32 i = 0; i <= 0x15; i++) {
+        snprintf(path, sizeof(path), "SOUND/FX/RS%04X.WAX", i);
         u32 fileSize = 0;
         u8* fileData = ReadFileBytes(path, fileSize);
         if (!fileData) continue;
@@ -75,8 +75,18 @@ void Sound::SetupSound() {
         for (u32 j = 0; j < count; j++) {
             if (bank.pcmSamples[j].empty()) continue;
             u32 numFrames = (u32)bank.pcmSamples[j].size();
+
+            // Per-sample rate from descriptor pitch (SPU pitch 0x1000 = 44100 Hz)
+            u32 sampleRate = PSX_SFX_RATE;
+            if (j < bank.sampleDescs.size()) {
+                u16 spuPitch = (u16)(bank.sampleDescs[j].params & 0xFFFF);
+                if (spuPitch > 0) {
+                    sampleRate = 44100u * spuPitch / 4096u;
+                }
+            }
+
             banks[i].samples[j] = AudioEngine::LoadSample(
-                bank.pcmSamples[j].data(), numFrames, PSX_SFX_RATE, 1);
+                bank.pcmSamples[j].data(), numFrames, sampleRate, 1);
             if (banks[i].samples[j] != AUDIO_SAMPLE_INVALID) {
                 totalSamples++;
             }
@@ -84,7 +94,8 @@ void Sound::SetupSound() {
 
         if (count > 0) {
             numWaxBanks++;
-            LOG("Sound: loaded WAX bank %u (%u samples)", i, count);
+            LOG("Sound: WAX bank 0x%02X: %u decoded samples, %u bytes ADPCM (SPU base 0x%X)",
+                i, count, bank.adpcmSize, bank.adpcmOffset);
         }
     }
 
@@ -117,6 +128,12 @@ AudioVoice Sound::PlayWaxSample(u32 bankIndex, u32 sampleIndex, f32 volume, f32 
 u32 Sound::GetBankSampleCount(u32 bankIndex) const {
     if (bankIndex >= MAX_WAX_BANKS) return 0;
     return banks[bankIndex].numSamples;
+}
+
+AudioSample Sound::GetBankSample(u32 bankIndex, u32 sampleIndex) const {
+    if (bankIndex >= MAX_WAX_BANKS) return AUDIO_SAMPLE_INVALID;
+    if (sampleIndex >= banks[bankIndex].numSamples) return AUDIO_SAMPLE_INVALID;
+    return banks[bankIndex].samples[sampleIndex];
 }
 
 // PC: music - decode FAG to mono PCM, load as AudioSample, play via voice mixer
