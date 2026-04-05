@@ -4,7 +4,7 @@
 // CharacterManager, AnimationManager, and P3D inventory cleanup.
 #pragma once
 
-#include "core.h"
+#include "common.h"
 #include "gen/manager.h"
 
 // Forward declarations

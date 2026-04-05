@@ -1,14 +1,13 @@
 // world.cpp - Level world implementation
 #include "gen/world.h"
 #include "gen/database.h"
+#include "gen/director.h"
 #include "gen/geometry.h"
 #include "p3d/context.h"
 #include "p3d/stream.h"
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
 
-#include <cmath>
-#include <cstring>
 #include <fstream>
 #include <filesystem>
 
@@ -106,7 +105,7 @@ void World::LoadTPGTextures(const u8* lcfData, u32 lcfSize) {
     for (u32 i = 0; i < count; i++) {
         if (pos + 16 > lcfSize) break;
         char magic[5] = {};
-        std::memcpy(magic, lcfData + pos, 4);
+        memcpy(magic, lcfData + pos, 4);
         u32 size   = (lcfData[pos+4]<<24) | (lcfData[pos+5]<<16) | (lcfData[pos+6]<<8) | lcfData[pos+7];
         u32 offset = (lcfData[pos+8]<<24) | (lcfData[pos+9]<<16) | (lcfData[pos+10]<<8) | lcfData[pos+11];
         u32 extraLen = (lcfData[pos+12]<<24) | (lcfData[pos+13]<<16) | (lcfData[pos+14]<<8) | lcfData[pos+15];
@@ -114,7 +113,7 @@ void World::LoadTPGTextures(const u8* lcfData, u32 lcfSize) {
         if (extraLen > 0)
             pos += (extraLen + 3) & ~3;
 
-        if (std::strncmp(magic, ".TPG", 4) != 0) continue;
+        if (strncmp(magic, ".TPG", 4) != 0) continue;
         if (offset + size > lcfSize || size < 6) continue;
 
         const u8* d = lcfData + offset;
@@ -163,7 +162,7 @@ void World::LoadTPGTextures(const u8* lcfData, u32 lcfSize) {
         vramHandle = 0;
     }
     vramHandle = p3d::context->CreateVRAMTexture(1024, 512, vram.data);
-    RC_LOG("[World] Uploaded raw VRAM as R16UI (1024x512, handle=%u)", vramHandle);
+    LOG("[World] Uploaded raw VRAM as R16UI (1024x512, handle=%u)", vramHandle);
 }
 
 World::World() = default;
@@ -172,13 +171,30 @@ World::~World() {
     Unload();
 }
 
+// PSX: LoadLevel__5WorldUl (WORLD.CPP:1389, 0x8004624C)
+bool World::LoadLevelIndex(u32 levelIndex) {
+    MARKFUNCTION(0x8004624C);
+
+    targetLevelIndex = levelIndex;
+
+    char levelPath[64];
+    std::snprintf(levelPath, sizeof(levelPath), "RTARGET/LEV%02u.LCF", levelIndex + 1);
+    if (!Load(levelPath)) {
+        return false;
+    }
+
+    currentLevelIndex = targetLevelIndex;
+    currentPetalIndex = targetPetalIndex;
+    return true;
+}
+
 bool World::Load(const std::string& lcfPath) {
     Unload();
 
     // Read LCF file from disc (PC equivalent of Stream::Open + disc read)
     std::ifstream file(lcfPath, std::ios::binary | std::ios::ate);
     if (!file) {
-        RC_ERR("[World] Failed to open: %s", lcfPath.c_str());
+        LOG("[World] Failed to open: %s", lcfPath.c_str());
         return false;
     }
     auto fileSize = file.tellg();
@@ -193,7 +209,7 @@ bool World::Load(const std::string& lcfPath) {
     // Parse stream header (PSX Stream::Open reads this from disc)
     auto entries = ParseStreamHeader(data, dataSize);
     if (entries.empty()) {
-        RC_ERR("[World] No stream entries in: %s", lcfPath.c_str());
+        LOG("[World] No stream entries in: %s", lcfPath.c_str());
         streamData.clear();
         return false;
     }
@@ -205,10 +221,10 @@ bool World::Load(const std::string& lcfPath) {
     u32 blkCount = 0;
     u32 wdbCount = 0;
     for (const auto& e : entries) {
-        if (std::strncmp(e.magic, ".BLK", 4) == 0) blkCount++;
-        if (std::strncmp(e.magic, ".WDB", 4) == 0) wdbCount++;
+        if (strncmp(e.magic, ".BLK", 4) == 0) blkCount++;
+        if (strncmp(e.magic, ".WDB", 4) == 0) wdbCount++;
     }
-    RC_LOG("[World] Found %u BLK, %u WDB entries in %s", blkCount, wdbCount, lcfPath.c_str());
+    LOG("[World] Found %u BLK, %u WDB entries in %s", blkCount, wdbCount, lcfPath.c_str());
 
     // Parse WDB entries using Database::Scan (PSX HandleWDBChunk)
     // Each WDB has block numbers starting from 0 - they are local to that WDB's
@@ -223,9 +239,9 @@ bool World::Load(const std::string& lcfPath) {
         std::vector<WDBGroup> wdbGroups;
         u32 blkAccum = 0;
         for (u32 i = 0; i < entries.size(); i++) {
-            if (std::strncmp(entries[i].magic, ".WDB", 4) == 0) {
+            if (strncmp(entries[i].magic, ".WDB", 4) == 0) {
                 wdbGroups.push_back({i, blkAccum, 0});
-            } else if (std::strncmp(entries[i].magic, ".BLK", 4) == 0) {
+            } else if (strncmp(entries[i].magic, ".BLK", 4) == 0) {
                 blkAccum++;
             }
         }
@@ -264,13 +280,13 @@ bool World::Load(const std::string& lcfPath) {
             }
             prevCount = curCount;
 
-            RC_LOG("[World] WDB group at entry %u: blkBase=%u, %u volumes",
+            LOG("[World] WDB group at entry %u: blkBase=%u, %u volumes",
                    wdbGroups[gi].entryIdx, wdbGroups[gi].blkBase, curCount - wdbGroups[gi].blocksBefore);
         }
 
         u32 totalParsed = 0;
         for (auto* v : blockVolumes) { if (v) totalParsed++; }
-        RC_LOG("[World] Parsed %u DBVolumes from %u WDB entries", totalParsed, (u32)wdbGroups.size());
+        LOG("[World] Parsed %u DBVolumes from %u WDB entries", totalParsed, (u32)wdbGroups.size());
     }
 
     // Initialize blocks from volumes (PSX _LoadBlocksFunc - Block::Init)
@@ -280,7 +296,7 @@ bool World::Load(const std::string& lcfPath) {
     std::vector<const u8*> blkPtrs;
     std::vector<u32> blkSizes;
     for (const auto& e : entries) {
-        if (std::strncmp(e.magic, ".BLK", 4) != 0) continue;
+        if (strncmp(e.magic, ".BLK", 4) != 0) continue;
         if (e.offset + e.size > dataSize) {
             blkPtrs.push_back(nullptr);
             blkSizes.push_back(0);
@@ -291,7 +307,7 @@ bool World::Load(const std::string& lcfPath) {
     }
     blockMgr.LoadBlocks(0, blkPtrs.data(), blkSizes.data(), blkCount);
 
-    RC_LOG("[World] Loaded %u blocks", blockMgr.GetNumBlocks());
+    LOG("[World] Loaded %u blocks", blockMgr.GetNumBlocks());
 
     // Debug: log ALL block positions and compute level AABB
     s32 minX = 0x7FFFFFFF, minY = 0x7FFFFFFF, minZ = 0x7FFFFFFF;
@@ -299,7 +315,7 @@ bool World::Load(const std::string& lcfPath) {
     for (u32 i = 0; i < blockMgr.GetNumBlocks(); i++) {
         Block* b = blockMgr.GetBlock(i);
         if (!b) continue;
-        if (i < 10) RC_LOG("[World] Block %u: pos=(%d,%d,%d) dim=(%d,%d,%d) parsed=%d",
+        if (i < 10) LOG("[World] Block %u: pos=(%d,%d,%d) dim=(%d,%d,%d) parsed=%d",
                            i, b->posX, b->posY, b->posZ, b->dimX, b->dimY, b->dimZ, b->parsed);
         s32 bMinX = b->posX + b->halfExtNegX, bMaxX = b->posX + b->halfExtPosX;
         s32 bMinY = b->posY + b->halfExtNegY, bMaxY = b->posY + b->halfExtPosY;
@@ -310,9 +326,9 @@ bool World::Load(const std::string& lcfPath) {
     }
     levelMin = { minX, minY, minZ };
     levelMax = { maxX, maxY, maxZ };
-    RC_LOG("[World] Level AABB: min=(%d,%d,%d) max=(%d,%d,%d)",
+    LOG("[World] Level AABB: min=(%d,%d,%d) max=(%d,%d,%d)",
            minX, minY, minZ, maxX, maxY, maxZ);
-    RC_LOG("[World] Level size: (%d, %d, %d)",
+    LOG("[World] Level size: (%d, %d, %d)",
            maxX - minX, maxY - minY, maxZ - minZ);
 
     return blockMgr.GetNumBlocks() > 0;
@@ -623,7 +639,7 @@ void World::computeBlockToPointDistances(const Block* block, const LVector* poin
 
 // OffsetToPreventSeams__FR10tagLVectorRC10tagLVector (GAME.CPP:2482)
 // Reversed from PSX func_8002AF94: computes per-axis sign of (pos - camPos),
-// then offset = -sign * (sign * delta / divisor + 1), clamped to ±limit.
+// then offset = -sign * (sign * delta / divisor + 1), clamped to Â±limit.
 // Modifies pos in-place.
 void World::OffsetToPreventSeams(LVector& pos, const LVector& camPos) {
     MARKFUNCTION(0x8002AF88);
@@ -655,7 +671,7 @@ void World::OffsetToPreventSeams(LVector& pos, const LVector& camPos) {
     s32 offY = (-signY) * (rawY + 1);
     s32 offZ = (-signZ) * (rawZ + 1);
 
-    // PSX: clamp each to ±seamLimit (gp[100])
+    // PSX: clamp each to Â±seamLimit (gp[100])
     if (offX < -seamLimit) offX = -seamLimit;
     else if (offX > seamLimit) offX = seamLimit;
     if (offY < -seamLimit) offY = -seamLimit;
@@ -675,6 +691,16 @@ void World::Unload() {
     if (vramHandle && p3d::context) {
         p3d::context->DestroyVRAMTexture(vramHandle);
         vramHandle = 0;
+    }
+}
+
+// PSX: ResetLevel__5World (WORLD.CPP:1918, 0x80046DE0)
+void World::ResetLevel() {
+    MARKFUNCTION(0x80046DE0);
+
+    // PSX also resets checkpoint validity and dead pool state here.
+    if (g_director) {
+        g_director->LevelReset();
     }
 }
 

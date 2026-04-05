@@ -2,10 +2,9 @@
 // Original: C:\CHAN\GAME\INC\GEN\DATABASE.HPP
 #pragma once
 
-#include "core.h"
+#include "common.h"
 #include "p3d/lvector.h"
 #include "gen/manager.h"  // Manager -> ccNode, ccMinNode, ccMinList, ccList
-#include <cstring>
 
 // DBAttrib = attribute from WDB database node
 struct DBAttrib {

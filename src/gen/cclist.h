@@ -3,10 +3,8 @@
 // PSX uses these for callback chains, path lists, entity management, etc.
 #pragma once
 
-#include "core.h"
+#include "common.h"
 #include "p3d/hash.h"
-#include <cstring>
-#include <cstdlib>
 
 // ccMinNode - minimal intrusive list node (12 bytes on PSX)
 // PSX layout: +0 next, +4 prev, +8 vtable
@@ -129,9 +127,9 @@ struct ccNode : public ccMinNode {
         }
         if (!str) return;
         if (alloc) {
-            s32 len = (s32)std::strlen(str);
+            s32 len = (s32)strlen(str);
             name = (char*)std::malloc(len + 1);
-            std::memcpy(name, str, len + 1);
+            memcpy(name, str, len + 1);
             flags |= 1; // mark as allocated
         } else {
             name = const_cast<char*>(str);

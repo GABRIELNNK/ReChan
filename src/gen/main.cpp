@@ -1,5 +1,5 @@
 // main.cpp
-#include "core.h"
+#include "common.h"
 #include "p3d/context.h"
 #include "p3d/inventory.h"
 #include "p3d/loadmanager.h"
@@ -11,15 +11,13 @@
 #include "gen/game.h"
 #include "gen/time.h"
 
-#include <cstdio>
 #include <vector>
 #include <algorithm>
 #include <chrono>
 #include <thread>
 
 int main() {
-    std::setvbuf(stdout, nullptr, _IONBF, 0);
-    std::setvbuf(stderr, nullptr, _IONBF, 0);
+    Log::Get().Init();
 
     tPlatform* platform = tPlatform::Create();
 
@@ -29,19 +27,17 @@ int main() {
     init.title = "Jackie Chan Stuntmaster";
 
     tContext* ctx = platform->CreateContext(init);
-    if (!ctx) return 1;
+    if (!ctx)
+        return 1;
 
     Game game;
-    game.Open(); // PSX: Manager::Open() -> InternalOpen() creates all managers
+    game.Open();
     game.SetState(GameState::Intro);
 
     p3d::context->SetClearColour(pddiColour(30, 30, 35));
 
-    MARKFUNCTION(0x8002635C); // psx_main
+    MARKFUNCTION(0x8002635C);
 
-    // --- Simple frame-limited game loop ---
-    // Runs at g_time->targetFPS (default 30). One logic tick + one render per frame.
-    // Matches PSX behaviour: all physics values assume 30 fps per-frame execution.
     using Clock = std::chrono::steady_clock;
 
     auto prevTime = Clock::now();
@@ -59,8 +55,12 @@ int main() {
         p3d::context->Clear(PDDI_BUFFER_ALL);
 
         bool running = game.Step();
-        if (!running)
+        if (!running) {
+            // PSX: when Step returns false (from gsDetermineGameOverState or gsEndState),
+            // the main loop resets lives via SetLivesLeft and re-enters via QueueLevelLoad.
+            // PSX: SetLivesLeft(g_player, savedLives)
             game.SetState(GameState::QueueLevelLoad);
+        }
 
         ctx->EndFrame();
 
@@ -78,6 +78,8 @@ int main() {
     platform->DestroyContext(ctx);
     tPlatform::Destroy();
 
-    RC_LOG("Clean shutdown");
+    LOG("Clean shutdown");
+    Log::Get().Shutdown();
+
     return 0;
 }

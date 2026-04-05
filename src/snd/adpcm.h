@@ -2,7 +2,7 @@
 // Decodes SPU ADPCM blocks (16 bytes = 28 PCM samples) to s16 PCM
 #pragma once
 
-#include "core.h"
+#include "gen/common.h"
 #include <vector>
 
 namespace SpuAdpcm {

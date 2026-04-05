@@ -1,7 +1,7 @@
 // blockmgr.h = BlockManager reversed from PSX BLKMGR.CPP
 #pragma once
 
-#include "core.h"
+#include "common.h"
 #include "gen/manager.h"
 #include "gen/block.h"
 #include <vector>

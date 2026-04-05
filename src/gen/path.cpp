@@ -1,9 +1,6 @@
 // path.cpp - Path interpolation system reversed from PSX PATH.CPP
 // Original: C:\CHAN\GAME\SRC\GEN\PATH.CPP
 #include "gen/path.h"
-#include <cmath>
-#include <cstdlib>
-#include <cstring>
 
 #include "p3d/hash.h"
 
@@ -18,7 +15,7 @@ static void IntV3Normalize(s32* v) {
     f32 fx = (f32)v[0];
     f32 fy = (f32)v[1];
     f32 fz = (f32)v[2];
-    f32 mag = std::sqrt(fx * fx + fy * fy + fz * fz);
+    f32 mag = sqrt(fx * fx + fy * fy + fz * fz);
     if (mag > 0.0f) {
         v[0] = (s32)(fx / mag * 65536.0f);
         v[1] = (s32)(fy / mag * 65536.0f);
@@ -31,7 +28,7 @@ static s32 IntMag3(s32 x, s32 y, s32 z) {
     f32 fx = (f32)x;
     f32 fy = (f32)y;
     f32 fz = (f32)z;
-    return (s32)std::sqrt(fx * fx + fy * fy + fz * fz);
+    return (s32)sqrt(fx * fx + fy * fy + fz * fz);
 }
 
 // Helper: fixed-point divide (a << 16) / b
@@ -61,9 +58,9 @@ NodeAttribs& NodeAttribs::operator=(const NodeAttribs& other) {
 
     if (count > 0) {
         ids = new u8[count];
-        std::memcpy(ids, other.ids, count);
+        memcpy(ids, other.ids, count);
         values = new s32[count];
-        std::memcpy(values, other.values, count * sizeof(s32));
+        memcpy(values, other.values, count * sizeof(s32));
     } else {
         ids = nullptr;
         values = nullptr;

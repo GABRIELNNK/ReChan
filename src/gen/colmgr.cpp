@@ -8,7 +8,6 @@
 #include "ai/thing.h"
 #include "ai/humanoid.h"
 #include "p3d/p3dmath.h"
-#include <cstring>
 
 // COLMGR globals (PSX: gp-relative)
 Wall* g_wallPtrArray[64] = {};         // gp+2828

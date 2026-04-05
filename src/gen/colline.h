@@ -2,7 +2,7 @@
 // Original: C:\CHAN\GAME\SRC\GEN\COLLINE.CPP
 #pragma once
 
-#include "core.h"
+#include "common.h"
 
 // Line - implicit 2D line equation: a*x + b*z + c = 0
 // PSX: 12 bytes (3 x s32). Used as floor boundary lines and wall height lines.

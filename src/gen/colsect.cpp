@@ -4,7 +4,6 @@
 #include "gen/colwall.h"
 #include "gen/colfloor.h"
 #include "p3d/p3dmath.h"
-#include <cstring>
 
 // Global array of 12 collision sectors (PSX: gp+1156)
 CollisionSector g_collisionSectors[12];

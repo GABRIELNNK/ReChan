@@ -3,7 +3,7 @@
 // Singleton on PSX at 0x800DD69C (gp+3408)
 #pragma once
 
-#include "core.h"
+#include "common.h"
 #include "config.h"
 #include "gen/manager.h"
 
@@ -114,7 +114,7 @@ public:
     void SetControlMapArray(s16 padIndex, const u8* map);   // 0x8002E2F0
     void InternalReset() override;                        // 0x8002E550
 
-#if RC_FEATURE_PAD_KEYBOARD_EMULATION
+#if PAD_KEYBOARD_EMULATION
     // PC: read keyboard state from PlatformInput => PSX button bits => ServiceInput
     void UpdateFromKeyboard(PlatformInput* platform, u16 padIndex = 0);
 #endif

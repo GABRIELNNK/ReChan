@@ -2,7 +2,7 @@
 // Reversed from PSX C:\CHAN\GAME\SRC\AI\BEHAVIOU.CPP
 #pragma once
 
-#include "core.h"
+#include "gen/common.h"
 
 class Humanoid;
 

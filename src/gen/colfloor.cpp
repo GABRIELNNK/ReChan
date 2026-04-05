@@ -3,7 +3,6 @@
 #include "gen/colfloor.h"
 #include "gen/colline.h"
 #include "p3d/p3dmath.h"
-#include <cstring>
 
 // PSX: GetFloorHeight__C5FloorRC10tagLVector (COLFLOOR.CPP:119) 0x800926BC
 // Height = fixmul16(normalX, pos.x) + fixmul16(normalZ, pos.z) + heightC

@@ -1,7 +1,6 @@
 // levelmgr.cpp - LevelManager reversed from PSX LEVELMGR.CPP
 // PSX source: C:\CHAN\GAME\SRC\GEN\LEVELMGR.CPP
 #include "gen/levelmgr.h"
-#include <cstdlib>
 
 // PSX: gp+0xEE8
 LevelManager* g_levelManager = nullptr;
@@ -10,7 +9,7 @@ LevelManager* g_levelManager = nullptr;
 LevelManager::LevelManager() {
     MARKFUNCTION(0x80058AE4);
     g_levelManager = this;
-    RC_LOG("[LevelManager] Created");
+    LOG("[LevelManager] Created");
 }
 
 // PSX: _._12LevelManager (0x80058BD4)
@@ -62,7 +61,7 @@ void LevelManager::PurgeLevel() {
     DeletePermMemID(1);
     DeletePermMemID(2);
 
-    RC_LOG("[LevelManager] PurgeLevel");
+    LOG("[LevelManager] PurgeLevel");
 }
 
 // PSX: PurgePetal__12LevelManager (0x80058DB4)
@@ -70,7 +69,7 @@ void LevelManager::PurgePetal() {
     MARKFUNCTION(0x80058DB4);
     // PSX: lighter cleanup than PurgeLevel - clears petal section only
     // TODO: implement petal-specific purge when petal loading is wired
-    RC_LOG("[LevelManager] PurgePetal");
+    LOG("[LevelManager] PurgePetal");
 }
 
 // PSX: AddOriginal__12LevelManagerP13OriginalBasicl (0x80058F84)

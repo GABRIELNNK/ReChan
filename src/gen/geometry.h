@@ -3,7 +3,7 @@
 // pddiPrimBuffer objects for rendering through the pddi abstraction.
 #pragma once
 
-#include "core.h"
+#include "common.h"
 
 class pddiPrimBuffer;
 

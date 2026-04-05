@@ -17,6 +17,7 @@ project "rechan"
     targetdir "assets"
     objdir    ("%{wks.location}/obj/" .. outputdir .. "/%{prj.name}")
     debugdir  "assets"
+    multiprocessorcompile "on"
 
     files {
         "src/**.h",
@@ -33,19 +34,23 @@ project "rechan"
         "libp3d",
         "glad",
         "glfw",
-        "opengl32",
     }
 
     filter "system:windows"
         systemversion "latest"
         defines { "RC_PLATFORM_WINDOWS" }
+        links { "opengl32" }
+
+    filter "system:linux"
+        defines { "PLATFORM_LINUX" }
+        links { "GL", "X11", "pthread", "dl" }
 
     filter "configurations:Debug"
         runtime "Debug"
         symbols "on"
-        defines { "RC_DEBUG" }
+        defines { "DEBUG" }
 
     filter "configurations:Release"
+        defines { "NDEBUG" }
         runtime "Release"
         optimize "on"
-        defines { "RC_RELEASE" }

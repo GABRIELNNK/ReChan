@@ -107,9 +107,9 @@ void Thing::Draw() {
     u32 vi = 0;
 
     // Color: yellow for player (type 1), red for others
-    f32 cr = (thingType == AI::TT_PLAYER) ? 1.0f : 1.0f;
-    f32 cg = (thingType == AI::TT_PLAYER) ? 1.0f : 0.3f;
-    f32 cb = (thingType == AI::TT_PLAYER) ? 0.0f : 0.3f;
+    f32 cr = (thingType == AITypes::TT_PLAYER) ? 1.0f : 1.0f;
+    f32 cg = (thingType == AITypes::TT_PLAYER) ? 1.0f : 0.3f;
+    f32 cb = (thingType == AITypes::TT_PLAYER) ? 0.0f : 0.3f;
 
     // Helper macro to push a line
     #define PUSHLINE(ax,ay,az,bx,by,bz) \

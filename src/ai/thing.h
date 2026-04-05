@@ -2,7 +2,7 @@
 // Reversed from PSX C:\CHAN\GAME\INC\AI\THING.HPP / C:\CHAN\GAME\SRC\AI\THING.CPP
 #pragma once
 
-#include "core.h"
+#include "gen/common.h"
 #include "p3d/lvector.h"
 #include "gen/cclist.h"
 
@@ -13,8 +13,8 @@ struct Ticket;
 // Block number sentinel (unassigned)
 static constexpr u16 BLOCK_UNASSIGNED = 0x1000;
 
-// AI namespace enums matching PSX AI:: scope
-namespace AI {
+// PSX AI:: scope enums (namespace renamed to avoid class AI conflict)
+namespace AITypes {
 
 // ThingTypes - entity type IDs dispatched by AI::AddThingNoTagList
 // PSX: enum AI::ThingTypes (used for CharacterManager, etc.)
@@ -42,7 +42,7 @@ enum ThingTypes : u16 {
     TT_OBSTACLE_BASE   = 301,
 };
 
-} // namespace AI
+} // namespace AITypes
 
 // Thing flags (u32 flags bitmask)
 enum ThingFlags : u32 {

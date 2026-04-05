@@ -102,9 +102,10 @@ static const char* kSimpleFrag = R"(
 #version 450 core
 in vec2 vUV;
 uniform sampler2D uTex;
+uniform vec4 uTint;
 out vec4 FragColor;
 void main() {
-    FragColor = texture(uTex, vUV);
+    FragColor = texture(uTex, vUV) * uTint;
 }
 )";
 
@@ -278,8 +279,7 @@ void glShader::SetTexture(u32 param, pddiTexture* t) { tex = t; }
 void glShader::SetInt(u32, int) {}
 void glShader::SetFloat(u32, float) {}
 void glShader::SetColour(u32 param, pddiColour c) {
-    if (param == PDDI_SP::DIFFUSE)
-        diffuse = c;
+    diffuse = c;
 }
 
 void glShader::PreRender() {
@@ -287,6 +287,14 @@ void glShader::PreRender() {
     if (tex) {
         tex->Bind(0);
         glUniform1i(glGetUniformLocation(program, "uTex"), 0);
+    }
+    int tintLoc = glGetUniformLocation(program, "uTint");
+    if (tintLoc >= 0) {
+        // PSX GPU: output = min(255, (tex * color) >> 7)
+        // Divide RGB by 128 (PSX neutral), alpha by 255
+        glUniform4f(tintLoc,
+            diffuse.r / 128.0f, diffuse.g / 128.0f,
+            diffuse.b / 128.0f, diffuse.a / 255.0f);
     }
 }
 
@@ -411,7 +419,8 @@ void glContext::BeginFrame() {
 }
 
 void glContext::EndFrame() {
-
+    glDisable(GL_SCISSOR_TEST);
+    glFlush();
 }
 
 void glContext::SetClearColour(pddiColour c) { clearColour = c; }

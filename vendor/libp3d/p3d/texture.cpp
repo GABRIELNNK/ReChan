@@ -31,6 +31,9 @@ tTexture::~tTexture() {
 bool tTexture::Create(int width, int height, int bpp, int alphaDepth,
                       const void* rgba) {
     if (!p3d::device) return false;
+    if (texture) {
+        delete texture;
+    }
     texture = p3d::device->NewTexture();
     texture->SetData(width, height, bpp, alphaDepth, rgba);
     return true;

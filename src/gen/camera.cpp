@@ -9,8 +9,6 @@
 #include "p3d/context.h"     // p3d::input
 #include "pddi/pddidev.h"    // pddiInput key codes
 #include "gen/time.h"        // g_time (delta time)
-#include <cmath>
-#include <cstdlib>
 
 
 // PSX math helpers
@@ -327,7 +325,7 @@ void Camera::Update() {
     // Up hint - PSX uses p3dFillHeadingMatrix with twist-rotated up
     // If forward is nearly vertical, use X as up hint
     Vec3 up(0.0f, 1.0f, 0.0f);
-    if (std::fabs(fwd.x) < 0.001f && std::fabs(fwd.z) < 0.001f)
+    if (fabs(fwd.x) < 0.001f && fabs(fwd.z) < 0.001f)
         up.Set(1.0f, 0.0f, 0.0f);
 
     // Build view matrix: right/up/forward basis
@@ -371,7 +369,7 @@ void Camera::LookAtTarget(const LVector* target) {
     f32 hMag = rmMag2((f32)dx, (f32)dz);
 
     // Pitch: PSX rmATan2(-dy, hMag) stored at +380
-    f32 pitchRad = std::atan2(-(f32)dy, hMag);
+    f32 pitchRad = atan2(-(f32)dy, hMag);
     s32 pitchAngle = (s32)(pitchRad / PSX_ANGLE_TO_RAD);
 
     // Determine quadrants (PSX uses sign of dy and dz)
@@ -399,19 +397,19 @@ void Camera::LookAtTarget(const LVector* target) {
     f32 yawRad;
     switch (quadrantXZ) {
         case 0: // +x, +z
-            yawRad = std::atan2(-(f32)dx, (f32)dz);
+            yawRad = atan2(-(f32)dx, (f32)dz);
             camAngleY = (s32)(yawRad / PSX_ANGLE_TO_RAD) + 16384;
             break;
         case 1: // -x, +z
-            yawRad = std::atan2(-(f32)dx, (f32)dz);
+            yawRad = atan2(-(f32)dx, (f32)dz);
             camAngleY = (s32)(yawRad / PSX_ANGLE_TO_RAD) + 16384;
             break;
         case 2: // +x, -z
-            yawRad = std::atan2(-(f32)dz, -(f32)dx);
+            yawRad = atan2(-(f32)dz, -(f32)dx);
             camAngleY = (s32)(yawRad / PSX_ANGLE_TO_RAD) + 0x8000;
             break;
         case 3: // -x, -z
-            yawRad = std::atan2(-(f32)dz, -(f32)dx);
+            yawRad = atan2(-(f32)dz, -(f32)dx);
             camAngleY = (s32)(yawRad / PSX_ANGLE_TO_RAD) + 0x8000;
             break;
     }
@@ -519,12 +517,7 @@ void Camera::ShakeCamera(s32 frames) {
 void Camera::DebugCam() {
     MARKFUNCTION(0x80048718);
 
-#if RC_FEATURE_IMPROVED_DEBUG_CAM
-    // ------------------------------------------------------------------
-    // PC Improved Debug Camera - WASD + mouse-look (LMB drag)
-    // Replaces the PSX DebugCam with smooth float-precision controls.
-    // Matches the old FreeCamera behaviour that worked well on PC.
-    // ------------------------------------------------------------------
+#if IMPROVED_DEBUG_CAM
     PlatformInput* pi = p3d::input;
     if (!pi) return;
 
@@ -560,8 +553,8 @@ void Camera::DebugCam() {
     f32 spd = speed * dt;
 
     // Build forward/right vectors from yaw+pitch
-    f32 cy = std::cos(yaw), sy = std::sin(yaw);
-    f32 cp = std::cos(pitch), sp = std::sin(pitch);
+    f32 cy = cos(yaw), sy = sin(yaw);
+    f32 cp = cos(pitch), sp = sin(pitch);
 
     Vec3 fwd(sy * cp, sp, cy * cp);
     Vec3 right(cy, 0.0f, -sy);
@@ -588,11 +581,6 @@ void Camera::DebugCam() {
     prevPosition = position;
 
 #else
-    // ------------------------------------------------------------------
-    // Original PSX DebugCam (0x80048718) - faithful reversal
-    // Reads pad input, adjusts Euler angles (±511 per frame) and
-    // position (±50 per frame), rotated by camera orientation.
-    // ------------------------------------------------------------------
     if (!g_inputManager) return;
     u32 pad = g_inputManager->GetRawButtons(0);
 
@@ -626,7 +614,7 @@ void Camera::DebugCam() {
     curPos.x += static_cast<s32>(delta.x);
     curPos.y += static_cast<s32>(delta.y);
     curPos.z += static_cast<s32>(delta.z);
-#endif // RC_FEATURE_IMPROVED_DEBUG_CAM
+#endif // IMPROVED_DEBUG_CAM
 }
 
 
@@ -653,9 +641,9 @@ void Camera::FollowPath() {
     constexpr f32 heightOfs  = 2000.0f;
 
     // Desired camera position (behind player)
-    s32 goalX = ppos.x - (s32)(std::sin(rad) * behindDist);
+    s32 goalX = ppos.x - (s32)(sin(rad) * behindDist);
     s32 goalY = ppos.y + (s32)heightOfs;
-    s32 goalZ = ppos.z - (s32)(std::cos(rad) * behindDist);
+    s32 goalZ = ppos.z - (s32)(cos(rad) * behindDist);
 
     // Smooth follow via exponential lerp (per 30 fps tick, ~15% per frame)
     constexpr f32 followSpeed = 0.15f;

@@ -2,7 +2,7 @@
 // Original: C:\CHAN\GAME\SRC\GEN\COLWALL.CPP
 #pragma once
 
-#include "core.h"
+#include "common.h"
 #include "p3d/lvector.h"
 
 // Wall - collision wall segment (vertical or horizontal-aligned)

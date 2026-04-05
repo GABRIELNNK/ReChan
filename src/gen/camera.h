@@ -2,7 +2,7 @@
 // PSX Camera struct: 492 bytes, inherits DynamicThing (200 bytes base)
 #pragma once
 
-#include "core.h"
+#include "common.h"
 #include "p3d/lvector.h"
 #include "gen/cammgr.h" // CameraAnchor
 #include "p3d/camera.h" // tCamera

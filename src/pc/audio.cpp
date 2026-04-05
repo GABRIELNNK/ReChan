@@ -2,7 +2,6 @@
 // This is the ONLY file besides miniaudio_impl.cpp that includes miniaudio.h
 #include "pc/audio.h"
 #include "miniaudio.h"
-#include <cstring>
 #include <vector>
 #include <mutex>
 
@@ -53,7 +52,7 @@ static std::mutex g_musicMutex;
 // Audio callback - mixes all active voices + music into output
 static void audioCallback(ma_device* device, void* output, const void* /*input*/, ma_uint32 frameCount) {
     f32* out = (f32*)output;
-    std::memset(out, 0, frameCount * ENGINE_CHANNELS * sizeof(f32));
+    memset(out, 0, frameCount * ENGINE_CHANNELS * sizeof(f32));
 
     // Mix voices
     {
@@ -156,8 +155,8 @@ bool AudioEngine::Init() {
     if (g_initialized) return true;
 
     // Clear state before starting device (callback may fire immediately)
-    std::memset(g_samples, 0, sizeof(g_samples));
-    std::memset(g_voices, 0, sizeof(g_voices));
+    memset(g_samples, 0, sizeof(g_samples));
+    memset(g_voices, 0, sizeof(g_voices));
     g_nextSampleId = 1;
     g_nextVoiceId = 1;
     g_masterVolume = 1.0f;
@@ -172,7 +171,7 @@ bool AudioEngine::Init() {
     config.periods = 3;
 
     if (ma_device_init(nullptr, &config, &g_device) != MA_SUCCESS) {
-        RC_ERR("AudioEngine: failed to init device");
+        LOG("AudioEngine: failed to init device");
         return false;
     }
 
@@ -180,14 +179,14 @@ bool AudioEngine::Init() {
     g_deviceSampleRate = g_device.sampleRate;
 
     if (ma_device_start(&g_device) != MA_SUCCESS) {
-        RC_ERR("AudioEngine: failed to start device");
+        LOG("AudioEngine: failed to start device");
         ma_device_uninit(&g_device);
         return false;
     }
 
     g_initialized = true;
 
-    RC_LOG("AudioEngine: initialized (device %u Hz, %u ch, period %u frames)",
+    LOG("AudioEngine: initialized (device %u Hz, %u ch, period %u frames)",
         g_deviceSampleRate, ENGINE_CHANNELS, config.periodSizeInFrames);
     return true;
 }
@@ -202,7 +201,7 @@ void AudioEngine::Shutdown() {
     ma_device_uninit(&g_device);
     g_initialized = false;
 
-    RC_LOG("AudioEngine: shutdown");
+    LOG("AudioEngine: shutdown");
 }
 
 bool AudioEngine::IsInitialized() {
@@ -217,7 +216,7 @@ AudioSample AudioEngine::LoadSample(const s16* data, u32 numFrames, u32 sampleRa
         if (g_samples[i].data == nullptr) {
             u32 totalSamples = numFrames * channels;
             g_samples[i].data = new s16[totalSamples];
-            std::memcpy(g_samples[i].data, data, totalSamples * sizeof(s16));
+            memcpy(g_samples[i].data, data, totalSamples * sizeof(s16));
             g_samples[i].numFrames = numFrames;
             g_samples[i].sampleRate = sampleRate;
             g_samples[i].channels = channels;
@@ -225,7 +224,7 @@ AudioSample AudioEngine::LoadSample(const s16* data, u32 numFrames, u32 sampleRa
         }
     }
 
-    RC_ERR("AudioEngine: no free sample slots");
+    LOG("AudioEngine: no free sample slots");
     return AUDIO_SAMPLE_INVALID;
 }
 
@@ -264,7 +263,7 @@ AudioVoice AudioEngine::PlaySample(AudioSample sample, f32 volume, f32 pan, bool
         }
     }
 
-    RC_WARN("AudioEngine: no free voice slots");
+    LOG("AudioEngine: no free voice slots");
     return AUDIO_VOICE_INVALID;
 }
 
@@ -314,7 +313,7 @@ bool AudioEngine::PlayMusic(const char* path, f32 volume, bool loop) {
 
     ma_decoder_config decoderConfig = ma_decoder_config_init(ma_format_f32, ENGINE_CHANNELS, g_deviceSampleRate);
     if (ma_decoder_init_file(path, &decoderConfig, &g_musicDecoder) != MA_SUCCESS) {
-        RC_ERR("AudioEngine: failed to load music '%s'", path);
+        LOG("AudioEngine: failed to load music '%s'", path);
         return false;
     }
 
@@ -322,7 +321,7 @@ bool AudioEngine::PlayMusic(const char* path, f32 volume, bool loop) {
     g_musicLoop = loop;
     g_musicActive = true;
 
-    RC_LOG("AudioEngine: playing music '%s'", path);
+    LOG("AudioEngine: playing music '%s'", path);
     return true;
 }
 

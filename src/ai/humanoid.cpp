@@ -3,7 +3,6 @@
 #include "ai/humanoid.h"
 #include "ai/player.h"
 #include "p3d/p3dmath.h"
-#include <cmath>
 
 // PSX: __8HumanoidPC10tagLVectorUs (HUMANOID.CPP:350)
 Humanoid::Humanoid(const LVector* initialPos, u16 type)
@@ -314,7 +313,7 @@ void Humanoid::FacePoint(const LVector& point, s32 immediate) {
 
     // Compute target angle using atan2(dx, dz) in PSX binary angle units (0-65535)
     // PSX convention: 0 = +Z, 0x4000 = +X, 0x8000 = -Z, 0xC000 = -X
-    f32 rad = std::atan2((f32)dx, (f32)dz);
+    f32 rad = atan2((f32)dx, (f32)dz);
     s32 targetAngle = ((s32)(rad * P3D_RAD_TO_ANGLE)) & 0xFFFF;
 
     if (immediate == 0) {

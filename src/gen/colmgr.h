@@ -2,7 +2,7 @@
 // Original: C:\CHAN\GAME\SRC\GEN\COLMGR.CPP
 #pragma once
 
-#include "core.h"
+#include "common.h"
 
 struct Wall;
 struct ccList;

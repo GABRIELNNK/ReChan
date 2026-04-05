@@ -2,7 +2,7 @@
 // InputManager / Control / Button implementations
 #include "gen/control.h"
 
-#if RC_FEATURE_PAD_KEYBOARD_EMULATION
+#if PAD_KEYBOARD_EMULATION
 #include "p3d/input.h"    // PlatformInput (PC keyboard/mouse)
 #include "pddi/pddidev.h"  // pddiInput key constants
 #endif
@@ -170,7 +170,7 @@ void InputManager::InternalReset() {
 
 // PC keyboard -> PSX pad emulation (behind config macro)
 
-#if RC_FEATURE_PAD_KEYBOARD_EMULATION
+#if PAD_KEYBOARD_EMULATION
 
 // Keyboard binding: maps a PC key code to a PSX pad button bit
 struct KeyPadBinding {
@@ -223,4 +223,4 @@ void InputManager::UpdateFromKeyboard(PlatformInput* platform, u16 padIndex) {
     ServiceInput(buttons, padIndex);
 }
 
-#endif // RC_FEATURE_PAD_KEYBOARD_EMULATION
+#endif // PAD_KEYBOARD_EMULATION

@@ -4,7 +4,6 @@
 #include "gen/game.h"
 #include "gen/control.h"
 #include "p3d/p3dmath.h"
-#include <cmath>
 
 // Command bit positions (matching PSX Behaviour output → commandBits)
 // PSX _Stand dispatches via ReturnMostSignificant32BitNumber(commandBits):
@@ -23,7 +22,7 @@ Player* Player::s_player = nullptr;
 
 // PSX: __6PlayerPC10tagLVector (PLAYER.CPP:1014)
 Player::Player(const LVector* initialPos)
-    : Humanoid(initialPos, AI::TT_PLAYER) {
+    : Humanoid(initialPos, AITypes::TT_PLAYER) {
     MARKFUNCTION(0x8002FA80);
 
     initialActiveRadius = 200;
@@ -204,8 +203,12 @@ void Player::OnCheckpoint() {
     homePos = pos;
 }
 
-void Player::SetLivesLeft(s32 /*lives*/) {
+void Player::SetLivesLeft(s32 lives) {
     MARKFUNCTION(0x80033D9C);
+    if (lives < 0) {
+        lives = 0;
+    }
+    livesLeft = lives;
 }
 
 void Player::SignalEnemyDead(Humanoid* /*enemy*/) {
@@ -253,7 +256,7 @@ void Player::ReadPlayerInput() {
     if (dx != 0 || dz != 0) {
         commandBits |= CB_RUN;
         // atan2(dx, dz) → PSX binary angle (0=+Z, 0x4000=+X)
-        f32 rad = std::atan2((f32)dx, (f32)dz);
+        f32 rad = atan2((f32)dx, (f32)dz);
         faceAngle = ((s32)(rad * P3D_RAD_TO_ANGLE)) & 0xFFFF;
     }
 
@@ -309,9 +312,9 @@ void Player::_Jump() {
         FaceAngleY(faceAngle, 1);
         f32 rad = (f32)orientation.y * P3D_ANGLE_TO_RAD;
         SVector dir;
-        dir.x = (s16)(std::sin(rad) * 4096.0f);
+        dir.x = (s16)(sin(rad) * 4096.0f);
         dir.y = 0;
-        dir.z = (s16)(std::cos(rad) * 4096.0f);
+        dir.z = (s16)(cos(rad) * 4096.0f);
         dir.pad = 0;
         AddForce(PLAYER_AIR_FORCE, &dir);
     }
@@ -332,9 +335,9 @@ void Player::_Fall() {
         FaceAngleY(faceAngle, 1);
         f32 rad = (f32)orientation.y * P3D_ANGLE_TO_RAD;
         SVector dir;
-        dir.x = (s16)(std::sin(rad) * 4096.0f);
+        dir.x = (s16)(sin(rad) * 4096.0f);
         dir.y = 0;
-        dir.z = (s16)(std::cos(rad) * 4096.0f);
+        dir.z = (s16)(cos(rad) * 4096.0f);
         dir.pad = 0;
         AddForce(PLAYER_AIR_FORCE, &dir);
     }
@@ -375,9 +378,9 @@ void Player::_Run() {
     // PSX binary angles: 0=+Z, 0x4000=+X, 0x8000=-Z, 0xC000=-X
     f32 rad = (f32)orientation.y * P3D_ANGLE_TO_RAD;
     SVector dir;
-    dir.x = (s16)(std::sin(rad) * 4096.0f);
+    dir.x = (s16)(sin(rad) * 4096.0f);
     dir.y = 0;
-    dir.z = (s16)(std::cos(rad) * 4096.0f);
+    dir.z = (s16)(cos(rad) * 4096.0f);
     dir.pad = 0;
 
     // Apply locomotion force (PSX: AddForce with gp+392 accumulated magnitude)

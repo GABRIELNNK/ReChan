@@ -2,7 +2,7 @@
 // Original: C:\CHAN\GAME\SRC\GEN\COLFLOOR.CPP
 #pragma once
 
-#include "core.h"
+#include "common.h"
 #include "gen/colline.h"
 #include "p3d/lvector.h"
 

@@ -1,8 +1,10 @@
-// core.h
+// core.h - shared types and platform detection
 #pragma once
 
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <cmath>
 
 // Types
@@ -18,24 +20,8 @@ using f32 = float;
 using f64 = double;
 
 #if defined(_WIN32) || defined(_WIN64)
-#ifndef RC_PLATFORM_WINDOWS
-#define RC_PLATFORM_WINDOWS
+#define PLATFORM_WINDOWS
 #endif
-#endif
-
-// Debug
-#ifdef RC_DEBUG
-#define RC_LOG(fmt, ...)   std::printf(fmt "\n", ##__VA_ARGS__)
-#define RC_ERR(fmt, ...)   std::fprintf(stderr, "[ERR] " fmt "\n", ##__VA_ARGS__)
-#define RC_WARN(fmt, ...)  std::fprintf(stderr, "[WARN] " fmt "\n", ##__VA_ARGS__)
-#else
-#define RC_LOG(fmt, ...)   ((void)0)
-#define RC_ERR(fmt, ...)   ((void)0)
-#define RC_WARN(fmt, ...)  ((void)0)
-#endif
-
-// IDA address marker (no-op)
-#define MARKFUNCTION(addr) ((void)0)
 
 // PSX fixed-point (20.12)
 struct Fixed {

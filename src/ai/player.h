@@ -30,6 +30,10 @@ public:
     // PSX +688 (ptr): sub-object vtable
     void* subVtable = nullptr;
 
+    // PSX +692 (s32): current lives left
+    s32 livesLeft = 4;
+    static constexpr s32 kMaxLives = 4;
+
     // PSX +696 (s32): player flags (bit 2 = combat-ready)
     s32 playerFlags = 0;
 
@@ -140,6 +144,8 @@ public:
 
     // PSX: SetLivesLeft__6Playerl (PLAYER.CPP:4457)
     void SetLivesLeft(s32 lives);
+
+    s32 GetLivesLeft() const { return livesLeft; }
 
     // PSX: SignalEnemyGetUp__6Player (PLAYER.CPP:1382)
     void SignalEnemyGetUp();

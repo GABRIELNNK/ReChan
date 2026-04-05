@@ -1,13 +1,12 @@
 // world.h - Level world: loads BLK blocks from an LCF stream
 #pragma once
 
-#include "core.h"
+#include "common.h"
 #include "gen/manager.h"
 #include "gen/block.h"
 #include "gen/blockmgr.h"
 #include <vector>
 #include <string>
-#include <cstring>
 
 // PSX VRAM simulation (1024x512 16-bit words), heap-allocated
 struct PsxVRAM {
@@ -21,7 +20,7 @@ struct PsxVRAM {
     u16  Get(int x, int y) const { return data[y * 1024 + x]; }
     void Set(int x, int y, u16 v) { data[y * 1024 + x] = v; }
 
-    void Clear() { std::memset(data, 0, 1024 * 512 * sizeof(u16)); }
+    void Clear() { memset(data, 0, 1024 * 512 * sizeof(u16)); }
 
     void Upload(s16 x, s16 y, s16 w, s16 h, const u8* raw) {
         for (int row = 0; row < h; row++) {
@@ -45,8 +44,22 @@ public:
     ~World() override;
 
     bool Load(const std::string& lcfPath);
+    bool LoadLevelIndex(u32 levelIndex);
     void Render(const LVector* camPos);
     void Unload();
+    void ResetLevel();
+
+    u32 GetCurrentLevelIndex() const { return currentLevelIndex; }
+    u32 GetTargetLevelIndex() const { return targetLevelIndex; }
+    u32 GetCurrentPetalIndex() const { return currentPetalIndex; }
+    u32 GetTargetPetalIndex() const { return targetPetalIndex; }
+
+    void SetTargetLevelIndex(u32 levelIndex) { targetLevelIndex = levelIndex; }
+    void SetTargetPetalIndex(u32 petalIndex) { targetPetalIndex = petalIndex; }
+    void SetTargetLevelPetal(u32 levelIndex, u32 petalIndex) {
+        targetLevelIndex = levelIndex;
+        targetPetalIndex = petalIndex;
+    }
 
     u32 GetBlockCount() const { return blockMgr.GetNumBlocks(); }
     BlockManager* GetBlockManager() { return &blockMgr; }
@@ -59,6 +72,13 @@ private:
     u32 vramHandle = 0;
     std::vector<u8> streamData; // LCF file data (kept alive for block pointers)
     LVector levelMin = {}, levelMax = {};
+
+    // PSX world progression fields (offsets +60,+64,+68,+72 in original layout).
+    // They represent current and queued level/petal indices used by game states.
+    u32 currentLevelIndex = 6;
+    u32 targetLevelIndex = 6;
+    u32 currentPetalIndex = 0;
+    u32 targetPetalIndex = 0;
 
     void LoadTPGTextures(const u8* lcfData, u32 lcfSize);
 

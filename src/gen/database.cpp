@@ -1,8 +1,6 @@
 // database.cpp - WDB database system reversed from PSX DATABASE.CPP
 // Original: C:\CHAN\GAME\SRC\GEN\DATABASE.CPP
 #include "gen/database.h"
-#include <cstdlib>
-#include <cstring>
 
 // PSX global: gp+3460
 Database* g_database = nullptr;
@@ -96,7 +94,7 @@ u32* DBRoot::Process(u32* data, const u32* end) {
             u32 len = dataSize;
             if (len > 0) {
                 char* str = new char[len + 1];
-                std::memcpy(str, data, len);
+                memcpy(str, data, len);
                 str[len] = '\0';
                 SetName(str, 0);
                 delete[] str;
@@ -112,7 +110,7 @@ u32* DBRoot::Process(u32* data, const u32* end) {
                 u32 len = dataSize;
                 if (len > 0) {
                     char* str = new char[len + 1];
-                    std::memcpy(str, data, len);
+                    memcpy(str, data, len);
                     str[len] = '\0';
                     a.strValue = str;
                 }
@@ -175,9 +173,9 @@ void DBRoot::AddAttribString(u32 index, u32 id, const char* str) {
         attribs[index].id = static_cast<u16>(id);
         attribs[index].type = 0;
         if (str) {
-            u32 len = static_cast<u32>(std::strlen(str));
+            u32 len = static_cast<u32>(strlen(str));
             char* copy = new char[len + 1];
-            std::memcpy(copy, str, len + 1);
+            memcpy(copy, str, len + 1);
             attribs[index].strValue = copy;
         }
     }
@@ -271,9 +269,9 @@ void DBMesh::SetFileName(const char* name) {
     if (fileName) {
         delete[] fileName;
     }
-    u32 len = static_cast<u32>(std::strlen(name));
+    u32 len = static_cast<u32>(strlen(name));
     fileName = new char[len + 1];
-    std::memcpy(fileName, name, len + 1);
+    memcpy(fileName, name, len + 1);
 }
 
 // DBPath
@@ -577,7 +575,7 @@ DBSphere* Database::FindSphere(const char* name, DBSphere* after) {
     ccMinNode* start = after ? after->next : sphereList.GetFirst();
     for (ccMinNode* n = start; n; n = n->next) {
         DBSphere* s = static_cast<DBSphere*>(n);
-        if (std::strcmp(s->GetName(), name) == 0) {
+        if (strcmp(s->GetName(), name) == 0) {
             return s;
         }
     }
@@ -595,7 +593,7 @@ DBLine* Database::FindLine(const char* name) {
     MARKFUNCTION(0x800391EC);
     for (ccMinNode* n = lineList.GetFirst(); n; n = n->next) {
         DBLine* obj = static_cast<DBLine*>(n);
-        if (std::strcmp(obj->GetName(), name) == 0) {
+        if (strcmp(obj->GetName(), name) == 0) {
             return obj;
         }
     }
@@ -607,7 +605,7 @@ DBPath* Database::FindPath(const char* name) {
     MARKFUNCTION(0x80039210);
     for (ccMinNode* n = pathList.GetFirst(); n; n = n->next) {
         DBPath* obj = static_cast<DBPath*>(n);
-        if (std::strcmp(obj->GetName(), name) == 0) {
+        if (strcmp(obj->GetName(), name) == 0) {
             return obj;
         }
     }
@@ -619,7 +617,7 @@ DBPoint* Database::FindPoint(const char* name) {
     MARKFUNCTION(0x80039234);
     for (ccMinNode* n = pointList.GetFirst(); n; n = n->next) {
         DBPoint* obj = static_cast<DBPoint*>(n);
-        if (std::strcmp(obj->GetName(), name) == 0) {
+        if (strcmp(obj->GetName(), name) == 0) {
             return obj;
         }
     }

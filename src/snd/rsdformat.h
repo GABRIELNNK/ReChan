@@ -3,10 +3,9 @@
 // WAX = sound effects bank, FAG = streaming music, CLP = ambient clips
 #pragma once
 
-#include "core.h"
+#include "gen/common.h"
 #include "snd/adpcm.h"
 #include <vector>
-#include <cstring>
 
 namespace RsdFormat {
 
@@ -62,7 +61,7 @@ inline WaxBank LoadWax(const u8* fileData, u32 fileSize) {
             // Sample table: array of {spuAddr, params, flags, spuAddr2}
             u32 numSamples = dataSize / 16;
             bank.sampleDescs.resize(numSamples);
-            std::memcpy(bank.sampleDescs.data(), data, numSamples * 16);
+            memcpy(bank.sampleDescs.data(), data, numSamples * 16);
         }
 
         pos += 8 + dataSize;
@@ -164,7 +163,7 @@ inline FagTrack LoadFag(const u8* fileData, u32 fileSize) {
         for (u32 b = 0; b < CHUNK_BLOCKS; b++) {
             s16 blockOut[28];
             SpuAdpcm::DecodeBlock(chunkBase + b * 16, blockOut, prev0, prev1);
-            std::memcpy(&chunkPcm[c][b * 28], blockOut, 28 * sizeof(s16));
+            memcpy(&chunkPcm[c][b * 28], blockOut, 28 * sizeof(s16));
         }
     }
 

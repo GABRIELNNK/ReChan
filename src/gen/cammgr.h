@@ -3,7 +3,7 @@
 // CameraManager loads paths, CameraAnchor owns them, Camera references the anchor.
 #pragma once
 
-#include "core.h"
+#include "common.h"
 #include "p3d/lvector.h"
 #include "gen/manager.h"  // Manager -> ccNode, ccMinNode, ccMinList
 #include "gen/database.h"    // DBPath, DBPoint, DBRoot

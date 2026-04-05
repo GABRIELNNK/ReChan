@@ -2,7 +2,7 @@
 // Original: C:\CHAN\GAME\INC\GEN\PATH.HPP
 #pragma once
 
-#include "core.h"
+#include "common.h"
 #include "p3d/lvector.h"
 #include "gen/cclist.h"
 #include "gen/database.h"

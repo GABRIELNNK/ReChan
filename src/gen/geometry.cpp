@@ -3,7 +3,6 @@
 #include "p3d/context.h"
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
-#include <cstring>
 #include <vector>
 
 // BLK layout:

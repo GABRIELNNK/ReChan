@@ -7,11 +7,10 @@
 #include "p3d/context.h"
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
-#include <cstring>
 
 Block::Block() {
     MARKFUNCTION(0x80052B64); // __5Block
-    std::memset(this, 0, sizeof(Block));
+    memset(this, 0, sizeof(Block));
 }
 
 Block::~Block() {

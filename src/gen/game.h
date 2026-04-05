@@ -4,7 +4,7 @@
 // and two HandlerSets for per-frame think and draw callbacks.
 #pragma once
 
-#include "core.h"
+#include "common.h"
 #include "gen/manager.h"
 #include "gen/handler.h"
 #include "gen/camera.h"
@@ -13,6 +13,9 @@
 
 // Forward declarations - managers created in InternalOpen
 class World;
+class TitleScreen;
+class GameOverScreen;
+class tTexture;
 
 enum class GameState : s32 {
     Null = 0,
@@ -85,6 +88,12 @@ public:
     HandlerSet& GetHandlerSet2() { return handlerSet2; }
     s32 GetControlVal(s32 pad) const { return controlVal[pad]; }
 
+    // PSX handler callbacks (registered in Game constructor)
+    // On PSX these are free functions; public so MenuRender/MenuDraw can call them.
+    static void BeginFrameHandler(Handler* h);
+    static void DrawEverythingHandlerCB(Handler* h);
+    static void EndFrameHandler(Handler* h);
+
 private:
     using StateFunc = bool(*)(Game*);
 
@@ -98,9 +107,50 @@ private:
     s32 controlVal[2] = {};                     // +128: per-pad button state
     s32 field136 = 0;                           // +136
 
-    // PC: non-PSX members for current rendering setup
+    // PC: Camera/tView needed until CameraManager + oxScreenManager reversed
     Camera gameCamera;
     tView view;
+
+    // PSX globals stored per-game instance
+    s32 introTimer = 0;                         // frame counter for intro screens
+    s32 introPhase = 0;                         // sub-phase within intro state
+    tTexture* introTexture = nullptr;           // current intro screen texture (PSX: gp+24)
+    TitleScreen* titleScreen = nullptr;         // PSX: gp+60
+    GameOverScreen* gameOverScreen = nullptr;    // PSX: gp+64
+    s32 titleIdleTimer = 0;                     // PSX: gp+128
+    s32 titleIdleBase = 0;                      // PSX: gp+124
+    s32 firstBoot = 1;                          // PSX: gp+80
+
+    // PC: per-frame fade state (PSX uses blocking inline loops)
+    s32 titleFadeType = 0;
+    s32 gameOverFadeType = 0;
+
+    // PSX: PlayMovie__4GamePcii (GAME.CPP:3309, 0x8002BBF0)
+    void PlayMovie(const char* name, s32 skippable, s32 unloadLevel);
+
+    // PSX: FadeBegin__4Game (GAME.CPP:3869, 0x8002C9A0)
+    static void FadeBegin();
+    // PSX: FadeUpdate__4Game (GAME.CPP:3879, 0x8002C9BC)
+    // Returns true (1) if fade is still in progress, false (0) when complete.
+    static s32 FadeUpdate();
+    // PSX: FadeEnd__4Game (GAME.CPP:3875, 0x8002C9B4)
+    static void FadeEnd();
+    // PSX: FadeRender__4Game (GAME.CPP:3893, 0x8002C9F8)
+    // Draws a fullscreen black quad with alpha=fadeCounter.
+    static void FadeRender();
+
+    // PSX: fade globals (gp+3388, gp+3392)
+    static u8 s_fadeStep;     // gp+3388: step per frame (init=17)
+    static u8 s_fadeCounter;  // gp+3392: accumulated alpha (0-255)
+
+    // PSX: FreeXconFE__4Game (GAME.CPP:3812, 0x8002C7A4)
+    static void FreeXconFE();
+    // PSX: InitXconFSImage__4Game (GAME.CPP:3826, 0x8002C838)
+    static void InitXconFSImage();
+    // PSX: FreeXconFSImage__4Game (GAME.CPP:3859, 0x8002C998)
+    static void FreeXconFSImage();
+    // PSX: LoadXconFE__4Game (GAME.CPP:3789, 0x8002C648)
+    static void LoadXconFE();
 
     static const StateFunc sStateTable[static_cast<int>(GameState::COUNT)];
 
@@ -132,11 +182,6 @@ private:
     static bool gsEndGameState(Game* game);
     static bool gsEndGameLoopState(Game* game);
     static bool gsEndState(Game* game);
-
-    // PSX handler callbacks (registered in Game constructor)
-    static void BeginFrameHandler(Handler* h);
-    static void DrawEverythingHandlerCB(Handler* h);
-    static void EndFrameHandler(Handler* h);
 };
 
 // Global game pointer (PSX: accessible through gp-relative)

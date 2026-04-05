@@ -34,7 +34,7 @@ void BlockManager::LoadBlocksFunc(const std::vector<DBVolume*>& volumes) {
         blocks[i].Init(volumes[i]);
     }
 
-    RC_LOG("[BlockManager] Initialized %u blocks from WDB volumes", totalBlocks);
+    LOG("[BlockManager] Initialized %u blocks from WDB volumes", totalBlocks);
 }
 
 // InternalOpen__12BlockManager (BLKMGR.CPP:258)
@@ -75,7 +75,7 @@ void BlockManager::LoadBlocks(u32 blockNum,
 
     loadingState = 0x1000; // mark loading complete
 
-    RC_LOG("[BlockManager] Parsed %u BLK entries", blkCount);
+    LOG("[BlockManager] Parsed %u BLK entries", blkCount);
 }
 
 // GetBlock__12BlockManagerUl (BLKMGR.CPP:1374)

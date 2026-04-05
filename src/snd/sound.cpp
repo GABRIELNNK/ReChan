@@ -2,8 +2,6 @@
 // PSX source: C:\CHAN\GAME\SRC\SND\SOUND.CPP
 #include "snd/sound.h"
 #include "snd/rsdformat.h"
-#include <cstdio>
-#include <cstring>
 
 // PSX: gp-relative global
 Sound* g_sound = nullptr;
@@ -15,21 +13,21 @@ static constexpr u32 PSX_MUSIC_RATE = 22050;
 
 // Helper: read entire file into memory
 static u8* ReadFileBytes(const char* path, u32& outSize) {
-    FILE* f = std::fopen(path, "rb");
+    FILE* f = FileOpen(path, "rb");
     if (!f) return nullptr;
-    std::fseek(f, 0, SEEK_END);
-    outSize = (u32)std::ftell(f);
-    std::fseek(f, 0, SEEK_SET);
+    fseek(f, 0, SEEK_END);
+    outSize = (u32)ftell(f);
+    fseek(f, 0, SEEK_SET);
     u8* data = new u8[outSize];
-    std::fread(data, 1, outSize, f);
-    std::fclose(f);
+    fread(data, 1, outSize, f);
+    fclose(f);
     return data;
 }
 
 // PSX: __5Sound (SOUND.CPP, 0x80059794)
 Sound::Sound() {
     MARKFUNCTION(0x80059794);
-    std::memset(banks, 0, sizeof(banks));
+    memset(banks, 0, sizeof(banks));
 }
 
 // PSX: _._5Sound (SOUND.CPP, 0x800597E8)
@@ -62,7 +60,7 @@ void Sound::SetupSound() {
     u32 totalSamples = 0;
     char path[256];
     for (u32 i = 0; i < 16; i++) {
-        std::snprintf(path, sizeof(path), "SOUND/FX/RS%04u.WAX", i);
+        snprintf(path, sizeof(path), "SOUND/FX/RS%04u.WAX", i);
         u32 fileSize = 0;
         u8* fileData = ReadFileBytes(path, fileSize);
         if (!fileData) continue;
@@ -86,11 +84,11 @@ void Sound::SetupSound() {
 
         if (count > 0) {
             numWaxBanks++;
-            RC_LOG("Sound: loaded WAX bank %u (%u samples)", i, count);
+            LOG("Sound: loaded WAX bank %u (%u samples)", i, count);
         }
     }
 
-    RC_LOG("Sound: loaded %u WAX banks (%u total samples)", numWaxBanks, totalSamples);
+    LOG("Sound: loaded %u WAX banks (%u total samples)", numWaxBanks, totalSamples);
 }
 
 // PSX: CleanupSound__5Sound (0x800599B0) - unloads sound data
@@ -101,7 +99,7 @@ void Sound::CleanupSound() {
     AudioEngine::StopAllVoices();
     AudioEngine::UnloadAllSamples();
 
-    std::memset(banks, 0, sizeof(banks));
+    memset(banks, 0, sizeof(banks));
     musicSample = AUDIO_SAMPLE_INVALID;
     musicVoice = AUDIO_VOICE_INVALID;
     numWaxBanks = 0;
@@ -126,7 +124,7 @@ bool Sound::PlayMusicTrack(const char* fagPath, f32 volume) {
     u32 fileSize = 0;
     u8* fileData = ReadFileBytes(fagPath, fileSize);
     if (!fileData) {
-        RC_ERR("Sound: failed to load music '%s'", fagPath);
+        LOG("Sound: failed to load music '%s'", fagPath);
         return false;
     }
 
@@ -134,7 +132,7 @@ bool Sound::PlayMusicTrack(const char* fagPath, f32 volume) {
     delete[] fileData;
 
     if (track.pcmData.empty()) {
-        RC_ERR("Sound: failed to decode music '%s'", fagPath);
+        LOG("Sound: failed to decode music '%s'", fagPath);
         return false;
     }
 
@@ -145,7 +143,7 @@ bool Sound::PlayMusicTrack(const char* fagPath, f32 volume) {
     musicSample = AudioEngine::LoadSample(
         track.pcmData.data(), track.numFrames, PSX_MUSIC_RATE, track.channels);
     if (musicSample == AUDIO_SAMPLE_INVALID) {
-        RC_ERR("Sound: failed to load music sample");
+        LOG("Sound: failed to load music sample");
         return false;
     }
 
@@ -153,7 +151,7 @@ bool Sound::PlayMusicTrack(const char* fagPath, f32 volume) {
     musicVoice = AudioEngine::PlaySample(musicSample, volume, 0.0f, true);
     musicPlaying = (musicVoice != AUDIO_VOICE_INVALID);
 
-    RC_LOG("Sound: playing music '%s' (%u frames, %u ch @ %u Hz, sample=%u, voice=%u)",
+    LOG("Sound: playing music '%s' (%u frames, %u ch @ %u Hz, sample=%u, voice=%u)",
         fagPath, track.numFrames, track.channels, PSX_MUSIC_RATE, musicSample, musicVoice);
     return musicPlaying;
 }
