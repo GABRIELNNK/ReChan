@@ -14,27 +14,25 @@ struct DBVolume;
 // AI (116 bytes on PSX) - inherits Manager
 // PSX layout:
 //   +0:  Manager base (28 bytes)
-//   +28: thingList (ccList, 12 bytes)   - all Things (general list)
-//   +40: activeList (ccList, 12 bytes)  - currently active Things
-//   +52: moveList (ccList, 12 bytes)    - Things queued for movement
-//   +64: killList (ccList, 12 bytes)    - Things queued for removal
-//   +76: activeZoneList (ccList, 12 bytes) - DBVolume active zones
-//   +88: field88..116 (various)
+//   +28: thingList (ccList, 12 bytes)   - staging for deletion
+//   +40: activeZoneList (ccList, 12 bytes) - ActiveZone objects
+//   +52: humanoidList (ccList, 12 bytes) - humanoids (floor, env collisions, Think)
+//   +64: pickupList (ccList, 12 bytes)   - active pickups
+//   +76: inactivePickupList (ccList, 12 bytes) - deactivated pickups staging
+//   +88: moveList (ccList, 12 bytes)     - extra movement list (privMoveList first)
+//   +100: behaviourList (ccList, 12 bytes) - BehaviourAttrib entries
+//   +112: populateFlags (s32)
 class AI : public Manager {
 public:
-    ccList thingList;       // +28: all Things
-    ccList activeList;      // +40: active Things
-    ccList moveList;        // +52: movement queue
-    ccList killList;        // +64: kill queue
-    ccList activeZoneList;  // +76: active zones (DBVolume list)
+    ccList thingList;           // +28: staging for deletion
+    ccList activeZoneList;      // +40: ActiveZone objects
+    ccList humanoidList;        // +52: humanoids
+    ccList pickupList;          // +64: active pickups
+    ccList inactivePickupList;  // +76: deactivated pickups
+    ccList moveList;            // +88: movement list
+    ccList behaviourList;       // +100: BehaviourAttrib entries
 
-    s32 field88 = 0;        // +88
-    s32 field92 = 0;        // +92
-    s32 field96 = 0;        // +96
-    s32 populateFlags = 0;  // +100
-    s32 field104 = 0;       // +104
-    s32 field108 = 0;       // +108
-    s32 field112 = 0;       // +112
+    s32 populateFlags = 0;  // +112
 
     // PSX: __2AI (AI.CPP:297, 0x80054180)
     AI();

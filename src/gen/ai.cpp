@@ -5,35 +5,63 @@
 #include "gen/database.h"
 #include "gen/charmgr.h"
 #include "gen/blockmgr.h"
+#include "gen/colmgr.h"
+#include "gen/camera.h"
+#include "gen/path.h"
+#include "p3d/p3dmath.h"
 #include "ai/player.h"
 #include "ai/humanoid.h"
+#include "ai/activezn.h"
 
 extern CharacterManager* g_characterManager;
 
 AI* g_ai = nullptr;
 
+// PSX: KillThingsInList__FR6ccListl (AI.CPP:1252 helper)
+// For each Thing in list, if blockNum < param, call Kill().
+// When param=0, kills nothing (unsigned comparison).
+static void KillThingsInList(ccList& list, s32 param) {
+    for (ccMinNode* n = list.head; n; n = n->next) {
+        Thing* thing = static_cast<Thing*>(n);
+        if (thing->blockNum < (u32)param) {
+            thing->Kill();
+        }
+    }
+}
+
+// PSX: PopulateBlockHelper__FR6ccList (AI.CPP:1958 helper)
+// For each Thing in list, call Activate().
+static void PopulateBlockHelper(ccList& list) {
+    for (ccMinNode* n = list.head; n; n = n->next) {
+        Thing* thing = static_cast<Thing*>(n);
+        thing->Activate();
+    }
+}
+
+// PSX: UnpopulateBlockHelper__FR6ccList (AI.CPP:1979 helper)
+// For each Thing in list, call Deactivate().
+static void UnpopulateBlockHelper(ccList& list) {
+    for (ccMinNode* n = list.head; n; n = n->next) {
+        Thing* thing = static_cast<Thing*>(n);
+        thing->Deactivate();
+    }
+}
+
 // PSX: __2AI (AI.CPP:297, 0x80054180)
 AI::AI() {
     MARKFUNCTION(0x80054180);
-    field88 = 0;
-    field92 = 0;
-    field96 = 0;
-    populateFlags = 0;
-    field104 = 0;
-    field108 = 0;
-    field112 = 0;
 }
 
 // PSX: _._2AI (AI.CPP:317, 0x800542C4)
 AI::~AI() {
     MARKFUNCTION(0x800542C4);
-    // Detach all nodes from lists without deleting - Things may be shared
-    // across multiple AI lists. InternalClose/KillThings handles actual cleanup.
     while (thingList.RemHead()) {}
-    while (activeList.RemHead()) {}
-    while (moveList.RemHead()) {}
-    while (killList.RemHead()) {}
     while (activeZoneList.RemHead()) {}
+    while (humanoidList.RemHead()) {}
+    while (pickupList.RemHead()) {}
+    while (inactivePickupList.RemHead()) {}
+    while (moveList.RemHead()) {}
+    while (behaviourList.RemHead()) {}
 }
 
 // PSX: InternalOpen__2AI (AI.CPP:322, 0x8005436C)
@@ -44,21 +72,21 @@ void AI::InternalOpen() {
 // PSX: InternalClose__2AI (AI.CPP:327, 0x8005438C)
 void AI::InternalClose() {
     MARKFUNCTION(0x8005438C);
-    // PSX: kills all things, clears lists
     KillThings(0);
 }
 
 // PSX: InternalReset__2AI (AI.CPP:874, 0x800553A4)
 void AI::InternalReset() {
     MARKFUNCTION(0x800553A4);
-    KillThings(0);
-    populateFlags = 0;
+    populateFlags = 1;
+    UnPopulate(0);
 }
 
 // PSX: AddActiveZone__2AIP8DBVolume (AI.CPP:338, 0x800543AC)
 void AI::AddActiveZone(DBVolume* vol) {
     MARKFUNCTION(0x800543AC);
-    // TODO: Add DBVolume to activeZoneList
+    ActiveZone* az = new ActiveZone(vol);
+    activeZoneList.AddNodeTail(az);
 }
 
 // PSX: AddThingNoTagList (AI.CPP:365, 0x80054404)
@@ -71,14 +99,12 @@ void AI::AddThingNoTagList(const char* name, u16 type,
     MARKFUNCTION(0x80054404);
 
     Thing* thing = nullptr;
-    ccList* targetList = &moveList; // default: moveList (offset +52)
+    ccList* targetList = &humanoidList; // default: humanoidList (offset +52)
 
     // PSX: type 0 = Player
     if (type == AITypes::TT_PLAYER) {
-        // PSX: allocates 764-byte Player, constructs with pos
         Player* player = new Player(pos);
         thing = player;
-        // PSX: copies orient to thing+40 (orientation) if provided
         if (orient) {
             thing->orientation.x = orient->x;
             thing->orientation.y = orient->y;
@@ -90,17 +116,19 @@ void AI::AddThingNoTagList(const char* name, u16 type,
         Humanoid* h = new Humanoid(pos, type);
         thing = h;
     }
-    // Other entity types not yet reversed
+    // PSX: types 301-328 = Pickups (+ type 101 = collectible)
+    // Pickup class not yet reversed - skip creation
+
+    // PSX: types 201, 402-472 = moveList entities (platforms, generators, etc.)
+    // These classes not yet reversed - skip creation
 
     if (!thing)
         return;
 
-    // PSX: SetName (for debug identification)
     if (name) {
         thing->SetName(name, 0);
     }
 
-    // PSX: FindAttrib(root, 3) -> collisionRadius
     if (root) {
         const DBAttrib* a3 = root->FindAttrib(3);
         if (a3) {
@@ -108,10 +136,6 @@ void AI::AddThingNoTagList(const char* name, u16 type,
         }
     }
 
-    // PSX: for humanoids, check attrib 31 (pre-active idle animation)
-    // Animation system not yet reversed - skip
-
-    // PSX: AnalyzeMesh (attrib 5 = mesh name hash, attrib 15 = block number)
     if (root) {
         thing->AnalyzeMesh(const_cast<DBRoot*>(root));
     }
@@ -126,35 +150,105 @@ void AI::AddThingNoTagList(const char* name, u16 type,
     // PSX: if block valid, call Reset via vtable
     thing->Reset();
 
-    // PSX: AddNode to target list (moveList for player, moveList for humanoids)
     targetList->AddNodeTail(thing);
 }
 
+// PSX: HandleHumanoidHumanoidCollision__Fv (AI.CPP:951, 0x800554D0)
+// Iterates FightingCollision humanoid array, calls pairwise collision.
+// FightingCollision not yet reversed - stub.
+static void HandleHumanoidHumanoidCollision() {
+}
+
 // PSX: MoveThings__2AI (AI.CPP:1268, 0x80055D10)
-// Per-frame loop: Think â†’ handle collisions â†’ Move â†’ UpdatePosition
+// Full per-frame pipeline matching PSX exactly.
 void AI::MoveThings() {
     MARKFUNCTION(0x80055D10);
 
-    // PSX: iterate activeList calling privMoveList
-    privMoveList(activeList);
+    // 1. Drain thingList (death staging) - delete completed deaths
+    while (ccMinNode* n = thingList.RemHead()) {
+        delete static_cast<Thing*>(n);
+    }
 
-    // PSX: MoveThingsObstacleCollisions
+    // 2. Clear floor heights for humanoids
+    ClearThingFloorHeights(humanoidList);
+
+    // 3. Humanoid vs humanoid collision
+    HandleHumanoidHumanoidCollision();
+
+    // 4. Obstacle collisions
     MoveThingsObstacleCollisions();
+    HandleHumanoidObstacleCollisions(humanoidList);
 
-    // PSX: MoveThingsPickupCollisions
+    // 5. Pickup collisions
     MoveThingsPickupCollisions();
+    HandleHumanoidPickupCollisions(humanoidList, inactivePickupList);
 
-    // PSX: MoveCamera
+    // 6. Environment collisions
+    HandleThingEnvironmentCollisions(humanoidList);
+    HandleThingEnvironmentCollisions(pickupList);
+
+    // 7. Clear collision state on humanoids (PSX: thing[88] = 0 -> flags2)
+    for (ccMinNode* n = humanoidList.head; n; n = n->next) {
+        Thing* thing = static_cast<Thing*>(n);
+        thing->flags2 = 0;
+    }
+
+    // 8. Pickup deactivation: move deactivated pickups from pickupList to inactivePickupList
+    // Pickup::PickupDeactivate not yet reversed - skip deactivation loop
+
+    // 9. Update positions
+    UpdatePositions(humanoidList);
+    UpdatePositions(pickupList);
+
+    // 10. Think pass (privMoveList handles Think + death transfer)
+    privMoveList(moveList);
+    privMoveList(humanoidList);
+    privMoveList(pickupList);
+
+    // 11. Camera
     MoveCamera();
+
+    // 12. Transfer flagged-for-death from inactivePickupList to thingList
+    for (ccMinNode* n = inactivePickupList.head; n;) {
+        Thing* thing = static_cast<Thing*>(n);
+        ccMinNode* next = n->next;
+        if (thing->flags & 0x0001) {
+            inactivePickupList.RemNode(n);
+            thingList.AddNodeTail(n);
+        }
+        n = next;
+    }
 }
 
 // PSX: privMoveList__2AIR6ccList (AI.CPP:886, 0x800553DC)
 void AI::privMoveList(ccList& list) {
     MARKFUNCTION(0x800553DC);
-    // PSX: for each Thing in list: Think(), Move(), UpdatePosition()
-    for (ccMinNode* n = list.head; n; n = n->next) {
+    for (ccMinNode* n = list.head; n;) {
         Thing* thing = static_cast<Thing*>(n);
-        thing->Think();
+        ccMinNode* nextNode = n->next;
+
+        u32 fl = thing->flags;
+        if (!(fl & 0x0001)) {
+            if (!(fl & TF_ACTIVATED)) {
+                n = nextNode;
+                continue;
+            }
+            thing->Think();
+            fl = thing->flags;
+            if (!(fl & 0x0001) || (fl & 0x0400)) {
+                n = nextNode;
+                continue;
+            }
+        }
+
+        // Transfer thing from source list to thingList (death staging)
+        if (Player::s_player == thing) {
+            g_game->GetCamera().SetLookAtTarget(nullptr, 1);
+        }
+        list.RemNode(n);
+        thingList.AddNodeTail(n);
+
+        n = nextNode;
     }
 }
 
@@ -170,26 +264,28 @@ void AI::UpdatePositions(ccList& list) {
 // PSX: KillThings__2AIl (AI.CPP:1252, 0x80055CB4)
 void AI::KillThings(s32 param) {
     MARKFUNCTION(0x80055CB4);
-    // TODO: iterate killList, destroy marked things
+    KillThingsInList(moveList, param);
+    KillThingsInList(inactivePickupList, param);
+    KillThingsInList(pickupList, param);
+    KillThingsInList(humanoidList, param);
 }
 
 // PSX: MoveThingsObstacleCollisions__2AI (AI.CPP:1407, 0x80055F14)
 void AI::MoveThingsObstacleCollisions() {
     MARKFUNCTION(0x80055F14);
-    // TODO: obstacle collision detection
+    HandlePickupObstacleCollisions(pickupList);
+    HandlePickupObstacleCollisions(inactivePickupList);
 }
 
 // PSX: MoveThingsPickupCollisions__2AI (AI.CPP:1413, 0x80055F44)
 void AI::MoveThingsPickupCollisions() {
     MARKFUNCTION(0x80055F44);
-    // TODO: pickup collision detection
+    HandleHumanoidPickupCollisions(humanoidList, pickupList);
 }
 
 // PSX: MoveCamera__2AI (AI.CPP:1442, 0x80055F6C)
 void AI::MoveCamera() {
     MARKFUNCTION(0x80055F6C);
-    // PSX MoveCamera dispatches camera virtuals from theCamera.
-    // Keep camera stepping in AI handler order (after things move, before draw).
     if (g_game) {
         g_game->GetCamera().Think();
         g_game->GetCamera().Update();
@@ -216,54 +312,35 @@ void AI::Populate() {
         u16 subType = pt->subType;
 
         if (subType != 0) {
-            // Non-player entity: find mesh name attrib and spawn
-            const char* meshName = nullptr;
-            const DBAttrib* a5 = pt->FindAttrib(5);
-            if (a5 && a5->strValue) {
-                meshName = a5->strValue;
-            }
             AddThingNoTagList(pt->GetName(), subType, &pt->pos,
                               (const SVector*)&pt->field40, nullptr, pt);
         } else {
             // Player spawn point (type 6, subType 0)
-            // PSX: creates player if needed, then configures with WDB position
+            // PSX: player must already exist; Populate configures position/orientation.
             if (!Player::s_player) {
-                // PSX: player creation happens via a gp-relative call before Populate
-                // configures it. Create via AddThingNoTagList (adds to moveList).
                 AddThingNoTagList(pt->GetName(), AITypes::TT_PLAYER, &pt->pos,
                                   (const SVector*)&pt->field40, nullptr, pt);
             }
 
             Player* player = Player::s_player;
             if (player) {
-                // PSX: ClearFloorHeight
                 player->ClearFloorHeight();
-
                 player->homePos = pt->pos;
                 player->pos = pt->pos;
 
-                // PSX: SetDesiredMoveDirection + FaceAngleY from WDB field44
                 s32 yRot = pt->field44;
                 player->faceAngle = yRot;
                 player->FaceAngleY(yRot, 0);
 
-                // PSX: reads attrib 15 for block number
                 const DBAttrib* a15 = pt->FindAttrib(15);
                 if (a15) {
                     player->blockNum = (u16)a15->value;
                 }
 
-                // PSX: calls Activate
-                player->Activate();
-
-                // PSX: move player to activeList for Think() ticking
-                player->Remove();
-                activeList.AddNodeTail(player);
-
+                // PSX: calls Reset via vtable, then sets TF_ACTIVATED
+                player->Reset();
                 player->flags |= TF_ACTIVATED;
-                player->jumpReturnHeight = player->homePos.y;
 
-                // PSX: CharacterManager::LoadCharacter(0)
                 if (g_characterManager) {
                     g_characterManager->LoadCharacter(0);
                 }
@@ -299,40 +376,128 @@ void AI::Populate() {
 // PSX: UnPopulate__2AIs (AI.CPP:1906, 0x800567CC)
 void AI::UnPopulate(s16 blockNum) {
     MARKFUNCTION(0x800567CC);
-    // TODO: deactivate entities in block
+    ccMinNode* n;
+    while ((n = activeZoneList.RemHead()) != nullptr) { delete n; }
+    while ((n = humanoidList.RemHead()) != nullptr) { delete n; }
+    while ((n = pickupList.RemHead()) != nullptr) { delete n; }
+    while ((n = inactivePickupList.RemHead()) != nullptr) { delete n; }
+    while ((n = moveList.RemHead()) != nullptr) { delete n; }
+    while ((n = thingList.RemHead()) != nullptr) { delete n; }
 }
 
 // PSX: PopulateActiveZones__2AI (AI.CPP:1449, 0x80055FC8)
 void AI::PopulateActiveZones() {
     MARKFUNCTION(0x80055FC8);
-    // TODO: activate entities within active zone volumes
+    if (!g_database)
+        return;
+    for (DBVolume* vol = g_database->GetFirstVolume(); vol; vol = static_cast<DBVolume*>(vol->next)) {
+        if (vol->subType == 300) {
+            AddActiveZone(vol);
+        }
+    }
 }
 
 // PSX: PopulateActiveZonesPaths__2AI (AI.CPP:1471, 0x80056038)
+// Iterates DB paths, finds parent ActiveZone via attrib 7 name hash,
+// creates LinearPath, adds to matching ActiveZone.
 void AI::PopulateActiveZonesPaths() {
     MARKFUNCTION(0x80056038);
-    // TODO: activate entities along path splines
+    if (!g_database)
+        return;
+    for (DBPath* path = g_database->GetFirstPath(); path; path = static_cast<DBPath*>(path->next)) {
+        // PSX: check path.points.head exists, then
+        // check the first point's type==33 and subType==50
+        DBPoint* firstPt = static_cast<DBPoint*>(path->points.head);
+        if (!firstPt)
+            continue;
+        if (firstPt->type != 33 || firstPt->subType != 50)
+            continue;
+
+        // PSX: attrib 7 on the first point = parent zone name hash
+        const DBAttrib* a7 = firstPt->FindAttrib(7);
+        if (!a7)
+            continue;
+        const char* zoneName = a7->strValue;
+        if (!zoneName)
+            continue;
+        u32 crc = p3dHash(zoneName);
+
+        ActiveZone* az = static_cast<ActiveZone*>(activeZoneList.FindNodeCRC(crc));
+        if (!az)
+            continue;
+
+        LinearPath* lp = new LinearPath();
+        lp->Init(path);
+        az->AddLinearPath(lp);
+    }
 }
 
 // PSX: PopulateActiveZonesSubZones__2AI (AI.CPP:1538, 0x80056164)
+// Iterates DB volumes with subType 301, creates SubZoneVolume, adds to parent ActiveZone.
 void AI::PopulateActiveZonesSubZones() {
     MARKFUNCTION(0x80056164);
-    // TODO: activate sub-zone entities
+    if (!g_database)
+        return;
+    for (DBVolume* vol = g_database->GetFirstVolume(); vol; vol = static_cast<DBVolume*>(vol->next)) {
+        if (vol->subType != 301)
+            continue;
+
+        // PSX: attrib 4 = parent zone name hash
+        const DBAttrib* a4 = vol->FindAttrib(4);
+        if (!a4)
+            continue;
+        const char* zoneName = a4->strValue;
+        if (!zoneName)
+            continue;
+        u32 crc = p3dHash(zoneName);
+
+        ActiveZone* az = static_cast<ActiveZone*>(activeZoneList.FindNodeCRC(crc));
+        if (!az)
+            continue;
+
+        SubZoneVolume* szv = new SubZoneVolume(vol);
+        az->AddSubZoneVolume(szv);
+    }
 }
 
 // PSX: PopulateBlock__2AI (AI.CPP:1958, 0x80056A34)
 void AI::PopulateBlock() {
     MARKFUNCTION(0x80056A34);
+    PopulateBlockHelper(humanoidList);
+    PopulateBlockHelper(pickupList);
+    PopulateBlockHelper(inactivePickupList);
+    PopulateBlockHelper(moveList);
 }
 
 // PSX: UnpopulateBlock__2AI (AI.CPP:1979, 0x80056B04)
 void AI::UnpopulateBlock() {
     MARKFUNCTION(0x80056B04);
+    UnpopulateBlockHelper(humanoidList);
+    UnpopulateBlockHelper(pickupList);
+    UnpopulateBlockHelper(inactivePickupList);
+    UnpopulateBlockHelper(moveList);
 }
 
 // PSX: GetPickupWithinReach__2AIP8Humanoid (AI.CPP:1999, 0x80056BFC)
 Thing* AI::GetPickupWithinReach(Humanoid* humanoid) {
     MARKFUNCTION(0x80056BFC);
+    if (!humanoid)
+        return nullptr;
+
+    LVector reachPt;
+    reachPt.x = humanoid->pos.x + (s32)((300LL * (s32)sinf((f32)humanoid->orientation.y * 3.14159265f / 32768.0f)) >> 0);
+    reachPt.y = humanoid->pos.y + 300;
+    reachPt.z = humanoid->pos.z + (s32)((300LL * (s32)sinf(((f32)humanoid->orientation.y + 0x4000) * 3.14159265f / 32768.0f)) >> 0);
+
+    for (ccMinNode* n = pickupList.head; n; n = n->next) {
+        Thing* thing = static_cast<Thing*>(n);
+        s32 dx = thing->pos.x - reachPt.x;
+        s32 dy = thing->pos.y - reachPt.y;
+        s32 dz = thing->pos.z - reachPt.z;
+        s32 dist = (s32)rmMag3((f32)dx, (f32)dy, (f32)dz);
+        if (dist < 550)
+            return thing;
+    }
     return nullptr;
 }
 
@@ -347,13 +512,14 @@ Thing* AI::FindThing(u32 id) {
 }
 
 // PSX: ParseBehaviourAttribScript__2AI (AI.CPP:2168, 0x800CA650)
+// Opens scr\behave.txt via ccFile, tokenizes by keyword hash,
+// builds BehaviourAttrib objects, adds to behaviourList (+100).
+// Requires ccFile + BehaviourAttrib class reversal.
 void AI::ParseBehaviourAttribScript() {
     MARKFUNCTION(0x800CA650);
-    // TODO: parse behaviour attribute data from level
 }
 
 // PSX: aiPrivHandler (AI.CPP:257, 0x800540E0) - handler callback
-// Called from handlerSet1 each frame. Runs the AI::MoveThings pipeline.
 void aiPrivHandler(Handler* h) {
     MARKFUNCTION(0x800540E0);
     if (g_ai) {
