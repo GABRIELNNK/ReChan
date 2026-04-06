@@ -1,7 +1,6 @@
 #pragma once
 
 #include "gen/cclist.h"
-#include <cstdio>
 
 class ccFile : public ccNode {
 public:
@@ -47,8 +46,6 @@ public:
     s32 GetLength() const;
 
 private:
-    static FILE* OpenStdFile(const char* path, const char* mode);
-
     s32 position = 0;
     s32 length = 0;
     u16 reserved32 = 0;

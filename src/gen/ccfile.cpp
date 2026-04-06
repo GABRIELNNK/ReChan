@@ -1,18 +1,7 @@
 #include "gen/ccfile.h"
-
-#include <cstring>
+#include <stdio.h>
 
 static constexpr uintptr_t kWriteHandleSentinel = 2;
-
-FILE* ccFile::OpenStdFile(const char* path, const char* mode) {
-#ifdef PLATFORM_WINDOWS
-    FILE* file = nullptr;
-    fopen_s(&file, path, mode);
-    return file;
-#else
-    return fopen(path, mode);
-#endif
-}
 
 ccFile::ccFile() {
     MARKFUNCTION(0x8004C008);
@@ -87,16 +76,18 @@ s32 ccFile::Open(const char* path, u16 mode) {
     const char* openMode = "rb";
     if (mode == OPEN_WRITE) {
         openMode = "wb";
-    } else if (mode == OPEN_APPEND) {
+    }
+    else if (mode == OPEN_APPEND) {
         openMode = "ab";
     }
 
-    FILE* file = OpenStdFile(GetName(), openMode);
+    FILE* file = fopen(GetName(), openMode);
     if (file) {
-        std::fseek(file, 0, SEEK_END);
-        length = (s32)std::ftell(file);
-        std::fseek(file, 0, SEEK_SET);
-    } else {
+        fseek(file, 0, SEEK_END);
+        length = (s32)ftell(file);
+        fseek(file, 0, SEEK_SET);
+    }
+    else {
         length = 0;
     }
 
@@ -104,7 +95,8 @@ s32 ccFile::Open(const char* path, u16 mode) {
     void* outHandle = file;
     if (length != 0) {
         result = 1;
-    } else if (mode == OPEN_WRITE || mode == OPEN_APPEND) {
+    }
+    else if (mode == OPEN_WRITE || mode == OPEN_APPEND) {
         result = 1;
         if (!outHandle) {
             outHandle = reinterpret_cast<void*>(kWriteHandleSentinel);
@@ -120,7 +112,7 @@ s32 ccFile::Close() {
     MARKFUNCTION(0x8004C18C);
     if (handle && !isMemory) {
         if ((uintptr_t)handle != kWriteHandleSentinel) {
-            std::fclose((FILE*)handle);
+            fclose((FILE*)handle);
         }
         handle = nullptr;
     }
@@ -169,7 +161,8 @@ s32 ccFile::Read(void* dst, u32 size) {
     if (handle) {
         if (position >= length) {
             readSize = 0;
-        } else {
+        }
+        else {
             u32 available = (u32)(length - position);
             if (readSize > available) {
                 readSize = available;
@@ -178,10 +171,11 @@ s32 ccFile::Read(void* dst, u32 size) {
 
         if (readSize) {
             if (isMemory == 1) {
-                std::memcpy(dst, (u8*)handle + position, readSize);
+                memcpy(dst, (u8*)handle + position, readSize);
                 bytesRead = (s32)readSize;
-            } else {
-                bytesRead = (s32)std::fread(dst, 1, readSize, (FILE*)handle);
+            }
+            else {
+                bytesRead = (s32)fread(dst, 1, readSize, (FILE*)handle);
             }
         }
     }
@@ -200,17 +194,17 @@ s32 ccFile::Write(void* src, u32 size) {
     }
 
     if ((uintptr_t)handle == kWriteHandleSentinel) {
-        FILE* file = OpenStdFile(GetName(), "wb");
+        FILE* file = fopen(GetName(), "wb");
         if (file) {
-            bytesWritten = (s32)std::fwrite(src, 1, size, file);
-            std::fclose(file);
+            bytesWritten = (s32)fwrite(src, 1, size, file);
+            fclose(file);
         }
         handle = nullptr;
         return bytesWritten;
     }
 
     if (!isMemory) {
-        bytesWritten = (s32)std::fwrite(src, 1, size, (FILE*)handle);
+        bytesWritten = (s32)fwrite(src, 1, size, (FILE*)handle);
         position += bytesWritten;
         if (position > length) {
             length = position;
@@ -225,12 +219,15 @@ s32 ccFile::Seek(u32 offset, u16 mode) {
 
     if (mode == SEEK_FROM_CURRENT) {
         position += (s32)offset;
-    } else if (mode < 2u) {
+    }
+    else if (mode < 2u) {
         position = (s32)offset;
-    } else {
+    }
+    else {
         if (mode == SEEK_FROM_END) {
             position = length - (s32)offset;
-        } else {
+        }
+        else {
             position = (s32)offset;
         }
     }
@@ -242,12 +239,13 @@ s32 ccFile::Seek(u32 offset, u16 mode) {
         if (mode == SEEK_FROM_CURRENT) {
             whence = SEEK_CUR;
             seekValue = (long)offset;
-        } else if (mode == SEEK_FROM_END) {
+        }
+        else if (mode == SEEK_FROM_END) {
             whence = SEEK_END;
             seekValue = -(long)offset;
         }
 
-        std::fseek((FILE*)handle, seekValue, whence);
+        fseek((FILE*)handle, seekValue, whence);
     }
 
     return position;
