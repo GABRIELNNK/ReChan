@@ -84,6 +84,7 @@ void Display::EndFrame() {
     view.EndRender();
     ++frameCounter;
     p3d::context->EndFrame();
+    p3d::display->RenderOverlay();
     p3d::display->SwapBuffers();
 }
 

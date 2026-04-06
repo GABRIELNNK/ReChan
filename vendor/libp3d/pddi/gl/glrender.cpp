@@ -1,8 +1,11 @@
-// glrender.cpp — OpenGL implementation of pddi interfaces
+// glrender.cpp - OpenGL implementation of pddi interfaces
 #include "pddi/gl/glrender.h"
 
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
+#include <imgui.h>
+#include <imgui_impl_glfw.h>
+#include <imgui_impl_opengl3.h>
 #include <cstdio>
 
 // Default shader GLSL
@@ -307,6 +310,12 @@ void glShader::PostRender() {
 glDisplay::glDisplay() = default;
 
 glDisplay::~glDisplay() {
+    if (imguiInitialized) {
+        ImGui_ImplOpenGL3_Shutdown();
+        ImGui_ImplGlfw_Shutdown();
+        ImGui::DestroyContext();
+        imguiInitialized = false;
+    }
     if (window) {
         glfwDestroyWindow(window);
         window = nullptr;
@@ -402,6 +411,16 @@ bool glDisplay::InitDisplay(const pddiDisplayInit& init) {
     std::printf("OpenGL %s on %s\n",
                 reinterpret_cast<const char*>(glGetString(GL_VERSION)),
                 reinterpret_cast<const char*>(glGetString(GL_RENDERER)));
+
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    ImGui::StyleColorsDark();
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init("#version 450");
+    imguiInitialized = true;
+
     return true;
 }
 
@@ -415,6 +434,28 @@ bool glDisplay::ShouldClose() {
 
 void glDisplay::PollEvents() {
     glfwPollEvents();
+    if (imguiInitialized && !imguiFrameStarted) {
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+        imguiFrameStarted = true;
+    }
+}
+
+void glDisplay::SetOverlayCallback(OverlayCallback cb) {
+    overlayCallback = cb;
+}
+
+void glDisplay::RenderOverlay() {
+    if (!imguiFrameStarted) {
+        return;
+    }
+    if (overlayCallback) {
+        overlayCallback();
+    }
+    ImGui::Render();
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    imguiFrameStarted = false;
 }
 
 bool glDisplay::IsKeyDown(int key) {

@@ -58,6 +58,9 @@ public:
     tMatrixCamera* GetP3DCamera() { return &p3dCamera; }
     const LVector& GetPosition() const { return position; }  // +28
     CameraMode GetMode() const { return currentMode; }
+    s32 GetCurFOV() const { return curFOV; }
+    s32 GetDesiredFOV() const { return desiredFOV; }
+    const LVector& GetTargetPos() const { return targetPos; }
 
     // PSX: theCamera+0x188 = cameraAnchor assigned by CameraManager::SetupPaths
     void SetCameraAnchor(CameraAnchor* a) { cameraAnchor = a; }

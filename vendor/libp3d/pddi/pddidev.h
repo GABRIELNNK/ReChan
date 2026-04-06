@@ -99,6 +99,11 @@ public:
 
     // WndProc callback
     virtual void SetWndProc(pddiWndProc proc) = 0;
+
+    // Overlay draw callback (called by RenderOverlay)
+    using OverlayCallback = void(*)();
+    virtual void SetOverlayCallback(OverlayCallback cb) = 0;
+    virtual void RenderOverlay() = 0;
 };
 
 // pddiRenderContext — frame management and draw state

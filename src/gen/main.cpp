@@ -10,6 +10,7 @@
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
 #include "pc/audio.h"
+#include "pc/debugui.h"
 #include "gen/game.h"
 #include "gen/time.h"
 
@@ -59,6 +60,7 @@ int main() {
 
     p3d::display->ShowCursor(false);
     p3d::display->SetWndProc(OnWndProc);
+    p3d::display->SetOverlayCallback(DebugUI::Draw);
 
     Game game;
     game.Open();

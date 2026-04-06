@@ -126,6 +126,10 @@ public:
     // WndProc callback
     void SetWndProc(pddiWndProc proc) override;
 
+    // Overlay
+    void SetOverlayCallback(OverlayCallback cb) override;
+    void RenderOverlay() override;
+
     // Viewport
     void GetViewport(int& x, int& y, int& w, int& h) const;
 
@@ -133,6 +137,9 @@ public:
 
 private:
     GLFWwindow* window = nullptr;
+    bool imguiInitialized = false;
+    bool imguiFrameStarted = false;
+    OverlayCallback overlayCallback = nullptr;
     int fbWidth = 0;
     int fbHeight = 0;
     int windowedX = 100, windowedY = 100;
