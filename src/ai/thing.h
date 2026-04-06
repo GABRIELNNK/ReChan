@@ -257,8 +257,8 @@ public:
     // PSX padding/fields +148..+183
     s32 field148[9] = {};
 
-    // PSX +184 (ptr): thing currently standing on (obstacle/platform)
-    Thing* standingOn = nullptr;
+    // PSX +184 (s32): ground standing Y height (set when TF_ON_GROUND)
+    s32 groundStandHeight = 0;
 
     // PSX +188 (ptr): embark ticket
     Ticket* ticket = nullptr;

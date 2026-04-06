@@ -207,6 +207,18 @@ inline void rmV3Scale(LVector* out, const LVector* in, s32 scale) {
     out->z = (s32)(((s64)in->z * (s64)scale) >> 16);
 }
 
+// rmSin16 - 16.16 fixed-point sine from PSX binary angle (0..65535 = full circle)
+// PSX: 0x80078364 (lookup table based)
+inline s32 rmSin16(s32 angle) {
+    f32 rad = (f32)(angle & 0xFFFF) * P3D_ANGLE_TO_RAD;
+    return (s32)(std::sin(rad) * 65536.0f);
+}
+
+// rmCos16 - 16.16 fixed-point cosine from PSX binary angle
+inline s32 rmCos16(s32 angle) {
+    return rmSin16(angle + 0x4000);
+}
+
 
 // rmATan216 - two-argument arctangent returning PSX binary angle (0..65535)
 // PSX: 0x80113CF0

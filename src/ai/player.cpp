@@ -6,6 +6,7 @@
 #include "gen/model.h"
 #include "gen/animmat.h"
 #include "p3d/p3dmath.h"
+#include "pc/log.h"
 
 // Command bit positions - PSX Behaviour action IDs from FindActionRequest/RequestAction
 // RequestAction does: commandBits |= (1 << actionID)

@@ -7,6 +7,7 @@
 #include "p3d/context.h"
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
+#include "pc/log.h"
 
 Block::Block() {
     MARKFUNCTION(0x80052B64); // __5Block
@@ -207,47 +208,46 @@ void Block::SetDimension(const LVector* a, const LVector* b) {
 }
 
 // Parse__5BlockUlPc (BLOCK.CPP:482)
-// PSX: stores data ptr, checks prim offset, calls collision loader + LoadPrim
+// PSX: a1+64 = data, a1+0 = parsed, a1+72 = collision, a1+68 = primGeom
 void Block::Parse(u32 size, const u8* blkData) {
     MARKFUNCTION(0x80052F80);
 
+    const u32* d = (const u32*)blkData;
+
+    // PSX: *(a1+64) = a3
     data = blkData;
 
-    // PSX checks word at data+16 to determine if prim data exists
-    if (size >= 20) {
-        u32 check = blkData[16] | (blkData[17] << 8) |
-                    (blkData[18] << 16) | (blkData[19] << 24);
-        parsed = (check != 0) ? 1 : 0;
-    } else {
-        parsed = 0;
-    }
+    // PSX: *(a1+0) = (*(data+16) != 0) ? 1 : 0
+    parsed = (d[4] != 0) ? 1 : 0;
 
     // PSX: collision = AsynchLoad(blockNum, data + *(data+20))
-    // PSX: scans g_collisionSectors[12] for an empty slot (status == -1)
-    if (size > 24) {
-        u32 colOffset = blkData[20] | (blkData[21] << 8) |
-                        (blkData[22] << 16) | (blkData[23] << 24);
-        if (colOffset > 0 && colOffset < size) {
-            CollisionSector* slot = nullptr;
-            for (int i = 0; i < 12; i++) {
-                if (g_collisionSectors[i].status == -1) {
-                    slot = &g_collisionSectors[i];
-                    break;
-                }
-            }
-            if (slot) {
-                slot->status = blockNum;
-                slot->Load((u32*)(blkData + colOffset));
-                collision = slot;
-            }
+    // AsynchLoad scans g_collisionSectors[12] for empty slot (status == -1),
+    // sets status = blockNum, calls Load with the collision data pointer.
+    u32 colOffset = d[5]; // *(data+20)
+    const u32* colData = (const u32*)(blkData + colOffset);
+
+    CollisionSector* slot = nullptr;
+    for (int i = 0; i < 12; i++) {
+        if (g_collisionSectors[i].status == -1) {
+            slot = &g_collisionSectors[i];
+            break;
         }
     }
-
-    // PSX: primGeom = LoadPrim(data + 24)
-    // PC: build pddiPrimBuffer from tPrimGeom GPU packets
-    if (size > 24) {
-        LoadPrim(blkData + 24, size - 24);
+    if (slot) {
+        slot->status = blockNum;
+        slot->Load((u32*)colData);
+        collision = slot;
     }
+
+    LOG("[Block] Parse block %u: size=%u parsed=%u colOffset=%u walls=%u floors=%u bounds=(%d,%d,%d)-(%d,%d,%d)",
+        blockNum, size, parsed, colOffset,
+        collision ? collision->wallCount : 0,
+        collision ? collision->floorCount : 0,
+        collision ? collision->boundsMin.x : 0, collision ? collision->boundsMin.y : 0, collision ? collision->boundsMin.z : 0,
+        collision ? collision->boundsMax.x : 0, collision ? collision->boundsMax.y : 0, collision ? collision->boundsMax.z : 0);
+
+    // PSX: *(a1+68) = LoadPrim(data + 24)
+    LoadPrim(blkData + 24, size - 24);
 }
 
 // Unload__5Block (BLOCK.CPP:514)
@@ -265,28 +265,22 @@ void Block::Unload() {
 }
 
 // PointInBlock__C5BlockRC10tagLVector (BLOCK.CPP:524)
-// PSX: checks point against collision sector bounding box (+4..+24)
-// PC: uses block position + half-extents (equivalent bounds)
+// PSX: reads bounds directly from collision sector (+4..+24)
 bool Block::PointInBlock(const LVector* pt) const {
     MARKFUNCTION(0x80053024);
 
-    // PSX reads bounding box from collision sector:
-    //   collision[4]=negX, collision[8]=negY, collision[12]=negZ
-    //   collision[16]=posX, collision[20]=posY, collision[24]=posZ
-    // PC equivalent: posX + halfExtNeg/Pos
-    s32 minX = posX + halfExtNegX;
-    s32 maxX = posX + halfExtPosX;
-    s32 minY = posY + halfExtNegY;
-    s32 maxY = posY + halfExtPosY;
-    s32 minZ = posZ + halfExtNegZ;
-    s32 maxZ = posZ + halfExtPosZ;
+    if (!collision) {
+        return false;
+    }
 
-    if (pt->x < minX) return false;
-    if (pt->x > maxX) return false;
-    if (pt->y < minY) return false;
-    if (pt->y > maxY) return false;
-    if (pt->z < minZ) return false;
-    if (pt->z > maxZ) return false;
+    // PSX: v2 = *(a1+72) = collision sector ptr
+    // v2[1..3] = boundsMin, v2[4..6] = boundsMax
+    if (pt->x < collision->boundsMin.x) return false;
+    if (pt->x > collision->boundsMax.x) return false;
+    if (pt->y < collision->boundsMin.y) return false;
+    if (pt->y > collision->boundsMax.y) return false;
+    if (pt->z < collision->boundsMin.z) return false;
+    if (pt->z > collision->boundsMax.z) return false;
     return true;
 }
 

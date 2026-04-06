@@ -11,6 +11,7 @@
 #include "p3d/context.h"
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
+#include "pc/log.h"
 #include <vector>
 
 // Global Thing unique ID counter (PSX: gp+3868)
@@ -438,8 +439,8 @@ DynamicThing::DynamicThing(const LVector* initialPos, u16 type)
     // PSX: homePos = initialPos
     homePos = *initialPos;
 
-    // PSX: standingOn = global default obstacle
-    standingOn = nullptr;
+    // PSX: groundStandHeight = 0
+    groundStandHeight = 0;
     ticket = nullptr;
 }
 
@@ -470,8 +471,8 @@ void DynamicThing::Reset() {
 
     maxFallDivisor = 10;
 
-    // PSX: standingOn = global default obstacle
-    standingOn = nullptr;
+    // PSX: groundStandHeight = 0
+    groundStandHeight = 0;
     Disembark();
 }
 
@@ -569,7 +570,7 @@ void DynamicThing::Move() {
     s32 abs_lfz = localForce.z * sign_lfz;
 
     s32 half_lfx = (s32)(((u32)abs_lfx + ((u32)abs_lfx >> 31)) >> 1) * sign_lfx;
-    s32 half_lfy = (s32)((localForce.y + ((u32)localForce.y >> 31)) >> 1);
+    s32 half_lfy = (localForce.y + (s32)((u32)localForce.y >> 31)) >> 1;
     s32 half_lfz = (s32)(((u32)abs_lfz + ((u32)abs_lfz >> 31)) >> 1) * sign_lfz;
 
     movement.x = velocity.x + half_lfx;
@@ -702,7 +703,10 @@ void DynamicThing::Disembark() {
 // PSX: GetTicketIssuer__12DynamicThing (THING.CPP:1162)
 Thing* DynamicThing::GetTicketIssuer() {
     MARKFUNCTION(0x80062550);
-    return standingOn;
+    if (ticket) {
+        return ticket->issuer;
+    }
+    return nullptr;
 }
 
 // PSX: HandleLand__12DynamicThingl (THING.CPP:1360)

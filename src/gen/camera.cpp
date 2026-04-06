@@ -259,16 +259,6 @@ void Camera::Move() {
     if (flags & 0x02) {
         LookAtTarget(&targetPos);
     }
-
-    static s32 moveLogCounter = 0;
-    if ((moveLogCounter++ % 120) == 0) {
-        LOG("[Camera] Move: pos=(%d,%d,%d) curPos=(%d,%d,%d) tgt=(%d,%d,%d) prevTgt=(%d,%d,%d) angles=(%d,%d,%d) flags=0x%x",
-            position.x, position.y, position.z,
-            curPos.x, curPos.y, curPos.z,
-            targetPos.x, targetPos.y, targetPos.z,
-            prevTargetPos.x, prevTargetPos.y, prevTargetPos.z,
-            camAngleX, camAngleY, camAngleZ, flags);
-    }
 }
 
 
@@ -632,7 +622,7 @@ void Camera::FollowPath() {
 
     Thing* target = targetThing;
     if (!target) {
-        LOG("[Camera] FollowPath: no targetThing!");
+        LOG("[Camera] FollowPath: no targetThing");
         return;
     }
 
@@ -800,11 +790,6 @@ void Camera::FollowPath() {
         // Copy curPos to position (camera eye)
         position = curPos;
         prevPosition = curPos;
-
-        LOG("[Camera] lookAtMode snap: eye=(%d,%d,%d) target=(%d,%d,%d) angles=(%d,%d,%d)",
-            position.x, position.y, position.z,
-            targetPos.x, targetPos.y, targetPos.z,
-            camAngleX, camAngleY, camAngleZ);
 
         SetCurFOV(desiredFOV);
 

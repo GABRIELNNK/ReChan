@@ -103,13 +103,10 @@ void Humanoid::Think() {
     // PSX step 9: face player if not player and not in certain states
     // (requires FightingCollision system, simplified for now)
 
-    // PSX step 10: ProcessAction dispatches to current state handler
     ProcessAction();
 
-    // PSX step 11: UpdatePosition (virtual, moves entity based on velocity)
-    UpdatePosition();
+    Move();
 
-    // PSX step 12: clear per-frame field, increment think counter
     field368 = 0;
     thinkCounter++;
 }

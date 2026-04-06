@@ -7,7 +7,10 @@
 #include "gen/cclist.h"
 #include "ai/thing.h"
 #include "ai/humanoid.h"
+#include "ai/player.h"
 #include "p3d/p3dmath.h"
+#include "gen/model.h"
+#include "gen/animmat.h"
 #include "pc/log.h"
 
 static s32 g_floorDebugCounter = 0;
@@ -25,6 +28,15 @@ s32 g_colMaxRadius = 400;            // gp+2908: max collision radius
 s32 g_colDefaultRadius = 175;        // gp+2912: default collision radius
 s32 g_colSlopeTol = 0x8000;          // gp+2884: slope tolerance
 s32 g_colSlopeForce = 0x4000;        // gp+2888: slope sliding force
+s32 g_colFallVelDivisor = 2;         // gp+2900: fall velocity divisor (s16)
+s32 g_colFallVelThreshold = 0;       // gp+2902: fall velocity threshold (s16)
+Floor* g_floorPtrArrayGlobal[64] = {};   // gp+2828+256 (global floor scratch, 64 ptrs)
+s32 g_climbSearchRadius = 512;       // gp+2848: climbing state search radius
+s32 g_boneFloorRadius = 2;           // gp+2860: bone floor search radius
+s32 g_camLookAheadDist = 1024;       // gp+2868: camera look-ahead distance
+s32 g_camEdgeThreshold = 256;        // gp+2872: camera edge height threshold
+s32 g_camEdgeCounter = 0;            // gp+2876: camera edge frame counter
+s32 g_camEdgeMaxCount = 3;           // gp+2880: camera edge max frames
 DynamicThing* g_combatTarget1 = nullptr; // gp+4176
 DynamicThing* g_combatTarget2 = nullptr; // gp+4180
 
@@ -198,17 +210,46 @@ void HandleThingFloor(DynamicThing* thing, s32 radius, s32 yMinOffset, s32 check
     s32 floorCount = CollisionSector::FillWorldFloorArray(searchMin, searchMax, floorArray, 64);
     if (floorCount > 64) floorCount = 64;
 
+    static s32 floorDbgCount = 0;
+    if (floorDbgCount < 3) {
+        LOG("[ColMgr] HandleThingFloor: pos=(%d,%d,%d) home=(%d,%d,%d) search=(%d,%d,%d)-(%d,%d,%d) floors=%d",
+            thing->pos.x, thing->pos.y, thing->pos.z,
+            localHomePosX, localHomePosY, localHomePosZ,
+            searchMin.x, searchMin.y, searchMin.z,
+            searchMax.x, searchMax.y, searchMax.z,
+            floorCount);
+        floorDbgCount++;
+    }
+
+    // PSX: climbing offset (v83, v85)
+    s32 climbOffX = 0;
+    s32 climbOffY = 0;
+    s32 climbOffZ = 0;
+
     // PSX: detect humanoid for special handling (thingType < 29)
     Humanoid* humanoid = nullptr;
     if (thing->thingType < 29) {
         humanoid = (Humanoid*)thing;
     }
 
-    // Pass 1: floor/ceiling at OLD position (pos + y search offset)
+    // PSX: climbing state 23 search offset
+    s32 isClimbing = 0;
+    if ((!humanoid && Player::s_player && Player::s_player->actionState == 23) ||
+        (humanoid && humanoid->actionState == 23)) {
+        isClimbing = 1;
+    }
+    if (isClimbing) {
+        s32 sinVal = rmSin16(thing->orientation.y);
+        climbOffX = -(s32)(((s64)sinVal * (s64)g_climbSearchRadius) >> 16);
+        s32 cosVal = rmSin16((s16)(thing->orientation.y + 0x4000));
+        climbOffZ = -(s32)(((s64)cosVal * (s64)g_climbSearchRadius) >> 16);
+    }
+
+    // Pass 1: floor/ceiling at OLD position (pos + climbOffset + ySearchOffset)
     LVector testPosOld;
-    testPosOld.x = thing->pos.x;
+    testPosOld.x = thing->pos.x + climbOffX;
     testPosOld.y = thing->pos.y + g_floorYSearchOffset;
-    testPosOld.z = thing->pos.z;
+    testPosOld.z = thing->pos.z + climbOffZ;
 
     s32 floorHOld, ceilingHOld;
     LVector floorNormOld = {};
@@ -219,13 +260,13 @@ void HandleThingFloor(DynamicThing* thing, s32 radius, s32 yMinOffset, s32 check
     CollisionSector::GetArrayFloorAndCeilingHeight(
         floorArray, floorCount,
         floorHOld, ceilingHOld, floorNormOld, ceilingNormOld,
-        &hasRailing, &testPosOld, 2);
+        &hasRailing, &railCorrection, &testPosOld, 2);
 
-    // Pass 2: floor/ceiling at NEW position (homePos + y search offset)
+    // Pass 2: floor/ceiling at NEW position (homePos + climbOffset + ySearchOffset)
     LVector testPosNew;
-    testPosNew.x = localHomePosX;
+    testPosNew.x = localHomePosX + climbOffX;
     testPosNew.y = thing->pos.y + g_floorYSearchOffset;
-    testPosNew.z = localHomePosZ;
+    testPosNew.z = localHomePosZ + climbOffZ;
 
     s32 floorHNew, ceilingHNew;
     LVector floorNormNew = {};
@@ -246,17 +287,106 @@ void HandleThingFloor(DynamicThing* thing, s32 radius, s32 yMinOffset, s32 check
 
     s32 bestFloorH = floorHNew;
 
-    // Compute slope correction from floor normals
+    // Pass 3: bone-based floor query for humanoids
+    if (humanoid) {
+        HumanoidModel* hmodel = (HumanoidModel*)humanoid->model;
+        if (hmodel && hmodel->animMatrices) {
+            s32* boneMatrix = AnimationMatrices::GetMatrix(hmodel->animMatrices, 5);
+            if (boneMatrix) {
+                LVector bonePos;
+                bonePos.x = boneMatrix[5];
+                bonePos.y = boneMatrix[6];
+                bonePos.z = boneMatrix[7];
+
+                s32 boneFloorH, boneCeilH;
+                LVector boneFloorNorm = {};
+                LVector boneCeilNorm = {};
+                s32 boneRailing = 0;
+                LVector boneRailCorr = {};
+
+                CollisionSector::GetArrayFloorAndCeilingHeight(
+                    floorArray, floorCount,
+                    boneFloorH, boneCeilH, boneFloorNorm, boneCeilNorm,
+                    &boneRailing, &boneRailCorr, &bonePos, g_boneFloorRadius);
+
+                bestFloorH = boneFloorH;
+            }
+        }
+    } else {
+        // Non-humanoid path: use global player's bone matrix for floor query
+        // Then do camera look-ahead edge detection
+        Player* player = Player::s_player;
+        if (player) {
+            HumanoidModel* pmodel = (HumanoidModel*)player->model;
+            if (pmodel && pmodel->animMatrices) {
+                s32* boneMatrix = AnimationMatrices::GetMatrix(pmodel->animMatrices, 5);
+                if (boneMatrix) {
+                    LVector bonePos;
+                    bonePos.x = boneMatrix[5];
+                    bonePos.y = boneMatrix[6];
+                    bonePos.z = boneMatrix[7];
+
+                    s32 boneFloorH, boneCeilH;
+                    LVector boneFloorNorm = {};
+                    LVector boneCeilNorm = {};
+                    s32 boneRailing = 0;
+                    LVector boneRailCorr = {};
+
+                    CollisionSector::GetArrayFloorAndCeilingHeight(
+                        floorArray, floorCount,
+                        boneFloorH, boneCeilH, boneFloorNorm, boneCeilNorm,
+                        &boneRailing, &boneRailCorr, &bonePos, g_boneFloorRadius);
+
+                    bestFloorH = boneFloorH;
+                }
+            }
+
+            // Camera look-ahead edge detection
+            s32 sinVal = rmSin16(player->orientation.y);
+            s32 cosVal = rmSin16((s16)(player->orientation.y + 0x4000));
+
+            LVector lookAheadPos;
+            lookAheadPos.x = testPosOld.x + (s32)(((s64)g_camLookAheadDist * (s64)sinVal) >> 16);
+            lookAheadPos.y = testPosOld.y + checkHeight;
+            lookAheadPos.z = testPosOld.z + (s32)(((s64)g_camLookAheadDist * (s64)cosVal) >> 16);
+
+            s32 lookFloorH, lookCeilH;
+            LVector lookFloorNorm = {};
+            LVector lookCeilNorm = {};
+            s32 lookRailing = 0;
+            LVector lookRailCorr = {};
+
+            CollisionSector::GetArrayFloorAndCeilingHeight(
+                floorArray, floorCount,
+                lookFloorH, lookCeilH, lookFloorNorm, lookCeilNorm,
+                &lookRailing, &lookRailCorr, &lookAheadPos, 16);
+
+            if (lookFloorH + g_camEdgeThreshold >= floorHNew) {
+                g_camEdgeCounter = 0;
+            } else {
+                g_camEdgeCounter++;
+            }
+            if (g_camEdgeMaxCount >= g_camEdgeCounter) {
+                thing->flags &= ~0x40000;
+            } else {
+                thing->flags |= 0x40000;
+            }
+        }
+    }
+
+    // Slope correction from floor normals
     s32 slopeCorr = 0;
     if (floorHOld > (s32)0x80000001) {
-        s32 slopeDot = fixmul16(floorNormOld.z, dispZ) + fixmul16(floorNormOld.x, dispX);
+        s32 slopeDot = (s32)(((s64)floorNormOld.z * (s64)dispZ) >> 16)
+                     + (s32)(((s64)floorNormOld.x * (s64)dispX) >> 16);
         if (floorNormOld.y != 0) {
             slopeCorr = rmDiv16i(slopeDot, floorNormOld.y) + 2;
         }
     }
     s32 slopeCorr2 = 0;
     if (floorHNew > (s32)0x80000001) {
-        s32 slopeDot = fixmul16(floorNormNew.z, dispZ) + fixmul16(floorNormNew.x, dispX);
+        s32 slopeDot = (s32)(((s64)floorNormNew.z * (s64)dispZ) >> 16)
+                     + (s32)(((s64)floorNormNew.x * (s64)dispX) >> 16);
         if (floorNormNew.y != 0) {
             slopeCorr2 = rmDiv16i(slopeDot, floorNormNew.y) + 2;
         }
@@ -272,7 +402,7 @@ void HandleThingFloor(DynamicThing* thing, s32 radius, s32 yMinOffset, s32 check
 
     // Clear ground/slope/ceiling bits, preserve others
     bool wasOnGround = (thing->flags >> 12) & 1;
-    thing->flags &= ~(TF_ON_GROUND | 0x10000 | 0x20000 | 0x40000);
+    thing->flags &= ~(TF_ON_GROUND | 0x10000 | 0x20000);
 
     // Floor normal output
     LVector outFloorNorm = {};
@@ -282,8 +412,20 @@ void HandleThingFloor(DynamicThing* thing, s32 radius, s32 yMinOffset, s32 check
     if (floorHNew > (s32)0x80000001) {
         s32 landingLevel = floorHNew - yMinOffset;
 
-        // PSX condition: pos.y >= (floorH - yMinOffset - standingTol) AND homePos.y < (floorH - yMinOffset + slopeCorrection)
         if (thing->pos.y >= landingLevel - g_floorStandingTol && localHomePosY < landingLevel + slopeCorr2) {
+
+            // PSX: falling velocity division for actionState 63 (flying back)
+            if (!wasOnGround) {
+                s32 absVelY = localVelY < 0 ? -localVelY : localVelY;
+                s32 threshold = g_colFallVelThreshold < 0 ? -g_colFallVelThreshold : g_colFallVelThreshold;
+                if (absVelY >= threshold && thing->thingType < 29) {
+                    Humanoid* hum = (Humanoid*)thing;
+                    if (hum->actionState == 63 && g_colFallVelDivisor != 0) {
+                        localVelY = -(localVelY / g_colFallVelDivisor);
+                    }
+                }
+            }
+
             // Set floor-contact flag
             thing->flags |= 0x10000;
 
@@ -297,9 +439,9 @@ void HandleThingFloor(DynamicThing* thing, s32 radius, s32 yMinOffset, s32 check
                 s64 slopeScale = (s64)g_colSlopeForce * (s64)thing->stateCounter;
                 LVector slopeForce;
                 LVector slopeDir;
-                slopeDir.x = floorNormNew.x;
+                slopeDir.x = (s32)(((s64)floorNormNew.x * (s64)floorNormNew.y) >> 16);
                 slopeDir.y = (s32)(((s64)floorNormNew.y * (s64)floorNormNew.y) >> 16) - 0x10000;
-                slopeDir.z = floorNormNew.z;
+                slopeDir.z = (s32)(((s64)floorNormNew.z * (s64)floorNormNew.y) >> 16);
                 rmV3Scale(&slopeForce, &slopeDir, (s32)(slopeScale >> 16));
                 slopeForce.y = 0;
                 thing->contactForce.x += slopeForce.x;
@@ -309,10 +451,18 @@ void HandleThingFloor(DynamicThing* thing, s32 radius, s32 yMinOffset, s32 check
                 outFloorNorm = floorNormNew;
             }
 
-            // PSX: vtable call SetFloorHeight(thing, landingLevel) if not already on ground
+            // PSX: virtual HandleLand call if not already on ground
             if (!wasOnGround) {
-                thing->SetFloorHeight(landingLevel);
+                thing->HandleLand(localHomePosY);
             }
+
+            // PSX: store ceiling norm into humanoid field436
+            if (humanoid) {
+                humanoid->field436 = ceilingNormNew.x;
+            }
+
+            // PSX: pickup/obstacle effect after landing (not yet reversed)
+            // Checks thing+308 != 0, then calls PlayEffect + Kill
         }
     }
 
@@ -336,7 +486,7 @@ void HandleThingFloor(DynamicThing* thing, s32 radius, s32 yMinOffset, s32 check
 
     // Store ground height for standing-on detection
     if (thing->flags & TF_ON_GROUND) {
-        thing->field148[3] = localHomePosY;
+        thing->groundStandHeight = localHomePosY;
     }
 }
 

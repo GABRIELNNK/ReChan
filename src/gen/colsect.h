@@ -51,13 +51,6 @@ struct CollisionSector {
         Floor** floorArray, s32 count,
         s32& outFloorH, s32& outCeilingH,
         LVector& outFloorNormal, LVector& outCeilingNormal,
-        s32* outHasRailing, const LVector* pos, s32 radius);
-
-    // Overload with separate railing correction output
-    static void GetArrayFloorAndCeilingHeight(
-        Floor** floorArray, s32 count,
-        s32& outFloorH, s32& outCeilingH,
-        LVector& outFloorNormal, LVector& outCeilingNormal,
         s32* outHasRailing, LVector* outRailCorrection,
         const LVector* pos, s32 radius);
 
