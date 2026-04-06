@@ -286,21 +286,58 @@ void TransformFlip::EvalRotChannel(const TransformAnim::Channel& ch, STreeJoint&
         joint.rotationY = (s16)(ry0 + (((ry1 - ry0) * (s64)frac16) >> 16));
         joint.rotationZ = (s16)(rz0 + (((rz1 - rz0) * (s64)frac16) >> 16));
     } else if (ch.keyType == 3) {
-        // tJoint1DOFangle: single axis, +8=numKeys, +12=keyTimesOff, +16=keyValuesOff
-        // Values are s16 per key. DOF axis determined by channel code (not stored in our data).
-        // For now, use frame-0 value only (type 3 is rare in character anims)
+        // tJoint1DOFangle: single axis rotation
+        // +8=numKeys, +12=keyTimesOff(u8 array), +16=dofIndex, +20=keyValuesOff(s16 array)
         u32 numKeys = ReadU32(data + 8);
         if (numKeys == 0) {
             return;
         }
-        u32 keyValsOff = ReadU32(data + 16);
+        u32 keyTimesOff = ReadU32(data + 12);
+        u32 dofIndex = ReadU32(data + 16);
+        u32 keyValsOff = ReadU32(data + 20);
+        u32 keyTimesByteOff = keyTimesOff * 4;
         u32 keyValsByteOff = keyValsOff * 4;
-        if (keyValsByteOff + 2 > rawSize) {
-            return;
+
+        // Key times are u8, find bracket by linear search
+        const u8* times = raw + keyTimesByteOff;
+        s32 bracket = 0;
+        if (numKeys > 1) {
+            for (u32 k = 0; k < numKeys - 1; k++) {
+                if (frame >= (s32)times[k] && frame < (s32)times[k + 1]) {
+                    bracket = (s32)k;
+                    break;
+                }
+                if (frame >= (s32)times[k + 1]) {
+                    bracket = (s32)(k + 1);
+                }
+            }
         }
-        // Read first key value as rotX (1DOF - imprecise but functional)
-        s16 val = ReadS16(raw + keyValsByteOff);
-        joint.rotationX = val;
+
+        s16 val;
+        if (numKeys == 1 || bracket >= (s32)numKeys - 1) {
+            val = ReadS16(raw + keyValsByteOff + bracket * 2);
+        } else {
+            s32 t0 = (s32)times[bracket];
+            s32 t1 = (s32)times[bracket + 1];
+            s32 timeDelta = t1 - t0;
+            if (timeDelta <= 0) {
+                val = ReadS16(raw + keyValsByteOff + bracket * 2);
+            } else {
+                s16 v0 = ReadS16(raw + keyValsByteOff + bracket * 2);
+                s16 v1 = ReadS16(raw + keyValsByteOff + (bracket + 1) * 2);
+                s32 frameDelta = frameReal - (t0 << 16);
+                s32 frac16 = (s32)(((s64)frameDelta << 16) / ((s64)timeDelta << 16));
+                val = (s16)((s32)v0 + ((((s32)v1 - (s32)v0) * (s64)frac16) >> 16));
+            }
+        }
+
+        if (dofIndex == 0) {
+            joint.rotationX = val;
+        } else if (dofIndex == 1) {
+            joint.rotationY = val;
+        } else {
+            joint.rotationZ = val;
+        }
     }
 }
 
