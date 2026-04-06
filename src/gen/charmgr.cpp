@@ -13,6 +13,7 @@
 #include "p3d/texture.h"
 #include "p3d/inventory.h"
 #include "p3d/context.h"
+#include "p3d/flip.h"
 #include "gen/ccfile.h"
 #include <algorithm>
 
@@ -115,8 +116,7 @@ const char* g_charNameTable[] = {
 // PSX: FreeAnimMemory (CHARMGR.CPP:201, 0x800395F8)
 void FreeAnimMemory(void* ptr) {
     MARKFUNCTION(0x800395F8);
-    // PSX: rPFree(g_MemoryHeap, ptr)
-    std::free(ptr);
+    delete (TransformAnim*)ptr;
 }
 
 // PSX: GetCompositeAnimationNameHash (CHARMGR.CPP:267, 0x80039624)
@@ -790,8 +790,19 @@ void CharacterManager::LoadAnimationBatch(u32 type, s32 animEnum, CharMgrCallbac
     }
 
     // TODO: parse the raw animation data (animBuf) into tCompositeAnim/tSequenceAnim
-    // For now, store the raw buffer pointer for future use
-    animPtrs[handleIdx] = animBuf;
+
+    if (animBuf && animSize > 0) {
+        TransformAnim* ta = TransformAnim::Parse(animBuf, (u32)animSize);
+        if (ta) {
+            ta->ownedRawData = animBuf;
+            animPtrs[handleIdx] = ta;
+        } else {
+            std::free(animBuf);
+            animPtrs[handleIdx] = nullptr;
+        }
+    } else {
+        animPtrs[handleIdx] = nullptr;
+    }
 
     // Store handle in slot's anim table
     if (animEnum >= 0 && animEnum < (s32)CharSlot::ANIM_TABLE_SIZE) {
@@ -821,7 +832,6 @@ void CharacterManager::UnloadAnimation(u32 type, u32 hash) {
 }
 
 // PSX: UnloadAnimation (enum+hash batch range) (CHARMGR.CPP:1813, 0x8003A8C0)
-// PSX: third param is COUNT, not hash. Loops animEnum..animEnum+count.
 void CharacterManager::UnloadAnimation(u32 type, s32 startEnum, u32 count) {
     MARKFUNCTION(0x8003A8C0);
 

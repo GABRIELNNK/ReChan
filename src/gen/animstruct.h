@@ -6,6 +6,7 @@
 
 #include "core.h"
 #include "p3d/p3dmath.h"
+#include "p3d/flip.h"
 #include "gen/cclist.h"
 
 class Model;
@@ -77,14 +78,15 @@ public:
     void ReAttachTree(s32 type, s32 animEnum);
 
     // Accessors
-    void* GetFlip() const { return flip; }
+    TransformFlip* GetFlip() const { return flip; }
+    TransformAnim* GetAnimation() const { return animation; }
     s32 GetCurrentFrame() const { return currentFrame; }
     s32 GetLoopCount() const { return loopCount; }
 
     // +24
-    void* animation = nullptr;
+    TransformAnim* animation = nullptr;
     // +28
-    void* flip = nullptr;
+    TransformFlip* flip = nullptr;
     // +32
     Model* model = nullptr;
     // +36

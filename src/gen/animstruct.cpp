@@ -1,20 +1,21 @@
 // animstruct.cpp - AnimStructure reversed from PSX MODEL.CPP:2335
 // PSX source: C:\CHAN\GAME\SRC\GEN\MODEL.CPP
 #include "gen/animstruct.h"
+#include "gen/model.h"
 #include "gen/time.h"
 #include "gen/charmgr.h"
 #include "p3d/p3dmath.h"
 
 // PSX: _13AnimStructurelP10tAnimationlP5ModelP13DrawableBasic (0x80070740)
 // mode: 0=normal, 1=reverse, 2=runToLast, 3=camera
-// animation: tAnimation* (opaque on PC for now)
-// loopType: initial loop type (typically 4=hold_last for camera)
+// animation: TransformAnim* (parsed from raw binary)
+// loopType: initial loop type
 // model: Model* (nullptr for camera anims)
 // drawableBasic: DrawableBasic* (nullptr for camera anims)
 AnimStructure::AnimStructure(s32 m, void* anim, s32 lt, Model* mdl, void* drawableBasic) {
     MARKFUNCTION(0x80070740);
 
-    animation = anim;
+    animation = (TransformAnim*)anim;
     mode = m;
     model = mdl;
     flip = nullptr;
@@ -22,11 +23,25 @@ AnimStructure::AnimStructure(s32 m, void* anim, s32 lt, Model* mdl, void* drawab
     speed = FIX16_ONE;
     loopCount = 0;
 
-    // PSX: mode 3 (camera) creates tParamFlip or tSequenceFlip as flip handler
-    // For mode 0 (normal humanoid), creates tTransformFlip2 + tTreeFlip
-    // For mode 1/2, gets flip from animation vtable+20
-    // We don't implement the flip creation since tParamFlip/tTreeFlip etc
-    // are Pure3D classes not yet reversed on PC
+    // PSX: mode 0 creates tTransformFlip2 + tTreeFlip, attaches to tree + animation
+    if (mode == 0 && animation && mdl) {
+        // Get skeleton from model's drawable
+        STreeData* skeleton = nullptr;
+        if (mdl->drawable && mdl->drawable->original) {
+            skeleton = mdl->drawable->original->skeleton;
+        }
+        if (skeleton) {
+            flip = new TransformFlip();
+            flip->Attach(skeleton, animation);
+
+            // Set endFrame from animation's numFrames
+            if (animation->numFrames > 0) {
+                endFrame = (animation->numFrames - 1) << 16;
+            }
+
+            flip->Reset();
+        }
+    }
 
     ResetCountsToAnim();
     SetLoopType(lt, 1);
@@ -36,8 +51,7 @@ AnimStructure::AnimStructure(s32 m, void* anim, s32 lt, Model* mdl, void* drawab
 AnimStructure::~AnimStructure() {
     MARKFUNCTION(0x80070AB8);
 
-    // PSX: deletes flip via vtable+8 destructor
-    // PSX: if blendPose, deletes its child then deletes blendPose
+    delete flip;
     flip = nullptr;
     animation = nullptr;
     blendPose = nullptr;
@@ -51,16 +65,15 @@ void AnimStructure::ResetCountsToAnim() {
         return;
     }
 
-    // PSX: endFrame = (vtable+16(animation) - 1) << 16
-    // vtable+16 = GetNumFrames. We don't have this on PC yet.
-    // For camera anims, the frame count comes from the loaded animation data.
-    // Use a safe default for now.
+    // PSX: endFrame = (GetNumFrames(animation) - 1) << 16
+    if (animation->numFrames > 0) {
+        endFrame = (animation->numFrames - 1) << 16;
+    }
     startFrame = 0;
     currentFrame = 0;
     prevFrame = 0;
     loopCount = 0;
 
-    // PSX: prevTick = currentTick = MEMORY[0x1C]
     s32 tick = g_time ? (s32)g_time->frameCounter : 0;
     currentTick = tick;
     prevTick = tick - 1;
@@ -70,7 +83,10 @@ void AnimStructure::ResetCountsToAnim() {
 void AnimStructure::ForceFrame(s32 frame) {
     MARKFUNCTION(0x80070DB8);
     currentFrame = frame << 16;
-    // PSX: calls flip vtable+24 (SetFrame) then vtable+20 (Update)
+    if (flip) {
+        flip->SetFrame(frame);
+        flip->UpdateJoints();
+    }
 }
 
 // PSX: SetLoopType__13AnimStructureli (0x80070C20)
@@ -179,8 +195,11 @@ void AnimStructure::ExecuteHandler(s32 doFlip) {
         // Not needed for camera mode
     }
 
-    // PSX: if doFlip && flip exists, calls flip->SetFrame then flip->Update
-    // This drives the t2PointCamFlip which updates camera position/target
+    // PSX: if doFlip && flip exists, calls flip->SetFrameReal then flip->UpdateJoints
+    if (doFlip && flip) {
+        flip->SetFrameReal(currentFrame);
+        flip->UpdateJoints();
+    }
 
     // Store state
     prevFrame = currentFrame;
@@ -267,10 +286,15 @@ void AnimStructure::ReAttachTree(s32 type, s32 animEnum) {
     if (!g_characterManager) {
         return;
     }
-    void* anim = g_characterManager->GetAnimation((u32)type, animEnum);
-    if (!anim) {
+    TransformAnim* newAnim = (TransformAnim*)g_characterManager->GetAnimation((u32)type, animEnum);
+    if (!newAnim) {
         return;
     }
-    // PSX: checks GetAnimationType == 65539 (tTreeAnim), reattaches flip
-    // Not critical for camera
+    // PSX: reattaches flip to new animation
+    animation = newAnim;
+    if (flip) {
+        flip->anim = newAnim;
+        flip->dirty = 1;
+    }
+    ResetCountsToAnim();
 }
