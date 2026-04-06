@@ -8,15 +8,23 @@
 #include "ai/thing.h"
 #include "ai/humanoid.h"
 #include "p3d/p3dmath.h"
+#include "pc/log.h"
+
+static s32 g_floorDebugCounter = 0;
 
 // COLMGR globals (PSX: gp-relative)
 Wall* g_wallPtrArray[64] = {};         // gp+2828
 s32 g_filledWallCount = 0;           // gp+4172
 s32 g_maxWallIterations = 4;         // gp+2836
 s32 g_wallHitCounter = 0;            // gp+2840
-s32 g_floorSearchMargin = 0x10000;   // gp+2844
-s32 g_floorYSearchOffset = 0x40000;  // gp+2852
-s32 g_floorStandingTol = 0x1000;     // gp+2856
+s32 g_floorSearchMargin = 500;       // gp+2844: floor AABB search expansion
+s32 g_floorYSearchOffset = 1024;     // gp+2852: vertical offset for floor search
+s32 g_floorStandingTol = 64;         // gp+2856: landing detection tolerance
+s32 g_colDefaultHeight = 768;        // gp+2904: default humanoid collision height
+s32 g_colMaxRadius = 400;            // gp+2908: max collision radius
+s32 g_colDefaultRadius = 175;        // gp+2912: default collision radius
+s32 g_colSlopeTol = 0x8000;          // gp+2884: slope tolerance
+s32 g_colSlopeForce = 0x4000;        // gp+2888: slope sliding force
 DynamicThing* g_combatTarget1 = nullptr; // gp+4176
 DynamicThing* g_combatTarget2 = nullptr; // gp+4180
 
@@ -148,89 +156,187 @@ void HandleThingWall(DynamicThing* thing, s32 radius, s32 height, s32 checkHeigh
 }
 
 // PSX: HandleThingFloor__FP12DynamicThinglll (COLMGR.CPP:795) 0x800A8614
-// Main floor collision handler: landing, ceiling, slopes, railings
-void HandleThingFloor(DynamicThing* thing, s32 height, s32 radius, s32 checkHeight) {
+// PSX params: (thing, searchRadius, yMinOffset, checkHeight)
+// Reversed from PSX decompile at line 100880-101330
+void HandleThingFloor(DynamicThing* thing, s32 radius, s32 yMinOffset, s32 checkHeight) {
     MARKFUNCTION(0x800A8614);
 
-    // Build floor search AABB
-    s32 deltaX = thing->homePos.x - thing->pos.x;
-    s32 deltaZ = thing->homePos.z - thing->pos.z;
+    s32 halfRadius = radius / 2;
 
+    // Work on local copies (PSX writes back only if TF_DYNAMIC at end)
+    s32 localHomePosX = thing->homePos.x;
+    s32 localHomePosY = thing->homePos.y;
+    s32 localHomePosZ = thing->homePos.z;
+    s32 localVelX = thing->velocity.x;
+    s32 localVelY = thing->velocity.y;
+    s32 localVelZ = thing->velocity.z;
+
+    // Compute displacement from pos to homePos
+    s32 dispX = localHomePosX - thing->pos.x;
+    s32 dispY = localHomePosY - thing->pos.y;
+    s32 dispZ = localHomePosZ - thing->pos.z;
+
+    // Build search AABB from min/max of pos and homePos, expanded by halfRadius + searchMargin
     LVector searchMin, searchMax;
-    searchMin.x = thing->homePos.x - g_floorSearchMargin;
-    searchMin.y = thing->homePos.y - g_floorYSearchOffset;
-    searchMin.z = thing->homePos.z - g_floorSearchMargin;
-    searchMax.x = thing->homePos.x + g_floorSearchMargin;
-    searchMax.y = thing->homePos.y + g_floorYSearchOffset;
-    searchMax.z = thing->homePos.z + g_floorSearchMargin;
+    searchMin.x = thing->pos.x;
+    searchMin.y = thing->pos.y;
+    searchMin.z = thing->pos.z;
+    searchMax.x = thing->pos.x;
+    searchMax.y = thing->pos.y;
+    searchMax.z = thing->pos.z;
+    ExtendRange(searchMin.x, localHomePosX, searchMax.x);
+    ExtendRange(searchMin.y, localHomePosY, searchMax.y);
+    ExtendRange(searchMin.z, localHomePosZ, searchMax.z);
 
-    // Extend by velocity
-    if (deltaX > 0) searchMax.x += deltaX; else searchMin.x += deltaX;
-    if (deltaZ > 0) searchMax.z += deltaZ; else searchMin.z += deltaZ;
+    searchMin.x -= halfRadius + g_floorSearchMargin;
+    searchMax.x += halfRadius + g_floorSearchMargin;
+    searchMin.z -= halfRadius + g_floorSearchMargin;
+    searchMax.z += halfRadius + g_floorSearchMargin;
 
     // Fill floor array
     Floor* floorArray[64];
     s32 floorCount = CollisionSector::FillWorldFloorArray(searchMin, searchMax, floorArray, 64);
     if (floorCount > 64) floorCount = 64;
 
-    // Pass 1: Floor/ceiling at homePos
-    s32 floorH, ceilingH;
-    LVector floorNorm, ceilingNorm;
-    s32 hasRailing = 0;
+    // PSX: detect humanoid for special handling (thingType < 29)
+    Humanoid* humanoid = nullptr;
+    if (thing->thingType < 29) {
+        humanoid = (Humanoid*)thing;
+    }
 
-    LVector testPos = thing->homePos;
-    testPos.y += height;
+    // Pass 1: floor/ceiling at OLD position (pos + y search offset)
+    LVector testPosOld;
+    testPosOld.x = thing->pos.x;
+    testPosOld.y = thing->pos.y + g_floorYSearchOffset;
+    testPosOld.z = thing->pos.z;
+
+    s32 floorHOld, ceilingHOld;
+    LVector floorNormOld = {};
+    LVector ceilingNormOld = {};
+    s32 hasRailing = 0;
+    LVector railCorrection = {};
 
     CollisionSector::GetArrayFloorAndCeilingHeight(
         floorArray, floorCount,
-        floorH, ceilingH, floorNorm, ceilingNorm,
-        &hasRailing, &testPos, radius);
+        floorHOld, ceilingHOld, floorNormOld, ceilingNormOld,
+        &hasRailing, &testPosOld, 2);
+
+    // Pass 2: floor/ceiling at NEW position (homePos + y search offset)
+    LVector testPosNew;
+    testPosNew.x = localHomePosX;
+    testPosNew.y = thing->pos.y + g_floorYSearchOffset;
+    testPosNew.z = localHomePosZ;
+
+    s32 floorHNew, ceilingHNew;
+    LVector floorNormNew = {};
+    LVector ceilingNormNew = {};
+    s32 hasRailingNew = 0;
+    LVector railCorrectionNew = {};
+
+    CollisionSector::GetArrayFloorAndCeilingHeight(
+        floorArray, floorCount,
+        floorHNew, ceilingHNew, floorNormNew, ceilingNormNew,
+        &hasRailingNew, &railCorrectionNew, &testPosNew, 2);
+
+    // Apply railing correction
+    if (hasRailingNew) {
+        localHomePosX += railCorrectionNew.x;
+        localHomePosZ += railCorrectionNew.z;
+    }
+
+    s32 bestFloorH = floorHNew;
+
+    // Compute slope correction from floor normals
+    s32 slopeCorr = 0;
+    if (floorHOld > (s32)0x80000001) {
+        s32 slopeDot = fixmul16(floorNormOld.z, dispZ) + fixmul16(floorNormOld.x, dispX);
+        if (floorNormOld.y != 0) {
+            slopeCorr = rmDiv16i(slopeDot, floorNormOld.y) + 2;
+        }
+    }
+    s32 slopeCorr2 = 0;
+    if (floorHNew > (s32)0x80000001) {
+        s32 slopeDot = fixmul16(floorNormNew.z, dispZ) + fixmul16(floorNormNew.x, dispX);
+        if (floorNormNew.y != 0) {
+            slopeCorr2 = rmDiv16i(slopeDot, floorNormNew.y) + 2;
+        }
+    }
+    if (slopeCorr2 < slopeCorr) slopeCorr2 = slopeCorr;
+    if (slopeCorr2 < 0) slopeCorr2 = 0;
 
     // Ceiling collision
-    if (ceilingH != 0x7FFFFFFF) {
-        if (thing->homePos.y + height > ceilingH) {
-            thing->flags |= 0x40000; // TF_CEILING_HIT
-            thing->homePos.y = ceilingH - height;
-            if (thing->velocity.y > 0) {
-                thing->velocity.y = 0;
-            }
-        }
-    } else {
-        thing->flags &= ~0x40000;
+    if (ceilingHNew != 0x7FFFFFFF && ceilingHNew - checkHeight < localHomePosY) {
+        localHomePosY = ceilingHNew - checkHeight - 1;
+        if (localVelY > 0) localVelY = 0;
     }
 
-    // Floor landing logic
-    if (floorH != 0x7FFFFFFF) {
-        s32 standDist = thing->homePos.y - floorH;
+    // Clear ground/slope/ceiling bits, preserve others
+    bool wasOnGround = (thing->flags >> 12) & 1;
+    thing->flags &= ~(TF_ON_GROUND | 0x10000 | 0x20000 | 0x40000);
 
-        if (standDist <= g_floorStandingTol && standDist >= -g_floorStandingTol) {
-            // Within landing tolerance
-            if (!(thing->flags & TF_ON_GROUND)) {
-                thing->Land();
+    // Floor normal output
+    LVector outFloorNorm = {};
+    outFloorNorm.y = 0x10000;
+
+    // Landing logic
+    if (floorHNew > (s32)0x80000001) {
+        s32 landingLevel = floorHNew - yMinOffset;
+
+        // PSX condition: pos.y >= (floorH - yMinOffset - standingTol) AND homePos.y < (floorH - yMinOffset + slopeCorrection)
+        if (thing->pos.y >= landingLevel - g_floorStandingTol && localHomePosY < landingLevel + slopeCorr2) {
+            // Set floor-contact flag
+            thing->flags |= 0x10000;
+
+            // Land
+            thing->Land();
+            localHomePosY = landingLevel + 1;
+            if (localVelY < 0) localVelY = 0;
+
+            // Slope sliding force
+            if (g_colSlopeTol >= floorNormNew.y) {
+                s64 slopeScale = (s64)g_colSlopeForce * (s64)thing->stateCounter;
+                LVector slopeForce;
+                LVector slopeDir;
+                slopeDir.x = floorNormNew.x;
+                slopeDir.y = (s32)(((s64)floorNormNew.y * (s64)floorNormNew.y) >> 16) - 0x10000;
+                slopeDir.z = floorNormNew.z;
+                rmV3Scale(&slopeForce, &slopeDir, (s32)(slopeScale >> 16));
+                slopeForce.y = 0;
+                thing->contactForce.x += slopeForce.x;
+                thing->contactForce.y += slopeForce.y;
+                thing->contactForce.z += slopeForce.z;
+                thing->flags |= 0x20000;
+                outFloorNorm = floorNormNew;
             }
-            thing->homePos.y = floorH;
-            thing->velocity.y = 0;
-        } else if (standDist < -g_floorStandingTol) {
-            // Below floor — push up
-            thing->homePos.y = floorH;
-            thing->velocity.y = 0;
-            if (!(thing->flags & TF_ON_GROUND)) {
-                thing->Land();
+
+            // PSX: vtable call SetFloorHeight(thing, landingLevel) if not already on ground
+            if (!wasOnGround) {
+                thing->SetFloorHeight(landingLevel);
             }
         }
     }
 
-    // Store floor normal into DynamicThing (field148[6..8])
-    thing->field148[6] = floorNorm.x;
-    thing->field148[7] = floorNorm.y;
-    thing->field148[8] = floorNorm.z;
+    // Write back local variables if TF_DYNAMIC
+    if (thing->flags & TF_DYNAMIC) {
+        thing->homePos.x = localHomePosX;
+        thing->homePos.y = localHomePosY;
+        thing->homePos.z = localHomePosZ;
+        thing->velocity.x = localVelX;
+        thing->velocity.y = localVelY;
+        thing->velocity.z = localVelZ;
+    }
 
-    // Set floor height
-    thing->SetFloorHeight(floorH);
+    // Store floor normal
+    thing->field148[6] = outFloorNorm.x;
+    thing->field148[7] = outFloorNorm.y;
+    thing->field148[8] = outFloorNorm.z;
 
-    // HandleLand callback
+    // Set floor height on model
+    thing->SetFloorHeight(bestFloorH);
+
+    // Store ground height for standing-on detection
     if (thing->flags & TF_ON_GROUND) {
-        thing->HandleLand(floorH);
+        thing->field148[3] = localHomePosY;
     }
 }
 
@@ -255,54 +361,72 @@ void HandleThingEnvironmentCollisions(ccList& thingList) {
 
         if (!(thing->flags & TF_MODEL_CREATED)) continue;
 
-        s32 radius, height, ckHeight;
+        // PSX params: radius, yMinOffset (CollisionYMin), checkHeight
+        s32 radius, yMinOffset, ckHeight;
         bool doWall = true;
-        bool doFloor = true;
 
         if (thing->thingType < 29) {
-            // Humanoid
+            // Humanoid - use collision bbox values
             Humanoid* hum = (Humanoid*)thing;
             s32 state = hum->actionState;
 
-            // States that skip wall collision: climbing (23), hanging (24), ledge (56)
-            if (state == 23 || state == 24 || state == 56) {
+            // States that skip wall collision: climbing (23), hanging (24)
+            if (state == 23 || state == 24) {
                 doWall = false;
             }
 
-            radius = 0x10000;     // default humanoid walk radius
-            height = 0x18000;     // default humanoid height
-            ckHeight = height;
+            // PSX: v7 = gp+2912 (default collision radius), v10 = 768 (default height)
+            // PSX: if collBboxMax.z < gp+2904: v7 = gp+2908, v10 = gp+2904
+            // Use humanoid bbox values as approximation of PSX globals
+            radius = g_colDefaultRadius;
+            yMinOffset = 0;
+            ckHeight = hum->collBboxMax.z;
+            if (ckHeight == 0) ckHeight = 768;
         } else if (thing->thingType == 101) {
             // Pickup
             radius = 0;
-            height = 0x8000;
+            yMinOffset = 0;
             ckHeight = 0;
         } else if (thing->thingType >= 301 && thing->thingType <= 328) {
             // Obstacle
-            radius = 0x10000;
-            height = 0x20000;
-            ckHeight = height;
+            radius = g_colDefaultRadius;
+            yMinOffset = 0;
+            ckHeight = 768;
         } else {
             // Default
-            radius = 0x10000;
-            height = 0x10000;
-            ckHeight = height;
+            radius = g_colDefaultRadius;
+            yMinOffset = 0;
+            ckHeight = 768;
         }
+
+        // PSX: GetTicketIssuer check
+        Thing* ticketIssuer = thing->GetTicketIssuer();
 
         if (doWall) {
-            HandleThingWall(thing, radius, height, ckHeight);
+            HandleThingWall(thing, radius, yMinOffset, ckHeight);
         }
-        if (doFloor) {
-            HandleThingFloor(thing, height, radius, ckHeight);
+
+        if (ticketIssuer) {
+            // Standing on an obstacle - just land, skip floor check
+            thing->Land();
+        } else {
+            HandleThingFloor(thing, radius, yMinOffset, ckHeight);
+        }
+
+        // PSX: if climbing state and not on ground and no ticket, let go of ledge
+        if (!doWall && !thing->GetTicketIssuer() && !(thing->flags & TF_ON_GROUND)) {
+            // LetGoOfLedge not yet reversed
         }
     }
 
-    // Post-loop: re-process combat targets
+    // Post-loop: re-process combat targets with their collision bbox
     if (g_combatTarget1 != nullptr) {
-        HandleThingWall(g_combatTarget1, 0x10000, 0x20000, 0x20000);
+        Humanoid* h = (Humanoid*)g_combatTarget1;
+        HandleThingWall(g_combatTarget1, g_colDefaultRadius, h->collBboxMin.y, h->collBboxMax.z);
     }
     if (g_combatTarget2 != nullptr) {
-        HandleThingWall(g_combatTarget2, 0x10000, 0x20000, 0x20000);
+        Humanoid* h = (Humanoid*)g_combatTarget2;
+        HandleThingWall(g_combatTarget2, g_colDefaultRadius, h->collBboxMin.y, h->collBboxMax.z);
     }
 }
 

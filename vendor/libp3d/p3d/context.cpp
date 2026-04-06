@@ -31,6 +31,9 @@ bool tContext::Setup(const tContextInitData& init) {
     di.xSize = init.xSize;
     di.ySize = init.ySize;
     di.title = init.title;
+    di.fullscreen = init.fullscreen;
+    di.vsync = init.vsync;
+    di.msaa = init.msaa;
     if (!display->InitDisplay(di))
         return false;
 

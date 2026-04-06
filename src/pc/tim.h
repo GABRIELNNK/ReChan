@@ -2,7 +2,7 @@
 // Converts PSX TIM image files to RGBA32 for PC rendering.
 #pragma once
 
-#include "gen/common.h"
+#include "core.h"
 
 class tTexture;
 class pddiBaseShader;

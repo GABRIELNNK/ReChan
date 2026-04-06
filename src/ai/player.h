@@ -96,6 +96,9 @@ public:
     // PSX: SetActionState__6PlayerUll (PLAYER.CPP:1579)
     void SetActionState(u32 state, s32 param) override;
 
+    // PSX: ProcessAction dispatches SD_HARDFALL/SD_HARDLAND via function pointers
+    void ProcessAction() override;
+
     // PSX: GetViewSpot__6PlayerP10tagLVectorT1 (PLAYER.CPP:1460)
     void GetViewSpot(LVector* outPos, LVector* outTarget) override;
 

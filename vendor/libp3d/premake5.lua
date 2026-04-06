@@ -1,40 +1,23 @@
 local libp3d_root = path.getdirectory(_SCRIPT)
 
--- GLAD
-project "glad"
+-- libp3d (includes glad + glfw)
+project "libp3d"
     kind "StaticLib"
-    language "C"
+    language "C++"
+    cppdialect "C++20"
     staticruntime "on"
     targetdir ("%{wks.location}/bin/" .. outputdir .. "/%{prj.name}")
     objdir    ("%{wks.location}/obj/" .. outputdir .. "/%{prj.name}")
 
     files {
+        libp3d_root .. "/**.h",
+        libp3d_root .. "/**.hpp",
+        libp3d_root .. "/**.cpp",
+
+        -- glad
         libp3d_root .. "/vendor/glad/src/gl.c",
-    }
-    includedirs {
-        libp3d_root .. "/vendor/glad/include",
-    }
 
-    filter "system:windows"
-        systemversion "latest"
-
-    filter "configurations:Debug"
-        runtime "Debug"
-        symbols "on"
-
-    filter "configurations:Release"
-        runtime "Release"
-        optimize "on"
-
--- GLFW
-project "glfw"
-    kind "StaticLib"
-    language "C"
-    staticruntime "on"
-    targetdir ("%{wks.location}/bin/" .. outputdir .. "/%{prj.name}")
-    objdir    ("%{wks.location}/obj/" .. outputdir .. "/%{prj.name}")
-
-    files {
+        -- glfw
         libp3d_root .. "/vendor/glfw/src/context.c",
         libp3d_root .. "/vendor/glfw/src/init.c",
         libp3d_root .. "/vendor/glfw/src/input.c",
@@ -47,7 +30,10 @@ project "glfw"
         libp3d_root .. "/vendor/glfw/src/vulkan.c",
         libp3d_root .. "/vendor/glfw/src/window.c",
     }
+
     includedirs {
+        libp3d_root,
+        libp3d_root .. "/vendor/glad/include",
         libp3d_root .. "/vendor/glfw/include",
     }
 
@@ -66,37 +52,6 @@ project "glfw"
             libp3d_root .. "/vendor/glfw/src/osmesa_context.c",
         }
         defines { "_GLFW_WIN32" }
-
-    filter "configurations:Debug"
-        runtime "Debug"
-        symbols "on"
-
-    filter "configurations:Release"
-        runtime "Release"
-        optimize "on"
-
--- libp3d
-project "libp3d"
-    kind "StaticLib"
-    language "C++"
-    cppdialect "C++20"
-    staticruntime "on"
-    targetdir ("%{wks.location}/bin/" .. outputdir .. "/%{prj.name}")
-    objdir    ("%{wks.location}/obj/" .. outputdir .. "/%{prj.name}")
-
-    files {
-        libp3d_root .. "/**.h",
-        libp3d_root .. "/**.cpp",
-    }
-
-    includedirs {
-        libp3d_root,
-        libp3d_root .. "/vendor/glad/include",
-        libp3d_root .. "/vendor/glfw/include",
-    }
-
-    filter "system:windows"
-        systemversion "latest"
 
     filter "configurations:Debug"
         runtime "Debug"

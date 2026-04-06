@@ -324,18 +324,75 @@ bool glDisplay::InitDisplay(const pddiDisplayInit& init) {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    window = glfwCreateWindow(init.xSize, init.ySize, init.title, nullptr, nullptr);
+    if (init.msaa > 0) {
+        glfwWindowHint(GLFW_SAMPLES, init.msaa);
+    }
+
+    GLFWmonitor* monitor = nullptr;
+    int winW = init.xSize;
+    int winH = init.ySize;
+
+    if (init.fullscreen) {
+        monitor = glfwGetPrimaryMonitor();
+        const GLFWvidmode* vidMode = glfwGetVideoMode(monitor);
+        winW = vidMode->width;
+        winH = vidMode->height;
+        glfwWindowHint(GLFW_RED_BITS, vidMode->redBits);
+        glfwWindowHint(GLFW_GREEN_BITS, vidMode->greenBits);
+        glfwWindowHint(GLFW_BLUE_BITS, vidMode->blueBits);
+        glfwWindowHint(GLFW_REFRESH_RATE, vidMode->refreshRate);
+    }
+
+    window = glfwCreateWindow(winW, winH, init.title, monitor, nullptr);
     if (!window) {
         std::fprintf(stderr, "GLFW: window creation failed\n");
         glfwTerminate();
         return false;
     }
-    width = init.xSize;
-    height = init.ySize;
+
+    windowedW = init.xSize;
+    windowedH = init.ySize;
+    if (!init.fullscreen) {
+        GLFWmonitor* primaryMonitor = glfwGetPrimaryMonitor();
+        if (primaryMonitor) {
+            int workX = 0;
+            int workY = 0;
+            int workW = 0;
+            int workH = 0;
+            glfwGetMonitorWorkarea(primaryMonitor, &workX, &workY, &workW, &workH);
+
+            int contentW = 0;
+            int contentH = 0;
+            glfwGetWindowSize(window, &contentW, &contentH);
+
+            int centeredX = workX + (workW - contentW) / 2;
+            int centeredY = workY + (workH - contentH) / 2;
+            if (centeredX < workX) centeredX = workX;
+            if (centeredY < workY) centeredY = workY;
+
+            glfwSetWindowPos(window, centeredX, centeredY);
+        }
+
+        glfwGetWindowPos(window, &windowedX, &windowedY);
+    }
 
     glfwMakeContextCurrent(window);
+    glfwSwapInterval(init.vsync ? 1 : 0);
+
     glfwSetWindowUserPointer(window, this);
     glfwSetFramebufferSizeCallback(window, FramebufferSizeCallback);
+    glfwSetWindowFocusCallback(window, WindowFocusCallback);
+    glfwSetWindowCloseCallback(window, WindowCloseCallback);
+    glfwSetKeyCallback(window, KeyCallback);
+    glfwSetMouseButtonCallback(window, MouseButtonCallback);
+    glfwSetCursorPosCallback(window, CursorPosCallback);
+    glfwSetScrollCallback(window, ScrollCallback);
+
+    glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
+
+    if (init.msaa > 0) {
+        glEnable(GL_MULTISAMPLE);
+    }
 
     if (!gladLoadGL(glfwGetProcAddress)) {
         std::fprintf(stderr, "GLAD: failed to load OpenGL\n");
@@ -349,15 +406,15 @@ bool glDisplay::InitDisplay(const pddiDisplayInit& init) {
 }
 
 void glDisplay::SwapBuffers() {
-    glfwSwapBuffers(window); 
+    glfwSwapBuffers(window);
 }
 
 bool glDisplay::ShouldClose() {
-    return glfwWindowShouldClose(window); 
+    return glfwWindowShouldClose(window);
 }
 
 void glDisplay::PollEvents() {
-    glfwPollEvents(); 
+    glfwPollEvents();
 }
 
 bool glDisplay::IsKeyDown(int key) {
@@ -369,30 +426,239 @@ bool glDisplay::IsMouseButtonDown(int button) {
 }
 
 void glDisplay::GetMousePosition(double& x, double& y) {
-    if (window) 
+    if (window) {
         glfwGetCursorPos(window, &x, &y);
-
-    else {
+    } else {
         x = 0;
-        y = 0; 
+        y = 0;
     }
 }
 
-void glDisplay::FramebufferSizeCallback(GLFWwindow* win, int w, int h) {
-    auto* self = static_cast<glDisplay*>(glfwGetWindowUserPointer(win));
-    if (self) {
-        self->width = w;
-        self->height = h;
+void glDisplay::SetIcon(int w, int h, const unsigned char* rgba) {
+    if (!window || !rgba)
+        return;
+    GLFWimage img;
+    img.width = w;
+    img.height = h;
+    img.pixels = const_cast<unsigned char*>(rgba);
+    glfwSetWindowIcon(window, 1, &img);
+}
+
+// Video mode
+
+int glDisplay::GetVideoModeCount() {
+    int count = 0;
+    GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+    if (monitor) {
+        glfwGetVideoModes(monitor, &count);
     }
+    return count;
+}
+
+void glDisplay::GetVideoMode(int index, pddiVideoMode& mode) {
+    int count = 0;
+    GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+    if (!monitor)
+        return;
+    const GLFWvidmode* modes = glfwGetVideoModes(monitor, &count);
+    if (index < 0 || index >= count)
+        return;
+    mode.width = modes[index].width;
+    mode.height = modes[index].height;
+    mode.refreshRate = modes[index].refreshRate;
+}
+
+void glDisplay::SetFullscreen(bool fullscreen) {
+    if (!window)
+        return;
+
+    if (fullscreen == IsFullscreen())
+        return;
+
+    if (fullscreen) {
+        // Save current windowed position/size
+        glfwGetWindowPos(window, &windowedX, &windowedY);
+        glfwGetWindowSize(window, &windowedW, &windowedH);
+
+        GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+        const GLFWvidmode* vidMode = glfwGetVideoMode(monitor);
+        glfwSetWindowMonitor(window, monitor, 0, 0,
+                             vidMode->width, vidMode->height,
+                             vidMode->refreshRate);
+    } else {
+        glfwSetWindowMonitor(window, nullptr,
+                             windowedX, windowedY,
+                             windowedW, windowedH, 0);
+    }
+}
+
+bool glDisplay::IsFullscreen() {
+    return window && glfwGetWindowMonitor(window) != nullptr;
+}
+
+void glDisplay::SetResolution(int w, int h) {
+    if (!window)
+        return;
+
+    if (IsFullscreen()) {
+        GLFWmonitor* monitor = glfwGetWindowMonitor(window);
+        const GLFWvidmode* vidMode = glfwGetVideoMode(monitor);
+        glfwSetWindowMonitor(window, monitor, 0, 0, w, h, vidMode->refreshRate);
+    } else {
+        glfwSetWindowSize(window, w, h);
+        windowedW = w;
+        windowedH = h;
+    }
+}
+
+void glDisplay::SetVSync(bool enabled) {
+    if (window) {
+        glfwSwapInterval(enabled ? 1 : 0);
+    }
+}
+
+void glDisplay::SetWindowPos(int x, int y) {
+    if (window && !IsFullscreen()) {
+        glfwSetWindowPos(window, x, y);
+        windowedX = x;
+        windowedY = y;
+    }
+}
+
+// Cursor
+
+void glDisplay::ShowCursor(bool visible) {
+    cursorVisible = visible;
+    if (window) {
+        glfwSetInputMode(window, GLFW_CURSOR,
+                         visible ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_HIDDEN);
+    }
+}
+
+void glDisplay::ClipCursor(bool clip) {
+    cursorClipped = clip;
+    UpdateCursorClip();
+}
+
+void glDisplay::UpdateCursorClip() {
+    if (!window)
+        return;
+
+    if (cursorClipped && focused) {
+        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        if (glfwRawMouseMotionSupported()) {
+            glfwSetInputMode(window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
+        }
+    } else if (!cursorVisible) {
+        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_HIDDEN);
+        glfwSetInputMode(window, GLFW_RAW_MOUSE_MOTION, GLFW_FALSE);
+    } else {
+        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+        glfwSetInputMode(window, GLFW_RAW_MOUSE_MOTION, GLFW_FALSE);
+    }
+}
+
+// WndProc
+
+void glDisplay::SetWndProc(pddiWndProc proc) {
+    wndProc = std::move(proc);
 }
 
 void glDisplay::GetViewport(int& x, int& y, int& w, int& h) const {
-    // Use the full window — no letterboxing.
-    // Aspect ratio is handled by the camera's projection matrix (HOR+).
     x = 0;
     y = 0;
-    w = width;
-    h = height;
+    w = fbWidth;
+    h = fbHeight;
+}
+
+// GLFW callbacks
+
+void glDisplay::FramebufferSizeCallback(GLFWwindow* win, int w, int h) {
+    auto* self = static_cast<glDisplay*>(glfwGetWindowUserPointer(win));
+    if (!self)
+        return;
+    self->fbWidth = w;
+    self->fbHeight = h;
+    if (self->wndProc) {
+        pddiWndMessage msg{};
+        msg.event = PDDI_WND_RESIZE;
+        msg.param1 = w;
+        msg.param2 = h;
+        self->wndProc(msg);
+    }
+}
+
+void glDisplay::WindowFocusCallback(GLFWwindow* win, int isFocused) {
+    auto* self = static_cast<glDisplay*>(glfwGetWindowUserPointer(win));
+    if (!self)
+        return;
+    self->focused = (isFocused != 0);
+    self->UpdateCursorClip();
+    if (self->wndProc) {
+        pddiWndMessage msg{};
+        msg.event = PDDI_WND_FOCUS;
+        msg.param1 = isFocused;
+        self->wndProc(msg);
+    }
+}
+
+void glDisplay::WindowCloseCallback(GLFWwindow* win) {
+    auto* self = static_cast<glDisplay*>(glfwGetWindowUserPointer(win));
+    if (!self)
+        return;
+    if (self->wndProc) {
+        pddiWndMessage msg{};
+        msg.event = PDDI_WND_CLOSE;
+        if (self->wndProc(msg)) {
+            glfwSetWindowShouldClose(win, GLFW_FALSE);
+        }
+    }
+}
+
+void glDisplay::KeyCallback(GLFWwindow* win, int key, int scancode, int action, int mods) {
+    auto* self = static_cast<glDisplay*>(glfwGetWindowUserPointer(win));
+    if (!self || !self->wndProc)
+        return;
+    if (action == GLFW_REPEAT)
+        return;
+    pddiWndMessage msg{};
+    msg.event = (action == GLFW_PRESS) ? PDDI_WND_KEYDOWN : PDDI_WND_KEYUP;
+    msg.param1 = key;
+    msg.param2 = scancode;
+    self->wndProc(msg);
+}
+
+void glDisplay::MouseButtonCallback(GLFWwindow* win, int button, int action, int mods) {
+    auto* self = static_cast<glDisplay*>(glfwGetWindowUserPointer(win));
+    if (!self || !self->wndProc)
+        return;
+    pddiWndMessage msg{};
+    msg.event = PDDI_WND_MOUSEBUTTON;
+    msg.param1 = button;
+    msg.param2 = (action == GLFW_PRESS) ? 1 : 0;
+    self->wndProc(msg);
+}
+
+void glDisplay::CursorPosCallback(GLFWwindow* win, double x, double y) {
+    auto* self = static_cast<glDisplay*>(glfwGetWindowUserPointer(win));
+    if (!self || !self->wndProc)
+        return;
+    pddiWndMessage msg{};
+    msg.event = PDDI_WND_MOUSEMOVE;
+    msg.fparam1 = x;
+    msg.fparam2 = y;
+    self->wndProc(msg);
+}
+
+void glDisplay::ScrollCallback(GLFWwindow* win, double xoff, double yoff) {
+    auto* self = static_cast<glDisplay*>(glfwGetWindowUserPointer(win));
+    if (!self || !self->wndProc)
+        return;
+    pddiWndMessage msg{};
+    msg.event = PDDI_WND_SCROLL;
+    msg.fparam1 = xoff;
+    msg.fparam2 = yoff;
+    self->wndProc(msg);
 }
 
 // glContext

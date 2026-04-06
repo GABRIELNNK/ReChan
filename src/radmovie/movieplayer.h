@@ -3,7 +3,7 @@
 // PSX: MoviePlayer class (348 bytes, 0x80014338 constructor)
 #pragma once
 
-#include "gen/common.h"
+#include "core.h"
 
 class tTexture;
 
@@ -32,8 +32,11 @@ public:
     // Check if a movie file is currently open.
     bool IsOpen() const { return fileData != nullptr; }
 
+    // Playback frame rate (computed from sector interleave)
+    f32 GetFrameRate() const { return (f32)(1.0 / frameInterval); }
+
 private:
-    // --- STR sector parsing ---
+    // STR sector parsing
     // Sector formats: raw (2352), Mode2 without sync (2336), or headerless (2048)
     // Detected at Open() time based on file content.
     static constexpr u32 SECTOR_SIZE_RAW = 2352;    // full raw CD sector
@@ -69,7 +72,7 @@ private:
     bool ParseSectorHeader(const u8* sector, SectorHeader& hdr);
     bool ParseVideoChunkHeader(const u8* sectorData, VideoChunkHeader& hdr);
 
-    // --- Video decoding (MDEC) ---
+    // Video decoding (MDEC)
     void DecodeVideoFrame(const u8* demuxData, u32 demuxSize, u16 width, u16 height,
                           u16 quantScale, u16 version);
 
@@ -100,10 +103,10 @@ private:
                          const s32 y3[64], const s32 y4[64],
                          u32* rgbaOut, u32 stride);
 
-    // --- XA ADPCM audio ---
+    // XA ADPCM audio
     void DecodeXAAudio(const u8* sectorData, u8 codingInfo);
 
-    // --- State ---
+    // State
     u8* fileData = nullptr;
     u32 fileSize = 0;
     u32 sectorCount = 0;

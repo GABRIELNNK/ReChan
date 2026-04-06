@@ -1,7 +1,7 @@
 // world.h - Level world: loads BLK blocks from an LCF stream
 #pragma once
 
-#include "common.h"
+#include "core.h"
 #include "gen/manager.h"
 #include "gen/block.h"
 #include "gen/blockmgr.h"
@@ -69,6 +69,11 @@ public:
     BlockManager* GetBlockManager() { return &blockMgr; }
     const LVector& GetLevelMin() const { return levelMin; }
     const LVector& GetLevelMax() const { return levelMax; }
+
+    // Upload raw PSX texture data to VRAM and refresh the GL texture
+    void UploadToVRAM(s16 x, s16 y, s16 w, s16 h, const u8* raw);
+    void RefreshVRAMTexture();
+    u32 GetVRAMHandle() const { return vramHandle; }
 
     // PSX: LevelIDToIndex__5Worldi (WORLD.CPP:1889, 0x80046D88)
     // Converts a level ID (e.g. 7=hub) to its index in the level list.

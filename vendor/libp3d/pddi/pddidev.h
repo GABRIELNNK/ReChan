@@ -1,12 +1,21 @@
-// pddidev.h — pddiDevice, pddiDisplay, pddiRenderContext interfaces
+// pddidev.h - pddiDevice, pddiDisplay, pddiRenderContext interfaces
 #pragma once
 
 #include "pddi/pddi.h"
+#include <functional>
 
 class pddiTexture;
 class pddiBaseShader;
 class pddiPrimBuffer;
 struct pddiPrimBufferDesc;
+
+// Video mode description
+
+struct pddiVideoMode {
+    int width = 0;
+    int height = 0;
+    int refreshRate = 0;
+};
 
 // Display init params
 
@@ -14,10 +23,36 @@ struct pddiDisplayInit {
     int xSize = 960;
     int ySize = 720;
     const char* title = "Pure3D";
+    bool fullscreen = false;
+    bool vsync = true;
+    int msaa = 0; // 0 = disabled, 2/4/8/16 = sample count
 };
 
-// pddiDisplay — window/framebuffer management
+// WndProc-style event types the app can hook into
 
+enum pddiWndEvent {
+    PDDI_WND_RESIZE,      // param1=width, param2=height
+    PDDI_WND_FOCUS,       // param1=focused (1 or 0)
+    PDDI_WND_CLOSE,       // window close requested
+    PDDI_WND_KEYDOWN,     // param1=key, param2=scancode
+    PDDI_WND_KEYUP,       // param1=key, param2=scancode
+    PDDI_WND_MOUSEBUTTON, // param1=button, param2=pressed (1 or 0)
+    PDDI_WND_MOUSEMOVE,   // fparam1=x, fparam2=y
+    PDDI_WND_SCROLL,      // fparam1=xoffset, fparam2=yoffset
+};
+
+struct pddiWndMessage {
+    pddiWndEvent event;
+    int param1 = 0;
+    int param2 = 0;
+    double fparam1 = 0.0;
+    double fparam2 = 0.0;
+};
+
+// Callback signature: return true to consume the event (stop further processing)
+using pddiWndProc = std::function<bool(const pddiWndMessage& msg)>;
+
+// pddiDisplay - window/framebuffer management
 
 namespace pddiInput {
     // Letter keys use ASCII: 'A' = 65, 'W' = 87, etc.
@@ -45,6 +80,25 @@ public:
     virtual bool IsKeyDown(int key) = 0;
     virtual bool IsMouseButtonDown(int button) = 0;
     virtual void GetMousePosition(double& x, double& y) = 0;
+
+    // Set window icon from RGBA pixel data (32-bit, row-major, top-to-bottom)
+    virtual void SetIcon(int w, int h, const unsigned char* rgba) = 0;
+
+    // Video mode
+    virtual int  GetVideoModeCount() = 0;
+    virtual void GetVideoMode(int index, pddiVideoMode& mode) = 0;
+    virtual void SetFullscreen(bool fullscreen) = 0;
+    virtual bool IsFullscreen() = 0;
+    virtual void SetResolution(int w, int h) = 0;
+    virtual void SetVSync(bool enabled) = 0;
+    virtual void SetWindowPos(int x, int y) = 0;
+
+    // Cursor
+    virtual void ShowCursor(bool visible) = 0;
+    virtual void ClipCursor(bool clip) = 0;
+
+    // WndProc callback
+    virtual void SetWndProc(pddiWndProc proc) = 0;
 };
 
 // pddiRenderContext — frame management and draw state

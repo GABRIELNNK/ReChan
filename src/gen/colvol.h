@@ -2,7 +2,7 @@
 // Original: C:\CHAN\GAME\SRC\GEN\COLVOL.CPP
 #pragma once
 
-#include "common.h"
+#include "core.h"
 
 // tagCollisionBox - axis-aligned bounding box (16 bytes)
 // PSX: stored at Thing+offset, used for broad-phase box tests

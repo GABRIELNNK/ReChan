@@ -14,6 +14,9 @@ struct tContextInitData {
     int xSize = 960;
     int ySize = 720;
     const char* title = "libp3d";
+    bool fullscreen = false;
+    bool vsync = true;
+    int msaa = 0;
 };
 
 // Context = owns all engine subsystems

@@ -1,4 +1,5 @@
 // world.cpp - Level world implementation
+#include "common.h"
 #include "gen/world.h"
 #include "gen/ai.h"
 #include "gen/charmgr.h"
@@ -546,6 +547,18 @@ bool World::Load(const std::string& lcfPath) {
            maxX - minX, maxY - minY, maxZ - minZ);
 
     return blockMgr.GetNumBlocks() > 0;
+}
+
+void World::UploadToVRAM(s16 x, s16 y, s16 w, s16 h, const u8* raw) {
+    vram.Upload(x, y, w, h, raw);
+}
+
+void World::RefreshVRAMTexture() {
+    if (vramHandle) {
+        p3d::context->DestroyVRAMTexture(vramHandle);
+        vramHandle = 0;
+    }
+    vramHandle = p3d::context->CreateVRAMTexture(1024, 512, vram.data);
 }
 
 void World::Render(const LVector* camPos) {

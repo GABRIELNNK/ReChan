@@ -1,5 +1,6 @@
 // database.cpp - WDB database system reversed from PSX DATABASE.CPP
 // Original: C:\CHAN\GAME\SRC\GEN\DATABASE.CPP
+#include "common.h"
 #include "gen/database.h"
 
 // PSX global: gp+3460

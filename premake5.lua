@@ -24,6 +24,10 @@ project "rechan"
         "src/**.cpp",
     }
 
+    filter "system:windows"
+        files { "src/pc/rechan.rc" }
+    filter {}
+
     includedirs {
         "src",
         "vendor/libp3d",
@@ -32,8 +36,6 @@ project "rechan"
 
     links {
         "libp3d",
-        "glad",
-        "glfw",
     }
 
     filter "system:windows"

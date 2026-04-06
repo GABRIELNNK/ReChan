@@ -3,6 +3,7 @@
 #include "fe/oxscrmgr.h"
 #include "xclib/xclib.h"
 #include "p3d/view.h"
+#include "xclib/xcfile.h"
 
 // PSX: view0 global (used for EnterLayer/ExitLayer in Render)
 extern tView view0;
@@ -32,7 +33,7 @@ void oxScreenManager::Init(const char* name, oxScreenManager* parentMgr) {
         section = new xcSection();
 
         // PSX: xcReadFileLow(name, &data, &size)
-        FILE* f = FileOpen(name, "rb");
+        FILE* f = xcOpenFile(name, "rb");
         if (f) {
             fseek(f, 0, SEEK_END);
             u32 size = (u32)ftell(f);

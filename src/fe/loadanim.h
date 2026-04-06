@@ -1,7 +1,7 @@
 // loadanim.h - PSX VBlankLogo loading bar (LOADANIM.CPP)
 #pragma once
 
-#include "gen/common.h"
+#include "core.h"
 
 // PSX: VBlankLogo class from C:\CHAN\GAME\SRC\FE\LOADANIM.CPP
 // On PSX this uses a VBlank interrupt to animate a gradient tile bar

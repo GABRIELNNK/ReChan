@@ -2,7 +2,7 @@
 // PSX source: C:\CHAN\GAME\SRC\SND\SNDMATH.CPP
 #pragma once
 
-#include "gen/common.h"
+#include "core.h"
 
 // PSX: Decibel100 lookup table (0x800DA768)
 // Extracted from GAME_REL.CPE binary - maps 0-100 linear volume to decibel-scaled value

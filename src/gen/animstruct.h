@@ -4,7 +4,7 @@
 // 104 bytes (26 DWORDs), inherits ccNode (24 bytes).
 #pragma once
 
-#include "gen/common.h"
+#include "core.h"
 #include "gen/cclist.h"
 
 class Model;

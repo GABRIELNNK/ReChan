@@ -13,7 +13,7 @@ class Time : public Manager {
 public:
     u32 frameCounter = 0; // +28: incremented each frame by Step()
 
-    // PC: target framerate — the game loop sleeps to maintain this rate.
+    // PC: target framerate - the game loop sleeps to maintain this rate.
     // PSX ran at ~30 fps; all physics values are tuned for 30 fps per-frame.
     // Set to 0 to uncap.
     s32 targetFPS = 30;
@@ -23,36 +23,31 @@ public:
     f32 fps = 30.0f;
 
     // PSX: __4Time (TIME.CPP, 0x80044950)
-    Time() { MARKFUNCTION(0x80044950); }
+    Time();
 
     // PSX: _._4Time (TIME.CPP, 0x800449E8)
-    ~Time() override { MARKFUNCTION(0x800449E8); }
+    ~Time() override;
 
     // PSX: InternalOpen__4Time (0x80044A10) - NOP stub
-    void InternalOpen() override { MARKFUNCTION(0x80044A10); }
+    void InternalOpen() override;
 
     // PSX: InternalClose__4Time (0x80044A18) - calls base
-    void InternalClose() override { MARKFUNCTION(0x80044A18); }
+    void InternalClose() override;
 
     // PSX: InternalReset__4Time (0x80044A38) - resets counter
-    void InternalReset() override {
-        MARKFUNCTION(0x80044A38);
-        frameCounter = 0;
-    }
+    void InternalReset() override;
 
     // PSX: Step__4Time (0x80044A40) - increment frame counter
-    void Step() {
-        MARKFUNCTION(0x80044A40);
-        frameCounter++;
-    }
+    void Step();
 
     // PC: call each frame with the real wall-clock elapsed time.
-    void Tick(f32 realDt) {
-        if (realDt < 0.0001f) realDt = 0.0001f;
-        if (realDt > 0.25f)  realDt = 0.25f; // clamp to avoid spiral of death
-        deltaTime = realDt;
-        fps = 1.0f / realDt;
-    }
+    void Tick(f32 realDt);
+
+    // High-resolution wall clock
+    static f64 GetTimeInSeconds();
+
+    // Sleep the calling thread for the given duration
+    static void Sleep(f32 seconds);
 
     u32 GetFrameCounter() const { return frameCounter; }
     f32 GetDeltaTime() const { return deltaTime; }

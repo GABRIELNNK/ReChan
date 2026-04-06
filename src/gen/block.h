@@ -2,7 +2,7 @@
 // Original: C:\CHAN\GAME\SRC\GEN\BLOCK.CPP
 #pragma once
 
-#include "common.h"
+#include "core.h"
 #include "p3d/lvector.h"
 
 class pddiPrimBuffer;

@@ -3,7 +3,7 @@
 // CSound is the base class for all sound objects.
 #pragma once
 
-#include "gen/common.h"
+#include "core.h"
 
 class CGenericPersistentSound;
 

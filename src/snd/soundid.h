@@ -4,7 +4,7 @@
 // The rsd sample (0-70) indexes the currently active WAX bank's descriptor table.
 #pragma once
 
-#include "gen/common.h"
+#include "core.h"
 
 // Transient sound IDs - used with CSound::PlayTransient / PlayTransientStereo.
 // IDs 0-216: gameplay sounds (hit, env, footstep, etc.)

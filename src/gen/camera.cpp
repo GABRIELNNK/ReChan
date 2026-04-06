@@ -1,5 +1,6 @@
 // camera.cpp - Camera class reversed from PSX CAMERA.CPP
 // Original: C:\CHAN\GAME\SRC\GEN\CAMERA.CPP
+#include "common.h"
 #include "gen/camera.h"
 #include "gen/control.h"
 #include "gen/charmgr.h"
@@ -13,10 +14,7 @@
 #include <cstdlib>
 #include <cmath>
 
-
 // PSX math helpers
-
-
 static constexpr f32 PSX_ANGLE_TO_RAD = P3D_ANGLE_TO_RAD;
 
 // PSX FOV push: converts curFOV (= desiredFOV * 3000) to tCamera fovA/fovB.
@@ -253,11 +251,23 @@ void Camera::Move() {
         }
     }
 
-    // PSX writes interpolated position to prevPosition only.
+    // PSX writes interpolated result to homePos (a1[31..33] = +124).
+    // pos (a1[7..9] = +28) stays at initial lookAtMode snap value.
+    // Update reads pos for rendering; LookAtTarget reads pos for eye.
     prevPosition = nextPos;
 
     if (flags & 0x02) {
         LookAtTarget(&targetPos);
+    }
+
+    static s32 moveLogCounter = 0;
+    if ((moveLogCounter++ % 120) == 0) {
+        LOG("[Camera] Move: pos=(%d,%d,%d) curPos=(%d,%d,%d) tgt=(%d,%d,%d) prevTgt=(%d,%d,%d) angles=(%d,%d,%d) flags=0x%x",
+            position.x, position.y, position.z,
+            curPos.x, curPos.y, curPos.z,
+            targetPos.x, targetPos.y, targetPos.z,
+            prevTargetPos.x, prevTargetPos.y, prevTargetPos.z,
+            camAngleX, camAngleY, camAngleZ, flags);
     }
 }
 
@@ -622,6 +632,7 @@ void Camera::FollowPath() {
 
     Thing* target = targetThing;
     if (!target) {
+        LOG("[Camera] FollowPath: no targetThing!");
         return;
     }
 
@@ -637,8 +648,11 @@ void Camera::FollowPath() {
         (void)dist;
     }
 
-    if (!nodeA)
+    if (!nodeA) {
+        LOG("[Camera] FollowPath: no nodeA! anchor=%p targetWorldPos=(%d,%d,%d)",
+            cameraAnchor, targetWorldPos.x, targetWorldPos.y, targetWorldPos.z);
         return;
+    }
     
     if (!nodeB)
         nodeB = nodeA;
@@ -786,6 +800,11 @@ void Camera::FollowPath() {
         // Copy curPos to position (camera eye)
         position = curPos;
         prevPosition = curPos;
+
+        LOG("[Camera] lookAtMode snap: eye=(%d,%d,%d) target=(%d,%d,%d) angles=(%d,%d,%d)",
+            position.x, position.y, position.z,
+            targetPos.x, targetPos.y, targetPos.z,
+            camAngleX, camAngleY, camAngleZ);
 
         SetCurFOV(desiredFOV);
 

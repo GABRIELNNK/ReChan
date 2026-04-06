@@ -1,25 +1,69 @@
 // charmgr.cpp - CharacterManager reversed from PSX C:\CHAN\GAME\SRC\GEN\CHARMGR.CPP
 // PC port: .RR files loaded from disk (assets/RCHARS/) via standard file I/O.
+#include "common.h"
 #include "gen/charmgr.h"
 #include "gen/model.h"
 #include "gen/levelmgr.h"
 #include "gen/geometry.h"
+#include "gen/game.h"
+#include "gen/world.h"
 #include "p3d/hash.h"
 #include "p3d/loadmanager.h"
 #include "p3d/texture.h"
 #include "p3d/inventory.h"
 #include "p3d/context.h"
+#include "xclib/xcfile.h"
 #include <algorithm>
 
-// PSX: CharDataLoadCallback creates loaders on stack, calls P3DLoad.
-// PC: we use tP3DFileHandler + tTextureLoader to process TexturePage chunks.
-// The .RR P3D resources (rrIdx = slotIdx*2+3) contain 0xFF04 TexturePage data.
-// Raw PRIM mesh data (rrIdx-1) is stored directly in slot.dataBuffer.
+// PSX: CharDataLoadCallback loads character textures into PSX VRAM via P3DLoad.
+// PC: parse the 0xFF04/0x6008 chunks and upload raw u16 data to the World's
+// PsxVRAM, matching PSX behavior (textures go into VRAM for tpage/cba lookup).
 static void P3DLoadTextures(const u8* data, u32 size) {
-    if (!data || size < 6 || !p3d::inventory) return;
-    tP3DFileHandler handler;
-    handler.AddHandler(new tTextureLoader());
-    handler.LoadFromMemory(data, size, p3d::inventory);
+    if (!data || size < 6) return;
+
+    World* world = g_game ? g_game->GetWorld() : nullptr;
+    if (!world) return;
+
+    // Parse P3D stream: root 0xFF04 container with 0x6008 sub-chunks
+    u16 rootId = data[0] | (data[1] << 8);
+    u32 rootSize = data[2] | (data[3] << 8) | (data[4] << 16) | (data[5] << 24);
+    if (rootId != 0xFF04) return;
+
+    u32 cpos = 6;
+    u32 cend = (rootSize < size) ? rootSize : size;
+    while (cpos + 6 <= cend) {
+        u16 chunkId = data[cpos] | (data[cpos + 1] << 8);
+        u32 chunkSize = data[cpos + 2] | (data[cpos + 3] << 8) |
+                        (data[cpos + 4] << 16) | (data[cpos + 5] << 24);
+        if (chunkSize < 6 || cpos + chunkSize > cend) break;
+
+        if (chunkId == 0x6008) {
+            u32 p = cpos + 6;
+            u32 dend = cpos + chunkSize;
+
+            // PString: u8 len + chars
+            if (p >= dend) { cpos += chunkSize; continue; }
+            u8 nameLen = data[p++];
+            p += nameLen;
+
+            // RECT16: s16 x, y, w, h + u32 type
+            if (p + 12 > dend) { cpos += chunkSize; continue; }
+            s16 rx = (s16)(data[p] | (data[p + 1] << 8)); p += 2;
+            s16 ry = (s16)(data[p] | (data[p + 1] << 8)); p += 2;
+            s16 rw = (s16)(data[p] | (data[p + 1] << 8)); p += 2;
+            s16 rh = (s16)(data[p] | (data[p + 1] << 8)); p += 2;
+            p += 4; // skip type
+
+            // Upload raw pixel data to VRAM
+            if (rw > 0 && rh > 0 && rw <= 1024 && rh <= 512 &&
+                p + (u32)(rw * rh * 2) <= dend) {
+                world->UploadToVRAM(rx, ry, rw, rh, data + p);
+            }
+        }
+        cpos += chunkSize;
+    }
+
+    world->RefreshVRAMTexture();
 }
 
 // Global singleton (PSX: gp+796)
@@ -164,7 +208,7 @@ CharFile::CharFile(u32 type) {
     snprintf(pathBuf, sizeof(pathBuf), "RCHARS/%s.RR", g_charNameTable[type]);
 
     // Open file (PSX: rCDOpen)
-    fileHandle = FileOpen(pathBuf, "rb");
+    fileHandle = xcOpenFile(pathBuf, "rb");
     if (!fileHandle) {
         LOG("[CharFile] Failed to open: %s", pathBuf);
         next = g_charFileList;
@@ -451,11 +495,13 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
     // 3. Registers OriginalSTree in LevelManager for FindModel lookup
     // PC: parse slot.dataBuffer as tPrimGeom, convert to pddiPrimBuffer
     if (slot.dataBuffer && g_levelManager) {
-        // Compute the model name hash: "RCHARS\<name>.P3D"
-        // PSX: GetCompositeAnimationNameHash uses this format
-        char nameBuf[96];
-        snprintf(nameBuf, sizeof(nameBuf), "RCHARS\\%s.P3D", g_charNameTable[type]);
-        u32 nameHash = p3dHash(nameBuf);
+        // PSX: nameCRC = *(u32*)(charFile->dataBuffer + 4)
+        // Resource 1 data at offset 4 contains the model's p3dHash name
+        // (e.g. p3dHash("JACKIELOHIER") for Jackie)
+        u32 nameHash = 0;
+        if (cf->dataBuffer && cf->dataSize > 0) {
+            nameHash = *(u32*)((u8*)cf->dataBuffer + 4);
+        }
 
         // Check if OriginalSTree already exists in LevelManager
         OriginalBasic* existing = g_levelManager->FindModel((s32)nameHash);
@@ -475,10 +521,10 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
                 // Register in LevelManager's streeList
                 g_levelManager->AddOriginal(original, 0);
 
-                LOG("[CharMgr] Created OriginalSTree for '%s' (hash 0x%08X, mesh %p)",
-                    nameBuf, nameHash, meshBuf);
+                LOG("[CharMgr] Created OriginalSTree for type %u (hash 0x%08X, mesh %p)",
+                    type, nameHash, meshBuf);
             } else {
-                LOG("[CharMgr] Failed to parse mesh for '%s'", nameBuf);
+                LOG("[CharMgr] Failed to parse mesh for type %u", type);
             }
         }
     }

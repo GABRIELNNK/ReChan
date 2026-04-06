@@ -34,6 +34,9 @@ struct Fixed {
     static Fixed FromFloat(f32 v) { return { static_cast<s32>(v * (1 << FRAC_BITS)) }; }
 };
 
+// IDA address marker (no-op on PC)
+#define MARKFUNCTION(addr) ((void)0)
+
 // Math types = split into separate headers
 #include "p3d/vector.h"
 #include "p3d/matrix.h"

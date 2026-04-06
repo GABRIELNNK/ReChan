@@ -168,7 +168,6 @@ void SModel::Show(u32 flags) {
     world.m[15] = 1.0f;
 
     p3d::context->SetWorldMatrix(world);
-    p3d::context->SetVRAMHandle(0);
 
     // PSX: calls drawable->Display(flags) through vtable
     drawable->Display(flags);

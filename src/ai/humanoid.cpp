@@ -3,6 +3,7 @@
 #include "ai/humanoid.h"
 #include "ai/player.h"
 #include "gen/model.h"
+#include "gen/animmat.h"
 #include "p3d/p3dmath.h"
 
 // PSX: __8HumanoidPC10tagLVectorUs (HUMANOID.CPP:350)
@@ -114,9 +115,28 @@ void Humanoid::Think() {
 }
 
 // PSX: Draw__8Humanoid (HUMANOID.CPP:1280)
+// PSX: swaps animation matrices, sets pos/orient on model, Show(0),
+// then updates collision bbox from skeleton joints (debug draw skipped).
 void Humanoid::Draw() {
     MARKFUNCTION(0x80063A88);
-    // PSX: complex draw with animation frame, shadow, etc.
+    if (model) {
+        HumanoidModel* hm = static_cast<HumanoidModel*>(model);
+        // PSX: Swap__17AnimationMatrices(v2[24]) - swap double-buffered joint matrices
+        if (hm->animMatrices) {
+            hm->animMatrices->Swap();
+        }
+        // PSX: copy pos/orientation to model, then Show(0)
+        Model* m = static_cast<Model*>(model);
+        m->posX = pos.x;
+        m->posY = pos.y;
+        m->posZ = pos.z;
+        m->rotX = (u16)(orientation.x & 0xFFFF);
+        m->rotY = (u16)(orientation.y & 0xFFFF);
+        m->rotZ = (u16)(orientation.z & 0xFFFF);
+        m->Show(0);
+        return;
+    }
+    // No model: fallback to debug wireframe
     Thing::Draw();
 }
 
@@ -251,7 +271,7 @@ void Humanoid::SetActionState(u32 state, s32 param) {
     case AS_PAUSE:             stateDispatch = SD_PAUSE; break;
     case AS_JUMP:              stateDispatch = SD_JUMP; break;
     case AS_RUN:               stateDispatch = SD_RUN; break;
-    case AS_BACKFLIP:          stateDispatch = SD_JUMP; break;
+    case AS_BACKFLIP:          stateDispatch = SD_BACKFLIP; break;
     case AS_STRAFE:            stateDispatch = SD_STRAFE; break;
     case AS_STRAFE_SPECIAL:    stateDispatch = SD_STRAFE; break;
     case AS_PUNCH_ATTACK:      stateDispatch = SD_THROW; break;
@@ -291,7 +311,7 @@ void Humanoid::ProcessAction() {
     case SD_FALL:         _Fall(); break;
     case SD_STRAFE:       _Straif(); break;
     case SD_DIVE_ROLL:    _DiveRoll(); break;
-    case SD_TAUNT:        _Taunt(); break;
+    case SD_BACKFLIP:     _Jump(); break;
     case SD_PAUSE:        _Pause(); break;
     case SD_GOT_HIT_HIGH: _GotHitHigh(); break;
     case SD_GOT_HIT_MED:  _GotHitMed(); break;

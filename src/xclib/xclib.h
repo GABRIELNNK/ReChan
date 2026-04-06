@@ -5,7 +5,7 @@
 // indexed color data to RGBA32 for GL rendering.
 #pragma once
 
-#include "gen/common.h"
+#include "core.h"
 
 class tTexture;
 class xcFont;

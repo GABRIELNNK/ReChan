@@ -6,8 +6,9 @@
 //   EXPAND.CPP - SquExpandData LZSS decompressor
 //   XCHASH.CPP - xcHash DJB2 hash
 //   XCFILE.CPP - xcReadFileLow file loading
+#include "gen/common.h"
 #include "xclib/xclib.h"
-#include "xcfile.h"
+#include "xclib/xcfile.h"
 #include "fe/xcfont.h"
 #include "p3d/texture.h"
 #include "pc/tim.h"
@@ -529,10 +530,10 @@ void xcSection::DrawPrimObj(u8* primData) {
             s16 x0, y0, x1, y1;
             prim->GetBounds(x0, y0, x1, y1);
 
-            f32 nx = PSX_NORM_X(x0);
-            f32 ny = 1.0f - PSX_NORM_Y(y1);
-            f32 nw = PSX_NORM_W(x1 - x0);
-            f32 nh = PSX_NORM_H(y1 - y0);
+            f32 nx = SCALE_NORM_X(x0);
+            f32 ny = 1.0f - SCALE_NORM_Y(y1);
+            f32 nw = SCALE_NORM_X(x1 - x0);
+            f32 nh = SCALE_NORM_Y(y1 - y0);
 
             ScreenDraw::DrawColoredRect(nx, ny, nw, nh, prim->r, prim->g, prim->b, 255);
             break;
@@ -545,10 +546,10 @@ void xcSection::DrawPrimObj(u8* primData) {
             u8 r, g, b;
             prim->GetAvgColor(r, g, b);
 
-            f32 nx = PSX_NORM_X(x0);
-            f32 ny = 1.0f - PSX_NORM_Y(y1);
-            f32 nw = PSX_NORM_W(x1 - x0);
-            f32 nh = PSX_NORM_H(y1 - y0);
+            f32 nx = SCALE_NORM_X(x0);
+            f32 ny = 1.0f - SCALE_NORM_Y(y1);
+            f32 nw = SCALE_NORM_X(x1 - x0);
+            f32 nh = SCALE_NORM_Y(y1 - y0);
 
             ScreenDraw::DrawColoredRect(nx, ny, nw, nh, r, g, b, 255);
             break;
@@ -565,10 +566,10 @@ void xcSection::DrawPrimObj(u8* primData) {
 
             s32 sx = prim->mtx.GetX();
             s32 sy = prim->mtx.GetY();
-            f32 nx = PSX_NORM_X(sx);
-            f32 ny = 1.0f - PSX_NORM_Y(sy + cell->height);
-            f32 nw = PSX_NORM_W(cell->width);
-            f32 nh = PSX_NORM_H(cell->height);
+            f32 nx = SCALE_NORM_X(sx);
+            f32 ny = 1.0f - SCALE_NORM_Y(sy + cell->height);
+            f32 nw = SCALE_NORM_X(cell->width);
+            f32 nh = SCALE_NORM_Y(cell->height);
 
             ScreenDraw::DrawQuad(tex, nx, ny, nw, nh,
                                  0.0f, 0.0f, 1.0f, 1.0f,

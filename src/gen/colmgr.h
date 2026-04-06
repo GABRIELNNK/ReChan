@@ -2,7 +2,7 @@
 // Original: C:\CHAN\GAME\SRC\GEN\COLMGR.CPP
 #pragma once
 
-#include "common.h"
+#include "core.h"
 
 struct Wall;
 struct ccList;
@@ -24,7 +24,8 @@ void HTW_HandleHandFootCollisions(DynamicThing* thing);
 void HandleThingWall(DynamicThing* thing, s32 radius, s32 height, s32 checkHeight);
 
 // PSX: HandleThingFloor__FP12DynamicThinglll (COLMGR.CPP:795) 0x800A8614
-void HandleThingFloor(DynamicThing* thing, s32 height, s32 radius, s32 checkHeight);
+// PSX params: (thing, searchRadius, yMinOffset, checkHeight)
+void HandleThingFloor(DynamicThing* thing, s32 radius, s32 yMinOffset, s32 checkHeight);
 
 // PSX: ClearThingFloorHeights__FR6ccList (COLMGR.CPP:1352) 0x800A9284
 void ClearThingFloorHeights(ccList& list);
@@ -49,5 +50,10 @@ extern s32 g_wallHitCounter;          // gp+2840: incremented on wall hit in com
 extern s32 g_floorSearchMargin;       // gp+2844: floor AABB search expansion
 extern s32 g_floorYSearchOffset;      // gp+2852: vertical offset for floor search
 extern s32 g_floorStandingTol;        // gp+2856: landing detection tolerance
+extern s32 g_colDefaultHeight;        // gp+2904: default humanoid collision height
+extern s32 g_colMaxRadius;            // gp+2908: max collision radius (close encounters)
+extern s32 g_colDefaultRadius;        // gp+2912: default collision radius
+extern s32 g_colSlopeTol;             // gp+2884: slope tolerance for sliding
+extern s32 g_colSlopeForce;           // gp+2888: slope sliding force multiplier
 extern DynamicThing* g_combatTarget1; // gp+4176: combat target #1
 extern DynamicThing* g_combatTarget2; // gp+4180: combat target #2

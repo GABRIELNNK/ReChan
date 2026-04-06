@@ -388,10 +388,10 @@ void xcFont::DrawText(const char* text, s32 screenX, s32 screenY,
         if (tw <= 0 || th <= 0) { curX += (f32)spr->w; continue; }
 
         // Normalize in 512x240 overlay space (same as sprites)
-        f32 nx = PSX_NORM_X(curX);
-        f32 ny = 1.0f - PSX_NORM_Y(curY + (f32)spr->h);
-        f32 nw = PSX_NORM_W((f32)spr->w);
-        f32 nh = PSX_NORM_H((f32)spr->h);
+        f32 nx = SCALE_NORM_X(curX);
+        f32 ny = 1.0f - SCALE_NORM_Y(curY + (f32)spr->h);
+        f32 nw = SCALE_NORM_X((f32)spr->w);
+        f32 nh = SCALE_NORM_Y((f32)spr->h);
 
         f32 u0 = (f32)spr->u0 / tw;
         f32 v0 = (f32)spr->v0 / th;

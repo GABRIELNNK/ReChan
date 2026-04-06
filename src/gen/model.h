@@ -12,7 +12,7 @@
 //   DrawableTree -> DrawableSTree / DrawableGeo
 #pragma once
 
-#include "gen/common.h"
+#include "core.h"
 #include "gen/cclist.h"
 
 class pddiPrimBuffer;

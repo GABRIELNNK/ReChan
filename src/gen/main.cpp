@@ -1,6 +1,7 @@
 // main.cpp
 #include "common.h"
 #include "p3d/context.h"
+#include "p3d/input.h"
 #include "p3d/inventory.h"
 #include "p3d/loadmanager.h"
 #include "p3d/texture.h"
@@ -8,13 +9,39 @@
 #include "p3d/stream.h"
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
+#include "pc/audio.h"
 #include "gen/game.h"
 #include "gen/time.h"
 
 #include <vector>
 #include <algorithm>
-#include <chrono>
-#include <thread>
+
+static f32 sSavedMasterVolume = 1.0f;
+
+static bool OnWndProc(const pddiWndMessage& msg) {
+    switch (msg.event) {
+    case PDDI_WND_FOCUS:
+        if (msg.param1) {
+            // Regained focus
+            if (p3d::input)
+                p3d::input->SetEnabled(true);
+            if (AudioEngine::IsInitialized())
+                AudioEngine::SetMasterVolume(sSavedMasterVolume);
+        } else {
+            // Lost focus
+            if (p3d::input)
+                p3d::input->SetEnabled(false);
+            if (AudioEngine::IsInitialized()) {
+                sSavedMasterVolume = AudioEngine::GetMasterVolume();
+                AudioEngine::SetMasterVolume(0.0f);
+            }
+        }
+        break;
+    default:
+        break;
+    }
+    return false;
+}
 
 int main() {
     Log::Get().Init();
@@ -22,13 +49,16 @@ int main() {
     tPlatform* platform = tPlatform::Create();
 
     tContextInitData init;
-    init.xSize = 1280;
-    init.ySize = 720;
-    init.title = "Jackie Chan Stuntmaster";
+    init.xSize = JCSM_TARGET_WIDTH;
+    init.ySize = JCSM_TARGET_HEIGHT;
+    init.title = JCSM_TITLE;
 
     tContext* ctx = platform->CreateContext(init);
     if (!ctx)
         return 1;
+
+    p3d::display->ShowCursor(false);
+    p3d::display->SetWndProc(OnWndProc);
 
     Game game;
     game.Open();
@@ -38,25 +68,12 @@ int main() {
 
     MARKFUNCTION(0x8002635C);
 
-    using Clock = std::chrono::steady_clock;
-
-    auto prevTime = Clock::now();
-
-    // PSX main (MAIN.CPP:519, 0x8002635C):
-    //   while (!quit) {
-    //       while (Step(game) && !quit) rDoTaskList();
-    //       SetLivesLeft(player, 4); SetState(game, QueueLevelLoad);
-    //   }
-    // PSX main does NOT call BeginFrame/EndFrame - that is the
-    // responsibility of the game states via Display handler callbacks
-    // in ProcessHandlers, or inline in menu states like MenuDraw.
-    // PC mirrors this: main.cpp only does timing, events, and swap.
+    f64 prevTime = Time::GetTimeInSeconds();
 
     while (!p3d::display->ShouldClose()) {
-        auto frameStart = Clock::now();
+        f64 frameStart = Time::GetTimeInSeconds();
 
-        // Measure real elapsed time since last frame
-        f32 realDt = std::chrono::duration<f32>(frameStart - prevTime).count();
+        f32 realDt = (f32)(frameStart - prevTime);
         prevTime = frameStart;
         g_time->Tick(realDt);
         g_time->Step();
@@ -74,10 +91,9 @@ int main() {
         // Sleep to maintain target framerate (0 = uncapped)
         f32 targetDt = g_time->GetTargetDt();
         if (targetDt > 0.0f) {
-            auto frameEnd = Clock::now();
-            f32 elapsed = std::chrono::duration<f32>(frameEnd - frameStart).count();
+            f32 elapsed = (f32)(Time::GetTimeInSeconds() - frameStart);
             if (elapsed < targetDt) {
-                std::this_thread::sleep_for(std::chrono::duration<f32>(targetDt - elapsed));
+                Time::Sleep(targetDt - elapsed);
             }
         }
     }

@@ -1,5 +1,7 @@
 // linefile.cpp - LineFile reversed from PSX LINEFILE.CPP
 // PSX source: C:\CHAN\GAME\SRC\GEN\LINEFILE.CPP
+#include "gen/common.h"
+#include "xclib/xcfile.h"
 #include "gen/linefile.h"
 
 // PSX: __8LineFile (0x80017F50)
@@ -22,7 +24,7 @@ void LineFile::Open(const char* filename) {
     MARKFUNCTION(0x80017FD4);
 
     // PSX: ccFile open, read entire file, null-terminate
-    FILE* f = FileOpen(filename, "rb");
+    FILE* f = xcOpenFile(filename, "rb");
     if (!f) {
         LOG("[LineFile] Failed to open: %s", filename);
         return;

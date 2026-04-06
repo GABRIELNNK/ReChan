@@ -2,7 +2,7 @@
 // PSX source: C:\CHAN\GAME\SRC\FE\XCFONT.CPP
 #pragma once
 
-#include "gen/common.h"
+#include "core.h"
 #include "fe/oxscrmgr.h"
 
 class tTexture;

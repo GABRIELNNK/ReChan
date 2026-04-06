@@ -3,7 +3,6 @@
 #include "gen/game.h"
 #include "gen/display.h"
 #include "gen/camera.h"
-#include <chrono>
 #include "gen/world.h"
 #include "gen/block.h"
 #include "gen/charmgr.h"
@@ -311,8 +310,12 @@ void Game::DrawEverythingHandlerCB(Handler*) {
     const LVector& camPos = g_display->GetCamera()->GetPosition();
     world->Render(&camPos);
 
+    // PSX: entities are drawn inside DrawEverythingHandler with VRAM active.
+    // PC: VRAM handle must be set for character tpage/cba texture lookup.
     if (Player::s_player) {
+        p3d::context->SetVRAMHandle(world->GetVRAMHandle());
         Player::s_player->Draw();
+        p3d::context->SetVRAMHandle(0);
     }
 }
 
@@ -810,9 +813,6 @@ bool Game::gsEndLevelLoopState(Game* game) {
 bool Game::gsEndLevelExitState(Game* game) {
     MARKFUNCTION(0x8002B744); // gsEndLevelExitState
 
-    // PSX: 660 bytes - handle level end scoring and progression
-
-    // PSX: ScoreManager::HandleLevelEnd()
     if (g_scoreManager) {
         g_scoreManager->HandleLevelEnd();
     }
@@ -823,14 +823,11 @@ bool Game::gsEndLevelExitState(Game* game) {
         return true;
     }
 
-    // PSX: check if next petal exists for current level
     s32 nextPetal = (s32)world->GetCurrentPetalIndex() + 1;
     if (nextPetal < world->GetCurLevelPetals()) {
-        // PSX: ScoreManager::OpenPetal(currentLevelIndex, nextPetal)
-        // TODO: ScoreManager::OpenPetal not yet reversed
+        g_scoreManager->OpenPetal(world->GetCurrentLevelIndex(), nextPetal);
     }
 
-    // PSX: always return to hub (level 7) after level completion
     s32 hubIndex = world->LevelIDToIndex(7);
     world->SetTargetLevelPetal((u32)hubIndex, 0);
 
@@ -1241,13 +1238,12 @@ void Game::PlayMovie(const char* name, s32 skippable, s32 unloadLevel) {
     // PSX: Play(0x80014534) with skip callback (0x80039330) if skippable
     // PC: blocking frame loop
     {
-        using Clock = std::chrono::steady_clock;
-        auto prevFrame = Clock::now();
-        f32 targetDt = 1.0f / 15.0f; // STR movies are typically 15fps
+        f64 prevFrame = Time::GetTimeInSeconds();
+        f32 targetDt = 1.0f / player->GetFrameRate();
 
         while (!player->IsFinished() && !p3d::display->ShouldClose()) {
-            auto now = Clock::now();
-            f32 elapsed = std::chrono::duration<f32>(now - prevFrame).count();
+            f64 now = Time::GetTimeInSeconds();
+            f32 elapsed = (f32)(now - prevFrame);
             if (elapsed < targetDt) continue;
             prevFrame = now;
 

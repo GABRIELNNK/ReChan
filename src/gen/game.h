@@ -4,7 +4,7 @@
 // and two HandlerSets for per-frame think and draw callbacks.
 #pragma once
 
-#include "common.h"
+#include "core.h"
 #include "gen/manager.h"
 #include "gen/handler.h"
 #include "gen/control.h"

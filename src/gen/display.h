@@ -4,8 +4,6 @@
 // Registers dispBeginFrameHandler (pri=62) and dispEndFrameHandler (pri=-62)
 // into the Game's handlerSet2 during InternalOpen.
 #pragma once
-
-#include "common.h"
 #include "gen/manager.h"
 #include "gen/handler.h"
 #include "p3d/view.h"
@@ -35,6 +33,10 @@ public:
     static void dispBeginFrameHandler(Handler* h);
     static void dispEndFrameHandler(Handler* h);
 
+    s32 GetScreenWidth() const { return screenWidth; }
+    s32 GetScreenHeight() const { return screenHeight; }
+    f32 GetAspectRatio() const { return aspectRatio; }
+
 private:
     // PSX: view0 - global static tView with 7 layers
     tView view;
@@ -44,6 +46,11 @@ private:
 
     // PSX: _MyFrameCounter (0x800DD664) - incremented every EndFrame
     s16 frameCounter = 0;
+
+    // PC:
+    s32 screenWidth = 1280;
+    s32 screenHeight = 720;
+    f32 aspectRatio = 16.0 / 9.0f;
 };
 
 // PSX: theDisplay (gp+3556)

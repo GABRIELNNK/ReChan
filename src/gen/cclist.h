@@ -3,7 +3,7 @@
 // PSX uses these for callback chains, path lists, entity management, etc.
 #pragma once
 
-#include "common.h"
+#include "core.h"
 #include "p3d/hash.h"
 
 // ccMinNode - minimal intrusive list node (12 bytes on PSX)

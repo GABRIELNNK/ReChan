@@ -4,7 +4,7 @@
 // Events 1-23 route to jcsHandleControlEvent, events 26-31 to rsDialogEvent.
 #pragma once
 
-#include "gen/common.h"
+#include "core.h"
 
 // PSX: rsSoundEvent enum values (inferred from usage)
 enum rsSoundEvent : s32 {

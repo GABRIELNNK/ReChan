@@ -3,7 +3,7 @@
 // Singleton on PSX at 0x800DD69C (gp+3408)
 #pragma once
 
-#include "common.h"
+#include "core.h"
 #include "config.h"
 #include "gen/manager.h"
 

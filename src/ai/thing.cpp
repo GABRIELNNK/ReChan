@@ -1,5 +1,6 @@
 // thing.cpp - Thing and DynamicThing implementations
 // Reversed from PSX C:\CHAN\GAME\SRC\AI\THING.CPP
+#include "gen/common.h"
 #include "ai/thing.h"
 #include "gen/blockmgr.h"
 #include "gen/database.h"
@@ -648,14 +649,29 @@ void DynamicThing::UpdatePosition() {
     pos = homePos;
 }
 
-// PSX: AddForce__12DynamicThinglPC9_RMVECT16 (THING.CPP:753)
+// PSX: AddForce__12DynamicThinglPC9_RMVECT16 (THING.CPP:753, 0x80061B44)
+// PSX: builds rotation matrix from SVector (Euler angles), rotates {0,0,magnitude}
+// to get world-space force, adds to contactForce.
+// direction is packed as int32[3] on PSX stack; as s16*: [rotX, 0, rotY, 0, rotZ, 0]
+// p3dBuildRotMatrixZYX uses s16[0]=rotX, s16[2]=rotY, s16[4]=rotZ
+// For all known callers, only rotY (stored at SVector.z) is non-zero.
 void DynamicThing::AddForce(s32 magnitude, const SVector* direction) {
     MARKFUNCTION(0x80061B44);
     if (!direction) return;
-    // PSX: scale direction by magnitude (fixed-point multiply)
-    force.x += (direction->x * magnitude) >> 12;
-    force.y += (direction->y * magnitude) >> 12;
-    force.z += (direction->z * magnitude) >> 12;
+
+    // PSX: p3dBuildRotMatrixZYX(*a3, a3[2], a3[4], matrix)
+    // a3[0] = SVector.x = rotX around X axis
+    // a3[2] = SVector.z = rotY around Y axis
+    // a3[4] = beyond SVector = rotZ around Z axis (typically 0)
+    // Then rotates {0, 0, magnitude} by this matrix and adds to contactForce.
+    s16 rotY = direction->z;
+    f32 angle = (f32)rotY * (2.0f * 3.14159265358979f / 65536.0f);
+    f32 sinA = std::sin(angle);
+    f32 cosA = std::cos(angle);
+
+    // {0, 0, magnitude} rotated by Y-axis: x = sin * mag, z = cos * mag
+    contactForce.x += (s32)(sinA * (f32)magnitude);
+    contactForce.z += (s32)(cosA * (f32)magnitude);
 }
 
 // PSX: Land__12DynamicThing (THING.CPP:794)

@@ -160,52 +160,54 @@ void CollisionSector::GetArrayFloorAndCeilingHeight(
     s32* outHasRailing, const LVector* pos, s32 radius) {
     MARKFUNCTION(0x80041ADC);
 
-    s32 bestFloorH = 0x7FFFFFFF;
-    s32 bestCeilH = 0x7FFFFFFF;
+    // PSX: v12 = lowest walkable ceiling above test pos
+    //      v13 = lowest secondary ceiling above test pos
+    s32 v12 = 0x7FFFFFFF;
+    s32 v13 = 0x7FFFFFFF;
 
-    // Pass 1: find best floor height below player
+    // Pass 1: find lowest surfaces ABOVE the test position
+    // PSX condition: a9[1] < h  (pos->y < floorHeight)
     for (s32 i = 0; i < count; i++) {
         Floor* floor = floorArray[i];
         s32 h = floor->GetFloorHeight(*pos);
 
-        if (pos->y < h) continue; // floor is above us
-        if (!floor->CheckFloorBounds(*pos, radius)) continue;
-
-        if (floor->flags & 0x0001) {
-            // Ceiling-type floor
-            if (h < bestFloorH) {
-                bestFloorH = h;
-                floor->GetFloorNormal(outFloorNormal);
+        if (pos->y < h && floor->CheckFloorBounds(*pos, radius)) {
+            // PSX: *((_WORD *)*v15 + 7) & 1  =  flags bit 0
+            if ((floor->flags & 1) && h < v12) {
+                v12 = h;
             }
-        } else if ((floor->field0C >> 1) & 1) {
-            // Secondary floor type
-            if (h < bestCeilH) {
-                bestCeilH = h;
+            // PSX: ((*v15)[3] >> 17) & 1  =  flags bit 1
+            else if (((floor->flags >> 1) & 1) && h < v13) {
+                v13 = h;
             }
         }
     }
 
-    if (bestCeilH < bestFloorH) {
-        bestFloorH = bestCeilH;
+    if (v13 < v12) {
+        v12 = v13;
     }
 
-    // Pass 2: find ceiling above player from ledge floors
-    s32 ceilH = (s32)0x80000001;
+    // Pass 2: find highest ledge floor BELOW the ceiling (v12)
+    // PSX: v17 starts at 0x80000001, finds max(h) where h < v12
+    s32 v17 = (s32)0x80000001;
     for (s32 i = 0; i < count; i++) {
         Floor* floor = floorArray[i];
 
-        bool isLedge = (floor->flags >> 0) & 1;  // bit 0 = ledge
-        bool hasRailing = (floor->flags >> 2) & 1; // bit 2 = railing
-        if (!(isLedge && !hasRailing)) continue;
+        // PSX: (*v19)[3] & 0x10000 = flags bit 0 (walkable)
+        //      ((*v19)[3] >> 18) & 1 == 0 = flags bit 2 clear (no railing)
+        bool walkable = (floor->flags & 1) != 0;
+        bool noRailing = ((floor->flags >> 2) & 1) == 0;
+        if (!(walkable && noRailing)) continue;
 
         if (!floor->CheckFloorBounds(*pos, radius)) continue;
 
         s32 h = floor->GetFloorHeight(*pos);
-        if (h >= bestFloorH) continue;
-        if (ceilH >= h) continue;
-
-        ceilH = h;
-        floor->GetFloorNormal(outCeilingNormal);
+        if (h < v12 && v17 < h) {
+            v17 = h;
+            floor->GetFloorNormal(outFloorNormal);
+            // PSX: *a6 = *((unsigned __int16 *)*v19 + 6) = floor->field0C as u16
+            outCeilingNormal.x = (s32)(u16)floor->field0C;
+        }
     }
 
     // Pass 3: check railing floors for correction
@@ -213,24 +215,61 @@ void CollisionSector::GetArrayFloorAndCeilingHeight(
     for (s32 i = 0; i < count; i++) {
         Floor* floor = floorArray[i];
 
-        bool isLedge = (floor->flags >> 0) & 1;
-        bool hasRailing = (floor->flags >> 2) & 1;
-        if (!(isLedge && hasRailing)) continue;
+        bool walkable = (floor->flags & 1) != 0;
+        bool hasRailing = ((floor->flags >> 2) & 1) != 0;
+        if (!(walkable && hasRailing)) continue;
 
         if (!floor->CheckFloorBounds(*pos, radius)) continue;
 
         s32 h = floor->GetFloorHeight(*pos);
-        if (h >= bestFloorH) continue;
-        if (ceilH >= h) continue;
-
-        *outHasRailing = 1;
-        LVector correction;
-        floor->GetRailingCorrection(correction, *pos);
+        if (h < v12 && v17 < h) {
+            *outHasRailing = 1;
+            LVector correction;
+            floor->GetRailingCorrection(correction, *pos);
+        }
     }
 
-    // Clamp sentinel values
-    outFloorH = (bestFloorH > 0x7FFFFFFE) ? 0x7FFFFFFF : bestFloorH;
-    outCeilingH = (bestCeilH > 0x7FFFFFFE) ? 0x7FFFFFFF : bestCeilH;
+    // PSX output: a3 = v17 (floor to stand on), a4 = v13 (secondary ceiling)
+    outFloorH = (v17 <= (s32)0x80000001) ? (s32)0x80000001 : v17;
+    outCeilingH = (v13 == 0x7FFFFFFF) ? 0x7FFFFFFF : v13;
+}
+
+// Overload with separate railing correction output
+void CollisionSector::GetArrayFloorAndCeilingHeight(
+    Floor** floorArray, s32 count,
+    s32& outFloorH, s32& outCeilingH,
+    LVector& outFloorNormal, LVector& outCeilingNormal,
+    s32* outHasRailing, LVector* outRailCorrection,
+    const LVector* pos, s32 radius) {
+
+    // Delegate to base version
+    GetArrayFloorAndCeilingHeight(floorArray, count, outFloorH, outCeilingH,
+        outFloorNormal, outCeilingNormal, outHasRailing, pos, radius);
+
+    // Fill railing correction if railing was detected (pass 3 result)
+    if (outRailCorrection) {
+        if (*outHasRailing) {
+            // Railing correction was computed in the base function via GetRailingCorrection
+            // but not returned. Re-compute for this overload.
+            for (s32 i = 0; i < count; i++) {
+                Floor* floor = floorArray[i];
+                bool walkable = (floor->flags & 1) != 0;
+                bool hasRailing = ((floor->flags >> 2) & 1) != 0;
+                if (!(walkable && hasRailing)) continue;
+                if (!floor->CheckFloorBounds(*pos, radius)) continue;
+                s32 h = floor->GetFloorHeight(*pos);
+                s32 v12 = outFloorH; // use floor height as ceiling proxy
+                if (h < v12 || v12 == (s32)0x80000001) {
+                    floor->GetRailingCorrection(*outRailCorrection, *pos);
+                    break;
+                }
+            }
+        } else {
+            outRailCorrection->x = 0;
+            outRailCorrection->y = 0;
+            outRailCorrection->z = 0;
+        }
+    }
 }
 
 // Wall collision result globals

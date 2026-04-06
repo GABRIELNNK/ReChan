@@ -1,22 +1,22 @@
 // levelmgr.cpp - LevelManager reversed from PSX LEVELMGR.CPP
 // PSX source: C:\CHAN\GAME\SRC\GEN\LEVELMGR.CPP
+#include "common.h"
 #include "gen/levelmgr.h"
 #include "gen/charmgr.h"
 #include "gen/model.h"
 
 namespace {
+    // OriginalBasic fields accessed via proper struct methods now.
+    // PSX access patterns use +16 (u16 list type) and +19 (s8 store ID).
+    static u16 GetOriginalListType(const OriginalBasic* original) {
+        return original->GetType();
+    }
 
-// OriginalBasic fields accessed via proper struct methods now.
-// PSX access patterns use +16 (u16 list type) and +19 (s8 store ID).
-static u16 GetOriginalListType(const OriginalBasic* original) {
-    return original->GetType();
+    static s8 GetOriginalStoreID(const OriginalBasic* node) {
+        return node->GetStoreID();
+    }
+
 }
-
-static s8 GetOriginalStoreID(const OriginalBasic* node) {
-    return node->GetStoreID();
-}
-
-} // namespace
 
 // PSX: gp+0xEE8
 LevelManager* g_levelManager = nullptr;
@@ -145,17 +145,17 @@ void LevelManager::AddOriginal(OriginalBasic* original, s32 /*param*/) {
 
     ccMinList* list = nullptr;
     switch (GetOriginalListType(original)) {
-    case 0:
-        list = &modelLists[2];
-        break;
-    case 1:
-        list = &streeList;
-        break;
-    case 2:
-        list = &modelLists[3];
-        break;
-    default:
-        return;
+        case 0:
+            list = &modelLists[2];
+            break;
+        case 1:
+            list = &streeList;
+            break;
+        case 2:
+            list = &modelLists[3];
+            break;
+        default:
+            return;
     }
 
     list->AddNode(list->tail, reinterpret_cast<ccMinNode*>(original));
@@ -171,17 +171,17 @@ void LevelManager::DeleteOriginal(OriginalBasic* original) {
 
     ccMinList* list = nullptr;
     switch (GetOriginalListType(original)) {
-    case 0:
-        list = &modelLists[2];
-        break;
-    case 1:
-        list = &streeList;
-        break;
-    case 2:
-        list = &modelLists[3];
-        break;
-    default:
-        return;
+        case 0:
+            list = &modelLists[2];
+            break;
+        case 1:
+            list = &streeList;
+            break;
+        case 2:
+            list = &modelLists[3];
+            break;
+        default:
+            return;
     }
 
     for (ccMinNode* n = list->head; n; n = n->next) {

@@ -1,5 +1,6 @@
 // loadanim.cpp - PSX VBlankLogo loading bar
 // PSX source: C:\CHAN\GAME\SRC\FE\LOADANIM.CPP
+#include "gen/common.h"
 #include "fe/loadanim.h"
 #include "gen/display.h"
 #include "pc/tim.h"
@@ -44,10 +45,10 @@ static void DrawLoadingScreen(u8 fill) {
     if (fill > 100) 
         fill = 100;
 
-    f32 nx = kBarLeftX / PSX_SCREEN_WIDTH;
-    f32 ny = 1.0f - (kBarY + kBarH) / PSX_SCREEN_HEIGHT;
-    f32 nw = kBarMaxW * (fill / 100.0f) / PSX_SCREEN_WIDTH;
-    f32 nh = kBarH / PSX_SCREEN_HEIGHT;
+    f32 nx = kBarLeftX / DEFAULT_SCREEN_WIDTH;
+    f32 ny = 1.0f - (kBarY + kBarH) / DEFAULT_SCREEN_HEIGHT;
+    f32 nw = kBarMaxW * (fill / 100.0f) / DEFAULT_SCREEN_WIDTH;
+    f32 nh = kBarH / DEFAULT_SCREEN_HEIGHT;
 
     u8 r8 = s_pulseR << 3;
     ScreenDraw::DrawColoredRect(nx, ny, nw, nh, r8, 0, 0, 255);

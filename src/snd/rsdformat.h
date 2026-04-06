@@ -3,7 +3,7 @@
 // WAX = sound effects bank, FAG = streaming music, CLP = ambient clips
 #pragma once
 
-#include "gen/common.h"
+#include "core.h"
 #include "snd/adpcm.h"
 #include <vector>
 

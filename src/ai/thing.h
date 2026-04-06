@@ -2,7 +2,7 @@
 // Reversed from PSX C:\CHAN\GAME\INC\AI\THING.HPP / C:\CHAN\GAME\SRC\AI\THING.CPP
 #pragma once
 
-#include "gen/common.h"
+#include "core.h"
 #include "p3d/lvector.h"
 #include "gen/cclist.h"
 

@@ -5,7 +5,7 @@
 // Comments are lines starting with '#'.
 #pragma once
 
-#include "common.h"
+#include "core.h"
 
 // LineFile (216 bytes on PSX)
 // PSX layout:

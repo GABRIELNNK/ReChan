@@ -1,6 +1,7 @@
 // rsevent.cpp - rsEvent sound dispatch reversed from PSX RSEVENT.CPP
 // PSX source: C:\CHAN\GAME\SRC\SND\RSEVENT.CPP
 // Dispatches sound events to the Sound manager.
+#include "gen/common.h"
 #include "snd/rsevent.h"
 #include "snd/sound.h"
 

@@ -4,7 +4,7 @@
 // On PC, this bridges to AudioEngine (miniaudio).
 #pragma once
 
-#include "gen/common.h"
+#include "core.h"
 
 // Forward declarations
 class CGenericPersistentSound;

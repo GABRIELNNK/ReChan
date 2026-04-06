@@ -1,6 +1,7 @@
 // tim.cpp - PSX TIM file loader and fullscreen 2D drawing
 // PSX TIM format: magic(4) + flags(4) + [CLUT section] + image section
 // Converts 4/8/16/24bpp PSX format to RGBA32 for PC.
+#include "gen/common.h"
 #include "pc/tim.h"
 #include "gen/config.h"
 #include "p3d/texture.h"
@@ -11,10 +12,9 @@
 #include "pddi/pddidev.h"
 #include "pddi/pddishad.h"
 #include "pddi/pdditex.h"
+#include "xclib/xcfile.h"
 
-
-// ---- TIM file structures ----
-
+// TIM file structures
 struct TimHeader {
     u32 magic;  // 0x10
     u32 flags;  // bits 0-2: depth (0=4bit,1=8bit,2=15bit,3=24bit), bit 3: has CLUT
@@ -36,7 +36,7 @@ static inline u32 psx16ToRGBA32(u16 c) {
 }
 
 TimImage* Tim::LoadFromFile(const char* path) {
-    FILE* f = FileOpen(path, "rb");
+    FILE* f = xcOpenFile(path, "rb");
     if (!f) {
         LOG("[Tim] Failed to open: %s", path);
         return nullptr;
@@ -55,7 +55,8 @@ TimImage* Tim::LoadFromFile(const char* path) {
 
     if (img) {
         LOG("[Tim] Loaded %s: %dx%d", path, img->width, img->height);
-    } else {
+    }
+    else {
         LOG("[Tim] Failed to decode: %s", path);
     }
     return img;
@@ -116,7 +117,8 @@ TimImage* Tim::LoadFromMemory(const u8* data, u32 fileSize) {
 
     // Decode pixels
     switch (depth) {
-        case 0: { // 4bpp indexed
+        case 0:
+        { // 4bpp indexed
             if (!clut) break;
             for (s32 y = 0; y < pixH; y++) {
                 const u8* row = imgData + y * iw * 2;
@@ -129,7 +131,8 @@ TimImage* Tim::LoadFromMemory(const u8* data, u32 fileSize) {
             }
             break;
         }
-        case 1: { // 8bpp indexed
+        case 1:
+        { // 8bpp indexed
             if (!clut) break;
             for (s32 y = 0; y < pixH; y++) {
                 const u8* row = imgData + y * iw * 2;
@@ -141,7 +144,8 @@ TimImage* Tim::LoadFromMemory(const u8* data, u32 fileSize) {
             }
             break;
         }
-        case 2: { // 16bpp direct color
+        case 2:
+        { // 16bpp direct color
             for (s32 y = 0; y < pixH; y++) {
                 const u16* row = reinterpret_cast<const u16*>(imgData + y * iw * 2);
                 for (s32 x = 0; x < pixW; x++) {
@@ -150,7 +154,8 @@ TimImage* Tim::LoadFromMemory(const u8* data, u32 fileSize) {
             }
             break;
         }
-        case 3: { // 24bpp direct color
+        case 3:
+        { // 24bpp direct color
             for (s32 y = 0; y < pixH; y++) {
                 const u8* row = imgData + y * iw * 2;
                 for (s32 x = 0; x < pixW; x++) {
@@ -176,7 +181,7 @@ tTexture* Tim::CreateTexture(const TimImage* img) {
     return tex;
 }
 
-// ---- ScreenDraw ----
+// ScreenDraw
 
 static pddiBaseShader* s_screenShader = nullptr;
 
@@ -205,7 +210,8 @@ static Mat4 BeginOverlay() {
             f32 offset = (range - 1.0f) * 0.5f;
             left = -offset;
             right = 1.0f + offset;
-        } else if (windowAspect < contentAspect) {
+        }
+        else if (windowAspect < contentAspect) {
             // Letterbox - window taller than 4:3
             f32 scale = windowAspect / contentAspect;
             f32 range = 1.0f / scale;
@@ -242,8 +248,8 @@ void ScreenDraw::DrawFullscreen(tTexture* tex) {
 }
 
 void ScreenDraw::DrawQuad(tTexture* tex, f32 x, f32 y, f32 w, f32 h,
-                           f32 u0, f32 v0, f32 u1, f32 v1,
-                           u8 r, u8 g, u8 b, u8 a) {
+                          f32 u0, f32 v0, f32 u1, f32 v1,
+                          u8 r, u8 g, u8 b, u8 a) {
     if (!tex) return;
     Mat4 prev = BeginOverlay();
     p3d::context->SetBlendMode(PDDI_BLEND_ALPHA);
@@ -260,7 +266,7 @@ void ScreenDraw::DrawColoredQuad(u8 r, u8 g, u8 b, u8 a) {
 }
 
 void ScreenDraw::DrawColoredRect(f32 x, f32 y, f32 w, f32 h,
-                                  u8 r, u8 g, u8 b, u8 a) {
+                                 u8 r, u8 g, u8 b, u8 a) {
     static tTexture* s_colorTex = nullptr;
     static u32 s_lastColor = 0;
 

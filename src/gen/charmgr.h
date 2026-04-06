@@ -3,7 +3,7 @@
 // PC port: .RR files loaded from disk (assets/RCHARS/) via standard file I/O.
 #pragma once
 
-#include "common.h"
+#include "core.h"
 #include "gen/manager.h"
 #include "ai/thing.h"
 

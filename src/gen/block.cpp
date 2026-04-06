@@ -22,8 +22,9 @@ void Block::Destroy() {
         primBuffer->Release();
         primBuffer = nullptr;
     }
+
     if (collision) {
-        delete collision;
+        collision->Unload();
         collision = nullptr;
     }
 }
@@ -222,14 +223,23 @@ void Block::Parse(u32 size, const u8* blkData) {
     }
 
     // PSX: collision = AsynchLoad(blockNum, data + *(data+20))
-    // Load collision sector from BLK data
+    // PSX: scans g_collisionSectors[12] for an empty slot (status == -1)
     if (size > 24) {
         u32 colOffset = blkData[20] | (blkData[21] << 8) |
                         (blkData[22] << 16) | (blkData[23] << 24);
         if (colOffset > 0 && colOffset < size) {
-            collision = new CollisionSector();
-            collision->status = blockNum;
-            collision->Load((u32*)(blkData + colOffset));
+            CollisionSector* slot = nullptr;
+            for (int i = 0; i < 12; i++) {
+                if (g_collisionSectors[i].status == -1) {
+                    slot = &g_collisionSectors[i];
+                    break;
+                }
+            }
+            if (slot) {
+                slot->status = blockNum;
+                slot->Load((u32*)(blkData + colOffset));
+                collision = slot;
+            }
         }
     }
 
@@ -246,9 +256,9 @@ void Block::Unload() {
     MARKFUNCTION(0x80052FF0);
 
     // PSX: Unload__15CollisionSector(collision)
+    // Collision sectors are in the global array - just unload, don't delete
     if (collision) {
         collision->Unload();
-        delete collision;
     }
     collision = nullptr;
     data = nullptr;

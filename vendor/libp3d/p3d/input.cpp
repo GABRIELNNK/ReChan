@@ -22,6 +22,15 @@ void PlatformInput::ServiceInput() {
     for (int i = 0; i < 3; i++)
         prevMouse[i] = currMouse[i];
 
+    if (!enabled) {
+        // Clear all current state so nothing reads as pressed
+        for (auto& [key, val] : currKeys)
+            val = false;
+        for (int i = 0; i < 3; i++)
+            currMouse[i] = false;
+        return;
+    }
+
     // Poll current state
     display->GetMousePosition(mouseX, mouseY);
     for (auto& [key, val] : currKeys)

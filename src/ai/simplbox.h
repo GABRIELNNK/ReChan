@@ -2,7 +2,7 @@
 // Reversed from PSX C:\CHAN\GAME\SRC\AI\SIMPLBOX.CPP
 #pragma once
 
-#include "gen/common.h"
+#include "core.h"
 #include "p3d/lvector.h"
 
 struct DBVolume;

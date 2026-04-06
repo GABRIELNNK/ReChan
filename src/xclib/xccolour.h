@@ -3,7 +3,7 @@
 // 16-bit ABGR1555 color used by xclib primitives.
 #pragma once
 
-#include "gen/common.h"
+#include "core.h"
 
 // PSX 5-to-8 bit expansion table (XCCOLOUR.H)
 // Maps 5-bit channel (0-31) to 8-bit (0-255)

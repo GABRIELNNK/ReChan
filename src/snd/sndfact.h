@@ -4,7 +4,7 @@
 // On PSX it uses memory pools; on PC it uses new/delete.
 #pragma once
 
-#include "gen/common.h"
+#include "core.h"
 
 class CSound;
 

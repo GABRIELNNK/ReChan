@@ -4,7 +4,7 @@
 // without an owning CSound object (e.g., from Director scripts).
 #pragma once
 
-#include "gen/common.h"
+#include "core.h"
 
 class CGenericPersistentSound;
 

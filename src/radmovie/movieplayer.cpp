@@ -2,6 +2,7 @@
 // Implements full MDEC video decode and XA ADPCM audio decode from raw CD sectors.
 // Reference: "The PlayStation 1 Video (STR) Format" v1.20 by Michael Sabin (MIT license)
 // PSX: MoviePlayer class (348 bytes, constructor 0x80014338)
+#include "gen/common.h"
 #include "radmovie/movieplayer.h"
 #include "pc/audio.h"
 #include "pc/tim.h"
@@ -9,7 +10,7 @@
 #include "p3d/context.h"
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
-
+#include "xclib/xcfile.h"
 #include <algorithm>
 
 // Constants
@@ -49,7 +50,7 @@ MoviePlayer::~MoviePlayer() {
 bool MoviePlayer::Open(const char* path) {
     Close();
 
-    FILE* f = FileOpen(path, "rb");
+    FILE* f = xcOpenFile(path, "rb");
     if (!f) {
         LOG("[MoviePlayer] Cannot open: %s", path);
         return false;
@@ -170,8 +171,50 @@ bool MoviePlayer::Open(const char* path) {
         }
     }
 
-    LOG("[MoviePlayer] Opened %s: %ux%u, %u sectors (%u bytes/sector, %u payload), %u audio samples",
-        path, frameWidth, frameHeight, sectorCount, sectorSize, videoChunkData, audioPCMWritten);
+    // Compute frame rate from sector interleave.
+    // PSX CD spins at 2x = 150 sectors/sec. The ratio of total sectors (video+audio)
+    // per video frame determines the playback rate.
+    // Scan the first two video frames to measure sectors-per-frame.
+    {
+        u32 firstFrameNum = 0;
+        u32 sectorsPerFrame = 0;
+        u32 totalSectorsForFrame = 0;
+        bool foundFirst = false;
+
+        for (u32 s = 0; s < sectorCount && s < 300; s++) {
+            const u8* sector = fileData + s * sectorSize;
+            SectorHeader sh;
+            if (!ParseSectorHeader(sector, sh)) continue;
+
+            if (sh.isVideo) {
+                VideoChunkHeader vh;
+                if (!ParseVideoChunkHeader(sector + dataOffset, vh)) continue;
+
+                if (!foundFirst) {
+                    firstFrameNum = vh.frameNum;
+                    foundFirst = true;
+                }
+
+                if (vh.frameNum == firstFrameNum) {
+                    totalSectorsForFrame++;
+                } else {
+                    // Count total sectors (all types) between start and this frame
+                    sectorsPerFrame = s; // all sectors up to second frame start
+                    break;
+                }
+            }
+        }
+
+        if (sectorsPerFrame > 0) {
+            // 150 sectors/sec (2x CD speed) / sectors-per-frame = fps
+            frameInterval = (f64)sectorsPerFrame / 150.0;
+        }
+        // else keep default 1/15
+    }
+
+    LOG("[MoviePlayer] Opened %s: %ux%u, %u sectors (%u bytes/sector, %u payload), %u audio samples, %.1f fps",
+        path, frameWidth, frameHeight, sectorCount, sectorSize, videoChunkData, audioPCMWritten,
+        1.0 / frameInterval);
     return true;
 }
 

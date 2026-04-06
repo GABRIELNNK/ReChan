@@ -89,7 +89,7 @@ private:
     void CreateDefaultProgram();
 };
 
-// glDisplay──
+// glDisplay
 
 class glDisplay : public pddiDisplay {
 public:
@@ -98,8 +98,8 @@ public:
 
     bool  InitDisplay(const pddiDisplayInit& init) override;
     void  SwapBuffers() override;
-    int   GetWidth() override { return width; }
-    int   GetHeight() override { return height; }
+    int   GetWidth() override { return fbWidth; }
+    int   GetHeight() override { return fbHeight; }
     bool  ShouldClose() override;
     void  PollEvents() override;
 
@@ -108,15 +108,49 @@ public:
     bool IsMouseButtonDown(int button) override;
     void GetMousePosition(double& x, double& y) override;
 
-    // Viewport with 4:3 letterboxing
+    void SetIcon(int w, int h, const unsigned char* rgba) override;
+
+    // Video mode
+    int  GetVideoModeCount() override;
+    void GetVideoMode(int index, pddiVideoMode& mode) override;
+    void SetFullscreen(bool fullscreen) override;
+    bool IsFullscreen() override;
+    void SetResolution(int w, int h) override;
+    void SetVSync(bool enabled) override;
+    void SetWindowPos(int x, int y) override;
+
+    // Cursor
+    void ShowCursor(bool visible) override;
+    void ClipCursor(bool clip) override;
+
+    // WndProc callback
+    void SetWndProc(pddiWndProc proc) override;
+
+    // Viewport
     void GetViewport(int& x, int& y, int& w, int& h) const;
+
+    GLFWwindow* GetWindow() const { return window; }
 
 private:
     GLFWwindow* window = nullptr;
-    int width = 0;
-    int height = 0;
+    int fbWidth = 0;
+    int fbHeight = 0;
+    int windowedX = 100, windowedY = 100;
+    int windowedW = 960, windowedH = 720;
+    bool cursorVisible = true;
+    bool cursorClipped = false;
+    bool focused = true;
+    pddiWndProc wndProc;
+
+    void UpdateCursorClip();
 
     static void FramebufferSizeCallback(GLFWwindow* window, int width, int height);
+    static void WindowFocusCallback(GLFWwindow* window, int focused);
+    static void WindowCloseCallback(GLFWwindow* window);
+    static void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
+    static void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
+    static void CursorPosCallback(GLFWwindow* window, double x, double y);
+    static void ScrollCallback(GLFWwindow* window, double xoff, double yoff);
 };
 
 // glContext──

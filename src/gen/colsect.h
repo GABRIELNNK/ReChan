@@ -2,7 +2,7 @@
 // Original: C:\CHAN\GAME\SRC\GEN\COLSECT.CPP
 #pragma once
 
-#include "common.h"
+#include "core.h"
 #include "p3d/lvector.h"
 
 struct Wall;
@@ -52,6 +52,14 @@ struct CollisionSector {
         s32& outFloorH, s32& outCeilingH,
         LVector& outFloorNormal, LVector& outCeilingNormal,
         s32* outHasRailing, const LVector* pos, s32 radius);
+
+    // Overload with separate railing correction output
+    static void GetArrayFloorAndCeilingHeight(
+        Floor** floorArray, s32 count,
+        s32& outFloorH, s32& outCeilingH,
+        LVector& outFloorNormal, LVector& outCeilingNormal,
+        s32* outHasRailing, LVector* outRailCorrection,
+        const LVector* pos, s32 radius);
 
     // PSX: FillWorldWallArray__15CollisionSectorRC10tagLVectorT1PPC4Walli (COLSECT.CPP:863) 0x800411F8
     static s32 FillWorldWallArray(

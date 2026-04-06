@@ -1,5 +1,6 @@
 // audio.cpp - AudioEngine implementation (wraps miniaudio)
 // This is the ONLY file besides miniaudio_impl.cpp that includes miniaudio.h
+#include "gen/common.h"
 #include "pc/audio.h"
 #include "miniaudio.h"
 #include <vector>

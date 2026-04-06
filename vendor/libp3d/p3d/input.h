@@ -13,6 +13,9 @@ class PlatformInput {
 public:
     void SetDisplay(pddiDisplay* display) { this->display = display; }
 
+    void SetEnabled(bool e) { enabled = e; }
+    bool IsEnabled() const { return enabled; }
+
     // Call once per frame before reading input (mirrors PSX Step/ServiceInput)
     void ServiceInput();
 
@@ -28,6 +31,7 @@ public:
 
 private:
     pddiDisplay* display = nullptr;
+    bool enabled = true;
 
     // Previous-frame state for oneshot detection (PSX Button::Oneshot mode)
     std::unordered_map<int, bool> prevKeys;

@@ -1,7 +1,9 @@
 // sound.cpp - Sound manager reversed from PSX SOUND.CPP
 // PSX source: C:\CHAN\GAME\SRC\SND\SOUND.CPP
+#include "gen/common.h"
 #include "snd/sound.h"
 #include "snd/rsdformat.h"
+#include "xclib/xcfile.h"
 
 // PSX: gp-relative global
 Sound* g_sound = nullptr;
@@ -13,7 +15,7 @@ static constexpr u32 PSX_MUSIC_RATE = 22050;
 
 // Helper: read entire file into memory
 static u8* ReadFileBytes(const char* path, u32& outSize) {
-    FILE* f = FileOpen(path, "rb");
+    FILE* f = xcOpenFile(path, "rb");
     if (!f) return nullptr;
     fseek(f, 0, SEEK_END);
     outSize = (u32)ftell(f);

@@ -3,7 +3,7 @@
 // Screen stack manager - pushes/pops screens, handles Init/Update/Render.
 #pragma once
 
-#include "gen/common.h"
+#include "core.h"
 
 struct xcSection;
 struct xcSectionMan;

@@ -2,7 +2,7 @@
 // Wraps miniaudio completely. Game code must never include miniaudio directly.
 #pragma once
 
-#include "gen/common.h"
+#include "core.h"
 
 // Opaque handle types
 using AudioSample = u32;  // handle to a loaded sample in the engine

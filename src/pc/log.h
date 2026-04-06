@@ -1,5 +1,4 @@
 #pragma once
-
 #include <cstdio>
 #include <cstdarg>
 #include <mutex>
@@ -28,4 +27,4 @@ private:
     std::mutex m_Mutex;
 };
 
-#define LOG(fmt, ...)      Log::Get().LogMessage(fmt, ##__VA_ARGS__)
+#define LOG(fmt, ...) Log::Get().LogMessage(fmt, ##__VA_ARGS__)

@@ -2,7 +2,7 @@
 // PSX source: C:\CHAN\GAME\SRC\GEN\ANIMMAT.CPP
 #pragma once
 
-#include "gen/common.h"
+#include "core.h"
 
 // AnimationMatrices - per-humanoid joint matrix buffers (660 bytes on PSX)
 struct AnimationMatrices {

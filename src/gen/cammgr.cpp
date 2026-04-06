@@ -1,5 +1,6 @@
 // cammgr.cpp - CameraManager
 // Original: C:\CHAN\GAME\SRC\GEN\CAMMGR.CPP
+#include "common.h"
 #include "gen/cammgr.h"
 #include "gen/blockmgr.h"
 #include "gen/world.h"

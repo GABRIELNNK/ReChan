@@ -198,6 +198,15 @@ inline void rmV3Normalize(LVector* out, const LVector* in) {
     out->z = (s32)(((s64)in->z << 16) / mag);
 }
 
+// rmV3Scale - scale vector by 16.16 fixed-point scalar
+// PSX: 0x8009346C
+// Source: C:\chan\devsys\psx\radlib\SOURCE\MATH\VECTOR\VECT3D.CPP
+inline void rmV3Scale(LVector* out, const LVector* in, s32 scale) {
+    out->x = (s32)(((s64)in->x * (s64)scale) >> 16);
+    out->y = (s32)(((s64)in->y * (s64)scale) >> 16);
+    out->z = (s32)(((s64)in->z * (s64)scale) >> 16);
+}
+
 
 // rmATan216 - two-argument arctangent returning PSX binary angle (0..65535)
 // PSX: 0x80113CF0

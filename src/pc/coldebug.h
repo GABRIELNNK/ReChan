@@ -2,7 +2,7 @@
 // Development helper (not PSX code)
 #pragma once
 
-#include "gen/common.h"
+#include "core.h"
 #include "p3d/lvector.h"
 
 class BlockManager;

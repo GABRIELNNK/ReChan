@@ -1,5 +1,6 @@
 // blockmgr.cpp = BlockManager reversed from PSX BLKMGR.CPP
 // Original: C:\CHAN\GAME\SRC\GEN\BLKMGR.CPP
+#include "common.h"
 #include "gen/blockmgr.h"
 #include "gen/database.h"
 
