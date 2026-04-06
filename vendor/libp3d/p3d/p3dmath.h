@@ -14,9 +14,42 @@
 // PSX math function equivalents (float versions)
 // Names match decompiled PSX code for easy cross-reference.
 
-// PSX binary angle: 65536 = 2π. Convert to/from radians.
-constexpr f32 P3D_ANGLE_TO_RAD = (2.0f * 3.14159265358979323846f) / 65536.0f;
-constexpr f32 P3D_RAD_TO_ANGLE = 65536.0f / (2.0f * 3.14159265358979323846f);
+// Pi
+#define PI 3.14159265358979323846f
+#define TWO_PI (2.0f * PI)
+
+// PSX binary angle: 65536 = full circle (2pi)
+#define ANGLE_TO_RAD (TWO_PI / 65536.0f)
+#define RAD_TO_ANGLE (65536.0f / TWO_PI)
+
+// PSX binary angle constants (0x0000-0xFFFF = 0-360 degrees)
+#define PSX_ANGLE_0    0x0000
+#define PSX_ANGLE_90   0x4000
+#define PSX_ANGLE_180  0x8000
+#define PSX_ANGLE_270  0xC000
+#define PSX_ANGLE_360  0x10000
+#define PSX_ANGLE_MASK 0xFFFF
+
+// PSX 16.16 fixed-point
+#define FIX16_SCALE 65536.0f
+#define FIX16_INV (1.0f / 65536.0f)
+
+// PSX 16.16 fixed-point named constants
+#define FIX16_ONE   0x10000   // 1.0
+#define FIX16_HALF  0x8000    // 0.5
+#define FIX16_QUARTER 0x4000  // 0.25
+#define FIX16_NEG_ONE ((s32)0xFFFF0000) // -1.0
+#define FIX16_MAX   0x7FFFFFFF
+
+// Sentinel values
+#define INVALID_HANDLE 0xFFFF
+#define INVALID_SLOT   0xFF
+
+// Conversion macros
+#define ANGLE2RAD(a) ((f32)(a) * ANGLE_TO_RAD)
+#define RAD2ANGLE(r) ((s32)((r) * RAD_TO_ANGLE))
+#define FIX16_TO_FLOAT(v) ((f32)(v) * FIX16_INV)
+#define FLOAT_TO_FIX16(v) ((s32)((v) * FIX16_SCALE))
 
 // p3dBuildRotMatrixZ / Y / X - single-axis rotation into Mat4
 // PSX: builds into 3×5 s16 Q12 MATRIX. PC: builds into 4×4 float Mat4.
@@ -68,9 +101,9 @@ inline void p3dBuildRotMatrixZYX(f32 ax, f32 ay, f32 az, Mat4& m) {
 // Overload taking PSX angle units (s32) - converts internally
 inline void p3dBuildRotMatrixZYX(s32 ax, s32 ay, s32 az, Mat4& m) {
     p3dBuildRotMatrixZYX(
-        static_cast<f32>(ax & 0xFFFF) * P3D_ANGLE_TO_RAD,
-        static_cast<f32>(ay & 0xFFFF) * P3D_ANGLE_TO_RAD,
-        static_cast<f32>(az & 0xFFFF) * P3D_ANGLE_TO_RAD,
+        ANGLE2RAD(ax & 0xFFFF),
+        ANGLE2RAD(ay & 0xFFFF),
+        ANGLE2RAD(az & 0xFFFF),
         m);
 }
 // p3dBuildRotMatrixYZX - PSX: 0x800737A4
@@ -99,9 +132,9 @@ inline void p3dBuildRotMatrixYZX(f32 ax, f32 ay, f32 az, Mat4& m) {
 // Overload taking PSX angle units (s32) - converts internally
 inline void p3dBuildRotMatrixYZX(s32 ax, s32 ay, s32 az, Mat4& m) {
     p3dBuildRotMatrixYZX(
-        static_cast<f32>(ax & 0xFFFF) * P3D_ANGLE_TO_RAD,
-        static_cast<f32>(ay & 0xFFFF) * P3D_ANGLE_TO_RAD,
-        static_cast<f32>(az & 0xFFFF) * P3D_ANGLE_TO_RAD,
+        ANGLE2RAD(ax & 0xFFFF),
+        ANGLE2RAD(ay & 0xFFFF),
+        ANGLE2RAD(az & 0xFFFF),
         m);
 }
 
@@ -130,18 +163,14 @@ inline Vec3 p3dVecTimesRotMatrix(const Vec3& v, const Mat4& m) {
 // p3dBuildTransMatrix - build identity + translation
 inline void p3dBuildTransMatrix(f32 x, f32 y, f32 z, Mat4& m) {
     m = Mat4();
-    m.m[12] = x; m.m[13] = y; m.m[14] = z;
+    m.SetTranslation(x, y, z);
 }
 
 
 // p3dFillTransMatrix - fill translation into existing matrix (PSX: 0x800946D0)
 // PSX: writes ONLY the translation part, leaves rotation untouched.
-// PSX MATRIX layout: t[0..2] at DWORD offsets [5],[6],[7].
-// PC Mat4 layout: translation at m[12],m[13],m[14].
 inline void p3dFillTransMatrix(const LVector& pos, Mat4& m) {
-    m.m[12] = (f32)pos.x;
-    m.m[13] = (f32)pos.y;
-    m.m[14] = (f32)pos.z;
+    m.SetTranslation((f32)pos.x, (f32)pos.y, (f32)pos.z);
 }
 
 
@@ -210,8 +239,8 @@ inline void rmV3Scale(LVector* out, const LVector* in, s32 scale) {
 // rmSin16 - 16.16 fixed-point sine from PSX binary angle (0..65535 = full circle)
 // PSX: 0x80078364 (lookup table based)
 inline s32 rmSin16(s32 angle) {
-    f32 rad = (f32)(angle & 0xFFFF) * P3D_ANGLE_TO_RAD;
-    return (s32)(std::sin(rad) * 65536.0f);
+    f32 rad = ANGLE2RAD(angle & 0xFFFF);
+    return FLOAT_TO_FIX16(std::sin(rad));
 }
 
 // rmCos16 - 16.16 fixed-point cosine from PSX binary angle
@@ -224,7 +253,7 @@ inline s32 rmCos16(s32 angle) {
 // PSX: 0x80113CF0
 inline u16 rmATan216(f32 x, f32 y) {
     f32 rad = std::atan2(y, x);
-    s32 angle = static_cast<s32>(rad * P3D_RAD_TO_ANGLE) & 0xFFFF;
+    s32 angle = RAD2ANGLE(rad) & 0xFFFF;
     return static_cast<u16>(angle);
 }
 

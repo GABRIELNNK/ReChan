@@ -40,3 +40,17 @@ struct Fixed {
 // Math types = split into separate headers
 #include "p3d/vector.h"
 #include "p3d/matrix.h"
+#include "p3d/lvector.h"
+
+inline Vec3 LVector::ToVec3() const {
+    return Vec3((f32)x, (f32)y, (f32)z);
+}
+inline Vec3 LVector::ToVec3Fix16() const {
+    return Vec3((f32)x / 65536.0f, (f32)y / 65536.0f, (f32)z / 65536.0f);
+}
+inline LVector Vec3::ToLVector() const {
+    return {(s32)x, (s32)y, (s32)z};
+}
+inline LVector Vec3::ToLVectorFix16() const {
+    return {(s32)(x * 65536.0f), (s32)(y * 65536.0f), (s32)(z * 65536.0f)};
+}

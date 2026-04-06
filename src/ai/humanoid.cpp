@@ -98,7 +98,7 @@ void Humanoid::Think() {
     s64 dt = (s64)attackRange * (s64)deltaTime;
     s32 scaledRange = (s32)((u64)dt >> 16);
     (void)scaledRange; // stored to PSX +212 (animation speed field, not yet wired)
-    deltaTime = 0x10000; // reset to 1.0
+    deltaTime = FIX16_ONE; // reset to 1.0
 
     // PSX step 9: face player if not player and not in certain states
     // (requires FightingCollision system, simplified for now)
@@ -352,7 +352,7 @@ void Humanoid::FacePoint(const LVector& point, s32 immediate) {
     // Compute target angle using atan2(dx, dz) in PSX binary angle units (0-65535)
     // PSX convention: 0 = +Z, 0x4000 = +X, 0x8000 = -Z, 0xC000 = -X
     f32 rad = atan2((f32)dx, (f32)dz);
-    s32 targetAngle = ((s32)(rad * P3D_RAD_TO_ANGLE)) & 0xFFFF;
+    s32 targetAngle = RAD2ANGLE(rad) & 0xFFFF;
 
     if (immediate == 0) {
         // Snap directly to target angle
@@ -364,8 +364,8 @@ void Humanoid::FacePoint(const LVector& point, s32 immediate) {
     s32 diff = targetAngle - orientation.y;
 
     // Wrap difference to -32768..32767
-    if (diff > 0x8000) diff -= 0x10000;
-    if (diff < -0x8000) diff += 0x10000;
+    if (diff > PSX_ANGLE_180) diff -= PSX_ANGLE_360;
+    if (diff < -PSX_ANGLE_180) diff += PSX_ANGLE_360;
 
     s32 absDiff = (diff >= 0) ? diff : -diff;
 
@@ -414,8 +414,8 @@ void Humanoid::FaceAngleY(s32 angle, s32 immediate) {
     s32 diff = angle - orientation.y;
 
     // Wrap difference to -32768..32767
-    if (diff > 0x8000) diff -= 0x10000;
-    if (diff < -0x8000) diff += 0x10000;
+    if (diff > PSX_ANGLE_180) diff -= PSX_ANGLE_360;
+    if (diff < -PSX_ANGLE_180) diff += PSX_ANGLE_360;
 
     s32 absDiff = (diff >= 0) ? diff : -diff;
 

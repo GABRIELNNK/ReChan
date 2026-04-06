@@ -19,7 +19,7 @@ AnimStructure::AnimStructure(s32 m, void* anim, s32 lt, Model* mdl, void* drawab
     model = mdl;
     flip = nullptr;
     blendPose = nullptr;
-    speed = 0x10000;
+    speed = FIX16_ONE;
     loopCount = 0;
 
     // PSX: mode 3 (camera) creates tParamFlip or tSequenceFlip as flip handler
@@ -145,7 +145,7 @@ void AnimStructure::ExecuteHandler(s32 doFlip) {
 
     // Compute frame delta based on speed
     s32 elapsed;
-    if (speed == 0x10000) {
+    if (speed == FIX16_ONE) {
         elapsed = (tick - prevTick) << 16;
     } else {
         elapsed = (s32)((((s64)(tick - prevTick)) << 16) * (s64)speed >> 16);
@@ -191,8 +191,8 @@ void AnimStructure::ExecuteHandler(s32 doFlip) {
 void AnimStructure::Loop() {
     if (endFrame > 0 && currentFrame > endFrame) {
         loopCount++;
-        if (endFrame + 0x10000 != 0) {
-            currentFrame = currentFrame % (endFrame + 0x10000);
+        if (endFrame + FIX16_ONE != 0) {
+            currentFrame = currentFrame % (endFrame + FIX16_ONE);
         }
     }
 }
@@ -200,7 +200,7 @@ void AnimStructure::Loop() {
 // PSX: LoopReverse__13AnimStructure (0x80071200)
 void AnimStructure::LoopReverse() {
     if (currentFrame < 0) {
-        currentFrame = endFrame - 0x10000;
+        currentFrame = endFrame - FIX16_ONE;
         loopCount++;
     }
 }
@@ -236,12 +236,12 @@ void AnimStructure::RunToLast() {
 
 // PSX: IncFrame__13AnimStructure
 void AnimStructure::IncFrame() {
-    currentFrame += 0x10000;
+    currentFrame += FIX16_ONE;
 }
 
 // PSX: DecFrame__13AnimStructure
 void AnimStructure::DecFrame() {
-    currentFrame -= 0x10000;
+    currentFrame -= FIX16_ONE;
     if (currentFrame < 0) {
         currentFrame = 0;
     }

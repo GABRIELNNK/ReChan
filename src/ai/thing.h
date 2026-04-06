@@ -4,6 +4,7 @@
 
 #include "core.h"
 #include "p3d/lvector.h"
+#include "p3d/p3dmath.h"
 #include "gen/cclist.h"
 
 struct DBRoot;
@@ -114,8 +115,8 @@ class Thing : public ccNode {
 public:
     // PSX +24 (u16): entity type from AI::ThingTypes
     u16 thingType = 0;
-    // PSX +26 (u16): initialized to 0xFFFF
-    u16 collisionRadius = 0xFFFF;
+    // PSX +26 (u16): initialized to INVALID_HANDLE
+    u16 collisionRadius = INVALID_HANDLE;
 
     // PSX +28,+32,+36: world position (s32 fixed-point)
     LVector pos = {};

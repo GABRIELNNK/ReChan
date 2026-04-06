@@ -45,7 +45,7 @@ void tCamera::GetClipPlanes(u16* outNear, u16* outFar) const {
 void tCamera::SetState() {
     // Convert PSX fixed-point FOV to GL perspective
     // fovB is vertical half-angle tangent in Q16 (65536 = 1.0)
-    f32 vfov_rad = 2.0f * std::atan((f32)fovB / 65536.0f);
+    f32 vfov_rad = 2.0f * std::atan(FIX16_TO_FLOAT(fovB));
     if (vfov_rad < 0.01f) vfov_rad = 0.7f; // safety fallback
 
     // Use display aspect ratio
@@ -111,14 +111,10 @@ void tMatrixCamera::UpdateMatrix() {
 }
 
 // PSX: GetPosition__13tMatrixCameraP9_RMVECT16 (0x8009D6C8)
-// Reads translation from the camera matrix (column 3 in column-major)
 void tMatrixCamera::GetPosition(LVector* out) const {
-    // PSX reads from MATRIX translation: +44,+48,+52 relative to tCamera start
-    // which is the t[0..2] of the PSX MATRIX struct.
-    // On PC, translation is in column 3: m[12], m[13], m[14]
-    out->x = (s32)(cameraMatrix.m[12]);
-    out->y = (s32)(cameraMatrix.m[13]);
-    out->z = (s32)(cameraMatrix.m[14]);
+    out->x = (s32)(cameraMatrix.GetTransX());
+    out->y = (s32)(cameraMatrix.GetTransY());
+    out->z = (s32)(cameraMatrix.GetTransZ());
 }
 
 // PC: tMatrixCamera SetState pushes projection + view
@@ -168,17 +164,17 @@ void t2PointMatrixCamera::UpdateMatrix() {
     }
 
     // Convert to float for PC matrix operations
-    Vec3 headingF((f32)heading.x / 65536.0f, (f32)heading.y / 65536.0f, (f32)heading.z / 65536.0f);
-    Vec3 upF((f32)up.x / 65536.0f, (f32)up.y / 65536.0f, (f32)up.z / 65536.0f);
+    Vec3 headingF(FIX16_TO_FLOAT(heading.x), FIX16_TO_FLOAT(heading.y), FIX16_TO_FLOAT(heading.z));
+    Vec3 upF(FIX16_TO_FLOAT(up.x), FIX16_TO_FLOAT(up.y), FIX16_TO_FLOAT(up.z));
 
     // PSX: p3dFillHeadingMatrix, p3dBuildRotMatrixZ, p3dMultMatrix, p3dFillTransMatrix
     Mat4 headingMatrix;
     p3dFillHeadingMatrix(headingF, upF, headingMatrix);
 
     Mat4 twistMatrix;
-    p3dBuildRotMatrixZ((f32)twist * P3D_ANGLE_TO_RAD, twistMatrix);
+    p3dBuildRotMatrixZ(ANGLE2RAD(twist), twistMatrix);
 
-    Mat4 combined = Mat4Multiply(twistMatrix, headingMatrix);
+    Mat4 combined = twistMatrix * headingMatrix;
     p3dFillTransMatrix(position, combined);
 
     // Store as our camera matrix (triggers worldToCamera computation)

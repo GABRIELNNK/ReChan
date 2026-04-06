@@ -865,7 +865,7 @@ void glContext::DrawPrimBuffer(pddiPrimBuffer* buffer) {
 
     glUseProgram(program3D);
 
-    Mat4 mvp = Mat4Multiply(projection, Mat4Multiply(viewMatrix, worldMatrix));
+    Mat4 mvp = projection * (viewMatrix * worldMatrix);
     glUniformMatrix4fv(glGetUniformLocation(program3D, "uMVP"),
                        1, GL_FALSE, mvp.Data());
 

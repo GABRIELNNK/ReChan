@@ -317,9 +317,9 @@ bool Block::Draw(const LVector* drawPos) {
     // (DrawEverythingHandler passes block pos modified by OffsetToPreventSeams)
     // PSX: gte_SetTransMatrix with drawPos directly, no axis flips
     Mat4 world;
-    world.m[12] = static_cast<f32>(drawPos->x);
-    world.m[13] = static_cast<f32>(drawPos->y);
-    world.m[14] = static_cast<f32>(drawPos->z);
+    world.SetTranslation(static_cast<f32>(drawPos->x),
+                         static_cast<f32>(drawPos->y),
+                         static_cast<f32>(drawPos->z));
     p3d::context->SetWorldMatrix(world);
 
     // PSX: Update UVPrimData/CBVPrimData, then RP_ZCullGClip/RP_ZCullGMFog

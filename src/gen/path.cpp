@@ -1,7 +1,7 @@
 // path.cpp - Path interpolation system reversed from PSX PATH.CPP
 // Original: C:\CHAN\GAME\SRC\GEN\PATH.CPP
 #include "gen/path.h"
-
+#include "p3d/p3dmath.h"
 #include "p3d/hash.h"
 
 // Sentinel value for "attribute not found"
@@ -17,9 +17,9 @@ static void IntV3Normalize(s32* v) {
     f32 fz = (f32)v[2];
     f32 mag = sqrt(fx * fx + fy * fy + fz * fz);
     if (mag > 0.0f) {
-        v[0] = (s32)(fx / mag * 65536.0f);
-        v[1] = (s32)(fy / mag * 65536.0f);
-        v[2] = (s32)(fz / mag * 65536.0f);
+        v[0] = FLOAT_TO_FIX16(fx / mag);
+        v[1] = FLOAT_TO_FIX16(fy / mag);
+        v[2] = FLOAT_TO_FIX16(fz / mag);
     }
 }
 
@@ -577,9 +577,9 @@ s32 SplinePath::Move(s32 speed) {
     // Advance parametric position
     t += dt;
 
-    // Check for segment crossing (t >= 1.0 in 16.16 = 0x10000)
-    while (t >= 0x10000) {
-        t -= 0x10000;
+    // Check for segment crossing (t >= 1.0 in 16.16)
+    while (t >= FIX16_ONE) {
+        t -= FIX16_ONE;
         currentSegment++;
         crossed = 1;
     }

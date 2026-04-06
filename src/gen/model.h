@@ -13,11 +13,13 @@
 #pragma once
 
 #include "core.h"
+#include "p3d/p3dmath.h"
 #include "gen/cclist.h"
 
 class pddiPrimBuffer;
 class Thing;
 struct AnimationMatrices;
+struct STreeData;
 
 // OriginalBasic - base for model data stored in LevelManager lists.
 // PSX: ccNode-derived with type and storeID fields.
@@ -52,6 +54,9 @@ struct OriginalSTree : public OriginalBasic {
     pddiPrimBuffer* meshBuffer = nullptr;
     u32 meshVertCount = 0;
     u32 meshTriCount = 0;
+
+    // Skeleton data (parsed from P3D 0x6122/0x6121 chunks)
+    STreeData* skeleton = nullptr;
 
     OriginalSTree();
     ~OriginalSTree() override;
@@ -162,7 +167,7 @@ public:
 class SModel : public Model {
 public:
     // +88. Scale fixed-point: 0x10000 = 1.0
-    s32 scale = 0x10000;
+    s32 scale = FIX16_ONE;
     // +92
     s32 field92 = 0;
 

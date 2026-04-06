@@ -571,12 +571,11 @@ void World::Render(const LVector* camPos) {
 // Multiplies world-space point by the current view matrix (GTE rotation + translation)
 static void TransformVector(const Mat4& vm, s32 inX, s32 inY, s32 inZ,
                             s32* outX, s32* outY, s32* outZ) {
-    f32 fx = static_cast<f32>(inX);
-    f32 fy = static_cast<f32>(inY);
-    f32 fz = static_cast<f32>(inZ);
-    *outX = static_cast<s32>(vm.m[0] * fx + vm.m[4] * fy + vm.m[8]  * fz + vm.m[12]);
-    *outY = static_cast<s32>(vm.m[1] * fx + vm.m[5] * fy + vm.m[9]  * fz + vm.m[13]);
-    *outZ = static_cast<s32>(vm.m[2] * fx + vm.m[6] * fy + vm.m[10] * fz + vm.m[14]);
+    f32 ox, oy, oz;
+    Mat4TransformPoint(vm, (f32)inX, (f32)inY, (f32)inZ, ox, oy, oz);
+    *outX = static_cast<s32>(ox);
+    *outY = static_cast<s32>(oy);
+    *outZ = static_cast<s32>(oz);
 }
 
 // chanp3dClipCode - PC equivalent of PSX chanp3dClipCode

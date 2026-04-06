@@ -40,7 +40,7 @@ Thing::Thing(const LVector* initialPos, u16 type) {
     MARKFUNCTION(0x80061558);
 
     thingType = type;
-    collisionRadius = 0xFFFF;
+    collisionRadius = INVALID_HANDLE;
 
     pos = *initialPos;
     orientation = {};
@@ -459,7 +459,7 @@ void DynamicThing::Reset() {
     Thing::Reset();
 
     health = 100;
-    gravity = 0x8000;
+    gravity = FIX16_HALF;
 
     // Clear all movement vectors
     velocity = {};
@@ -510,7 +510,7 @@ void DynamicThing::Move() {
     s32 friction_z = (-sign_vz) * drag_z;
 
     // Reset gravity to default (overridden each frame by ground contact)
-    gravity = 0x8000;
+    gravity = FIX16_HALF;
 
     // Step 4: contact force handling (if stateCounter != 0)
     if (stateCounter != 0) {
@@ -666,7 +666,7 @@ void DynamicThing::AddForce(s32 magnitude, const SVector* direction) {
     // a3[4] = beyond SVector = rotZ around Z axis (typically 0)
     // Then rotates {0, 0, magnitude} by this matrix and adds to contactForce.
     s16 rotY = direction->z;
-    f32 angle = (f32)rotY * (2.0f * 3.14159265358979f / 65536.0f);
+    f32 angle = ANGLE2RAD(rotY);
     f32 sinA = std::sin(angle);
     f32 cosA = std::cos(angle);
 

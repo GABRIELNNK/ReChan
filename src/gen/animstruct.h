@@ -5,6 +5,7 @@
 #pragma once
 
 #include "core.h"
+#include "p3d/p3dmath.h"
 #include "gen/cclist.h"
 
 class Model;
@@ -93,7 +94,7 @@ public:
     // +44
     s32 loopTypeField = 0;
     // +48
-    s32 speed = 0x10000;
+    s32 speed = FIX16_ONE;
     // +52
     void* blendPose = nullptr;
     // +56

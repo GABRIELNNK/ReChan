@@ -3,7 +3,7 @@
 #pragma once
 
 #include "ai/thing.h"
-
+#include "p3d/p3dmath.h"
 #include "ai/behaviour.h"
 
 // Action state IDs for Humanoid::SetActionState
@@ -154,7 +154,7 @@ public:
     // PSX +368 (s32): cleared each Think
     s32 field368 = 0;
     // PSX +372 (s32): delta time multiplier (0x10000 = 1.0)
-    s32 deltaTime = 0x10000;
+    s32 deltaTime = FIX16_ONE;
 
     // PSX +376,+378,+380 (u16): punch/kick/combo direction indices
     u16 punchDir = 0;

@@ -510,9 +510,9 @@ Thing* AI::GetPickupWithinReach(Humanoid* humanoid) {
         return nullptr;
 
     LVector reachPt;
-    reachPt.x = humanoid->pos.x + (s32)((300LL * (s32)sinf((f32)humanoid->orientation.y * 3.14159265f / 32768.0f)) >> 0);
+    reachPt.x = humanoid->pos.x + (s32)((300LL * (s32)sinf(ANGLE2RAD(humanoid->orientation.y))) >> 0);
     reachPt.y = humanoid->pos.y + 300;
-    reachPt.z = humanoid->pos.z + (s32)((300LL * (s32)sinf(((f32)humanoid->orientation.y + 0x4000) * 3.14159265f / 32768.0f)) >> 0);
+    reachPt.z = humanoid->pos.z + (s32)((300LL * (s32)sinf(ANGLE2RAD(humanoid->orientation.y + 0x4000))) >> 0);
 
     for (ccMinNode* n = pickupList.head; n; n = n->next) {
         Thing* thing = static_cast<Thing*>(n);

@@ -406,7 +406,7 @@ void HandleThingFloor(DynamicThing* thing, s32 radius, s32 yMinOffset, s32 check
 
     // Floor normal output
     LVector outFloorNorm = {};
-    outFloorNorm.y = 0x10000;
+    outFloorNorm.y = FIX16_ONE;
 
     // Landing logic
     if (floorHNew > (s32)0x80000001) {

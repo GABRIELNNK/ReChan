@@ -1,11 +1,14 @@
-// vector.h — Vec3 (PC float equivalent of PSX _RMVECT16)
-// PSX layout: { s32 x, y, z } — 12 bytes, integer world units
-// PC layout:  { f32 x, y, z } — 12 bytes, float world units
+// vector.h - Vec3 (PC float equivalent of PSX _RMVECT16)
+// PSX layout: { s32 x, y, z } - 12 bytes, integer world units
+// PC layout:  { f32 x, y, z } - 12 bytes, float world units
 #pragma once
 
 #include <cmath>
 
 using f32 = float;
+using s32 = int32_t;
+
+struct LVector;
 
 struct Vec3 {
     f32 x, y, z;
@@ -58,6 +61,11 @@ struct Vec3 {
                 y + (b.y - y) * t,
                 z + (b.z - z) * t};
     }
+
+    // Convert to LVector (raw cast, no fixed-point conversion)
+    inline LVector ToLVector() const;
+    // Convert to LVector with float -> 16.16 conversion
+    inline LVector ToLVectorFix16() const;
 };
 
 inline Vec3 operator*(f32 s, const Vec3& v) { return {s * v.x, s * v.y, s * v.z}; }

@@ -15,7 +15,6 @@
 #include <cmath>
 
 // PSX math helpers
-static constexpr f32 PSX_ANGLE_TO_RAD = P3D_ANGLE_TO_RAD;
 
 // PSX FOV push: converts curFOV (= desiredFOV * 3000) to tCamera fovA/fovB.
 // PSX: fovA = (87162 * curFOV) >> 16, fovB = (72744 * curFOV) >> 16
@@ -37,8 +36,7 @@ static s32 rmRandom0() {
 }
 
 static s32 rmSin16Local(s32 angle) {
-    f32 rad = (f32)(angle & 0xFFFF) * PSX_ANGLE_TO_RAD;
-    return (s32)(std::sin(rad) * 65536.0f);
+    return rmSin16(angle);
 }
 
 bool EvalCubic(s32* curValue, s32* accel, s32 target, s32 velocity, s32 time) {
@@ -289,9 +287,9 @@ void Camera::Update() {
         rmV3Normalize(&headingFixed, &headingFixed);
 
         Vec3 heading(
-            (f32)headingFixed.x / 65536.0f,
-            (f32)headingFixed.y / 65536.0f,
-            (f32)headingFixed.z / 65536.0f);
+            FIX16_TO_FLOAT(headingFixed.x),
+            FIX16_TO_FLOAT(headingFixed.y),
+            FIX16_TO_FLOAT(headingFixed.z));
 
         Vec3 up(0.0f, 1.0f, 0.0f);
         if (headingFixed.x == 0 && headingFixed.z == 0) {
@@ -302,9 +300,9 @@ void Camera::Update() {
         p3dFillHeadingMatrix(heading, up, headingMatrix);
 
         Mat4 twistMatrix;
-        p3dBuildRotMatrixZ((f32)camTwist * PSX_ANGLE_TO_RAD, twistMatrix);
+        p3dBuildRotMatrixZ(ANGLE2RAD(camTwist), twistMatrix);
 
-        Mat4 matrix = Mat4Multiply(twistMatrix, headingMatrix);
+        Mat4 matrix = twistMatrix * headingMatrix;
         p3dFillTransMatrix(camPos, matrix);
 
         // PSX: GetFOV from G_2ptcam, SetCameraMatrix + SetFOV on embedded tMatrixCamera
@@ -676,9 +674,9 @@ void Camera::FollowPath() {
     if (denom != 0)
         t = rmDiv16i(dotA, denom);
     if (t < 0) t = 0;
-    if (t > 0x10000) t = 0x10000;
+    if (t > FIX16_ONE) t = FIX16_ONE;
 
-    s32 oneMinusT = 0x10000 - t;
+    s32 oneMinusT = FIX16_ONE - t;
 
     // Interpolate node attributes (16.16 lerp)
     s32 fovInterp     = (s32)(((s64)nodeA->fov * oneMinusT + (s64)nodeB->fov * t) >> 16);

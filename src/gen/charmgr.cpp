@@ -5,6 +5,7 @@
 #include "gen/model.h"
 #include "gen/levelmgr.h"
 #include "gen/geometry.h"
+#include "gen/skeleton.h"
 #include "gen/game.h"
 #include "gen/world.h"
 #include "p3d/hash.h"
@@ -483,50 +484,73 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
     memset(slot.animIndexTable, 0xFF, CharSlot::ANIM_TABLE_SIZE);
 
     // PSX: CharDataLoadCallback creates 8 loaders on stack, calls P3DLoad.
-    // The P3D data (resource rrIdx) is a TexturePage (0xFF04) stream.
-    // P3DLoad parses the 0xFF04 container and loads 0x6008 Texture sub-chunks
-    // into the p3d::inventory. The mesh data is in slot.dataBuffer (raw PRIM).
-    P3DLoadTextures(dataBuf, dataSize);
+    // P3D stream (resource rrIdx) contains:
+    //   - 0x6008 Texture chunks (uploaded to VRAM)
+    //   - 0x6122 Mapped STree (skeleton hierarchy)
+    //   - 0x4007 CompAnim (composite animation reference)
+    // The raw mesh data (tPrimGeom) is in slot.dataBuffer (resource rrIdx-1).
+    //
+    // PSX: P3DLoad with 8 loaders (tGeoLoader, tMatLoader, tPrimLoader,
+    //      tSTreeLoader, tTexLoader, tClutAnimLoader, tTexAnimLoader, tCompAnimLoader)
+    // PC: ParseP3DStreamFull extracts textures + skeleton.
+    STreeData* skeleton = ParseP3DStreamFull(dataBuf, dataSize);
     std::free(dataBuf);
 
     // PSX: CharDataLoadCallback post-processing:
-    // 1. Creates OriginalSTree from the mesh data
-    // 2. Sets rendering callbacks on the tPrimGeom
-    // 3. Registers OriginalSTree in LevelManager for FindModel lookup
-    // PC: parse slot.dataBuffer as tPrimGeom, convert to pddiPrimBuffer
+    // 1. Finds loaded tSTree in P3D inventory
+    // 2. Creates OriginalSTree (60 bytes), stores tSTree* at +36
+    // 3. Sets rendering callbacks on the tSTree (RP_XformVertsLitCBF_CL, RP_FixUpPolysCBF_CL)
+    // 4. Registers OriginalSTree in LevelManager for FindModel lookup
+    // PC: parse tPrimGeom with skeleton to build per-joint mesh
     if (slot.dataBuffer && g_levelManager) {
-        // PSX: nameCRC = *(u32*)(charFile->dataBuffer + 4)
-        // Resource 1 data at offset 4 contains the model's p3dHash name
-        // (e.g. p3dHash("JACKIELOHIER") for Jackie)
         u32 nameHash = 0;
         if (cf->dataBuffer && cf->dataSize > 0) {
             nameHash = *(u32*)((u8*)cf->dataBuffer + 4);
         }
 
-        // Check if OriginalSTree already exists in LevelManager
         OriginalBasic* existing = g_levelManager->FindModel((s32)nameHash);
         if (!existing) {
-            // Parse tPrimGeom data from dataBuffer into pddiPrimBuffer
-            // The dataBuffer IS the tPrimGeom binary (same format as BLK geometry)
-            s32 bufSize = rrSize(cf->rrHeader, rrIdx - 1);
-            pddiPrimBuffer* meshBuf = ParseBLKPrims(
-                (const u8*)slot.dataBuffer, (u32)bufSize);
+            OriginalSTree* original = new OriginalSTree();
+            original->nameCRC = nameHash;
+            original->SetStoreID(type == 0 ? 0 : 2);
 
-            if (meshBuf) {
-                OriginalSTree* original = new OriginalSTree();
-                original->nameCRC = nameHash;
-                original->SetStoreID(type == 0 ? 0 : 2);
+            s32 bufSize = rrSize(cf->rrHeader, rrIdx - 1);
+
+            if (skeleton) {
+                // Read idle animation (animEnum 0) to apply bind pose to skeleton joints.
+                // PSX: animation is loaded separately via LoadAnimationBatch, but we need the
+                // bind pose before building the mesh. Resource index: 2*animEnum + 8 = 8.
+                s32 idleAnimSize = 0;
+                u8* idleAnimBuf = cf->ReadResource(8, &idleAnimSize);
+                if (idleAnimBuf) {
+                    ApplyAnimFrame0(skeleton, idleAnimBuf, (u32)idleAnimSize);
+                    std::free(idleAnimBuf);
+                }
+
+                // Build per-joint mesh with animation-applied transforms
+                BuildPerJointMeshes(skeleton, (const u8*)slot.dataBuffer, (u32)bufSize);
+                original->skeleton = skeleton;
+                skeleton = nullptr; // ownership transferred
+
+                LOG("[CharMgr] Created OriginalSTree with skeleton for type %u (hash 0x%08X, %u joints)",
+                    type, nameHash, original->skeleton->numJoints);
+            } else {
+                // Fallback: flat mesh without skeleton
+                pddiPrimBuffer* meshBuf = ParseBLKPrims(
+                    (const u8*)slot.dataBuffer, (u32)bufSize);
                 original->meshBuffer = meshBuf;
 
-                // Register in LevelManager's streeList
-                g_levelManager->AddOriginal(original, 0);
-
-                LOG("[CharMgr] Created OriginalSTree for type %u (hash 0x%08X, mesh %p)",
-                    type, nameHash, meshBuf);
-            } else {
-                LOG("[CharMgr] Failed to parse mesh for type %u", type);
+                LOG("[CharMgr] Created OriginalSTree (flat) for type %u (hash 0x%08X)",
+                    type, nameHash);
             }
+
+            g_levelManager->AddOriginal(original, 0);
         }
+    }
+
+    // Clean up skeleton if not transferred to OriginalSTree
+    if (skeleton) {
+        delete skeleton;
     }
 
     LOG("[CharMgr] Loaded character type %u into slot %d", type, slotIdx);

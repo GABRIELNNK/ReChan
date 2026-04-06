@@ -409,7 +409,7 @@ void Player::ReadPlayerInput() {
         commandBits |= CB_RUN;
         // atan2(dx, dz) → PSX binary angle (0=+Z, 0x4000=+X)
         f32 rad = atan2((f32)dx, (f32)dz);
-        faceAngle = ((s32)(rad * P3D_RAD_TO_ANGLE)) & 0xFFFF;
+        faceAngle = RAD2ANGLE(rad) & 0xFFFF;
     }
 
     // Cross button → jump
