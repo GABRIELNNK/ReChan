@@ -23,20 +23,15 @@ LineFile::~LineFile() {
 void LineFile::Open(const char* filename) {
     MARKFUNCTION(0x80017FD4);
 
-    // PSX: ccFile open, read entire file, null-terminate
-    FILE* f = xcOpenFile(filename, "rb");
-    if (!f) {
+    u8* rawData = nullptr;
+    if (!xcReadFileLow(filename, &rawData, &fileSize)) {
         LOG("[LineFile] Failed to open: %s", filename);
         return;
     }
 
-    fseek(f, 0, SEEK_END);
-    fileSize = (u32)ftell(f);
-    fseek(f, 0, SEEK_SET);
-
     buffer = new char[fileSize + 1];
-    fread(buffer, 1, fileSize, f);
-    fclose(f);
+    memcpy(buffer, rawData, fileSize);
+    delete[] rawData;
 
     buffer[fileSize] = '\0';
     curPos = buffer;
@@ -84,21 +79,34 @@ bool LineFile::Next() {
         if (!lineEnd)
             lineEnd = endPos;
 
-        // Save line end, temporarily null-terminate for strtok-like parsing
-        char savedChar = *lineEnd;
-        *lineEnd = '\0';
+        char* token = curPos;
+        while (token < lineEnd && numWords < MAX_WORDS) {
+            while (token < lineEnd &&
+                   (*token == ' ' || *token == '\t' || *token == '\r')) {
+                token++;
+            }
 
-        // PSX: strtok with " \t" delimiters, copy up to 8 words of max 23 chars
-        char* tok = strtok(curPos, " \t\r");
-        while (tok && numWords < MAX_WORDS) {
-            strncpy(words[numWords], tok, WORD_LEN - 1);
-            words[numWords][WORD_LEN - 1] = '\0';
+            if (token >= lineEnd) {
+                break;
+            }
+
+            char* tokenEnd = token;
+            while (tokenEnd < lineEnd &&
+                   *tokenEnd != ' ' && *tokenEnd != '\t' && *tokenEnd != '\r') {
+                tokenEnd++;
+            }
+
+            s32 len = (s32)(tokenEnd - token);
+            if (len >= WORD_LEN) {
+                len = WORD_LEN - 1;
+            }
+
+            memcpy(words[numWords], token, len);
+            words[numWords][len] = '\0';
             numWords++;
-            tok = strtok(nullptr, " \t\r");
+            token = tokenEnd;
         }
 
-        // Restore and advance past line
-        *lineEnd = savedChar;
         curPos = (lineEnd < endPos) ? lineEnd + 1 : endPos;
 
         if (numWords > 0)

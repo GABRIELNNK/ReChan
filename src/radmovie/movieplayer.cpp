@@ -50,25 +50,19 @@ MoviePlayer::~MoviePlayer() {
 bool MoviePlayer::Open(const char* path) {
     Close();
 
-    FILE* f = xcOpenFile(path, "rb");
-    if (!f) {
+    u8* rawData = nullptr;
+    if (!xcReadFileLow(path, &rawData, &fileSize)) {
         LOG("[MoviePlayer] Cannot open: %s", path);
         return false;
     }
 
-    fseek(f, 0, SEEK_END);
-    fileSize = (u32)ftell(f);
-    fseek(f, 0, SEEK_SET);
-
     if (fileSize < 256) {
         LOG("[MoviePlayer] File too small: %s (%u bytes)", path, fileSize);
-        fclose(f);
+        delete[] rawData;
         return false;
     }
 
-    fileData = new u8[fileSize];
-    fread(fileData, 1, fileSize, f);
-    fclose(f);
+    fileData = rawData;
 
     // Auto-detect sector format from file content
     // Raw 2352: starts with CD sync 00 FF FF FF FF FF FF FF FF FF FF 00

@@ -6,7 +6,7 @@
 #include "ai/simplbox.h"
 
 class Humanoid;
-class LinearPath;
+struct LinearPath;
 struct DBVolume;
 
 // SubZoneVolume (48 bytes) - ccNode(24) + SimpleBox(24)

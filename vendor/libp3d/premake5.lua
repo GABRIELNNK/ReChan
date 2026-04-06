@@ -51,7 +51,7 @@ project "libp3d"
             libp3d_root .. "/vendor/glfw/src/egl_context.c",
             libp3d_root .. "/vendor/glfw/src/osmesa_context.c",
         }
-        defines { "_GLFW_WIN32" }
+        defines { "_GLFW_WIN32", "_CRT_SECURE_NO_WARNINGS" }
 
     filter "configurations:Debug"
         runtime "Debug"

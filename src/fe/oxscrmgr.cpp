@@ -32,15 +32,9 @@ void oxScreenManager::Init(const char* name, oxScreenManager* parentMgr) {
         sectionMan = parentMgr->sectionMan;
         section = new xcSection();
 
-        // PSX: xcReadFileLow(name, &data, &size)
-        FILE* f = xcOpenFile(name, "rb");
-        if (f) {
-            fseek(f, 0, SEEK_END);
-            u32 size = (u32)ftell(f);
-            fseek(f, 0, SEEK_SET);
-            u8* data = new u8[size];
-            fread(data, 1, size, f);
-            fclose(f);
+        u8* data = nullptr;
+        u32 size = 0;
+        if (xcReadFileLow(name, &data, &size)) {
 
             // PSX: temporarily swap sectionMan->section so FixInventories
             // can reference the current section during font loading

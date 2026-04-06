@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdio>
 #include <cstdarg>
+#include <fstream>
 #include <mutex>
 
 class Log {
@@ -23,7 +24,7 @@ private:
     void WriteToConsole(const char* text);
 
 private:
-    FILE* m_File;
+    std::ofstream m_File;
     std::mutex m_Mutex;
 };
 

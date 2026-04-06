@@ -12,7 +12,7 @@
 #include "p3d/texture.h"
 #include "p3d/inventory.h"
 #include "p3d/context.h"
-#include "xclib/xcfile.h"
+#include "gen/ccfile.h"
 #include <algorithm>
 
 // PSX: CharDataLoadCallback loads character textures into PSX VRAM via P3DLoad.
@@ -121,11 +121,8 @@ void FreeAnimMemory(void* ptr) {
 // PSX: GetCompositeAnimationNameHash (CHARMGR.CPP:267, 0x80039624)
 u32 GetCompositeAnimationNameHash(const char* name) {
     MARKFUNCTION(0x80039624);
-    // PSX: builds "RCHARS\\{name}.P3D" then hashes with p3dHash
     char buf[96] = {};
-    strcpy(buf, "RCHARS\\");
-    strcat(buf, name);
-    strcat(buf, ".P3D");
+    snprintf(buf, sizeof(buf), "RCHARS\\%s.P3D", name);
     return p3dHash(buf);
 }
 
@@ -207,9 +204,8 @@ CharFile::CharFile(u32 type) {
     char pathBuf[128];
     snprintf(pathBuf, sizeof(pathBuf), "RCHARS/%s.RR", g_charNameTable[type]);
 
-    // Open file (PSX: rCDOpen)
-    fileHandle = xcOpenFile(pathBuf, "rb");
-    if (!fileHandle) {
+    fileHandle = new ccFile();
+    if (!fileHandle->Open(pathBuf, ccFile::OPEN_READ)) {
         LOG("[CharFile] Failed to open: %s", pathBuf);
         next = g_charFileList;
         g_charFileList = this;
@@ -219,13 +215,12 @@ CharFile::CharFile(u32 type) {
     // PSX: rrLoadHeaderOnly - reads first 2048 bytes (or file size if smaller)
     // The header is an array of RREntry (8 bytes each)
     // PSX reads up to min(fileSize, 2048) bytes
-    fseek(fileHandle, 0, SEEK_END);
-    s32 fileSize = (s32)ftell(fileHandle);
-    fseek(fileHandle, 0, SEEK_SET);
+    s32 fileSize = fileHandle->GetLength();
 
     s32 headerSize = (fileSize < 2048) ? fileSize : 2048;
     rrHeader = (RREntry*)std::malloc(headerSize);
-    fread(rrHeader, 1, headerSize, fileHandle);
+    fileHandle->Seek(0, ccFile::SEEK_FROM_START);
+    fileHandle->Read(rrHeader, (u32)headerSize);
     rrHeaderEntries = headerSize / (s32)sizeof(RREntry);
 
     // Read resource 1 (the animation hash data section)
@@ -236,8 +231,8 @@ CharFile::CharFile(u32 type) {
     s32 dataByteSize = rrSize(rrHeader, 1);
     if (dataByteSize > 0) {
         dataBuffer = std::malloc(dataByteSize);
-        fseek(fileHandle, rrOffset(rrHeader, 1), SEEK_SET);
-        fread(dataBuffer, 1, dataByteSize, fileHandle);
+        fileHandle->Seek((u32)rrOffset(rrHeader, 1), ccFile::SEEK_FROM_START);
+        fileHandle->Read(dataBuffer, (u32)dataByteSize);
         dataSize = dataByteSize / 4; // PSX stores size in words
     }
 
@@ -262,7 +257,8 @@ CharFile::~CharFile() {
 
     // PSX: rCDCloseA, rPFree(rrHeader), rPFree(dataBuffer)
     if (fileHandle) {
-        fclose(fileHandle);
+        fileHandle->Close();
+        delete fileHandle;
         fileHandle = nullptr;
     }
     std::free(rrHeader);
@@ -335,8 +331,12 @@ u8* CharFile::ReadResource(s32 index, s32* outSize) {
         return nullptr;
     }
     u8* buf = (u8*)std::malloc(size);
-    fseek(fileHandle, offset, SEEK_SET);
-    fread(buf, 1, size, fileHandle);
+    fileHandle->Seek((u32)offset, ccFile::SEEK_FROM_START);
+    if (fileHandle->Read(buf, (u32)size) != size) {
+        std::free(buf);
+        if (outSize) *outSize = 0;
+        return nullptr;
+    }
     if (outSize) *outSize = size;
     return buf;
 }
@@ -464,16 +464,16 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
         s32 skelSize2 = rrSize(cf->rrHeader, slotIdx * 2 + 4);
         s32 skelSize = std::max(skelSize1, skelSize2);
         u8* skelBuf = (u8*)std::malloc(skelSize);
-        fseek(cf->fileHandle, rrOffset(cf->rrHeader, rrIdx - 1), SEEK_SET);
-        fread(skelBuf, 1, skelSize, cf->fileHandle);
+        cf->fileHandle->Seek((u32)rrOffset(cf->rrHeader, rrIdx - 1), ccFile::SEEK_FROM_START);
+        cf->fileHandle->Read(skelBuf, (u32)skelSize);
         slot.dataBuffer = skelBuf;
         g_playerMeshType = 0;
     } else {
         // NPC: read extra buffer (resource rrIdx-1)
         s32 extraSize = rrSize(cf->rrHeader, rrIdx - 1);
         u8* extraBuf = (u8*)std::malloc(extraSize);
-        fseek(cf->fileHandle, rrOffset(cf->rrHeader, rrIdx - 1), SEEK_SET);
-        fread(extraBuf, 1, extraSize, cf->fileHandle);
+        cf->fileHandle->Seek((u32)rrOffset(cf->rrHeader, rrIdx - 1), ccFile::SEEK_FROM_START);
+        cf->fileHandle->Read(extraBuf, (u32)extraSize);
         slot.dataBuffer = extraBuf;
     }
 
@@ -602,8 +602,8 @@ void CharacterManager::ReloadCharacter(u32 type, s32 meshType, CharMgrCallback* 
 
     s32 extraSize = rrSize(cf->rrHeader, rrIdx - 1);
     u8* extraBuf = (u8*)std::malloc(extraSize);
-    fseek(cf->fileHandle, rrOffset(cf->rrHeader, rrIdx - 1), SEEK_SET);
-    fread(extraBuf, 1, extraSize, cf->fileHandle);
+    cf->fileHandle->Seek((u32)rrOffset(cf->rrHeader, rrIdx - 1), ccFile::SEEK_FROM_START);
+    cf->fileHandle->Read(extraBuf, (u32)extraSize);
     slot.dataBuffer = extraBuf;
 
     s32 dataSize = 0;

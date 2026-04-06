@@ -701,19 +701,12 @@ xcSectionMan::~xcSectionMan() {
 bool xcSectionMan::LoadSection(const char* filename) {
     FreeSection();
 
-    FILE* f = std::fopen(filename, "rb");
-    if (!f) {
+    u8* data = nullptr;
+    u32 size = 0;
+    if (!xcReadFileLow(filename, &data, &size)) {
         LOG("[xcSectionMan] Failed to open: %s", filename);
         return false;
     }
-
-    std::fseek(f, 0, SEEK_END);
-    u32 size = (u32)std::ftell(f);
-    std::fseek(f, 0, SEEK_SET);
-
-    u8* data = new u8[size];
-    std::fread(data, 1, size, f);
-    std::fclose(f);
 
     section = new xcSection();
     if (!section->Init(data, size, this)) {

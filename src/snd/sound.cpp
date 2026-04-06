@@ -15,14 +15,10 @@ static constexpr u32 PSX_MUSIC_RATE = 22050;
 
 // Helper: read entire file into memory
 static u8* ReadFileBytes(const char* path, u32& outSize) {
-    FILE* f = xcOpenFile(path, "rb");
-    if (!f) return nullptr;
-    fseek(f, 0, SEEK_END);
-    outSize = (u32)ftell(f);
-    fseek(f, 0, SEEK_SET);
-    u8* data = new u8[outSize];
-    fread(data, 1, outSize, f);
-    fclose(f);
+    u8* data = nullptr;
+    if (!xcReadFileLow(path, &data, &outSize)) {
+        return nullptr;
+    }
     return data;
 }
 

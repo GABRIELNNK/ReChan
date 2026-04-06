@@ -50,7 +50,7 @@ private:
     // PC:
     s32 screenWidth = 1280;
     s32 screenHeight = 720;
-    f32 aspectRatio = 16.0 / 9.0f;
+    f32 aspectRatio = 16.0f / 9.0f;
 };
 
 // PSX: theDisplay (gp+3556)

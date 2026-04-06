@@ -10,6 +10,7 @@
 // Forward declarations
 class CharacterManager;
 struct CharFile;
+class ccFile;
 
 // PSX: 0x800D6880 - character name table indexed by ThingType
 extern const char* g_charNameTable[];
@@ -55,11 +56,10 @@ struct CharSlot {
 };
 
 // PSX: CharFile (32 bytes) - file handle for a character .RR type
-// PC: FILE* replaces rCDOpen handle; RREntry* replaces rrHeader void*
 struct CharFile {
     void* dataBuffer = nullptr;       // PSX +0: raw .RR data section (resource 1)
     s32 dataSize = 0;                 // PSX +4: size in WORDS (bytes/4)
-    FILE* fileHandle = nullptr;       // PSX +8: rCDOpen -> PC FILE*
+    ccFile* fileHandle = nullptr;     // PSX +8: file handle
     RREntry* rrHeader = nullptr;      // PSX +12: rrLoadHeaderOnly result
     s32 rrHeaderEntries = 0;          // PC: number of entries in header
     CharFile* next = nullptr;         // PSX +20: linked list next

@@ -8,7 +8,7 @@ Log& Log::Get() {
 }
 
 Log::Log()
-    : m_File(nullptr) {}
+    : m_File() {}
 
 Log::~Log() {
     Shutdown();
@@ -17,23 +17,18 @@ Log::~Log() {
 void Log::Init(const char* filename) {
     std::lock_guard<std::mutex> lock(m_Mutex);
 
-    if (m_File)
+    if (m_File.is_open())
         return;
 
-#if defined(_MSC_VER)
-    fopen_s(&m_File, filename, "w");
-#else
-    m_File = fopen(filename, "w");
-#endif
+    m_File.open(filename, std::ios::out | std::ios::trunc);
 }
 
 void Log::Shutdown() {
     std::lock_guard<std::mutex> lock(m_Mutex);
 
-    if (m_File) {
-        fflush(m_File);
-        fclose(m_File);
-        m_File = nullptr;
+    if (m_File.is_open()) {
+        m_File.flush();
+        m_File.close();
     }
 }
 
@@ -63,9 +58,9 @@ void Log::LogMessageV(const char* fmt, va_list args) {
     std::snprintf(finalBuffer, sizeof(finalBuffer), "%s\n", messageBuffer);
 #endif
 
-    if (m_File) {
-        std::fputs(finalBuffer, m_File);
-        std::fflush(m_File);
+    if (m_File.is_open()) {
+        m_File << finalBuffer;
+        m_File.flush();
     }
 
     WriteToConsole(finalBuffer);

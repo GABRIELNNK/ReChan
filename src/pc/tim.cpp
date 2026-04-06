@@ -36,21 +36,14 @@ static inline u32 psx16ToRGBA32(u16 c) {
 }
 
 TimImage* Tim::LoadFromFile(const char* path) {
-    FILE* f = xcOpenFile(path, "rb");
-    if (!f) {
+    u8* data = nullptr;
+    u32 fileSize = 0;
+    if (!xcReadFileLow(path, &data, &fileSize)) {
         LOG("[Tim] Failed to open: %s", path);
         return nullptr;
     }
 
-    fseek(f, 0, SEEK_END);
-    long fileSize = ftell(f);
-    fseek(f, 0, SEEK_SET);
-
-    u8* data = new u8[fileSize];
-    fread(data, 1, fileSize, f);
-    fclose(f);
-
-    TimImage* img = Tim::LoadFromMemory(data, (u32)fileSize);
+    TimImage* img = Tim::LoadFromMemory(data, fileSize);
     delete[] data;
 
     if (img) {
