@@ -42,3 +42,20 @@ void Time::Sleep(f32 seconds) {
         std::this_thread::sleep_for(std::chrono::duration<f32>(seconds));
     }
 }
+
+void Time::WaitForFrameEnd(f64 frameStart) const {
+    f32 target = GetTargetDt();
+    if (target <= 0.0f) return;
+
+    // Hybrid: sleep for the bulk, spin for the last 2ms
+    constexpr f32 spinMargin = 0.002f;
+    f64 now = GetTimeInSeconds();
+    f32 remaining = target - (f32)(now - frameStart);
+    if (remaining > spinMargin) {
+        Sleep(remaining - spinMargin);
+    }
+    // Spin-wait for the remainder
+    while ((f32)(GetTimeInSeconds() - frameStart) < target) {
+        // spin
+    }
+}

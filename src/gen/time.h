@@ -45,6 +45,9 @@ public:
     // Sleep the calling thread for the given duration
     static void Sleep(f32 seconds);
 
+    // Precise frame limiter: hybrid sleep + spin-wait. Call at end of frame.
+    void WaitForFrameEnd(f64 frameStart) const;
+
     u32 GetFrameCounter() const { return frameCounter; }
     f32 GetDeltaTime() const { return deltaTime; }
     f32 GetFPS() const { return fps; }

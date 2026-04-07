@@ -558,6 +558,12 @@ void glDisplay::SetVSync(bool enabled) {
     }
 }
 
+void glDisplay::SetTitle(const char* title) {
+    if (window) {
+        glfwSetWindowTitle(window, title);
+    }
+}
+
 void glDisplay::SetWindowPos(int x, int y) {
     if (window && !IsFullscreen()) {
         glfwSetWindowPos(window, x, y);

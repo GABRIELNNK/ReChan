@@ -93,6 +93,9 @@ public:
     virtual void SetVSync(bool enabled) = 0;
     virtual void SetWindowPos(int x, int y) = 0;
 
+    // Window title
+    virtual void SetTitle(const char* title) = 0;
+
     // Cursor
     virtual void ShowCursor(bool visible) = 0;
     virtual void ClipCursor(bool clip) = 0;

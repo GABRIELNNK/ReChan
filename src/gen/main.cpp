@@ -90,13 +90,15 @@ int main() {
             game.SetState(GameState::QueueLevelLoad);
         }
 
-        // Sleep to maintain target framerate (0 = uncapped)
-        f32 targetDt = g_time->GetTargetDt();
-        if (targetDt > 0.0f) {
-            f32 elapsed = (f32)(Time::GetTimeInSeconds() - frameStart);
-            if (elapsed < targetDt) {
-                Time::Sleep(targetDt - elapsed);
-            }
+        g_time->WaitForFrameEnd(frameStart);
+
+        // Update title bar with FPS every 30 frames
+        static u32 titleCounter = 0;
+        if (++titleCounter >= 30) {
+            char titleBuf[128];
+            snprintf(titleBuf, sizeof(titleBuf), "%s - %.1f fps (%.2f ms)", JCSM_TITLE, g_time->fps, g_time->deltaTime * 1000.0f);
+            p3d::display->SetTitle(titleBuf);
+            titleCounter = 0;
         }
     }
 

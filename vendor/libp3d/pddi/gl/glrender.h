@@ -119,6 +119,8 @@ public:
     void SetVSync(bool enabled) override;
     void SetWindowPos(int x, int y) override;
 
+    void SetTitle(const char* title) override;
+
     // Cursor
     void ShowCursor(bool visible) override;
     void ClipCursor(bool clip) override;
