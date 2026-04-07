@@ -25,6 +25,9 @@ public:
     // PSX +628 (s32): combo timer in frames (max 1800)
     s32 comboTimer = 0;
 
+    // PSX +632 (u8): encounter state byte (1=active, 2=enemy dead)
+    u8 encounterState = 0;
+
     // PSX +636..+688: embedded sub-object (targeting/combat, 52 bytes)
     s32 subObject[13] = {};
     // PSX +688 (ptr): sub-object vtable
@@ -71,6 +74,33 @@ public:
     s32 currentAnimEnum = 0;
     // PSX +760 (s32): animation load state (set to 2 during loads)
     s32 animLoadState = 0;
+
+    // PSX gp-relative globals (player-specific, one instance)
+    // gp+392: running force accumulator (ramps up while running)
+    s32 forceAccum = 0;
+    // gp+396: force ramp rate (added per frame in _Run)
+    static constexpr s32 FORCE_RAMP_RATE = 150;
+    // gp+400: force deceleration rate (subtracted per frame in _Stand anim 27)
+    static constexpr s32 FORCE_DECEL_RATE = 200;
+    // gp+420: idle animation timer (incremented each frame in _Stand)
+    s32 idleTimer = 0;
+    // gp+444: turn-around flag (set when angle difference in turn range)
+    s32 turnAroundFlag = 0;
+    // gp+476: turn delay threshold (s16, frames before turn-around completes)
+    s16 turnDelayThreshold = 8;
+    // gp+478: idle anim threshold (s16, frames before idle animation change)
+    s16 idleAnimThreshold = 1800;
+    // gp+3436: stored turn target angle
+    s32 turnTargetAngle = 0;
+    // gp+3440: turn-around timer (s16)
+    s16 turnAroundTimer = 0;
+
+    // gp+536: encounter distance threshold for PlayerSingleEncounterCheak
+    s32 encounterRange = 0;
+    // gp+540: encounter check initialized flag
+    s32 encounterInitialized = 0;
+    // gp+3428: cached pointer to FightingCollision humanoid array
+    void* encounterHumanoidArray = nullptr;
 
     // Global player pointer - PSX: gp+3432
     static Player* s_player;
@@ -138,6 +168,9 @@ public:
     // PSX: DoJump__6Playerl (PLAYER.CPP:1437)
     void DoJump(s32 height);
 
+    // PSX: DoWallJump__6Player (PLAYER.CPP:3664)
+    void DoWallJump();
+
     // PSX: FallingPhysics__6Player (PLAYER.CPP:3187)
     void FallingPhysics();
 
@@ -159,7 +192,8 @@ public:
     void SignalEnemyDead(Humanoid* enemy);
 
     // PSX: EnterCombatCombo__6Player (PLAYER.CPP:4967)
-    void EnterCombatCombo();
+    // PSX: returns int (non-zero = success). Delegates to Humanoid::EnterCombatCombo.
+    bool EnterCombatCombo();
 
     // PSX: LoadCombatDialog__6Player (PLAYER.CPP:5000)
     void LoadCombatDialog();
@@ -174,11 +208,7 @@ public:
     void PlayCombatThrowDialog();
 
     // PSX: PlayerSingleEncounterCheak__6Player (PLAYER.CPP:4660)
-    void PlayerSingleEncounterCheak();
-
-    // PC: reads InputManager → sets commandBits + faceAngle
-    // (PSX: done via Behaviour::Process in the player's Behaviour object)
-    void ReadPlayerInput();
+    bool PlayerSingleEncounterCheak();
 
     // PSX: LoadPlayerTauntResponse__6PlayerP8Humanoid (PLAYER.CPP:4712)
     void LoadPlayerTauntResponse(Humanoid* target);

@@ -204,6 +204,58 @@ inline f32 rmMag3(f32 x, f32 y, f32 z) {
     return std::sqrt(x * x + y * y + z * z);
 }
 
+// rmMag2ff - fast 2D magnitude approximation (PSX: radlib MAGFAST.C)
+// Returns max(|a|,|b|) + min(|a|,|b|)/4
+inline s32 rmMag2ff(s32 a, s32 b) {
+    if (a < 0) a = -a;
+    if (b < 0) b = -b;
+    if (b < a) {
+        return a + (b >> 2);
+    }
+    return b + (a >> 2);
+}
+
+// rmMag3ffu - unsigned fast 3D magnitude helper (PSX: radlib MAGFAST.C)
+inline s32 rmMag3ffu(u32 a1, u32 a2, u32 a3) {
+    if (a2 >= a1 || a3 >= a1) {
+        if (a3 >= a2) {
+            if (a2 < a1) {
+                return a3 + (a1 >> 2) + (a1 >> 4) + (a1 >> 5) + (a2 >> 2) + (a2 >> 5);
+            }
+            return a3 + (a2 >> 2) + (a2 >> 4) + (a2 >> 5) + (a1 >> 2) + (a1 >> 5);
+        }
+        if (a3 < a1) {
+            return a2 + (a1 >> 2) + (a1 >> 4) + (a1 >> 5) + (a3 >> 2) + (a3 >> 5);
+        }
+        return a2 + (a3 >> 2) + (a3 >> 4) + (a3 >> 5) + (a1 >> 2) + (a1 >> 5);
+    }
+    if (a3 < a2) {
+        return a1 + (a2 >> 2) + (a2 >> 4) + (a2 >> 5) + (a3 >> 2) + (a3 >> 5);
+    }
+    return a1 + (a3 >> 2) + (a3 >> 4) + (a3 >> 5) + (a2 >> 2) + (a2 >> 5);
+}
+
+// rmMag3ff - fast 3D magnitude approximation (PSX: radlib MAGFAST.C)
+inline s32 rmMag3ff(s32 a1, s32 a2, s32 a3) {
+    if (a1 < 0) a1 = -a1;
+    if (a2 < 0) a2 = -a2;
+    if (a3 < 0) a3 = -a3;
+    return rmMag3ffu((u32)a1, (u32)a2, (u32)a3);
+}
+
+// rmRangedRandom - PRNG returning value in [0, range)
+// PSX: 0x80078404, Source: C:\chan\devsys\psx\radlib\SOURCE\MATH\RANDOM\RANDOM0.C:48
+inline u32 rmRangedRandom(u32 range) {
+    static u32 seed = 0x12345678;
+    if (range == 0) {
+        return 0;
+    }
+    seed ^= 0x1D872B41;
+    seed ^= (seed >> 5);
+    seed ^= (seed << 27);
+    return seed % range;
+}
+
 // rmDiv16i - 16.16 fixed-point division (PSX: 0x8007D8B4)
 // Returns (a << 16) / b as a 16.16 fixed-point result.
 // Source: C:\chan\devsys\psx\radlib\SOURCE\MATH\MULTDIV\DIVIDE.C:30

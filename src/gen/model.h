@@ -260,6 +260,9 @@ public:
     HumanoidModel();
     ~HumanoidModel() override;
 
+    // PSX: SetAnim__13HumanoidModelllil (MHUMAN.CPP:166)
+    void SetAnim(s32 animEnum, s32 a3, s32 force, s32 extra) override;
+
     // PSX: _Loop__13HumanoidModelP13AnimStructure (MHUMAN.CPP:196)
     // Only loops when mode == 0 (normal animation playback).
     void HandleLoop(AnimStructure* anim) override;
@@ -271,6 +274,9 @@ class PlayerModel : public HumanoidModel {
 public:
     PlayerModel();
     ~PlayerModel() override;
+
+    // PSX: SetAnim__11PlayerModelllil (MPLAYER.CPP:293)
+    void SetAnim(s32 animEnum, s32 a3, s32 force, s32 extra) override;
 
     // PSX: _Loop__11PlayerModelP13AnimStructure (MPLAYER.CPP:573)
     void HandleLoop(AnimStructure* anim) override;

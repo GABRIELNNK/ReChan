@@ -18,4 +18,4 @@
 
 // Scale 2D UI to maintain 4:3 aspect ratio instead of stretching to
 // fill the window. Adds pillarbox/letterbox bars when needed.
-#define CORRECT_UI_ASPECT 1
+#define CORRECT_UI_ASPECT 0

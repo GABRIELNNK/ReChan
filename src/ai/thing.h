@@ -233,6 +233,12 @@ public:
 
     // PSX: GetObjectToWorldSpaceVector__5Thing (THING.CPP:1352)
     void GetObjectToWorldSpaceVector(const SVector& in, SVector& out);
+
+    // PSX: DistanceFromPointXZ__C5ThingRC10tagLVector (THING.CPP:1180, 0x800625C0)
+    s32 DistanceFromPointXZ(const LVector& point) const;
+
+    // PSX: DistanceFromPoint__C5ThingRC10tagLVector (THING.CPP:1189, 0x800625F4)
+    s32 DistanceFromPoint(const LVector& point) const;
 };
 
 // DynamicThing - Thing with physics (velocity, gravity, forces)

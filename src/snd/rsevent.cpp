@@ -248,3 +248,9 @@ void jcsFadeOutEngine(u32 flags) {
         LOG("[jcsFadeOutEngine] FadeOut persistent + reverb (flags=0x%X)", flags);
     }
 }
+
+// PSX: jcsValidateHandle (JCSDLG.CPP:1639, 0x800434D8)
+// Dialog system not fully reversed - always returns 0 (handle invalid).
+s32 jcsValidateHandle(s32 /*handle*/) {
+    return 0;
+}

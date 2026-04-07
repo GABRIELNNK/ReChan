@@ -149,3 +149,41 @@ private:
 
 // PSX: 0x800DD69C, defined in control.cpp
 extern InputManager* g_inputManager;
+
+// PSX: ShockEnum values for controller rumble (CONTROL.CPP)
+enum ShockEnum : s32 {
+    SHOCK_0 = 0,
+    SHOCK_1 = 1,
+    SHOCK_2 = 2,
+    SHOCK_3 = 3,
+    SHOCK_4 = 4,
+    SHOCK_5 = 5,
+    SHOCK_6 = 6,
+    SHOCK_7 = 7,
+    SHOCK_8 = 8,
+    SHOCK_9 = 9,
+    SHOCK_10 = 10,
+    SHOCK_11 = 11,
+    SHOCK_12 = 12,
+    SHOCK_13 = 13,
+    SHOCK_14 = 14,
+    SHOCK_15 = 15,
+    SHOCK_16 = 16,
+    SHOCK_17 = 17,
+    SHOCK_CLEAR = 18,
+};
+
+// PSX: Shock (CONTROL.CPP, 0x8002D6C0)
+void Shock(ShockEnum type);
+
+// PSX: SetActuator (CONTROL.CPP:250, 0x8002D540) - PC no-op
+void SetActuator(u8 motor, u8 speed, u32 duration);
+
+// PSX: ClearActuator (CONTROL.CPP:242, 0x8002D52C) - PC no-op
+void ClearActuator();
+
+// PSX: UpdateActuator (CONTROL.CPP:262, 0x8002D564) - PC no-op
+void UpdateActuator(s32 param);
+
+// PSX: PadGetState (Sony lib) - PC stub
+s32 PadGetState(s32 port);

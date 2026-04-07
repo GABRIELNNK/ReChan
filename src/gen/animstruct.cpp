@@ -4,6 +4,7 @@
 #include "gen/model.h"
 #include "gen/time.h"
 #include "gen/charmgr.h"
+#include "ai/humanoid.h"
 #include "p3d/p3dmath.h"
 
 // PSX: _13AnimStructurelP10tAnimationlP5ModelP13DrawableBasic (0x80070740)
@@ -307,10 +308,48 @@ void AnimStructure::RunToLastBlend() {
 
 // PSX: ProcessHumanoidCB__13AnimStructure (0x80071108)
 void AnimStructure::ProcessHumanoidCB() {
-    // PSX dispatches callback and clears cb fields. Clear fields here to
-    // preserve one-shot semantics until full callback dispatch is reversed.
-    if (humanoidCB.offsetHi != 0) {
-        humanoidCB = {};
+    s16 selector = humanoidCB.offsetHi;
+    if (selector == 0) {
+        return;
+    }
+
+    AnimHumanoidCB cb = humanoidCB;
+    humanoidCB = {};
+
+    if (!model || !model->backPtr) {
+        return;
+    }
+
+    uintptr_t base = reinterpret_cast<uintptr_t>(model->backPtr);
+    uintptr_t adjusted = base + (s16)cb.offsetLo;
+
+    // PSX: selector <= 0 means direct callback function at +100.
+    if (cb.offsetHi <= 0) {
+        uintptr_t fnValue = reinterpret_cast<uintptr_t>(cb.funcPtr);
+        if (fnValue > 0xFFFF) {
+            using CallbackFn = s32 (*)(uintptr_t);
+            CallbackFn fn = reinterpret_cast<CallbackFn>(cb.funcPtr);
+            fn(adjusted);
+        }
+        return;
+    }
+
+    // PSX selector dispatch uses vtable slots via selector:
+    // 61 -> vtable +240 (_DoStand), 62 -> vtable +244 (_DoRun).
+    Humanoid* humanoid = dynamic_cast<Humanoid*>(model->backPtr);
+    if (!humanoid) {
+        return;
+    }
+
+    switch (cb.offsetHi) {
+    case 61:
+        humanoid->_DoStand();
+        return;
+    case 62:
+        humanoid->_DoRun();
+        return;
+    default:
+        return;
     }
 }
 

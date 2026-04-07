@@ -13,8 +13,6 @@
 #include "ai/humanoid.h"
 #include "ai/activezn.h"
 
-extern CharacterManager* g_characterManager;
-
 AI* g_ai = nullptr;
 
 // PSX: KillThingsInList__FR6ccListl (AI.CPP:1252 helper)
@@ -154,10 +152,13 @@ void AI::AddThingNoTagList(const char* name, u16 type,
         thing->AnalyzeMesh(const_cast<DBRoot*>(root));
     }
 
-    // PSX: for humanoids (type 1-28), OpenCharacter + LoadCharacter
+    // PSX: for humanoids (type 1-28), OpenCharacter + LoadCharacter + LoadAnimation(0..123)
     if ((u16)(type - 1) < 28u) {
         if (g_characterManager) {
             g_characterManager->LoadCharacter(type);
+            // PSX: LoadAnimation(type, 0, 124, callback) - loads anims 0-123 synchronously
+            // AnimCallback chains through all 124 anims via LoadAnimationBatch
+            g_characterManager->LoadAnimation(type, 0, 124, nullptr);
         }
     }
 

@@ -53,3 +53,7 @@ void jcsFadeOutEngine(u32 flags);
 // PSX: g_currentSoundLocation (gp-relative at 0x800ED6CC)
 // Current sound location index (set by RS_SET_LOCATION event)
 extern s32 g_currentSoundLocation;
+
+// PSX: jcsValidateHandle (JCSDLG.CPP:1639, 0x800434D8)
+// Returns non-zero if the dialog handle is still valid.
+s32 jcsValidateHandle(s32 handle);

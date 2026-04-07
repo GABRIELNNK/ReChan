@@ -5,7 +5,15 @@
 #include "gen/model.h"
 #include "gen/animmat.h"
 #include "gen/animstruct.h"
+#include "snd/rsevent.h"
 #include "p3d/p3dmath.h"
+
+static constexpr s32 HUMANOID_ANIM_RUN = 2;
+static constexpr s32 HUMANOID_ANIM_DIVE_ROLL = 90;
+static constexpr s16 DIVE_ROLL_FORCE_END_FRAME = 14;
+static constexpr s32 DIVE_ROLL_FORCE = 0xDAC;
+static constexpr s16 DIVE_ROLL_JUMP_PAUSE_FRAME = 0xB;
+static constexpr s16 DIVE_ROLL_RUN_STRAFE_FRAME = 0xD;
 
 // PSX: __8HumanoidPC10tagLVectorUs (HUMANOID.CPP:350)
 Humanoid::Humanoid(const LVector* initialPos, u16 type)
@@ -66,12 +74,17 @@ Humanoid::Humanoid(const LVector* initialPos, u16 type)
     // PSX: activeRadius/initialActiveRadius set to 100 for humanoids
     activeRadius = 100;
     initialActiveRadius = 100;
+
+    if (!behaviour) {
+        behaviour = new Behaviour(this, thingType, 0);
+    }
 }
 
 // PSX: _._8Humanoid (HUMANOID.CPP:490)
 Humanoid::~Humanoid() {
     MARKFUNCTION(0x80062C58);
     // PSX: KillDialog, delete sound, delete behaviour, etc.
+    delete behaviour;
     behaviour = nullptr;
     fightingSystem = nullptr;
     defaultFightingSystem = nullptr;
@@ -199,7 +212,9 @@ void Humanoid::CreateModel(const char* name) {
     }
 
     // PSX: creates Behaviour if not exists (AI system)
-    // Behaviour system not yet reversed - skip
+    if (!behaviour) {
+        behaviour = new Behaviour(this, thingType, 0);
+    }
 
     // PSX: calls Thing::CreateModel which does the LevelManager lookup
     Thing::CreateModel(name);
@@ -265,7 +280,19 @@ void Humanoid::SetActionState(u32 state, s32 param) {
     case AS_INACTIVE_IDLE:     stateDispatch = SD_STAND; break;
     case AS_STAND:             stateDispatch = SD_STAND; break;
     case AS_STAND_ANIM:        stateDispatch = SD_STAND; break;
-    case AS_DIVE_ROLL:         stateDispatch = SD_DIVE_ROLL; break;
+    case AS_DIVE_ROLL: {
+        stateDispatch = SD_DIVE_ROLL;
+        if (model) {
+            Model* m = static_cast<Model*>(model);
+            s32 animEnum = (field316 != 0) ? field316 : HUMANOID_ANIM_DIVE_ROLL;
+            m->ApplyAnimToModel(0, animEnum, param, 0, 0);
+            AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+            if (anim) {
+                anim->SetLoopType(ANIM_LOOP, 1);
+            }
+        }
+        break;
+    }
     case AS_PAUSE:             stateDispatch = SD_PAUSE; break;
     case AS_JUMP:              stateDispatch = SD_JUMP; break;
     case AS_RUN:               stateDispatch = SD_RUN; break;
@@ -333,6 +360,11 @@ void Humanoid::ProcessControl() {
     }
 }
 
+void Humanoid::RequestAction(u32 actionID) {
+    MARKFUNCTION(0x8006CFFC);
+    commandBits |= (1 << actionID);
+}
+
 // PSX: FaceThing__8HumanoidP5Thingi (HUMANOID.CPP:2252)
 void Humanoid::FaceThing(Thing* target, s32 immediate) {
     MARKFUNCTION(0x80064B98);
@@ -378,6 +410,54 @@ void Humanoid::FacePoint(const LVector& point, s32 immediate) {
     } else {
         orientation.y -= turnRate;
     }
+}
+
+// PSX: SetIdleAnimation__8Humanoidli (HUMANOID.CPP:2717, 0x800654C4)
+// Plays idle animation via model->SetAnim. If no weapon, plays anim 22.
+// If weapon, plays weapon idle with optional transition.
+void Humanoid::SetIdleAnimation(s32 loopType, s32 doTransition) {
+    MARKFUNCTION(0x800654C4);
+
+    if (!model) {
+        return;
+    }
+
+    // PSX: checks field500 (pickup pointer) for weapon idle
+    if (!field500) {
+        // No weapon: play standard idle (anim 22) via model->SetAnim
+        Model* m = static_cast<Model*>(model);
+        m->SetAnim(22, loopType, 0, 0);
+        return;
+    }
+
+    // TODO: weapon idle system (GetWeaponTransitionIdle, SetTransitionAnim)
+    // For now, fall back to standard idle
+    Model* m = static_cast<Model*>(model);
+    m->SetAnim(22, loopType, 0, 0);
+}
+
+// PSX: TestIdleAnimation__8Humanoid (HUMANOID.CPP:2763, 0x80065618)
+// Returns true if currently playing the idle animation (22 or weapon idle).
+bool Humanoid::TestIdleAnimation() {
+    MARKFUNCTION(0x80065618);
+
+    if (!model) {
+        return false;
+    }
+
+    Model* m = static_cast<Model*>(model);
+    AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+    if (!anim) {
+        return false;
+    }
+
+    s32 curAnim = anim->animEnum;
+
+    // PSX: if has weapon (field500), check weapon idle anim ID at +216
+    // PSX: if has field504, check that anim ID
+    // Otherwise: check against 22 (standard idle)
+    // TODO: weapon idle anim check
+    return curAnim == 22;
 }
 
 // PSX: FindFoe__8HumanoidUlli (HUMANOID.CPP:2446)
@@ -517,44 +597,71 @@ void Humanoid::_Stand() {
 }
 
 // PSX: _DiveRoll__8Humanoid (HUMANOID.CPP:3977)
-// Phase-based dive roll: early frames apply forward force, mid/late check transitions.
+// Frame-based dive roll: force on early frames, then command-gated exits.
 void Humanoid::_DiveRoll() {
     MARKFUNCTION(0x80066E3C);
 
-    // PSX: checks animation frame for phase transitions
-    // Without animation system, check commandBits for immediate transitions
-    s32 cb = commandBits;
-
-    if (cb & 0x0008) { // punch -> jump
-        SetActionState(AS_JUMP, 0);
+    if (!model) {
         return;
     }
-    if (cb & 0x0010) { // taunt -> pause
-        SetActionState(AS_PAUSE, 0);
-        return;
-    }
-    if (cb & 0x0004) { // kick -> run
-        SetActionState(AS_RUN, 0);
-        return;
-    }
-    if (cb & 0x0020) { // strafe
-        SetActionState(AS_STRAFE, 0);
+    Model* m = static_cast<Model*>(model);
+    AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+    if (!anim) {
         return;
     }
 
-    // PSX: apply forward force during early frames
-    SVector dir;
-    dir.x = (s16)orientation.x;
-    dir.y = (s16)orientation.y;
-    dir.z = (s16)orientation.z;
-    dir.pad = 0;
-    AddForce(runSpeed, &dir);
+    s16 frame = (s16)anim->currentFrame;
+    u32 cb = (u32)commandBits;
 
-    // PSX: check stateTimer as frame proxy
-    stateTimer++;
-    if (stateTimer > 20) {
+    if (anim->loopCount > 0) {
+        if ((cb >> 3) & 1) {
+            SetActionState(AS_JUMP, 0);
+            return;
+        }
+        if ((cb >> 4) & 1) {
+            SetActionState(AS_PAUSE, 0);
+            return;
+        }
+        if ((cb >> 5) & 1) {
+            SetActionState(AS_STRAFE, 0);
+            return;
+        }
+        if ((cb >> 2) & 1) {
+            SetActionState(AS_RUN, 0);
+            m->ApplyAnimToModel(0, HUMANOID_ANIM_RUN, ANIM_LOOP, 0, 0);
+            return;
+        }
         SetActionState(AS_STAND, 0);
+        return;
     }
+
+    if (frame < DIVE_ROLL_FORCE_END_FRAME) {
+        SVector dir;
+        dir.x = (s16)(orientation.x & 0xFFFF);
+        dir.y = (s16)((orientation.x >> 16) & 0xFFFF);
+        dir.z = (s16)(orientation.y & 0xFFFF);
+        dir.pad = (s16)((orientation.y >> 16) & 0xFFFF);
+        AddForce(DIVE_ROLL_FORCE, &dir);
+    }
+
+    if (frame >= DIVE_ROLL_JUMP_PAUSE_FRAME) {
+        if ((cb >> 3) & 1) {
+            SetActionState(AS_JUMP, 0);
+        } else if ((cb >> 4) & 1) {
+            SetActionState(AS_PAUSE, 0);
+        }
+    }
+
+    if (frame >= DIVE_ROLL_RUN_STRAFE_FRAME) {
+        if ((cb >> 2) & 1) {
+            SetActionState(AS_RUN, 0);
+            m->ApplyAnimToModel(0, HUMANOID_ANIM_RUN, ANIM_LOOP, 0, 0);
+        } else if ((cb >> 5) & 1) {
+            SetActionState(AS_STRAFE, 0);
+        }
+    }
+
+    // PSX also drives a dive-roll kick combo subtree here via fighting nodes.
 }
 
 // PSX: _Taunt__8Humanoid (HUMANOID.CPP:4069)
@@ -698,10 +805,10 @@ void Humanoid::_Run() {
     if (sd & 0x0004) {
         FaceAngleY(faceAngle, 0);
         SVector dir;
-        dir.x = (s16)orientation.x;
-        dir.y = (s16)orientation.y;
-        dir.z = (s16)orientation.z;
-        dir.pad = 0;
+        dir.x = (s16)(orientation.x & 0xFFFF);
+        dir.y = (s16)((orientation.x >> 16) & 0xFFFF);
+        dir.z = (s16)(orientation.y & 0xFFFF);
+        dir.pad = (s16)((orientation.y >> 16) & 0xFFFF);
         AddForce(runSpeed, &dir);
         return;
     }
@@ -836,10 +943,10 @@ void Humanoid::_Straif() {
     // Apply movement force in facing direction
     if (attackRange != 0) {
         SVector dir;
-        dir.x = (s16)orientation.x;
-        dir.y = (s16)orientation.y;
-        dir.z = (s16)orientation.z;
-        dir.pad = 0;
+        dir.x = (s16)(orientation.x & 0xFFFF);
+        dir.y = (s16)((orientation.x >> 16) & 0xFFFF);
+        dir.z = (s16)(orientation.y & 0xFFFF);
+        dir.pad = (s16)((orientation.y >> 16) & 0xFFFF);
         AddForce(attackRange, &dir);
     }
 }
@@ -855,10 +962,10 @@ void Humanoid::_Jump() {
     if (commandBits & 0x0004) {
         FaceAngleY(faceAngle, 1);
         SVector dir;
-        dir.x = (s16)orientation.x;
-        dir.y = (s16)orientation.y;
-        dir.z = (s16)orientation.z;
-        dir.pad = 0;
+        dir.x = (s16)(orientation.x & 0xFFFF);
+        dir.y = (s16)((orientation.x >> 16) & 0xFFFF);
+        dir.z = (s16)(orientation.y & 0xFFFF);
+        dir.pad = (s16)((orientation.y >> 16) & 0xFFFF);
         AddForce(runSpeed, &dir);
     }
 
@@ -878,6 +985,25 @@ void Humanoid::_Jump() {
 // Empty function on PSX (8 bytes, just jr $ra + nop)
 void Humanoid::_Fall() {
     MARKFUNCTION(0x80067F2C);
+}
+
+// PSX: _DoStand__8Humanoid (HUMANOID.CPP:6274, 0x80069A04)
+// Callback target used by AnimStructure::ProcessHumanoidCB selector 61.
+void Humanoid::_DoStand() {
+    MARKFUNCTION(0x80069A04);
+    SetActionState(AS_STAND, 0);
+}
+
+// PSX: _DoRun__8Humanoid (HUMANOID.CPP:6280, 0x80069A34)
+// Callback target used by AnimStructure::ProcessHumanoidCB selector 62.
+void Humanoid::_DoRun() {
+    MARKFUNCTION(0x80069A34);
+    if (!model) {
+        return;
+    }
+
+    Model* m = static_cast<Model*>(model);
+    m->SetAnim(HUMANOID_ANIM_RUN, ANIM_BLEND, 0, 0);
 }
 
 // PSX: _Pickup__8Humanoid (HUMANOID.CPP:4959)
@@ -1232,4 +1358,71 @@ cleanup:
     }
 
     // PSX: KillDialog(0, 0, 512) - dialog system not reversed
+}
+
+// PSX: LoadDialog__8HumanoidUll (HUMANOID.CPP, 0x8006CB54)
+s32 Humanoid::LoadDialog(u32 dialogID, s32 priority) {
+    MARKFUNCTION(0x8006CB54);
+    s32 handle = rsEvent(RS_LOAD_DIALOG, (s32)thingType, (s32)dialogID, priority);
+    if (handle) {
+        soundHandle = handle;
+        soundParam = (s32)dialogID;
+    }
+    return 1;
+}
+
+// PSX: PlayDialog__8HumanoidUlUl (HUMANOID.CPP, 0x8006CBA0)
+s32 Humanoid::PlayDialog(u32 dialogID, s32 priority) {
+    MARKFUNCTION(0x8006CBA0);
+    if (soundParam != (s32)dialogID) {
+        return 0;
+    }
+    if (soundHandle && jcsValidateHandle(soundHandle)) {
+        if (rsEvent(RS_PLAY_DIALOG, soundHandle, (s32)(intptr_t)&pos, priority) != 0) {
+            return 1;
+        }
+        rsEvent(RS_KILL_DIALOG, soundHandle, 0, 0);
+    }
+    soundHandle = 0;
+    soundParam = 0;
+    return 1;
+}
+
+// PSX: EnterCombatCombo__8Humanoid (HUMANOID.CPP, 0x80065ECC)
+// Searches the fighting combo tree for a matching node based on the current
+// request (commandBits) and fighting system. Returns 1 if a combo was entered.
+// Depends on FightingComboNode tree, FightTargetAndThrowLatch, etc.
+s32 Humanoid::EnterCombatCombo() {
+    MARKFUNCTION(0x80065ECC);
+
+    // PSX: if (!TestAndSetWeaponKungFU(this)) defaultFightingSystem = fightingSystem
+    // TestAndSetWeaponKungFU checks weapon state and remaps fightingSystem.
+    // Without weapon system, always copies fightingSystem to defaultFightingSystem.
+    defaultFightingSystem = fightingSystem;
+
+    // PSX: TestWallContextFightingRequestRemap(this) - adjusts commandBits for wall context
+    // Without wall collision data, this is a no-op.
+
+    // PSX: if (vtable[64](this) == 1) return 1
+    // This checks a virtual function related to special attack states.
+    // For base Humanoid, this is not triggered.
+
+    // PSX: FindSiblingWithRequestedCommand(this, defaultFightingSystem, commandBits)
+    // defaultFightingSystem (+480) is the combo tree root node.
+    // If null, FindSiblingWithRequestedCommand returns 0.
+    s32 foundNode = 0;
+    if (defaultFightingSystem) {
+        // Fighting combo tree search would go here
+        // (requires FightingComboNode structure reversal)
+    }
+    field488 = foundNode;
+
+    if (foundNode) {
+        // PSX: extract fighting type from node, check type, target, enter combat
+        // Not reachable without fighting system data loaded
+        return 1;
+    }
+
+    field488 = 0;
+    return 0;
 }

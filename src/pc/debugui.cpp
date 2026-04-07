@@ -99,6 +99,55 @@ static const char* ActionStateName(s32 s) {
     }
 }
 
+static const char* StateDispatchName(u16 d) {
+    switch (d) {
+    case SD_NONE: return "None";
+    case SD_STAND: return "Stand";
+    case SD_DIVE_ROLL: return "DiveRoll";
+    case SD_PAUSE: return "Pause";
+    case SD_RUN: return "Run";
+    case SD_BACKFLIP: return "Backflip";
+    case SD_STRAFE: return "Strafe";
+    case SD_JUMP: return "Jump";
+    case SD_FALL: return "Fall";
+    case SD_GOT_HIT_HIGH: return "GotHitHigh";
+    case SD_GOT_HIT_MED: return "GotHitMed";
+    case SD_GOT_HIT_LOW: return "GotHitLow";
+    case SD_WALLJUMP: return "WallJump";
+    case SD_COLLAPSE: return "Collapse";
+    case SD_DEAD: return "Dead";
+    case SD_SPIN_BACK: return "SpinBack";
+    case SD_FLYING_BACK: return "FlyingBack";
+    case SD_STUNNED: return "Stunned";
+    case SD_THROW: return "Throw";
+    case SD_PICKUP: return "Pickup";
+    case SD_GET_UP: return "GetUp";
+    case SD_POLE_IDLE: return "PoleIdle";
+    case SD_POLE_SWING: return "PoleSwing";
+    case SD_SLOPE_SLIDE: return "SlopeSlide";
+    case SD_DEAD_PLAYER: return "DeadPlayer";
+    case SD_HARDFALL: return "HardFall";
+    case SD_HARDLAND: return "HardLand";
+    case SD_FLIP: return "Flip";
+    case SD_INACTIVE_IDLE: return "InactiveIdle";
+    case SD_PUSH_OBJECT: return "PushObject";
+    case SD_TABLE_ROLL: return "TableRoll";
+    case SD_LEDGE_LATCH: return "LedgeLatch";
+    case SD_LEDGE_PULLUP: return "LedgePullup";
+    case SD_DO_STAND: return "DoStand";
+    default: return "Unknown";
+    }
+}
+
+static const char* AnimLoadStateName(s32 s) {
+    switch (s) {
+    case 0: return "Stopped";
+    case 1: return "Playing";
+    case 2: return "Paused";
+    default: return "Unknown";
+    }
+}
+
 static const char* AnimLoopTypeName(s32 t) {
     switch (t) {
     case ANIM_LOOP: return "Loop";
@@ -172,6 +221,10 @@ void DebugUI::Draw() {
         Player* p = Player::s_player;
         if (ImGui::Begin("Player", &sShowPlayer)) {
             if (p) {
+                Model* m = p->model ? static_cast<Model*>(p->model) : nullptr;
+                AnimStructure* anim = m ? static_cast<AnimStructure*>(m->animStructure) : nullptr;
+                u32 cb = (u32)p->commandBits;
+
                 ImGui::SeparatorText("Position");
                 LVectorText("Pos", p->pos);
                 LVectorText("Orientation", p->orientation);
@@ -179,19 +232,44 @@ void DebugUI::Draw() {
 
                 ImGui::SeparatorText("State");
                 ImGui::Text("Action State: %s (%d)", ActionStateName(p->actionState), p->actionState);
-                ImGui::Text("State A/B: %d / %d", p->actionStateA, p->actionStateB);
-                ImGui::Text("Dispatch: %d", p->stateDispatch);
-                ImGui::Text("Command Bits: 0x%08X", p->commandBits);
+                ImGui::Text("State A: %s (%d)", ActionStateName(p->actionStateA), p->actionStateA);
+                ImGui::Text("State B: %s (%d)", ActionStateName(p->actionStateB), p->actionStateB);
+                ImGui::Text("Dispatch: %s (%u)", StateDispatchName(p->stateDispatch), (u32)p->stateDispatch);
                 ImGui::Text("Face Angle: %d", p->faceAngle);
+                ImGui::Text("Orientation Y: %d", p->orientation.y);
+                ImGui::Text("On Ground: %s", (p->flags & TF_ON_GROUND) ? "yes" : "no");
+
+                ImGui::SeparatorText("Input Bits");
+                ImGui::Text("Command Bits: 0x%08X", cb);
+                ImGui::Text("Run:%d Jump:%d Guard:%d Strafe:%d", (cb >> 2) & 1, (cb >> 3) & 1, (cb >> 4) & 1, (cb >> 5) & 1);
+                ImGui::Text("Backflip:%d Attack:%d Pickup:%d", (cb >> 6) & 1, (cb >> 7) & 1, (cb >> 15) & 1);
 
                 ImGui::SeparatorText("Stats");
                 ImGui::Text("Health: %d", p->health);
                 ImGui::Text("Lives: %d", p->livesLeft);
                 ImGui::Text("Combo: %d (timer: %d)", p->hitCombo, p->comboTimer);
-                ImGui::Text("Anim Enum: %d", p->currentAnimEnum);
+                ImGui::Text("Anim Requested: %d", p->currentAnimEnum);
+                ImGui::Text("Anim Load State: %s (%d)", AnimLoadStateName(p->animLoadState), p->animLoadState);
+                ImGui::Text("Jump Phase: %d", p->field700);
+                ImGui::Text("Force Accum: %d", p->forceAccum);
+                ImGui::Text("Idle Timer: %d", p->idleTimer);
+                ImGui::Text("Turn Flag/Timer: %d / %d", p->turnAroundFlag, p->turnAroundTimer);
                 ImGui::Text("Flags: 0x%04X", p->flags);
                 ImGui::Text("Flags2: 0x%04X", p->flags2);
                 ImGui::Text("Player Flags: 0x%08X", p->playerFlags);
+
+                ImGui::SeparatorText("Animation Runtime");
+                if (anim) {
+                    ImGui::Text("Anim Current: %d", anim->animEnum);
+                    ImGui::Text("Loop Type: %s (%d)", AnimLoopTypeName(anim->loopTypeField), anim->loopTypeField);
+                    ImGui::Text("Loop Count: %d", anim->loopCount);
+                    ImGui::Text("Frame: %d / %d", anim->currentFrame >> 16, anim->endFrame >> 16);
+                    ImGui::Text("Raw Frame: %d / %d", anim->currentFrame, anim->endFrame);
+                    ImGui::Text("Speed: %.3f (raw: %d)", anim->speed / 65536.0f, anim->speed);
+                    ImGui::Text("Ticks prev/cur: %d / %d", anim->prevTick, anim->currentTick);
+                } else {
+                    ImGui::Text("AnimStructure: null");
+                }
             } else {
                 ImGui::Text("No player");
             }

@@ -4,11 +4,13 @@
 #include "gen/animmat.h"
 #include "gen/animstruct.h"
 #include "gen/charmgr.h"
+#include "ai/player.h"
 #include "gen/skeleton.h"
 #include "p3d/context.h"
 #include "p3d/p3dmath.h"
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
+#include "pc/log.h"
 #include <cstdlib>
 #include <vector>
 
@@ -229,8 +231,14 @@ void SModel::ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 /*p
     if (!anim) {
         anim = g_characterManager->GetAnimation(0, animEnum);
         if (!anim) {
-            anim = g_characterManager->GetAnimation(0, 22);
-            animEnum = 22;
+            LOG("[Model] ApplyAnimToModel: anim %d not found for type %d, lazy-loading", animEnum, thingType);
+            g_characterManager->LoadAnimationBatch(0, animEnum, nullptr);
+            anim = g_characterManager->GetAnimation(0, animEnum);
+            if (!anim) {
+                LOG("[Model] ApplyAnimToModel: anim %d STILL not found after load, falling back to 22", animEnum);
+                anim = g_characterManager->GetAnimation(0, 22);
+                animEnum = 22;
+            }
         }
     }
 
@@ -268,6 +276,49 @@ void SModel::InitSemiTransMode() {
 }
 
 // HumanoidModel
+
+// PSX: SetAnim__13HumanoidModelllil (MHUMAN.CPP:166, 0x8006E248)
+// Routes anims to ApplyAnimToModel. Transition anims (37-38) get
+// special blend-from-current-frame handling. Most others go straight
+// through to ApplyAnimToModel with the Thing's type.
+void HumanoidModel::SetAnim(s32 animEnum, s32 a3, s32 force, s32 extra) {
+    MARKFUNCTION(0x8006E248);
+
+    AnimStructure* as = (AnimStructure*)animStructure;
+    // Early exit: if not forcing and anim already matches, no-op
+    if (!force && as && as->animEnum == animEnum) {
+        return;
+    }
+
+    // PSX: reads thingType from backPtr + 24 (Thing::thingType)
+    // On PC, player type is always 0
+    s32 thingType = 0;
+
+    // PSX: anims 37-38 are transition anims with blend from current frame
+    if (animEnum >= 37 && animEnum <= 38) {
+        // PSX: ApplyAnimToModel using current frame as start, loopType=2
+        s32 currentFrame = 0;
+        if (as) {
+            currentFrame = as->currentFrame >> 16;
+        }
+        ApplyAnimToModel(thingType, animEnum, 2, a3, extra);
+        // PSX: sets humanoidCB blend data {4063232, 8}
+        as = (AnimStructure*)animStructure;
+        if (as) {
+            as->humanoidCB.offsetLo = (s16)(4063232 & 0xFFFF);
+            as->humanoidCB.offsetHi = (s16)(4063232 >> 16);
+            as->humanoidCB.funcPtr = reinterpret_cast<void*>(static_cast<intptr_t>(8));
+        }
+        return;
+    }
+
+    // PSX: anims 39-50 (combat/hit), 43, 45, 49-50, 314-315 go to default
+    // PSX: anims 4, 1, 2, 15, 22 go to default
+    // PSX: anim 17 special: uses current frame offset
+    // All others: LABEL_30 default play
+    ApplyAnimToModel(thingType, animEnum, a3, 0, extra);
+}
+
 // PSX: _13HumanoidModel (MHUMAN.CPP:45, 0x8006E020)
 HumanoidModel::HumanoidModel() {
     MARKFUNCTION(0x8006E020);
@@ -310,6 +361,89 @@ PlayerModel::PlayerModel() {
 PlayerModel::~PlayerModel() {
 }
 
+// PSX: SetAnim__11PlayerModelllil (MPLAYER.CPP:293, 0x80077B20)
+// Routes player-specific animation enums to correct loop types.
+// Some anims trigger sound effects. Falls back to HumanoidModel::SetAnim
+// for unrecognized enums.
+void PlayerModel::SetAnim(s32 animEnum, s32 a3, s32 force, s32 extra) {
+    MARKFUNCTION(0x80077B20);
+
+    AnimStructure* as = (AnimStructure*)animStructure;
+    // Early exit: if not forcing and anim already matches, no-op
+    if (!force && as && as->animEnum == animEnum) {
+        return;
+    }
+
+    s32 loopType = ANIM_RUN_TO_LAST; // default v11=2
+    bool handled = true;
+    bool setBlendData = false;
+
+    // PSX anim routing - traced from binary comparison tree
+    if (animEnum == 1 || animEnum == 22) {
+        // PSX: anim 1 + 22 redirect to 22 with Loop
+        animEnum = 22;
+        loopType = ANIM_LOOP;
+    } else if (animEnum == 2 || animEnum == 31 || animEnum == 41 ||
+               animEnum == 47 || animEnum == 48 || animEnum == 189 ||
+               animEnum == 206 || animEnum == 220 || animEnum == 231 ||
+               animEnum == 244 || animEnum == 254 || animEnum == 261) {
+        // PSX: these anims use Loop (v11=0)
+        loopType = ANIM_LOOP;
+    } else if (animEnum == 3 || animEnum == 17 || animEnum == 21 ||
+               animEnum == 152 || animEnum == 295) {
+        // PSX: RunToLast, no blend data
+        loopType = ANIM_RUN_TO_LAST;
+    } else if (animEnum == 24) {
+        // PSX: strafe - plays DiveRoll sound if frame < 29
+        // TODO: CHumanoidSound::DiveRoll sound trigger
+        loopType = ANIM_RUN_TO_LAST;
+    } else if (animEnum >= 27 && animEnum <= 30) {
+        // PSX: 27 gets blend data, 28 goes to LABEL_58, 29-30 are RunToLast
+        if (animEnum == 27) {
+            setBlendData = true;
+        } else if (animEnum == 28) {
+            HumanoidModel::SetAnim(animEnum, a3, force, extra);
+            return;
+        }
+        loopType = ANIM_RUN_TO_LAST;
+    } else if (animEnum >= 32 && animEnum <= 36) {
+        // PSX: RunToLast, no blend data
+        loopType = ANIM_RUN_TO_LAST;
+    } else if (animEnum == 42) {
+        // PSX: plays HitWorldStructure sound if frame < 29
+        // TODO: CHumanoidSound::HitWorldStructure sound trigger
+        setBlendData = true;
+        loopType = ANIM_RUN_TO_LAST;
+    } else if (animEnum == 46) {
+        // PSX: RunToLast with blend data (turn animation)
+        setBlendData = true;
+        loopType = ANIM_RUN_TO_LAST;
+    } else {
+        // Fallback to HumanoidModel::SetAnim
+        HumanoidModel::SetAnim(animEnum, a3, force, extra);
+        handled = false;
+    }
+
+    if (handled) {
+        ApplyAnimToModel(0, animEnum, loopType, a3, extra);
+        // PSX: LABEL_59 always writes v18[0]/v18[1] into animStructure+96/+100.
+        // v18 starts as {0,0} and is set to {3997696, 8} only for blend anims.
+        as = (AnimStructure*)animStructure;
+        if (as) {
+            if (setBlendData) {
+                // PSX: v18[0] = 3997696 (0x003D0000), LOWORD(v18[1]) = 8
+                as->humanoidCB.offsetLo = 0;
+                as->humanoidCB.offsetHi = 61;
+                as->humanoidCB.funcPtr = reinterpret_cast<void*>(static_cast<intptr_t>(8));
+            } else {
+                as->humanoidCB.offsetLo = 0;
+                as->humanoidCB.offsetHi = 0;
+                as->humanoidCB.funcPtr = nullptr;
+            }
+        }
+    }
+}
+
 // PSX: _Loop__11PlayerModelP13AnimStructure (MPLAYER.CPP:573)
 // Simple trampoline to base Model::HandleLoop on PSX.
 void PlayerModel::HandleLoop(AnimStructure* anim) {
@@ -333,8 +467,15 @@ void PlayerModel::HandleRunToLast(AnimStructure* anim) {
     if (curAnim == 32) {
         // PSX: walljump anim (0x20) - on completion, calls DoWallJump then chains to anim 33
         Model::HandleRunToLast(anim);
-        // PSX checks: if (loopCount_hi >= endFrame_hi) { DoWallJump; SetAnim(33,0,0,0) }
-        // DoWallJump__6Player not yet reversed.
+        s16 currentFrameHi = (s16)((u32)anim->currentFrame >> 16);
+        s16 endFrameHi = (s16)((u32)anim->endFrame >> 16);
+        if (currentFrameHi >= endFrameHi) {
+            Player* player = dynamic_cast<Player*>(backPtr);
+            if (player) {
+                player->DoWallJump();
+            }
+            SetAnim(33, 0, 0, 0);
+        }
         return;
     }
 
@@ -342,8 +483,10 @@ void PlayerModel::HandleRunToLast(AnimStructure* anim) {
         // PSX: anim 295 (0x127) - on completion, sets action state to fall (13, 3)
         Model::HandleRunToLast(anim);
         if (anim->loopCount > 0 && backPtr) {
-            // PSX: backPtr->SetActionState(13, 3) via vtable+0xE8
-            // Not yet fully wired - requires Humanoid vtable dispatch.
+            Humanoid* humanoid = dynamic_cast<Humanoid*>(backPtr);
+            if (humanoid) {
+                humanoid->SetActionState(AS_FALL, 3);
+            }
         }
         return;
     }

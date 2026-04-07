@@ -713,3 +713,15 @@ Thing* DynamicThing::GetTicketIssuer() {
 void DynamicThing::HandleLand(s32 /*height*/) {
     MARKFUNCTION(0x800628C8);
 }
+
+// PSX: DistanceFromPointXZ__C5ThingRC10tagLVector (THING.CPP:1180, 0x800625C0)
+s32 Thing::DistanceFromPointXZ(const LVector& point) const {
+    MARKFUNCTION(0x800625C0);
+    return rmMag2ff(pos.x - point.x, pos.z - point.z);
+}
+
+// PSX: DistanceFromPoint__C5ThingRC10tagLVector (THING.CPP:1189, 0x800625F4)
+s32 Thing::DistanceFromPoint(const LVector& point) const {
+    MARKFUNCTION(0x800625F4);
+    return rmMag3ff(pos.x - point.x, pos.y - point.y, pos.z - point.z);
+}

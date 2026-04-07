@@ -308,6 +308,9 @@ public:
     // PSX: ProcessControl__8Humanoid (HUMANOID.CPP:961)
     virtual void ProcessControl();
 
+    // PSX: RequestAction__8HumanoidUl (HUMANOID.CPP:2727)
+    void RequestAction(u32 actionID);
+
     // PSX: FaceThing__8HumanoidP5Thingi (HUMANOID.CPP:2252)
     void FaceThing(Thing* target, s32 immediate);
 
@@ -325,6 +328,23 @@ public:
 
     // PSX: FaceAngleY__8Humanoidli (HUMANOID.CPP:2402)
     void FaceAngleY(s32 angle, s32 immediate);
+
+    // PSX: SetIdleAnimation__8Humanoidli (HUMANOID.CPP:2717, 0x800654C4)
+    // Plays idle animation (22 or weapon idle) via model->SetAnim.
+    void SetIdleAnimation(s32 loopType, s32 doTransition);
+
+    // PSX: TestIdleAnimation__8Humanoid (HUMANOID.CPP:2763, 0x80065618)
+    // Returns true if currently playing the idle animation.
+    bool TestIdleAnimation();
+
+    // PSX: LoadDialog__8HumanoidUll (HUMANOID.CPP, 0x8006CB54)
+    s32 LoadDialog(u32 dialogID, s32 priority);
+
+    // PSX: PlayDialog__8HumanoidUlUl (HUMANOID.CPP, 0x8006CBA0)
+    s32 PlayDialog(u32 dialogID, s32 priority);
+
+    // PSX: EnterCombatCombo__8Humanoid (HUMANOID.CPP)
+    s32 EnterCombatCombo();
 
     virtual void _Stand();
     virtual void _Run();
@@ -344,4 +364,9 @@ public:
     virtual void _Stunned();
     virtual void _Throw();
     virtual void _Pickup();
+
+    // PSX callback targets used by AnimStructure::ProcessHumanoidCB.
+    // Selector 61 -> _DoStand, selector 62 -> _DoRun.
+    virtual void _DoStand();
+    virtual void _DoRun();
 };
