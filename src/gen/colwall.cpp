@@ -3,10 +3,10 @@
 #include "gen/colwall.h"
 #include "p3d/p3dmath.h"
 
-// Collision globals (PSX: gp-relative)
-s32 g_collisionMargin = 0;    // gp+2524
-s32 g_collisionSmallTol = 0;  // gp+2528
-s32 g_collisionLargeTol = 0;  // gp+2532
+// Collision globals (PSX: gp-relative, values from PSX .data section)
+s32 g_collisionMargin = 16;    // gp+2524 (0x10)
+s32 g_collisionSmallTol = 130; // gp+2528 (0x82) - thin wall threshold
+s32 g_collisionLargeTol = 16;  // gp+2532 (0x10)
 
 // PSX: CheckWallCollision__C4WallRC10tagLVectorT1llliRlR10tagLVectorT5 (COLWALL.CPP:194) 0x80091EAC
 // Detect wall crossing between oldPos and newPos, compute intersection
@@ -72,14 +72,20 @@ s32 Wall::CheckWallBounds(const LVector& pos, s32 radius, s32 height, s32 arg4, 
     s32 topY = fixmul16(topSlope, coord) + topIntercept;
     s32 botY = fixmul16(bottomSlope, coord) + bottomIntercept;
 
+    // Curb/thin-wall skip flag: only skip if wall is thin AND entity is above it
+    s32 skipWall = 0;
     if (checkHeight != 0) {
-        s32 diff = botY - topY;
-        if (diff <= g_collisionSmallTol) return 0;
-        if (pos.y + height < topY) return 0;
+        if (g_collisionSmallTol >= (botY - topY)) {
+            skipWall = (pos.y + height >= topY) ? 1 : 0;
+        }
     }
 
-    if (pos.y + arg4 < topY) return 0;
-    return ((botY - g_collisionLargeTol) < (pos.y + height)) ? 0 : 1;
+    if (coord + ext >= wallMin && wallMax >= coord - ext && !skipWall) {
+        if (pos.y + arg4 >= topY) {
+            return (botY - g_collisionLargeTol >= pos.y + height) ? 1 : 0;
+        }
+    }
+    return 0;
 }
 
 // PSX: CheckWallIntersection__C4WallR10tagLVectorRC10tagLVectorllli (COLWALL.CPP:132) 0x80091C90

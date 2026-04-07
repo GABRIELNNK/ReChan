@@ -232,8 +232,8 @@ void DebugUI::Draw() {
 
                 ImGui::SeparatorText("State");
                 ImGui::Text("Action State: %s (%d)", ActionStateName(p->actionState), p->actionState);
-                ImGui::Text("State A: %s (%d)", ActionStateName(p->actionStateA), p->actionStateA);
-                ImGui::Text("State B: %s (%d)", ActionStateName(p->actionStateB), p->actionStateB);
+                ImGui::Text("Attack Joint: %d", p->attackJointIndex);
+                ImGui::Text("Prev Joint: %d", p->prevAttackJointIndex);
                 ImGui::Text("Dispatch: %s (%u)", StateDispatchName(p->stateDispatch), (u32)p->stateDispatch);
                 ImGui::Text("Face Angle: %d", p->faceAngle);
                 ImGui::Text("Orientation Y: %d", p->orientation.y);

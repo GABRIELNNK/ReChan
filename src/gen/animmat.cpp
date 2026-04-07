@@ -93,3 +93,19 @@ const s32* AnimationMatrices::GetMatrix(const AnimationMatrices* am, u32 joint) 
     }
     return am->GetMatrix(joint);
 }
+
+// PSX: GetAttack__C17AnimationMatricesUlR10tagLVectorT2 (ANIMMAT.CPP:878, 0x80078EB8)
+s32 AnimationMatrices::GetAttack(u32 joint, LVector& outPrev, LVector& outCur) const {
+    MARKFUNCTION(0x80078EB8);
+    if (joint >= 10) {
+        return 0;
+    }
+    s32 offset = joint * 8;
+    outPrev.x = previous[offset + 5];
+    outPrev.y = previous[offset + 6];
+    outPrev.z = previous[offset + 7];
+    outCur.x = current[offset + 5];
+    outCur.y = current[offset + 6];
+    outCur.z = current[offset + 7];
+    return 1;
+}

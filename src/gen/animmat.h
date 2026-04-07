@@ -43,4 +43,8 @@ struct AnimationMatrices {
 
     static s32* GetMatrix(AnimationMatrices* am, u32 joint);
     static const s32* GetMatrix(const AnimationMatrices* am, u32 joint);
+
+    // PSX: GetAttack__C17AnimationMatricesUlR10tagLVectorT2 (ANIMMAT.CPP:878, 0x80078EB8)
+    // Returns prev/cur frame bone translations for attack collision sweep
+    s32 GetAttack(u32 joint, LVector& outPrev, LVector& outCur) const;
 };

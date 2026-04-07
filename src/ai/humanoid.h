@@ -93,10 +93,10 @@ enum StateDispatch : u16 {
 // Source: C:\CHAN\GAME\SRC\AI\HUMANOID.CPP
 class Humanoid : public DynamicThing {
 public:
-    // PSX +200 (s32): action state ID (-1 = none)
-    s32 actionStateA = -1;
-    // PSX +204 (s32): previous action state ID (-1 = none)
-    s32 actionStateB = -1;
+    // PSX +200 (s32): attack joint/bone index for GetAttack (0-9, -1=none)
+    s32 attackJointIndex = -1;
+    // PSX +204 (s32): previous attack joint/bone index (-1=none)
+    s32 prevAttackJointIndex = -1;
 
     // PSX +208 (s32): facing range / attack range
     s32 attackRange = 0;

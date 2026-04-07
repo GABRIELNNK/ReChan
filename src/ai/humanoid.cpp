@@ -20,8 +20,8 @@ Humanoid::Humanoid(const LVector* initialPos, u16 type)
     : DynamicThing(initialPos, type) {
     MARKFUNCTION(0x80062A34);
 
-    actionStateA = -1;
-    actionStateB = -1;
+    attackJointIndex = -1;
+    prevAttackJointIndex = -1;
     collBboxMin = {175, 0, 768};
     collBboxMax = {175, 0, 768};
     field328 = 0;

@@ -12,7 +12,7 @@ class DynamicThing;
 void ExtendRange(s32& rangeMin, s32 value, s32& rangeMax);
 
 // PSX: HTW_FillWallArray__Flll (COLMGR.CPP:240) 0x800A7BBC
-void HTW_FillWallArray(s32 radius, s32 velX, s32 velZ);
+void HTW_FillWallArray(s32 radius, s32 height, s32 checkHeight);
 
 // PSX: HTW_HandleWallCollisions__FP12DynamicThinglll (COLMGR.CPP:319) 0x800A7E38
 s32 HTW_HandleWallCollisions(DynamicThing* thing, s32 radius, s32 height, s32 checkHeight);

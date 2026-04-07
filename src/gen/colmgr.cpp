@@ -11,34 +11,44 @@
 #include "p3d/p3dmath.h"
 #include "gen/model.h"
 #include "gen/animmat.h"
+#include "gen/colvol.h"
 #include "pc/log.h"
 
 static s32 g_floorDebugCounter = 0;
 
-// COLMGR globals (PSX: gp-relative)
+// COLMGR globals (PSX: gp-relative, values from PSX .data section)
 Wall* g_wallPtrArray[64] = {};         // gp+2828
 s32 g_filledWallCount = 0;           // gp+4172
 s32 g_maxWallIterations = 4;         // gp+2836
 s32 g_wallHitCounter = 0;            // gp+2840
-s32 g_floorSearchMargin = 500;       // gp+2844: floor AABB search expansion
-s32 g_floorYSearchOffset = 1024;     // gp+2852: vertical offset for floor search
-s32 g_floorStandingTol = 64;         // gp+2856: landing detection tolerance
-s32 g_colDefaultHeight = 768;        // gp+2904: default humanoid collision height
-s32 g_colMaxRadius = 400;            // gp+2908: max collision radius
-s32 g_colDefaultRadius = 175;        // gp+2912: default collision radius
-s32 g_colSlopeTol = 0x8000;          // gp+2884: slope tolerance
-s32 g_colSlopeForce = 0x4000;        // gp+2888: slope sliding force
+s32 g_floorSearchMargin = 320;       // gp+2844 (0x140): floor AABB search expansion
+s32 g_floorYSearchOffset = 384;      // gp+2852 (0x180): vertical offset for floor search
+s32 g_floorStandingTol = 640;        // gp+2856 (0x280): landing detection tolerance
+s32 g_colDefaultHeight = 256;        // gp+2904 (0x100): short humanoid height threshold
+s32 g_colMaxRadius = 512;            // gp+2908 (0x200): max skeletal collision radius
+s32 g_colDefaultRadius = 192;        // gp+2912 (0xC0): default collision radius
+s32 g_colSlopeTol = 0xB50B;          // gp+2884: slope tolerance (~cos 45)
+s32 g_colSlopeForce = 0x4E0000;      // gp+2888: slope sliding force
 s32 g_colFallVelDivisor = 2;         // gp+2900: fall velocity divisor (s16)
-s32 g_colFallVelThreshold = 0;       // gp+2902: fall velocity threshold (s16)
+s32 g_colFallVelThreshold = 100;     // gp+2902 (0x64): fall velocity threshold (s16)
 Floor* g_floorPtrArrayGlobal[64] = {};   // gp+2828+256 (global floor scratch, 64 ptrs)
-s32 g_climbSearchRadius = 512;       // gp+2848: climbing state search radius
-s32 g_boneFloorRadius = 2;           // gp+2860: bone floor search radius
-s32 g_camLookAheadDist = 1024;       // gp+2868: camera look-ahead distance
-s32 g_camEdgeThreshold = 256;        // gp+2872: camera edge height threshold
+s32 g_climbSearchRadius = 128;       // gp+2848 (0x80): climbing state search radius
+s32 g_boneFloorRadius = 48;          // gp+2860 (0x30): bone floor search radius
+s32 g_camLookAheadDist = 144;        // gp+2868 (0x90): camera look-ahead distance
+s32 g_camEdgeThreshold = 1536;       // gp+2872 (0x600): camera edge height threshold
 s32 g_camEdgeCounter = 0;            // gp+2876: camera edge frame counter
-s32 g_camEdgeMaxCount = 3;           // gp+2880: camera edge max frames
+s32 g_camEdgeMaxCount = 15;          // gp+2880 (0xF): camera edge max frames
 DynamicThing* g_combatTarget1 = nullptr; // gp+4176
 DynamicThing* g_combatTarget2 = nullptr; // gp+4180
+
+// HTW working globals - copies of entity pos/homePos used during wall processing
+// PSX: 0x800E28CC-0x800E28E0
+static s32 HTW_PosX;      // 800E28CC
+static s32 HTW_PosY;      // 800E28D0
+static s32 HTW_PosZ;      // 800E28D4
+static s32 HTW_HomePosX;  // 800E28D8
+static s32 HTW_HomePosY;  // 800E28DC
+static s32 HTW_HomePosZ;  // 800E28E0
 
 // PSX: ExtendRange__FRllT0 (COLMGR.CPP:195) 0x800A7B80
 void ExtendRange(s32& rangeMin, s32 value, s32& rangeMax) {
@@ -47,33 +57,81 @@ void ExtendRange(s32& rangeMin, s32 value, s32& rangeMax) {
     if (value > rangeMax) rangeMax = value;
 }
 
+// PSX: CorrectCollision__FRC10tagLVectorT0lG9_RMVECT16R10tagLVectorT4 (COLWALL.CPP) 0x800C4CA4
+static void CorrectCollision(
+    const LVector& pos, const LVector& homePos, s32 ratio,
+    s32 normalX, s32 normalY, s32 normalZ,
+    LVector& outPos, LVector& outHomePos) {
+    // Lerp pos toward homePos by collision ratio (contact point)
+    outPos.x = pos.x + (s32)((ratio * (s64)(homePos.x - pos.x)) >> 16);
+    outPos.y = pos.y + (s32)((ratio * (s64)(homePos.y - pos.y)) >> 16);
+    outPos.z = pos.z + (s32)((ratio * (s64)(homePos.z - pos.z)) >> 16);
+
+    // Project remaining distance onto wall normal, minus 2 for epsilon
+    s32 projDist = (s32)((normalX * (s64)(homePos.x - outPos.x)) >> 16)
+                 + (s32)((normalY * (s64)(homePos.y - outPos.y)) >> 16)
+                 + (s32)((normalZ * (s64)(homePos.z - outPos.z)) >> 16)
+                 - 2;
+
+    // Push homePos back along normal by projected distance
+    outHomePos.x = homePos.x - (s32)((normalX * (s64)projDist) >> 16);
+    outHomePos.y = homePos.y - (s32)((normalY * (s64)projDist) >> 16);
+    outHomePos.z = homePos.z - (s32)((normalZ * (s64)projDist) >> 16);
+
+    // Nudge contact point 2 units along normal (away from wall)
+    outPos.x -= (s32)((-2LL * normalX) >> 16);
+    outPos.y -= (s32)((-2LL * normalY) >> 16);
+    outPos.z -= (s32)((-2LL * normalZ) >> 16);
+}
+
 // PSX: HTW_FillWallArray__Flll (COLMGR.CPP:240) 0x800A7BBC
 // Fills g_wallPtrArray with wall pointers in the entity's vicinity
-void HTW_FillWallArray(s32 radius, s32 velX, s32 velZ) {
+void HTW_FillWallArray(s32 radius, s32 height, s32 checkHeight) {
     MARKFUNCTION(0x800A7BBC);
 
-    CollisionSector* sect0 = &g_collisionSectors[0];
+    // Primary AABB: pos +/- 1024 on X/Z, Y from pos extended to homePos + height offsets
+    s32 searchMinX = HTW_PosX - 1024;
+    s32 searchMaxX = HTW_PosX + 1024;
+    s32 searchMinY = HTW_PosY;
+    s32 searchMaxY = HTW_PosY;
+    ExtendRange(searchMinY, HTW_HomePosY, searchMaxY);
+    searchMinY += height;
+    searchMaxY += checkHeight;
+    s32 searchMinZ = HTW_PosZ - 1024;
+    s32 searchMaxZ = HTW_PosZ + 1024;
 
-    // Base search range from sector 0 bounds, padded by 0x400
-    s32 searchMinX = sect0->boundsMin.x - 0x400;
-    s32 searchMinZ = sect0->boundsMin.z - 0x400;
-    s32 searchMaxX = sect0->boundsMax.x + 0x400;
-    s32 searchMaxZ = sect0->boundsMax.z + 0x400;
+    // Secondary AABB: center of pos-homePos +/- half-extent +/- radius
+    s32 centerX = (HTW_PosX + HTW_HomePosX) / 2;
+    s32 centerY = (HTW_PosY + HTW_HomePosY) / 2;
+    s32 centerZ = (HTW_PosZ + HTW_HomePosZ) / 2;
 
-    // Extend by velocity direction
-    if (velX > 0) {
-        ExtendRange(searchMinX, searchMaxX + velX, searchMaxX);
-    } else {
-        ExtendRange(searchMinX, searchMinX + velX, searchMaxX);
+    s32 diffX = HTW_HomePosX - HTW_PosX;
+    s32 halfExtX = (diffX < 0 ? -diffX : diffX) / 2;
+    s32 diffY = HTW_HomePosY - HTW_PosY;
+    s32 halfExtY = (diffY < 0 ? -diffY : diffY) / 2;
+    s32 diffZ = HTW_HomePosZ - HTW_PosZ;
+    s32 halfExtZ = (diffZ < 0 ? -diffZ : diffZ) / 2;
+
+    s32 secMinX = centerX - halfExtX - radius;
+    s32 secMinY = centerY - halfExtY;
+    s32 secMinZ = centerZ - halfExtZ - radius;
+    s32 secMaxX = centerX + halfExtX + radius;
+    s32 secMaxY = centerY + halfExtY;
+    s32 secMaxZ = centerZ + halfExtZ + radius;
+
+    // If secondary box extends beyond primary in any direction, use secondary entirely
+    if (secMinX < searchMinX || secMinZ < searchMinZ ||
+        searchMaxX < secMaxX || searchMaxZ < secMaxZ) {
+        searchMinX = secMinX;
+        searchMinY = secMinY;
+        searchMinZ = secMinZ;
+        searchMaxX = secMaxX;
+        searchMaxY = secMaxY;
+        searchMaxZ = secMaxZ;
     }
-    if (velZ > 0) {
-        ExtendRange(searchMinZ, searchMaxZ + velZ, searchMaxZ);
-    } else {
-        ExtendRange(searchMinZ, searchMinZ + velZ, searchMaxZ);
-    }
 
-    LVector searchMin = {searchMinX, 0, searchMinZ};
-    LVector searchMax = {searchMaxX, 0, searchMaxZ};
+    LVector searchMin = {searchMinX, searchMinY, searchMinZ};
+    LVector searchMax = {searchMaxX, searchMaxY, searchMaxZ};
 
     s32 count = CollisionSector::FillWorldWallArray(searchMin, searchMax, g_wallPtrArray, 64);
     if (count > 64) count = 64;
@@ -81,36 +139,125 @@ void HTW_FillWallArray(s32 radius, s32 velX, s32 velZ) {
 }
 
 // PSX: HTW_HandleWallCollisions__FP12DynamicThinglll (COLMGR.CPP:319) 0x800A7E38
-// Iterative wall collision correction loop
+// Iterative wall collision correction loop - operates on HTW globals
 s32 HTW_HandleWallCollisions(DynamicThing* thing, s32 radius, s32 height, s32 checkHeight) {
     MARKFUNCTION(0x800A7E38);
 
-    s32 wallHitFlags = 0;
-
-    for (s32 iter = 0; iter < g_maxWallIterations; iter++) {
-        s32 hit = CollisionSector::CheckArrayWallCollision(
-            g_wallPtrArray, g_filledWallCount,
-            thing->homePos, thing->homePos,
-            radius, height, 0, checkHeight);
-
-        if (!hit) break;
-
-        wallHitFlags |= 0x8000;
-
-        // Apply correction: push homePos along wall normal by collision deficit
-        s32 pushDist = radius - g_wallCollisionInfo.collisionRatio + 2;
-        thing->homePos.x += fixmul16(g_wallCollisionInfo.wallNormal.x, pushDist);
-        thing->homePos.z += fixmul16(g_wallCollisionInfo.wallNormal.z, pushDist);
+    // Compute on-ground check flag: on ground AND not standing on something
+    s32 onGround = (thing->flags & TF_ON_GROUND) ? 1 : 0;
+    Thing* issuer = thing->GetTicketIssuer();
+    s32 checkFlag = 0;
+    if (onGround) {
+        checkFlag = (issuer == nullptr) ? 1 : 0;
     }
 
-    return wallHitFlags;
+    s32 wallHit = 0;
+    s32 iter = 0;
+    thing->flags &= ~(u32)0x8000;
+
+    LVector posVec = {HTW_PosX, HTW_PosY, HTW_PosZ};
+    LVector homePosVec = {HTW_HomePosX, HTW_HomePosY, HTW_HomePosZ};
+
+    do {
+        if (!CollisionSector::CheckArrayWallCollision(
+                g_wallPtrArray, g_filledWallCount,
+                posVec, homePosVec,
+                radius, height, checkHeight, checkFlag)) {
+            break;
+        }
+
+        wallHit = 1;
+        thing->flags |= 0x8000;
+
+        LVector correctedPos, correctedHomePos;
+        CorrectCollision(
+            posVec, homePosVec,
+            g_wallCollisionInfo.collisionRatio,
+            g_wallCollisionInfo.wallNormal.x,
+            g_wallCollisionInfo.wallNormal.y,
+            g_wallCollisionInfo.wallNormal.z,
+            correctedPos, correctedHomePos);
+
+        // Update globals from corrected values (X and Z only, per PSX)
+        HTW_PosX = correctedPos.x;
+        HTW_PosZ = correctedPos.z;
+        HTW_HomePosX = correctedHomePos.x;
+        HTW_HomePosZ = correctedHomePos.z;
+
+        // Refresh local vectors for next iteration
+        posVec = {HTW_PosX, HTW_PosY, HTW_PosZ};
+        homePosVec = {HTW_HomePosX, HTW_HomePosY, HTW_HomePosZ};
+    } while (++iter < g_maxWallIterations);
+
+    return wallHit;
 }
 
 // PSX: HTW_HandleHandFootCollisions__FP12DynamicThing (COLMGR.CPP:409) 0x800A7FAC
 // Checks wall collisions for attack limb positions (player only)
+// Adjusts HTW_HomePosX/Z if an attack bone hits a wall toward the player
 void HTW_HandleHandFootCollisions(DynamicThing* thing) {
     MARKFUNCTION(0x800A7FAC);
-    // NOT YET IMPLEMENTED - requires AnimationMatrices which doesn't exist yet
+
+    // PSX: bne $a0, thePlayer -> only runs for the player
+    if (thing != Player::s_player) {
+        return;
+    }
+
+    Humanoid* player = (Humanoid*)thing;
+
+    // PSX +200: attack joint index, must be < 10
+    if ((u32)player->attackJointIndex >= 10) {
+        return;
+    }
+
+    // Get prev/cur frame bone positions for the attacking joint
+    HumanoidModel* hmodel = (HumanoidModel*)player->model;
+    AnimationMatrices* animMat = hmodel->animMatrices;
+
+    LVector prevPos, curPos;
+    animMat->GetAttack((u32)player->attackJointIndex, prevPos, curPos);
+
+    // Build a small direction vector from orientation.y, scaled by 0x200
+    LVector dir = {};
+    dir.x = (s32)(((s64)rmSin16(thing->orientation.y) * 0x200) >> 16);
+    dir.z = (s32)(((s64)rmSin16((s16)(thing->orientation.y + 0x4000)) * 0x200) >> 16);
+
+    // Offset prevPos backward by direction
+    prevPos.x = curPos.x - dir.x;
+    prevPos.y = curPos.y - dir.y;
+    prevPos.z = curPos.z - dir.z;
+
+    // Check wall collision for the attack limb (zero radius/height)
+    if (!CollisionSector::CheckArrayWallCollision(
+            g_wallPtrArray, g_filledWallCount,
+            prevPos, curPos,
+            0, 0, 0, 0)) {
+        return;
+    }
+
+    // Check if wall normal points toward the entity (dot < 0)
+    s32 dot = fixmul16(g_wallCollisionInfo.wallNormal.x,
+                       g_wallCollisionInfo.hitPoint.x - HTW_HomePosX)
+            + fixmul16(g_wallCollisionInfo.wallNormal.z,
+                       g_wallCollisionInfo.hitPoint.z - HTW_HomePosZ);
+
+    if (dot >= 0) {
+        return;
+    }
+
+    // Compute slide amount: project attack movement onto wall normal,
+    // scaled by half the remaining collision fraction
+    s32 projMove = fixmul16(g_wallCollisionInfo.wallNormal.x,
+                            curPos.x - prevPos.x)
+                 + fixmul16(g_wallCollisionInfo.wallNormal.z,
+                            curPos.z - prevPos.z);
+
+    s32 halfComplement = fixmul16(0x10000 - g_wallCollisionInfo.collisionRatio, 0x8000);
+    s32 pushAmt = fixmul16(halfComplement, projMove);
+
+    // Push homePos away from wall
+    HTW_HomePosX -= fixmul16(g_wallCollisionInfo.wallNormal.x, pushAmt);
+    HTW_HomePosZ -= fixmul16(g_wallCollisionInfo.wallNormal.z, pushAmt);
 }
 
 // PSX: HandleThingWall__FP12DynamicThinglll (COLMGR.CPP:510) 0x800A8290
@@ -118,52 +265,85 @@ void HTW_HandleHandFootCollisions(DynamicThing* thing) {
 void HandleThingWall(DynamicThing* thing, s32 radius, s32 height, s32 checkHeight) {
     MARKFUNCTION(0x800A8290);
 
-    LVector savedHomePos = thing->homePos;
+    // Save original homePos for correction transfer
+    s32 savedHomePosX = thing->homePos.x;
+    s32 savedHomePosY = thing->homePos.y;
+    s32 savedHomePosZ = thing->homePos.z;
 
-    // Fill wall array for this entity's region
-    HTW_FillWallArray(radius, thing->velocity.x, thing->velocity.z);
+    // Copy entity state to HTW globals
+    HTW_PosX = thing->pos.x;
+    HTW_PosY = thing->pos.y;
+    HTW_PosZ = thing->pos.z;
+    HTW_HomePosX = thing->homePos.x;
+    HTW_HomePosY = thing->homePos.y;
+    HTW_HomePosZ = thing->homePos.z;
 
-    // Run iterative wall correction
-    s32 hitFlags = HTW_HandleWallCollisions(thing, radius, height, checkHeight);
+    // Fill wall array using HTW globals for search area
+    HTW_FillWallArray(radius, height, checkHeight);
 
-    // Wall intersection test for movement direction
-    LVector moveDir;
-    moveDir.x = thing->homePos.x - thing->pos.x;
-    moveDir.y = thing->homePos.y - thing->pos.y;
-    moveDir.z = thing->homePos.z - thing->pos.z;
+    // Run iterative wall correction (modifies HTW globals)
+    s32 wallHit = HTW_HandleWallCollisions(thing, radius, height, checkHeight);
 
-    CollisionSector::CheckArrayWallIntersection(
-        g_wallPtrArray, g_filledWallCount,
-        thing->homePos, moveDir,
-        radius, height, 0, checkHeight);
+    // Compute on-ground check for intersection test
+    s32 onGround = (thing->flags & TF_ON_GROUND) ? 1 : 0;
+    Thing* issuer = thing->GetTicketIssuer();
+    s32 checkFlag = 0;
+    if (onGround) {
+        checkFlag = (issuer == nullptr) ? 1 : 0;
+    }
+
+    // Wall intersection test using HTW globals
+    LVector moveDir = {HTW_HomePosX, HTW_PosY + 2, HTW_HomePosZ};
+    LVector hitOutput = {};
+    if (CollisionSector::CheckArrayWallIntersection(
+            g_wallPtrArray, g_filledWallCount,
+            hitOutput, moveDir,
+            radius, height, checkHeight, checkFlag)) {
+        HTW_HomePosX = hitOutput.x;
+        HTW_HomePosZ = hitOutput.z;
+    }
 
     // Hand/foot collision for player combat
     HTW_HandleHandFootCollisions(thing);
 
     // Combat wall hit tracking for humanoids
-    if (thing->thingType < 29 && (hitFlags & 0x8000)) {
+    s32 alreadyTarget = 0;
+    if (thing->thingType < 29) {
+        if (thing == g_combatTarget1 || thing == g_combatTarget2) {
+            alreadyTarget = 1;
+        }
+
         Humanoid* hum = (Humanoid*)thing;
         s32 state = hum->actionState;
-
-        // Combat action states that trigger wall-hit effects
+        s32 isCombat = 0;
         if (state == 36 || state == 59 || state == 37 ||
             state == 38 || state == 60 || state == 61 || state == 62) {
+            isCombat = 1;
+        }
+
+        if (isCombat && !alreadyTarget) {
             if (g_combatTarget1 == nullptr) {
                 g_combatTarget1 = thing;
-            } else {
+            } else if (g_combatTarget2 == nullptr) {
                 g_combatTarget2 = thing;
             }
+
+            // Transfer wall correction to combat opponent (PSX +256)
+            DynamicThing* opponent = (DynamicThing*)(uintptr_t)hum->field256;
+            g_wallHitCounter++;
+            if (opponent) {
+                opponent->homePos.x += HTW_HomePosX - savedHomePosX;
+                opponent->homePos.y += HTW_HomePosY - savedHomePosY;
+                opponent->homePos.z += HTW_HomePosZ - savedHomePosZ;
+            }
         }
-        g_wallHitCounter++;
     }
 
-    // Transfer wall correction to underlying obstacle if standing on one
-    Thing* standingOn = thing->GetTicketIssuer();
-    if (standingOn != nullptr && (hitFlags & 0x8000)) {
-        // PSX casts the issuer to DynamicThing for homePos access
-        DynamicThing* dynStandingOn = (DynamicThing*)standingOn;
-        dynStandingOn->homePos.x += (thing->homePos.x - savedHomePos.x);
-        dynStandingOn->homePos.z += (thing->homePos.z - savedHomePos.z);
+    // Write globals back to thing->homePos only if TF_DYNAMIC
+    if (thing->flags & TF_DYNAMIC) {
+        thing->homePos.x = HTW_HomePosX;
+        thing->homePos.y = HTW_HomePosY;
+        thing->homePos.z = HTW_HomePosZ;
     }
 }
 
@@ -511,42 +691,30 @@ void HandleThingEnvironmentCollisions(ccList& thingList) {
 
         if (!(thing->flags & TF_MODEL_CREATED)) continue;
 
-        // PSX params: radius, yMinOffset (CollisionYMin), checkHeight
-        s32 radius, yMinOffset, ckHeight;
+        // PSX defaults for all entities
         bool doWall = true;
+        s32 radius = 128;
+        s32 yMinOffset = 0;
+        s32 ckHeight = 768;
 
-        if (thing->thingType < 29) {
-            // Humanoid - use collision bbox values
+        if (thing->thingType >= 29) {
+            // Non-humanoid: keep defaults (radius=128, ckHeight=768)
+            // Pickups (type 301-328) override yMinOffset
+            // PSX: GetCollisionYMin__C6Pickup - not yet reversed
+            if (thing->thingType >= 301 && thing->thingType < 329) {
+                // yMinOffset = ((Pickup*)thing)->GetCollisionYMin();
+            }
+        } else {
+            // Humanoid path
             Humanoid* hum = (Humanoid*)thing;
             s32 state = hum->actionState;
 
-            // States that skip wall collision: climbing (23), hanging (24)
+            // Climbing/hanging states skip wall collision
             if (state == 23 || state == 24) {
                 doWall = false;
             }
 
-            // PSX: v7 = gp+2912 (default collision radius), v10 = 768 (default height)
-            // PSX: if collBboxMax.z < gp+2904: v7 = gp+2908, v10 = gp+2904
-            // Use humanoid bbox values as approximation of PSX globals
             radius = g_colDefaultRadius;
-            yMinOffset = 0;
-            ckHeight = hum->collBboxMax.z;
-            if (ckHeight == 0) ckHeight = 768;
-        } else if (thing->thingType == 101) {
-            // Pickup
-            radius = 0;
-            yMinOffset = 0;
-            ckHeight = 0;
-        } else if (thing->thingType >= 301 && thing->thingType <= 328) {
-            // Obstacle
-            radius = g_colDefaultRadius;
-            yMinOffset = 0;
-            ckHeight = 768;
-        } else {
-            // Default
-            radius = g_colDefaultRadius;
-            yMinOffset = 0;
-            ckHeight = 768;
         }
 
         // PSX: GetTicketIssuer check
@@ -581,19 +749,77 @@ void HandleThingEnvironmentCollisions(ccList& thingList) {
 }
 
 // PSX: HandleHumanoidObstacleCollisions__FR6ccList (COLMGR.CPP:1667) 0x800A96EC
-void HandleHumanoidObstacleCollisions(ccList& obstacleList) {
+// Iterates humanoid list, dispatches per-humanoid obstacle collision handler
+void HandleHumanoidObstacleCollisions(ccList& humanoidList) {
     MARKFUNCTION(0x800A96EC);
-    // NOT YET IMPLEMENTED - requires Obstacle class
+
+    for (ccMinNode* node = humanoidList.head; node != nullptr;) {
+        ccMinNode* next = node->next;
+        DynamicThing* thing = (DynamicThing*)node;
+        if (thing->flags & TF_MODEL_CREATED) {
+            // PSX: Obstacle::HandleHumanoidObstacleCollision((Humanoid*)thing)
+            // (OBSTACLE.CPP:1301, 0x8007C178) - iterates global obstacle list
+            // against this humanoid. Requires Obstacle class - not yet reversed.
+        }
+        node = next;
+    }
 }
 
 // PSX: HandlePickupObstacleCollisions__FR6ccList (COLMGR.CPP:1699) 0x800A9740
+// Iterates obstacle list, dispatches per-obstacle pickup collision handler
 void HandlePickupObstacleCollisions(ccList& obstacleList) {
     MARKFUNCTION(0x800A9740);
-    // NOT YET IMPLEMENTED - requires Obstacle class
+
+    for (ccMinNode* node = obstacleList.head; node != nullptr;) {
+        ccMinNode* next = node->next;
+        DynamicThing* thing = (DynamicThing*)node;
+        if (thing->flags & TF_MODEL_CREATED) {
+            // PSX: Obstacle::HandlePickupObstacleCollision(thing)
+            // (OBSTACLE.CPP:1235, 0x8007BF18) - iterates pickup list for
+            // this obstacle. Requires Obstacle class - not yet reversed.
+        }
+        node = next;
+    }
 }
 
 // PSX: HandleHumanoidPickupCollisions__FR6ccListT0 (COLMGR.CPP:1732) 0x800A9794
+// Double loop: for each humanoid, check collision against each active pickup
 void HandleHumanoidPickupCollisions(ccList& humanoidList, ccList& pickupList) {
     MARKFUNCTION(0x800A9794);
-    // NOT YET IMPLEMENTED - requires Pickup + CollisionVolume classes
+
+    tagCollisionSphere sphere;
+    sphere.radius = 128;
+
+    for (ccMinNode* hNode = humanoidList.head; hNode != nullptr;) {
+        ccMinNode* hNext = hNode->next;
+        DynamicThing* humanoid = (DynamicThing*)hNode;
+
+        if (humanoid->flags & TF_MODEL_CREATED) {
+            for (ccMinNode* pNode = pickupList.head; pNode != nullptr;) {
+                ccMinNode* pNext = pNode->next;
+                DynamicThing* pickup = (DynamicThing*)pNode;
+
+                // PSX: check if pickup has damage (velocity.x, PSX +100) or knockback (velocity.z, PSX +108)
+                s32 hasEffect = 0;
+                if (pickup->health != 0 || pickup->velocity.z != 0) {
+                    hasEffect = 1;
+                }
+
+                if ((pickup->flags & TF_MODEL_CREATED) && hasEffect) {
+                    // PSX +204: pickup owner check (can't hit self)
+                    // PSX: CheckStaticCylinderSphereCollision(humanoid.pos, humanoid.collCyl, pickup.pos, &sphere)
+                    // PSX: if hit -> humanoid->ProcessHit(pickup, 1, 3, 14, 7, pickup[76], 5, 10000, 0, sphere.radius)
+                    //              SetFoe(theHudMgr, humanoid)
+                    //              AddFightingPoints(theScoreManager, 100)
+                    //              AddStylePoints(theScoreManager, 100)
+                    //              pickup->PlayEffect()
+                    //              pickup->Kill()
+                    // Requires: Pickup class, CheckStaticCylinderSphereCollision (COLVOL),
+                    // HUD::SetFoe, Humanoid::ProcessHit virtual - not yet reversed.
+                }
+                pNode = pNext;
+            }
+        }
+        hNode = hNext;
+    }
 }
