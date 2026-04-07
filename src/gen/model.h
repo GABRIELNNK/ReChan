@@ -18,6 +18,7 @@
 
 class pddiPrimBuffer;
 class Thing;
+class AnimStructure;
 struct AnimationMatrices;
 struct STreeData;
 
@@ -178,6 +179,25 @@ public:
     // PSX: ApplyAnimToModel__5Model (virtual)
     virtual void ApplyAnimToModel(s32 thingType, s32 animEnum, s32 p3, s32 p4, s32 p5);
 
+    // PSX: SetAnim__5Modelllil (virtual, overridden by HumanoidModel/PlayerModel)
+    virtual void SetAnim(s32 animEnum, s32 loopType, s32 flag, s32 extra);
+
+    // PSX: animation boundary handlers dispatched via vtable from ExecuteHandler.
+    // Base Model implementations are trampolines to AnimStructure methods.
+    // Overridden by HumanoidModel (_Loop) and PlayerModel (_Loop, _RunToLast, _IncFrame).
+    // PSX signature: void handler(Model* this_adjusted, AnimStructure* anim)
+    virtual void HandleLoop(AnimStructure* anim);
+    virtual void HandleLoopReverse(AnimStructure* anim);
+    virtual void HandleHoldFirst(AnimStructure* anim);
+    virtual void HandleHoldLast(AnimStructure* anim);
+    virtual void HandleRunToLast(AnimStructure* anim);
+    virtual void HandleHoldFrame(AnimStructure* anim);
+    virtual void HandleRunToFrame(AnimStructure* anim);
+    virtual void HandleIncFrame(AnimStructure* anim);
+    virtual void HandleDecFrame(AnimStructure* anim);
+    virtual void HandleLoopDesired(AnimStructure* anim);
+    virtual void HandleRunToLastBlend(AnimStructure* anim);
+
     // PSX: DeleteDrawable (called from destructor)
     void DeleteDrawable();
 };
@@ -239,6 +259,10 @@ public:
 
     HumanoidModel();
     ~HumanoidModel() override;
+
+    // PSX: _Loop__13HumanoidModelP13AnimStructure (MHUMAN.CPP:196)
+    // Only loops when mode == 0 (normal animation playback).
+    void HandleLoop(AnimStructure* anim) override;
 };
 
 // PlayerModel - player-specific model (136 bytes, same as HumanoidModel)
@@ -247,4 +271,11 @@ class PlayerModel : public HumanoidModel {
 public:
     PlayerModel();
     ~PlayerModel() override;
+
+    // PSX: _Loop__11PlayerModelP13AnimStructure (MPLAYER.CPP:573)
+    void HandleLoop(AnimStructure* anim) override;
+    // PSX: _RunToLast__11PlayerModelP13AnimStructure (MPLAYER.CPP:374)
+    void HandleRunToLast(AnimStructure* anim) override;
+    // PSX: _IncFrame__11PlayerModelP13AnimStructure (MPLAYER.CPP:578)
+    void HandleIncFrame(AnimStructure* anim) override;
 };

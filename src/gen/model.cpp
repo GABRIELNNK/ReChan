@@ -146,6 +146,27 @@ void Model::DeleteDrawable() {
     drawableType = 0;
 }
 
+// PSX: SetAnim__5Modelllil (MODEL.CPP:1907)
+// Base implementation is a no-op. Overridden by HumanoidModel/PlayerModel.
+void Model::SetAnim(s32 /*animEnum*/, s32 /*loopType*/, s32 /*flag*/, s32 /*extra*/) {
+}
+
+// PSX: Model animation boundary handlers (MODEL.CPP:1916-2009)
+// Base implementations are trampolines to AnimStructure methods.
+// PSX signature: void _Handler(Model* this, AnimStructure* anim)
+
+void Model::HandleLoop(AnimStructure* anim) { anim->Loop(); }
+void Model::HandleLoopReverse(AnimStructure* anim) { anim->LoopReverse(); }
+void Model::HandleHoldFirst(AnimStructure* anim) { anim->HoldFirst(); }
+void Model::HandleHoldLast(AnimStructure* anim) { anim->HoldLast(); }
+void Model::HandleRunToLast(AnimStructure* anim) { anim->RunToLast(); }
+void Model::HandleHoldFrame(AnimStructure* /*anim*/) { /* PSX: empty stub */ }
+void Model::HandleRunToFrame(AnimStructure* /*anim*/) { /* PSX: empty stub */ }
+void Model::HandleIncFrame(AnimStructure* /*anim*/) { /* PSX: empty stub */ }
+void Model::HandleDecFrame(AnimStructure* anim) { anim->DecFrame(); }
+void Model::HandleLoopDesired(AnimStructure* /*anim*/) { /* PSX: empty stub */ }
+void Model::HandleRunToLastBlend(AnimStructure* anim) { anim->RunToLastBlend(); }
+
 // SModel
 // PSX: _6SModel (MODEL.CPP:1013, 0x8006ED68)
 SModel::SModel() {
@@ -218,7 +239,7 @@ void SModel::ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 /*p
     }
 
     AnimStructure* as = (AnimStructure*)animStructure;
-    as->field40 = animEnum;
+    as->animEnum = animEnum;
 
     // PSX: p4 == 0 path (normal apply)
     as->animation = (TransformAnim*)anim;
@@ -272,10 +293,67 @@ HumanoidModel::~HumanoidModel() {
     }
 }
 
+// PSX: _Loop__13HumanoidModelP13AnimStructure (MHUMAN.CPP:196)
+// Only calls base Loop when mode == 0 (normal). For reverse/runToLast/camera
+// modes, the loop handler intentionally does nothing.
+void HumanoidModel::HandleLoop(AnimStructure* anim) {
+    if (anim->mode == 0) {
+        Model::HandleLoop(anim);
+    }
+}
+
 // PlayerModel
 PlayerModel::PlayerModel() {
     // Same as HumanoidModel on PSX
 }
 
 PlayerModel::~PlayerModel() {
+}
+
+// PSX: _Loop__11PlayerModelP13AnimStructure (MPLAYER.CPP:573)
+// Simple trampoline to base Model::HandleLoop on PSX.
+void PlayerModel::HandleLoop(AnimStructure* anim) {
+    Model::HandleLoop(anim);
+}
+
+// PSX: _RunToLast__11PlayerModelP13AnimStructure (MPLAYER.CPP:374)
+// Checks specific anim enums for animation chaining on completion.
+void PlayerModel::HandleRunToLast(AnimStructure* anim) {
+    s32 curAnim = anim->animEnum;
+
+    if (curAnim == 281) {
+        // PSX: anim 281 (0x119) chains to anim 282 (0x11A) on completion
+        Model::HandleRunToLast(anim);
+        if (anim->loopCount > 0) {
+            SetAnim(282, 0, 0, 0);
+        }
+        return;
+    }
+
+    if (curAnim == 32) {
+        // PSX: walljump anim (0x20) - on completion, calls DoWallJump then chains to anim 33
+        Model::HandleRunToLast(anim);
+        // PSX checks: if (loopCount_hi >= endFrame_hi) { DoWallJump; SetAnim(33,0,0,0) }
+        // DoWallJump__6Player not yet reversed.
+        return;
+    }
+
+    if (curAnim == 295) {
+        // PSX: anim 295 (0x127) - on completion, sets action state to fall (13, 3)
+        Model::HandleRunToLast(anim);
+        if (anim->loopCount > 0 && backPtr) {
+            // PSX: backPtr->SetActionState(13, 3) via vtable+0xE8
+            // Not yet fully wired - requires Humanoid vtable dispatch.
+        }
+        return;
+    }
+
+    // Default: just run the base handler
+    Model::HandleRunToLast(anim);
+}
+
+// PSX: _IncFrame__11PlayerModelP13AnimStructure (MPLAYER.CPP:578)
+// Simple trampoline to base Model::HandleIncFrame on PSX (which is a no-op).
+void PlayerModel::HandleIncFrame(AnimStructure* anim) {
+    Model::HandleIncFrame(anim);
 }

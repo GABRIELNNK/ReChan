@@ -4,6 +4,7 @@
 #include "ai/player.h"
 #include "gen/model.h"
 #include "gen/animmat.h"
+#include "gen/animstruct.h"
 #include "p3d/p3dmath.h"
 
 // PSX: __8HumanoidPC10tagLVectorUs (HUMANOID.CPP:350)
@@ -270,7 +271,7 @@ void Humanoid::SetActionState(u32 state, s32 param) {
     case AS_RUN:               stateDispatch = SD_RUN; break;
     case AS_BACKFLIP:          stateDispatch = SD_BACKFLIP; break;
     case AS_STRAFE:            stateDispatch = SD_STRAFE; break;
-    case AS_STRAFE_SPECIAL:    stateDispatch = SD_STRAFE; break;
+    case AS_SLOPE_SLIDE:      stateDispatch = SD_STRAFE; break;
     case AS_PUNCH_ATTACK:      stateDispatch = SD_THROW; break;
     case AS_KICK_ATTACK:       stateDispatch = SD_THROW; break;
     case AS_COMBAT_IDLE:       stateDispatch = SD_STAND; break;
@@ -898,103 +899,163 @@ void Humanoid::_Pickup() {
     }
 }
 
-// PSX: _Throw__8Humanoid (HUMANOID.CPP:4998)
-// Face target, release object at frame, cleanup.
+// PSX: _Throw__8Humanoid (HUMANOID.CPP:4998, 0x800685A8)
+// Face target during early frames, release thrown object at animation
+// frame threshold, transition to stand when animation completes.
 void Humanoid::_Throw() {
     MARKFUNCTION(0x800685A8);
 
-    stateTimer++;
+    if (!model) {
+        return;
+    }
+    Model* m = static_cast<Model*>(model);
+    AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+    if (!anim) {
+        return;
+    }
 
-    // Face target in early frames
-    if (stateTimer < 6 && field256 != 0) {
+    s16 frame = (s16)anim->currentFrame;
+
+    // PSX: face target during first 6 frames
+    if (frame < 6 && field256 != 0) {
         Thing* target = (Thing*)(intptr_t)field256;
         FaceThing(target, 1);
     }
 
-    // PSX: if pickup object exists, check throw frame
-    if (field500 != 0 && stateTimer > 8) {
-        if (flags2 & 0x0001) { // carrying
-            // PSX: release the pickup object
-            field500 = 0;
-            flags2 &= ~0x0001; // clear carrying flag
+    // PSX: if pickup object exists and past throw frame, release it
+    if (field500 != 0) {
+        // PSX: GetThrowMoveThrowFrame (not reversed) - use frame 8 as proxy
+        if (frame >= 8) {
+            if (flags2 & 0x0001) {
+                // PSX: carrying flag set - release with direction
+                // PSX: PlayDialog(84, 10) if this == thePlayer
+                field500 = 0;
+                flags2 &= ~0x0001;
+            } else {
+                // PSX: release without direction
+                field500 = 0;
+            }
         }
     }
 
-    // PSX: if animation complete
-    if (stateTimer > 20) {
+    // PSX: if animation completed (loopCount > 0)
+    if (anim->loopCount > 0) {
         ReleaseTarget();
         SetActionState(AS_STAND, 0);
     }
 }
 
-// PSX: _GotHitHigh__8Humanoid (HUMANOID.CPP:5114)
-// Apply knockback speed, check for death.
+// PSX: _GotHitHigh__8Humanoid (HUMANOID.CPP:5114, 0x8006882C)
+// First frame: force animation to specific global frame. Adjusts speed
+// based on field466 knockback. Sets death state if health gone.
 void Humanoid::_GotHitHigh() {
     MARKFUNCTION(0x8006882C);
 
-    // PSX: on first frame when walkCycleFlag == 46, force specific animation frame
+    if (!model) {
+        return;
+    }
+    Model* m = static_cast<Model*>(model);
+    AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+    if (!anim) {
+        return;
+    }
+
+    // PSX: on first frame (walkCycleFlag == 46), force specific global frame
     if (walkCycleFlag == 46) {
+        // PSX: ForceFrame(gp+1856) - global value, use 0 as default
+        anim->ForceFrame(0);
         walkCycleFlag = 1;
     }
 
-    // PSX: apply knockback from field466
-    // field466 is knockback magnitude (s16)
-    // Applied as animation speed adjustment
+    // PSX: if field466 (knockback speed) nonzero, adjust animation speed
+    if (field466 != 0) {
+        // PSX: speed = rmDiv16i(endFrame, field466 << 16)
+        if (anim->endFrame != 0) {
+            anim->speed = rmDiv16i(anim->endFrame, (s32)field466 << 16);
+        }
+    }
 
-    // Check for death
+    // PSX: if health == 0, set walkCycleFlag to AS_DEAD (72)
     if (health <= 0) {
-        walkCycleFlag = (s32)AS_DEAD; // 72 = next state on recovery
+        walkCycleFlag = (s32)AS_DEAD;
     }
 }
 
-// PSX: _GotHitMed__8Humanoid (HUMANOID.CPP:5161)
-// Apply knockback, check for death.
+// PSX: _GotHitMed__8Humanoid (HUMANOID.CPP:5161, 0x800688B4)
+// Adjusts animation speed from knockback. Sets death state if HP gone.
 void Humanoid::_GotHitMed() {
     MARKFUNCTION(0x800688B4);
 
-    // PSX: apply knockback from field466 (same as GotHitHigh but without frame forcing)
+    if (!model) {
+        return;
+    }
+    Model* m = static_cast<Model*>(model);
+    AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+    if (!anim) {
+        return;
+    }
 
-    // Check for death
+    // PSX: if field466 nonzero, adjust animation speed
+    if (field466 != 0) {
+        if (anim->endFrame != 0) {
+            anim->speed = rmDiv16i(anim->endFrame, (s32)field466 << 16);
+        }
+    }
+
+    // PSX: if health == 0, set walkCycleFlag to AS_DEAD
     if (health <= 0) {
         walkCycleFlag = (s32)AS_DEAD;
     }
 }
 
-// PSX: _GotHitLow__8Humanoid (HUMANOID.CPP:5232)
-// Identical logic to _GotHitMed.
+// PSX: _GotHitLow__8Humanoid (HUMANOID.CPP:5232, 0x800689B4)
+// Identical logic to _GotHitMed: speed adjust + death check.
 void Humanoid::_GotHitLow() {
     MARKFUNCTION(0x800689B4);
 
-    // Check for death
+    if (!model) {
+        return;
+    }
+    Model* m = static_cast<Model*>(model);
+    AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+    if (!anim) {
+        return;
+    }
+
+    if (field466 != 0) {
+        if (anim->endFrame != 0) {
+            anim->speed = rmDiv16i(anim->endFrame, (s32)field466 << 16);
+        }
+    }
+
     if (health <= 0) {
         walkCycleFlag = (s32)AS_DEAD;
     }
 }
 
-// PSX: _Stunned__8Humanoid (HUMANOID.CPP:5333)
-// Countdown stun timer, return to stand on expire.
+// PSX: _Stunned__8Humanoid (HUMANOID.CPP:5333, 0x80068AB4)
+// Countdown stun timer (field468). On expire, clean up animControl
+// and return to stand. On health depletion, go dead.
 void Humanoid::_Stunned() {
     MARKFUNCTION(0x80068AB4);
 
-    s16 stunCounter = (s16)field468;
-    u16 stunDecRate = (u16)comboCount; // PSX +470
-
-    if (stunCounter <= 0) {
+    if ((s16)field468 > 0) {
+        // PSX: decrement stun timer by rate (field468 - comboCount)
+        field468 = (u16)((u16)field468 - comboCount);
+    } else {
         // Stun expired
         field468 = 0;
 
-        // PSX: clean up animControl target
+        // PSX: if animControl target exists, signal and clear
         if (animControl != 0) {
+            // PSX: *(animControl + 108) = 1 — signal stun target complete
             animControl = 0;
         }
 
         SetActionState(AS_STAND, 0);
-    } else {
-        // Decrement stun timer
-        field468 = (u16)(stunCounter - (s16)stunDecRate);
     }
 
-    // Health check - if dead
+    // PSX: death check (health == 0)
     if (health <= 0) {
         if (animControl != 0) {
             animControl = 0;
@@ -1003,93 +1064,172 @@ void Humanoid::_Stunned() {
     }
 }
 
-// PSX: _SpinBack__8Humanoid (HUMANOID.CPP:5373)
-// Wait for animation to complete, then transition to recovery.
+// PSX: _SpinBack__8Humanoid (HUMANOID.CPP:5373, 0x80068B78)
+// Wait for spin-back animation to complete (loopCount > 0),
+// then transition to recovery state.
 void Humanoid::_SpinBack() {
     MARKFUNCTION(0x80068B78);
 
-    // PSX: checks model->animStruct->stopFlag > 0
-    // Without animation, use stateTimer as proxy
-    stateTimer++;
-    if (stateTimer > 30) {
+    if (!model) {
+        return;
+    }
+    Model* m = static_cast<Model*>(model);
+    AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+    if (!anim) {
+        return;
+    }
+
+    // PSX: if loopCount > 0, transition to spin-back recovery
+    if (anim->loopCount > 0) {
         SetActionState(AS_SPIN_BACK_RECOVER, 0);
     }
 }
 
-// PSX: _FlyingBack__8Humanoid (HUMANOID.CPP:5397)
-// Scale velocity, check ground/animation end.
+// PSX: _FlyingBack__8Humanoid (HUMANOID.CPP:5397, 0x80068BC8)
+// Scale velocity by global knockback factor, check animation complete
+// for landing transition, check ground for ground-check transition.
 void Humanoid::_FlyingBack() {
     MARKFUNCTION(0x80068BC8);
 
-    stateTimer++;
+    // PSX: velocity.x *= gp+1860 (knockback damping factor)
+    // PSX: maxFallDivisor = 18 / gp+1764
+    // Global values not reversed - use defaults
+    maxFallDivisor = 18;
 
-    // PSX: check if animation complete
-    if (stateTimer > 30) {
-        SetActionState(AS_FLYING_BACK_LAND, 0);
+    if (!model) {
+        return;
+    }
+    Model* m = static_cast<Model*>(model);
+    AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+    if (!anim) {
         return;
     }
 
-    // PSX: check if on ground (flags bit 12 = TF_ON_GROUND)
+    // PSX: if animation complete (loopCount > 0), transition to landing
+    if (anim->loopCount > 0) {
+        SetActionState(AS_FLYING_BACK_LAND, 0);
+    }
+
+    // PSX: if on ground (flags bit 12), transition to ground check
     if (flags & TF_ON_GROUND) {
         SetActionState(AS_FLYING_BACK_CHECK, 0);
     }
 }
 
-// PSX: _Collapse__8Humanoid (HUMANOID.CPP:5476)
-// Play groan, count timer, get-up or die.
+// PSX: _Collapse__8Humanoid (HUMANOID.CPP:5476, 0x80068DD4)
+// Play collapse groan dialog, call ProcessControl, check animation
+// complete + on-ground for get-up/death transition.
 void Humanoid::_Collapse() {
     MARKFUNCTION(0x80068DD4);
 
-    // PSX: LoadDialog(1, 50) — groan sound (not yet implemented)
+    if (!model) {
+        return;
+    }
+    Model* m = static_cast<Model*>(model);
+    AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+    if (!anim) {
+        return;
+    }
 
-    // PSX: calls CollapseUpdate virtual (not yet implemented)
+    // PSX: LoadDialog(1, 50) - groan sound (dialog system not reversed)
 
-    stateTimer++;
+    // PSX: vtable+260 call - ProcessControl equivalent
+    ProcessControl();
 
-    // PSX: check if on ground (flags bit 12)
-    if (!(flags & TF_ON_GROUND)) return;
+    // PSX: check loopCount > 0 AND on-ground
+    if (anim->loopCount <= 0) {
+        return;
+    }
+    if (!(flags & TF_ON_GROUND)) {
+        return;
+    }
 
+    // PSX: if health == 0, die
     if (health <= 0) {
-        // Dead
         SetActionState(AS_DEAD, 0);
-    } else {
-        // Check get-up conditions
-        s16 getUpThreshold = (s16)humanoidDataID; // PSX +464
-        if (stateTimer >= getUpThreshold) {
-            // PSX: if not player, signal enemy get-up
-            SetActionState(AS_GET_UP, 0);
+        return;
+    }
+
+    // PSX: check stateTimer against humanoidDataID threshold
+    if ((s16)humanoidDataID < (s16)stateTimer) {
+        // PSX: if not this player AND model has bit 4 flag, signal get-up
+        if (this != (Humanoid*)Player::s_player) {
+            // PSX: check model->modelFlags bit 4
+            if (m->modelFlags & 0x10) {
+                Player::s_player->SignalEnemyGetUp();
+            }
         }
+        SetActionState(AS_GET_UP, 0);
+    } else {
+        stateTimer++;
     }
 }
 
-// PSX: _Dead__8Humanoid (HUMANOID.CPP:5723)
-// Signal player, cleanup, remove or fade.
+// PSX: _Dead__8Humanoid (HUMANOID.CPP:5723, 0x800691DC)
+// Complex death handler: type-specific checks, signal player,
+// toggle flags, cleanup, remove from fighting system.
 void Humanoid::_Dead() {
     MARKFUNCTION(0x800691DC);
 
-    // PSX: special handling for type 23 (boss)
-    // PSX: type check for respawn eligibility (types 10-17)
+    // PSX: type check for respawn eligibility
+    // Types 10, 12, 13, 15, 17 are boss types that don't signal player
+    bool isBossType = false;
+    switch (thingType) {
+    case AITypes::TT_GRONTAR:
+    case AITypes::TT_PAUL:
+    case AITypes::TT_OSCAR:
+    case AITypes::TT_DANTE:
+    case AITypes::TT_BUTCH:
+        isBossType = true;
+        break;
+    }
 
-    // PSX: toggle animation direction flag based on thinkCounter
-    if ((thinkCounter & 0x03) == 2) {
-        if (flags & TF_BIT8) {
-            flags &= ~TF_BIT8;
+    if (!isBossType) {
+        // PSX: SignalEnemyDead(thePlayer, this)
+        if (Player::s_player) {
+            Player::s_player->SignalEnemyDead(this);
+        }
+
+        // PSX: toggle flags bit 8 based on thinkCounter state
+        if ((thinkCounter & 0x03) == 2) {
+            if (flags & TF_BIT8) {
+                flags &= ~TF_BIT8;
+            } else {
+                flags |= TF_BIT8;
+            }
+        }
+
+        // PSX: check if death animation complete + enough time elapsed
+        if (!model) {
+            goto cleanup;
+        }
+        {
+            Model* m = static_cast<Model*>(model);
+            if (m->modelFlags & 0x10) {
+                // Animation still playing
+                return;
+            }
+            if (thinkCounter < 41) {
+                return;
+            }
+        }
+
+cleanup:
+        // PSX: RemoveHumanoid from FightingCollision (not reversed)
+        ReleaseTarget();
+        flags &= ~0x0080; // clear bit 7
+
+        if (field260 != 0) {
+            // PSX: set model flag for fade-out
+            if (model) {
+                Model* m = static_cast<Model*>(model);
+                m->modelFlags |= 0x20;
+            }
         } else {
-            flags |= TF_BIT8;
+            // PSX: call Kill virtual to deactivate
+            Kill();
         }
     }
 
-    // PSX: check if death animation has played long enough
-    if (thinkCounter < 41) return;
-
-    // Full cleanup
-    ReleaseTarget();
-    flags &= ~0x0080; // clear bit 7
-
-    if (field260 != 0) {
-        // PSX: set model fade flag
-    } else {
-        // PSX: call Kill virtual
-        Kill();
-    }
+    // PSX: KillDialog(0, 0, 512) - dialog system not reversed
 }

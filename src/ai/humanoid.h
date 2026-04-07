@@ -12,19 +12,29 @@ enum ActionState : u32 {
     AS_INACTIVE_IDLE     = 0,
     AS_STAND             = 1,
     AS_STAND_ANIM        = 2,
+    AS_WALL_JUMP_TAUNT   = 3,   // PSX Player case 3: wall jump taunt/idle
     AS_DIVE_ROLL         = 4,
-    AS_PAUSE             = 6,
-    AS_JUMP              = 8,
+    AS_PAUSE             = 6,   // Humanoid: pause/guard. Player: running jump
+    AS_JUMP              = 8,   // standing jump (no tables)
+    AS_LEDGE_LATCH       = 9,   // PSX Player case 9: ledge grab
     AS_RUN               = 10,
-    AS_BACKFLIP          = 11,
+    AS_BACKFLIP          = 11,  // PSX Player case 11: face enemy + strafe init
     AS_STRAFE            = 12,
     AS_FALL              = 13,
     AS_HARDFALL          = 14,
     AS_HARDLAND          = 15,
-    AS_STRAFE_SPECIAL    = 20,
+    AS_FLIP              = 16,  // PSX: pole swing dismount / flip variant 295
+    AS_FLIP_VARIANT      = 17,  // PSX Player case 17: flip variant
+    AS_POLE_IDLE         = 18,  // PSX Player case 18: pole/table idle setup
+    AS_PUSH_OBJECT       = 19,  // PSX Player case 19: push object
+    AS_SLOPE_SLIDE       = 20,  // PSX Player case 20: slope slide
+    AS_TABLE_ROLL        = 21,  // PSX Player case 21: table roll
+    AS_POLE_SWING        = 23,  // PSX Player case 23: horizontal pole swing
+    AS_LEDGE_PULLUP      = 24,  // PSX: ledge pull-up sequence
     AS_PUNCH_ATTACK      = 32,
     AS_KICK_ATTACK       = 34,
     AS_COMBAT_IDLE       = 36,
+    AS_PICKUP            = 44,  // PSX Player case 44: pick up object
     AS_THROW_PICKUP      = 45,
     AS_FLYING_BACK_LAND  = 58,
     AS_BACK_GRAB_RECOVER = 62,
@@ -38,6 +48,7 @@ enum ActionState : u32 {
 };
 
 // State dispatch indices for Humanoid::ProcessAction
+// PSX: stateDispatch > 0 = vtable index, stateDispatch < 0 = direct function pointer
 enum StateDispatch : u16 {
     SD_NONE         = 0,
     SD_STAND        = 22,
@@ -59,9 +70,22 @@ enum StateDispatch : u16 {
     SD_STUNNED      = 38,
     SD_THROW        = 39,
     SD_PICKUP       = 40,
+    // PSX vtable indices 41-48 used by Player-specific handlers
+    SD_GET_UP       = 43,   // PSX case 68: get up from knockdown
+    SD_POLE_IDLE    = 44,   // PSX case 18: pole/table idle
+    SD_POLE_SWING   = 45,   // PSX case 23: horizontal pole swing
+    SD_SLOPE_SLIDE  = 47,   // PSX case 20: slope slide
+    SD_DEAD_PLAYER  = 48,   // PSX case 72: player death
     // Player-specific dispatch via direct function pointer (stateDispatch = -1 on PSX)
-    SD_HARDFALL     = 250,
-    SD_HARDLAND     = 251,
+    SD_HARDFALL        = 250,
+    SD_HARDLAND        = 251,
+    SD_FLIP            = 252,
+    SD_INACTIVE_IDLE   = 253,
+    SD_PUSH_OBJECT     = 254,
+    SD_TABLE_ROLL      = 255,
+    SD_LEDGE_LATCH     = 256,
+    SD_LEDGE_PULLUP    = 257,
+    SD_DO_STAND        = 258,
 };
 
 // Humanoid - DynamicThing with combat, animation, and AI state

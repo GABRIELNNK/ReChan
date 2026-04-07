@@ -37,15 +37,17 @@ public:
     // PSX +696 (s32): player flags (bit 2 = combat-ready)
     s32 playerFlags = 0;
 
-    // PSX +704 (u16): reserved
+    // PSX +700 (s32): jump phase (0=initial, 1=holding, 2=peak, 3=landing)
+    s32 field700 = 0;
+    // PSX +704 (u16): jump hold button flag
     u16 field704 = 0;
-    // PSX +706 (u16): reserved
+    // PSX +706 (u16): jump tap completion flag
     u16 field706 = 0;
     // PSX +708 (u16): weapon dialog ID (set from global data)
     u16 weaponDialogID = 0;
 
-    // PSX +712 (s32): reserved
-    s32 field712 = 0;
+    // PSX +712 (ptr): jump parameter table pointer (standingJumpHold/Tap, runJumpHold/Tap)
+    const s32* field712 = nullptr;
     // PSX +716 (s32): jump return height (set to homePos.y in DoJump)
     s32 jumpReturnHeight = 0;
     // PSX +720 (s32): reserved

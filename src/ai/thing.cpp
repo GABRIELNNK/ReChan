@@ -712,5 +712,4 @@ Thing* DynamicThing::GetTicketIssuer() {
 // PSX: HandleLand__12DynamicThingl (THING.CPP:1360)
 void DynamicThing::HandleLand(s32 /*height*/) {
     MARKFUNCTION(0x800628C8);
-    Land();
 }

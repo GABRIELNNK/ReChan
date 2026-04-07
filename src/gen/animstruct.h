@@ -91,8 +91,8 @@ public:
     Model* model = nullptr;
     // +36
     s32 mode = 0;
-    // +40
-    s32 field40 = 0;
+    // +40: current animation enum being played (set by ApplyAnimToModel)
+    s32 animEnum = 0;
     // +44
     s32 loopTypeField = 0;
     // +48
@@ -124,7 +124,8 @@ public:
     // +96..+103
     AnimHumanoidCB humanoidCB = {};
 
-private:
+    // PSX: these are called from Model virtual handler trampolines.
+    // Must be accessible to Model-level handlers.
     void Loop();
     void LoopReverse();
     void HoldFirst();

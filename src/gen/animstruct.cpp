@@ -178,17 +178,34 @@ void AnimStructure::ExecuteHandler(s32 doFlip) {
     // mode 5 (blend) = no frame advance
 
     // Run the boundary handler (loop, hold, etc).
-    // PSX dispatches via model-side tables when model != null. That table
-    // is not fully reversed on PC yet, so use the same built-in handlers.
+    // PSX: when model != null AND handlerIndex > 0, dispatches through
+    // Model vtable: model->vtable[handlerIndex-1](model + handlerOffset, this).
+    // When model == null (e.g. camera anims), falls back to built-in switch.
     if (handlerIndex != 0) {
-        switch (loopTypeField) {
-            case 0: Loop(); break;
-            case 1: LoopReverse(); break;
-            case 2: RunToLast(); break;
-            case 3: HoldFirst(); break;
-            case 4: HoldLast(); break;
-            case 6: DecFrame(); break;
-            default: break;
+        if (model && handlerIndex > 0) {
+            // Dispatch through Model virtual handler methods (PSX vtable path)
+            switch (loopTypeField) {
+                case 0: model->HandleLoop(this); break;
+                case 1: model->HandleLoopReverse(this); break;
+                case 2: model->HandleRunToLast(this); break;
+                case 3: model->HandleHoldFirst(this); break;
+                case 4: model->HandleHoldLast(this); break;
+                case 5: model->HandleIncFrame(this); break;
+                case 6: model->HandleDecFrame(this); break;
+                case 7: model->HandleRunToLastBlend(this); break;
+                default: break;
+            }
+        } else {
+            // Fallback: no model (camera anims, etc.) - direct AnimStructure handlers
+            switch (loopTypeField) {
+                case 0: Loop(); break;
+                case 1: LoopReverse(); break;
+                case 2: RunToLast(); break;
+                case 3: HoldFirst(); break;
+                case 4: HoldLast(); break;
+                case 6: DecFrame(); break;
+                default: break;
+            }
         }
     }
 
