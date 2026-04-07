@@ -4,6 +4,7 @@
 #include "gen/camera.h"
 #include "gen/animstruct.h"
 #include "gen/model.h"
+#include "gen/charmgr.h"
 #include "gen/scoremgr.h"
 #include "gen/time.h"
 #include "ai/player.h"
@@ -12,6 +13,7 @@
 #include "snd/sound.h"
 #include "pc/audio.h"
 #include "p3d/lvector.h"
+#include <cstdio>
 
 static bool sShowPlayer = false;
 static bool sShowCamera = false;
@@ -19,6 +21,8 @@ static bool sShowAudio = false;
 static bool sShowAnimation = false;
 static bool sShowGame = false;
 static bool sShowImGuiDemo = false;
+static s32 sAnimSelectedEnum = 0;
+static s32 sAnimSelectedLoopType = ANIM_LOOP;
 
 static const char* GameStateName(GameState s) {
     switch (s) {
@@ -202,6 +206,122 @@ void DebugUI::Draw() {
             if (p && p->model) {
                 Model* m = (Model*)p->model;
                 AnimStructure* anim = (AnimStructure*)m->animStructure;
+                if (sAnimSelectedEnum < 0) {
+                    sAnimSelectedEnum = 0;
+                }
+                if (sAnimSelectedEnum >= (s32)CharSlot::ANIM_TABLE_SIZE) {
+                    sAnimSelectedEnum = (s32)CharSlot::ANIM_TABLE_SIZE - 1;
+                }
+                if (sAnimSelectedLoopType < ANIM_LOOP || sAnimSelectedLoopType > ANIM_STOP) {
+                    sAnimSelectedLoopType = ANIM_LOOP;
+                }
+
+                ImGui::SeparatorText("Controls");
+                ImGui::InputInt("Anim Enum", &sAnimSelectedEnum, 1, 10);
+                if (sAnimSelectedEnum < 0) {
+                    sAnimSelectedEnum = 0;
+                }
+                if (sAnimSelectedEnum >= (s32)CharSlot::ANIM_TABLE_SIZE) {
+                    sAnimSelectedEnum = (s32)CharSlot::ANIM_TABLE_SIZE - 1;
+                }
+
+                if (ImGui::BeginCombo("Loop Type", AnimLoopTypeName(sAnimSelectedLoopType))) {
+                    for (s32 lt = ANIM_LOOP; lt <= ANIM_STOP; lt++) {
+                        bool selected = (sAnimSelectedLoopType == lt);
+                        if (ImGui::Selectable(AnimLoopTypeName(lt), selected)) {
+                            sAnimSelectedLoopType = lt;
+                        }
+                        if (selected) {
+                            ImGui::SetItemDefaultFocus();
+                        }
+                    }
+                    ImGui::EndCombo();
+                }
+
+                if (ImGui::Button("Load")) {
+                    if (g_characterManager) {
+                        g_characterManager->LoadAnimationBatch(0, sAnimSelectedEnum, nullptr);
+                    }
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Play")) {
+                    p->PlayAnimation(sAnimSelectedEnum, sAnimSelectedLoopType);
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Pause")) {
+                    p->PauseAnimation();
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Resume")) {
+                    p->ResumeAnimation();
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Stop")) {
+                    p->StopAnimation();
+                }
+
+                CharSlot* playerSlot = nullptr;
+                if (g_characterManager) {
+                    for (s32 i = 0; i < CHAR_MAX_SLOTS; i++) {
+                        if (g_characterManager->slots[i].thingType == 0) {
+                            playerSlot = &g_characterManager->slots[i];
+                            break;
+                        }
+                    }
+                }
+
+                s32 maxAnimEnum = (s32)CharSlot::ANIM_TABLE_SIZE - 1;
+                if (playerSlot && playerSlot->charFile && playerSlot->charFile->rrHeaderEntries >= 10) {
+                    s32 rrMax = (playerSlot->charFile->rrHeaderEntries - 10) / 2;
+                    if (rrMax < maxAnimEnum) {
+                        maxAnimEnum = rrMax;
+                    }
+                }
+                if (maxAnimEnum < 0) {
+                    maxAnimEnum = 0;
+                }
+
+                s32 loadedCount = 0;
+                if (playerSlot && g_characterManager) {
+                    for (s32 e = 0; e <= maxAnimEnum; e++) {
+                        u8 handle = playerSlot->animIndexTable[e];
+                        if (handle != 0xFF && handle < CHAR_MAX_ANIMS && g_characterManager->animPtrs[handle]) {
+                            loadedCount++;
+                        }
+                    }
+                }
+
+                ImGui::SeparatorText("Available Animations");
+                ImGui::Text("Available enums: 0..%d", maxAnimEnum);
+                ImGui::Text("Loaded animations: %d", loadedCount);
+
+                if (ImGui::BeginChild("AnimList", ImVec2(0, 220), true)) {
+                    ImGuiListClipper clipper;
+                    clipper.Begin(maxAnimEnum + 1);
+                    while (clipper.Step()) {
+                        for (s32 e = clipper.DisplayStart; e < clipper.DisplayEnd; e++) {
+                            bool loaded = false;
+                            u8 handle = 0xFF;
+                            if (playerSlot && g_characterManager) {
+                                handle = playerSlot->animIndexTable[e];
+                                loaded = (handle != 0xFF && handle < CHAR_MAX_ANIMS && g_characterManager->animPtrs[handle] != nullptr);
+                            }
+
+                            char label[64];
+                            std::snprintf(label, sizeof(label), "%03d %s", e, loaded ? "[loaded]" : "");
+
+                            if (ImGui::Selectable(label, sAnimSelectedEnum == e)) {
+                                sAnimSelectedEnum = e;
+                            }
+                        }
+                    }
+                    ImGui::EndChild();
+                }
+
+                ImGui::SeparatorText("Current Playback");
+                ImGui::Text("Current Anim Enum: %d", p->currentAnimEnum);
+                ImGui::Text("Anim State: %s", p->IsAnimationPaused() ? "Paused" : "Playing");
+
                 if (anim) {
                     ImGui::Text("Frame: %d (0x%X)", anim->currentFrame >> 16, anim->currentFrame);
                     ImGui::Text("Start/End: %d / %d", anim->startFrame >> 16, anim->endFrame >> 16);
@@ -216,6 +336,8 @@ void DebugUI::Draw() {
                     if (anim->endFrame > anim->startFrame) {
                         f32 progress = (f32)(anim->currentFrame - anim->startFrame) /
                                        (f32)(anim->endFrame - anim->startFrame);
+                        if (progress < 0.0f) progress = 0.0f;
+                        if (progress > 1.0f) progress = 1.0f;
                         ImGui::ProgressBar(progress, ImVec2(-1, 0), "");
                     }
                 } else {

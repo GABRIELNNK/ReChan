@@ -12,7 +12,10 @@ STreeData* ParseP3DStreamFull(const u8* data, u32 size);
 // This reads the pre-relocation binary directly and sets rotation/translation on joints.
 void ApplyAnimFrame0(STreeData* skeleton, const u8* rawAnimData, u32 rawAnimSize);
 
+struct OriginalSTree;
+
 // Build a combined pddiPrimBuffer from tPrimGeom data using skeleton joint info.
 // Transforms vertices into model space using skeleton joint world matrices.
 // Stores combined mesh in skeleton->joints[0].meshBuffer.
-void BuildPerJointMeshes(STreeData* skeleton, const u8* primGeomData, u32 primGeomSize);
+// Also stores SkinData on OriginalSTree for per-frame CPU skinning.
+void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 primGeomSize);

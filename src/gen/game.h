@@ -92,6 +92,7 @@ public:
     // PSX handler callbacks (registered in Game constructor)
     // On PSX these are free functions; public so MenuRender/MenuDraw can call them.
     static void BeginFrameHandler(Handler* h);
+    static void AnimateEverythingHandler(Handler* h);
     static void DrawEverythingHandlerCB(Handler* h);
     static void EndFrameHandler(Handler* h);
 

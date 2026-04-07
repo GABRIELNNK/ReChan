@@ -2,6 +2,21 @@
 #include "core.h"
 #include "p3d/skeleton.h"
 
+// PSX CHANNEL.CPP key list types.
+enum TransformKeyType : u32 {
+    KEY_JOINT_1DOF_ANGLE = 3,
+    KEY_JOINT_3DOF_ANGLE = 5,
+    KEY_JOINT_3DOF_LP_PSX = 8,
+    KEY_STATIC_3DOF_ANGLE = 11,
+    KEY_STATIC_3DOF_POS = 12,
+};
+
+enum TransformDofAxis : u32 {
+    DOF_AXIS_X = 0,
+    DOF_AXIS_Y = 1,
+    DOF_AXIS_Z = 2,
+};
+
 // Parsed animation data from raw tTransformAnim binary blob.
 struct TransformAnim {
     u32 nameUID;
@@ -36,6 +51,7 @@ struct TransformFlip {
     s32 frame;              // +0x14: current frame (integer)
     s32 frameReal;          // +0x24: current frame (16.16 fixed-point)
     s32 dirty;              // +0x28: needs re-evaluation flag
+    bool additiveTranslation;// non-bind clips use translation offsets from bind pose
     TransformAnim* anim;    // +0x1C: animation data
     STreeData* tree;        // +0x34: target skeleton
 
@@ -64,7 +80,7 @@ private:
     // Evaluate a translation channel at current frame and write to joint
     void EvalTransChannel(const TransformAnim::Channel& ch, STreeJoint& joint);
 
-    // Find bracket keyframe index for the given integer frame.
+    // Find bracket keyframe index for the given 16.16 frame value.
     // Returns the index of the keyframe at or just before the frame.
-    static s32 FindBracket(const u8* rawBase, u32 keyTimesOff, s32 numKeys, s32 intFrame);
+    static s32 FindBracket(const u8* rawBase, u32 keyTimesOff, s32 numKeys, s32 frameReal);
 };

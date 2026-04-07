@@ -3,12 +3,14 @@
 #include "gen/model.h"
 #include "gen/animmat.h"
 #include "gen/animstruct.h"
+#include "gen/charmgr.h"
 #include "gen/skeleton.h"
 #include "p3d/context.h"
 #include "p3d/p3dmath.h"
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
 #include <cstdlib>
+#include <vector>
 
 // OriginalSTree
 OriginalSTree::OriginalSTree() {
@@ -23,6 +25,10 @@ OriginalSTree::~OriginalSTree() {
     if (skeleton) {
         delete skeleton;
         skeleton = nullptr;
+    }
+    if (skinData) {
+        delete skinData;
+        skinData = nullptr;
     }
 }
 
@@ -44,15 +50,44 @@ void DrawableSTree::Display(u32 /*flags*/) {
     if (!original)
         return;
 
-    // Prefer skeleton-built mesh (rest-pose transformed vertices)
-    if (original->skeleton && original->skeleton->joints &&
-        original->skeleton->joints[0].meshBuffer) {
-        p3d::context->DrawPrimBuffer(original->skeleton->joints[0].meshBuffer);
+    STreeData* skel = original->skeleton;
+    SkinData* skin = original->skinData;
+
+    // Per-frame CPU skinning
+    if (skel && skin && skin->numVerts > 0 && skel->joints &&
+        skel->joints[0].meshBuffer) {
+        Mat4* jointMatrices = new Mat4[skel->numJoints];
+        skel->ComputeWorldMatrices(jointMatrices);
+
+        std::vector<f32> vertData(skin->numVerts * 10);
+        for (u32 i = 0; i < skin->numVerts; i++) {
+            const SkinVertex& sv = skin->verts[i];
+            const Mat4& m = jointMatrices[sv.jointIdx];
+            f32 wx, wy, wz;
+            Mat4TransformPoint(m, sv.lx, sv.ly, sv.lz, wx, wy, wz);
+            vertData[i * 10 + 0] = wx;
+            vertData[i * 10 + 1] = wy;
+            vertData[i * 10 + 2] = wz;
+            vertData[i * 10 + 3] = sv.r;
+            vertData[i * 10 + 4] = sv.g;
+            vertData[i * 10 + 5] = sv.b;
+            vertData[i * 10 + 6] = sv.u;
+            vertData[i * 10 + 7] = sv.v;
+            vertData[i * 10 + 8] = sv.tpage;
+            vertData[i * 10 + 9] = sv.cba;
+        }
+
+        skel->joints[0].meshBuffer->SetVertexData(vertData.data(), skin->numVerts);
+        p3d::context->DrawPrimBuffer(skel->joints[0].meshBuffer);
+        delete[] jointMatrices;
         return;
     }
 
     // Fallback to flat mesh
-    if (original->meshBuffer) {
+    STreeData* fallbackSkel = original->skeleton;
+    if (fallbackSkel && fallbackSkel->joints && fallbackSkel->joints[0].meshBuffer) {
+        p3d::context->DrawPrimBuffer(fallbackSkel->joints[0].meshBuffer);
+    } else if (original->meshBuffer) {
         p3d::context->DrawPrimBuffer(original->meshBuffer);
     }
 }
@@ -162,6 +197,39 @@ void SModel::Animate() {
         AnimStructure* anim = (AnimStructure*)animStructure;
         anim->ExecuteHandler(1);
     }
+}
+
+// PSX: ApplyAnimToModel__6SModellllll (MODEL.CPP:1098, 0x8006EEAC)
+void SModel::ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 /*p4*/, s32 /*p5*/) {
+    MARKFUNCTION(0x8006EEAC);
+    if (!g_characterManager) return;
+
+    void* anim = g_characterManager->GetAnimation((u32)thingType, animEnum);
+    if (!anim) {
+        anim = g_characterManager->GetAnimation(0, animEnum);
+        if (!anim) {
+            anim = g_characterManager->GetAnimation(0, 22);
+            animEnum = 22;
+        }
+    }
+
+    if (!animStructure) {
+        animStructure = new AnimStructure(0, anim, loopType, this, drawable);
+    }
+
+    AnimStructure* as = (AnimStructure*)animStructure;
+    as->field40 = animEnum;
+
+    // PSX: p4 == 0 path (normal apply)
+    as->animation = (TransformAnim*)anim;
+    if (as->flip) {
+        as->flip->anim = (TransformAnim*)anim;
+        as->flip->additiveTranslation = false;
+        as->flip->dirty = 1;
+    }
+    as->ResetCountsToAnim();
+    as->SetLoopType(loopType, 1);
+    as->humanoidCB = {};
 }
 
 // PSX: SetOriginalSTree__6SModelP13OriginalSTreeP10tAnimation (MODEL.CPP:1026, 0x8006EDD4)

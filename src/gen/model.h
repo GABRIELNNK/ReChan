@@ -21,6 +21,24 @@ class Thing;
 struct AnimationMatrices;
 struct STreeData;
 
+// Pre-parsed skinning data for CPU vertex skinning each frame
+struct SkinVertex {
+    f32 lx, ly, lz;          // joint-local position
+    f32 r, g, b;             // vertex color
+    f32 u, v;                // texture coords
+    f32 tpage, cba;          // PSX texture info
+    u32 jointIdx;            // owning joint index
+};
+
+struct SkinData {
+    SkinVertex* verts = nullptr;
+    u16* indices = nullptr;
+    u32 numVerts = 0;
+    u32 numIndices = 0;
+
+    ~SkinData() { delete[] verts; delete[] indices; }
+};
+
 // OriginalBasic - base for model data stored in LevelManager lists.
 // PSX: ccNode-derived with type and storeID fields.
 // PSX layout:
@@ -57,6 +75,9 @@ struct OriginalSTree : public OriginalBasic {
 
     // Skeleton data (parsed from P3D 0x6122/0x6121 chunks)
     STreeData* skeleton = nullptr;
+
+    // CPU skinning data (local-space verts + joint indices)
+    SkinData* skinData = nullptr;
 
     OriginalSTree();
     ~OriginalSTree() override;
@@ -180,6 +201,9 @@ public:
 
     // PSX: Animate__6SModel (MODEL.CPP:1416)
     void Animate() override;
+
+    // PSX: ApplyAnimToModel__6SModellllll (MODEL.CPP:1098)
+    void ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 p4, s32 p5) override;
 
     // PSX: SetOriginalSTree__6SModelP13OriginalSTreeP10tAnimation (MODEL.CPP:1026)
     void SetOriginalSTree(OriginalSTree* original);

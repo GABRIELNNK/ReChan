@@ -5,6 +5,8 @@
 #include "gen/control.h"
 #include "gen/model.h"
 #include "gen/animmat.h"
+#include "gen/animstruct.h"
+#include "gen/charmgr.h"
 #include "p3d/p3dmath.h"
 #include "pc/log.h"
 
@@ -23,6 +25,30 @@ static constexpr s32 PLAYER_JUMP_FORCE = 2000;  // upward contactForce on jump
 
 // PSX: gp+492 - hard-fall velocity threshold (velocity.y must be <= this to trigger)
 static constexpr s32 g_hardFallThreshold = -8192;
+
+enum PlayerAnimEnum : s32 {
+    // PSX SetActionState__6PlayerUll case 0 applies enum 1.
+    PLAYER_ANIM_INACTIVE_IDLE = 1,
+    // PSX locomotion baseline used by current JACKIE run state.
+    PLAYER_ANIM_RUN = 2,
+    // PSX SetIdleAnimation__8Humanoidli uses enum 22 when unarmed.
+    PLAYER_ANIM_IDLE_UNARMED = 22,
+    // PSX SetActionState__6PlayerUll case 13 applies enum 39 then ForceFrame(5).
+    PLAYER_ANIM_FALL = 39,
+};
+
+static bool EnsurePlayerAnimationLoaded(s32 animEnum) {
+    if (!g_characterManager || animEnum < 0) {
+        return false;
+    }
+    if (g_characterManager->GetAnimation(0, animEnum)) {
+        return true;
+    }
+
+    // Current load path is synchronous on PC.
+    g_characterManager->LoadAnimationBatch(0, animEnum, nullptr);
+    return g_characterManager->GetAnimation(0, animEnum) != nullptr;
+}
 
 Player* Player::s_player = nullptr;
 
@@ -151,7 +177,6 @@ void Player::CreateModel(const char* name) {
     Thing::CreateModel(name);
 
     // PSX: virtual calls for animation setup (ApplyAnimToModel etc.)
-    // Animation system not yet reversed - skip
 
     // PSX: OriginalSTree_omPlayer = model->drawable->original
     // Used for suit-change system - skip global for now
@@ -162,6 +187,7 @@ void Player::CreateModel(const char* name) {
     // PSX: InitSemiTransMode (called via Humanoid path, also needed here)
     Model* m = static_cast<Model*>(model);
     if (m) {
+        m->ApplyAnimToModel(0, 0, 2, 0, 0);
         SModel* sm = static_cast<SModel*>(m);
         sm->InitSemiTransMode();
     }
@@ -184,6 +210,7 @@ void Player::SetActionState(u32 state, s32 param) {
     case AS_FALL:
         // PSX case 13: stateDispatch=29, play anim 39 frame 5,
         // field616=0, playerFlags|=1, jumpReturnHeight=homePos.y, fall sound
+        PlayAnimation(PLAYER_ANIM_FALL, ANIM_RUN_TO_LAST);
         stateDispatch = SD_FALL;
         field344 = 0;
         field348 = 8;
@@ -218,6 +245,24 @@ void Player::SetActionState(u32 state, s32 param) {
 
     // Delegate to Humanoid for the core state mapping and preamble
     Humanoid::SetActionState(state, param);
+
+    // Keep core locomotion states visibly animated while higher-fidelity
+    // state->anim mapping is still being reversed.
+    switch (state) {
+    case AS_INACTIVE_IDLE:
+        PlayAnimation(PLAYER_ANIM_INACTIVE_IDLE, ANIM_LOOP);
+        break;
+    case AS_STAND:
+    case AS_STAND_ANIM:
+        // PSX SetIdleAnimation default path uses anim 22 when unarmed.
+        PlayAnimation(PLAYER_ANIM_IDLE_UNARMED, ANIM_LOOP);
+        break;
+    case AS_RUN:
+        PlayAnimation(PLAYER_ANIM_RUN, ANIM_LOOP);
+        break;
+    default:
+        break;
+    }
 }
 
 // PSX: ProcessAction dispatches via method thunk (field344/346/348).
@@ -422,6 +467,73 @@ void Player::LoadPlayerTauntResponse(Humanoid* /*target*/) {
 
 void Player::PlayPlayerTauntResponse() {
     MARKFUNCTION(0x8003431C);
+}
+
+bool Player::PlayAnimation(s32 animEnum, s32 loopType) {
+    if (!model || animEnum < 0) {
+        return false;
+    }
+    if (!EnsurePlayerAnimationLoaded(animEnum)) {
+        return false;
+    }
+
+    Model* m = static_cast<Model*>(model);
+    m->ApplyAnimToModel(0, animEnum, loopType, 0, 0);
+    currentAnimEnum = animEnum;
+    animLoadState = 1;
+    return true;
+}
+
+void Player::PauseAnimation() {
+    if (!model) {
+        return;
+    }
+    Model* m = static_cast<Model*>(model);
+    AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+    if (!anim) {
+        return;
+    }
+    anim->speed = 0;
+    animLoadState = 2;
+}
+
+void Player::ResumeAnimation() {
+    if (!model) {
+        return;
+    }
+    Model* m = static_cast<Model*>(model);
+    AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+    if (!anim) {
+        return;
+    }
+    anim->speed = FIX16_ONE;
+    animLoadState = 1;
+}
+
+void Player::StopAnimation() {
+    if (!model) {
+        return;
+    }
+    Model* m = static_cast<Model*>(model);
+    AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+    if (!anim) {
+        return;
+    }
+    anim->ForceFrame(0);
+    anim->speed = 0;
+    animLoadState = 0;
+}
+
+bool Player::IsAnimationPaused() const {
+    if (!model) {
+        return false;
+    }
+    Model* m = static_cast<Model*>(model);
+    AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+    if (!anim) {
+        return false;
+    }
+    return anim->speed == 0;
 }
 
 // Action state handler stubs

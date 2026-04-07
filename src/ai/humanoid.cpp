@@ -203,10 +203,10 @@ void Humanoid::CreateModel(const char* name) {
     // PSX: calls Thing::CreateModel which does the LevelManager lookup
     Thing::CreateModel(name);
 
-    // PSX: after CreateModel, calls ApplyAnimToModel and InitSemiTransMode
-    // Animation system not yet reversed - skip for now
+    // PSX: ApplyAnimToModel(thingType, 0, 2, 0, 0) then InitSemiTransMode
     Model* m = static_cast<Model*>(model);
     if (m) {
+        m->ApplyAnimToModel(0, 0, 2, 0, 0);
         SModel* sm = static_cast<SModel*>(m);
         sm->InitSemiTransMode();
     }

@@ -528,9 +528,9 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
                 }
 
                 // Build per-joint mesh with animation-applied transforms
-                BuildPerJointMeshes(skeleton, (const u8*)slot.dataBuffer, (u32)bufSize);
                 original->skeleton = skeleton;
                 skeleton = nullptr; // ownership transferred
+                BuildPerJointMeshes(original, (const u8*)slot.dataBuffer, (u32)bufSize);
 
                 LOG("[CharMgr] Created OriginalSTree with skeleton for type %u (hash 0x%08X, %u joints)",
                     type, nameHash, original->skeleton->numJoints);

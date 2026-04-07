@@ -35,9 +35,17 @@ struct STreeJoint {
     s16 restPoseRotX;         // +32: rest-pose rotation (binary angle, from 0x6125)
     s16 restPoseRotY;         // +34
     s16 restPoseRotZ;         // +36
+    // PC-only: bind baseline sampled from animation 0 frame 0.
+    s32 bindTranslationX;
+    s32 bindTranslationY;
+    s32 bindTranslationZ;
+    s16 bindRotationX;
+    s16 bindRotationY;
+    s16 bindRotationZ;
     u16 primGeomStartIdx;     // +52: first vertex index in tPrimGeom
     u16 primGeomCount;        // +54: number of vertices for this joint
     u16 polyStartIdx;         // +56: first polygon index
+    s32 captureBufferIdx;      // STLOAD AddJoint matrix buffer dword offset
 
     // PC-only: per-joint pddiPrimBuffer
     pddiPrimBuffer* meshBuffer = nullptr;

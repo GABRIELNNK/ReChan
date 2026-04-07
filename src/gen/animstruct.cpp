@@ -177,26 +177,26 @@ void AnimStructure::ExecuteHandler(s32 doFlip) {
     }
     // mode 5 (blend) = no frame advance
 
-    // Run the boundary handler (loop, hold, etc)
+    // Run the boundary handler (loop, hold, etc).
+    // PSX dispatches via model-side tables when model != null. That table
+    // is not fully reversed on PC yet, so use the same built-in handlers.
     if (handlerIndex != 0) {
-        if (model == nullptr) {
-            // No model - use built-in handlers
-            switch (loopTypeField) {
-                case 0: Loop(); break;
-                case 1: LoopReverse(); break;
-                case 2: RunToLast(); break;
-                case 3: HoldFirst(); break;
-                case 4: HoldLast(); break;
-                case 6: DecFrame(); break;
-                default: break;
-            }
+        switch (loopTypeField) {
+            case 0: Loop(); break;
+            case 1: LoopReverse(); break;
+            case 2: RunToLast(); break;
+            case 3: HoldFirst(); break;
+            case 4: HoldLast(); break;
+            case 6: DecFrame(); break;
+            default: break;
         }
-        // PSX: with model, dispatches through model's vtable
-        // Not needed for camera mode
     }
 
-    // PSX: if doFlip && flip exists, calls flip->SetFrameReal then flip->UpdateJoints
+    // PSX: if doFlip, updates flipbook state.
     if (doFlip && flip) {
+        if (currentFrame < 0) {
+            currentFrame = 0;
+        }
         flip->SetFrameReal(currentFrame);
         flip->UpdateJoints();
     }
@@ -208,10 +208,11 @@ void AnimStructure::ExecuteHandler(s32 doFlip) {
 
 // PSX: Loop__13AnimStructure (0x8007119C)
 void AnimStructure::Loop() {
-    if (endFrame > 0 && currentFrame > endFrame) {
+    if (currentFrame > endFrame) {
         loopCount++;
-        if (endFrame + FIX16_ONE != 0) {
-            currentFrame = currentFrame % (endFrame + FIX16_ONE);
+        s32 denom = endFrame + FIX16_ONE;
+        if (denom != 0) {
+            currentFrame = currentFrame % denom;
         }
     }
 }
@@ -227,8 +228,6 @@ void AnimStructure::LoopReverse() {
 // PSX: HoldFirst__13AnimStructure (0x80071234)
 void AnimStructure::HoldFirst() {
     if (startFrame < currentFrame) {
-        // Not past start yet
-    } else {
         currentFrame = startFrame;
         loopCount++;
         ProcessHumanoidCB();
@@ -237,7 +236,7 @@ void AnimStructure::HoldFirst() {
 
 // PSX: HoldLast__13AnimStructure (0x80071278)
 void AnimStructure::HoldLast() {
-    if (endFrame > 0 && currentFrame > endFrame) {
+    if (currentFrame > endFrame) {
         currentFrame = endFrame;
         loopCount++;
         ProcessHumanoidCB();
@@ -246,7 +245,7 @@ void AnimStructure::HoldLast() {
 
 // PSX: RunToLast__13AnimStructure (0x800712BC)
 void AnimStructure::RunToLast() {
-    if (endFrame > 0 && currentFrame > endFrame) {
+    if (currentFrame > endFrame) {
         currentFrame = endFrame;
         loopCount++;
         ProcessHumanoidCB();
@@ -255,14 +254,29 @@ void AnimStructure::RunToLast() {
 
 // PSX: IncFrame__13AnimStructure
 void AnimStructure::IncFrame() {
-    currentFrame += FIX16_ONE;
+    if (endFrame >= currentFrame) {
+        currentFrame = prevFrame + FIX16_ONE;
+    } else {
+        s32 denom = endFrame + FIX16_ONE;
+        loopCount++;
+        if (denom != 0) {
+            currentFrame = currentFrame % denom;
+        }
+        ProcessHumanoidCB();
+    }
+
+    if (flip) {
+        flip->SetFrameReal(currentFrame);
+        flip->UpdateJoints();
+    }
 }
 
 // PSX: DecFrame__13AnimStructure
 void AnimStructure::DecFrame() {
-    currentFrame -= FIX16_ONE;
+    currentFrame = prevFrame - FIX16_ONE;
     if (currentFrame < 0) {
-        currentFrame = 0;
+        currentFrame = endFrame;
+        ProcessHumanoidCB();
     }
 }
 
@@ -276,8 +290,11 @@ void AnimStructure::RunToLastBlend() {
 
 // PSX: ProcessHumanoidCB__13AnimStructure (0x80071108)
 void AnimStructure::ProcessHumanoidCB() {
-    // PSX: checks humanoidCB.valid (+98), dispatches callback
-    // Not critical for camera operation
+    // PSX dispatches callback and clears cb fields. Clear fields here to
+    // preserve one-shot semantics until full callback dispatch is reversed.
+    if (humanoidCB.offsetHi != 0) {
+        humanoidCB = {};
+    }
 }
 
 // PSX: ReAttachTree__13AnimStructurell (0x80070B6C)

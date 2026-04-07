@@ -3,6 +3,7 @@
 // BuildPerJointMeshes: builds pddiPrimBuffer from tPrimGeom + skeleton
 #include "common.h"
 #include "gen/skeleton.h"
+#include "gen/model.h"
 #include "gen/game.h"
 #include "gen/world.h"
 #include "p3d/context.h"
@@ -181,15 +182,52 @@ void ApplyAnimFrame0(STreeData* skeleton, const u8* rawAnimData, u32 rawAnimSize
             if (valByteOff + 4 > rawAnimSize) {
                 continue;
             }
-            // Packed u32: bits[0:4]*32 = rotZ, bits[5:10]*32 = rotY, bits[11:15]*64 = rotX
+            // PSX CHANNEL.CPP packing for tJoint3DOFangle.
             u32 packed = ReadU32(rawAnimData + valByteOff);
-            joint.rotationX = (s16)((packed >> 11) * 64);
-            joint.rotationY = (s16)(((packed >> 5) & 0x3F) * 32);
-            joint.rotationZ = (s16)((packed & 0x1F) * 32);
+            joint.rotationX = (s16)((packed << 5) & 0xFFFF);
+            joint.rotationY = (s16)((packed >> 6) & 0xFFE0);
+            joint.rotationZ = (s16)((packed >> 16) & 0xFFC0);
         } else if (keyType == 3) {
-            // tJoint1DOFangle: single s16 value, DOF is the channel's axis
-            // For frame-0, just skip - 1DOF channels are rare in idle anims
-            LOG("[Anim] Rot channel %d: unhandled type 3 (1DOFangle)", i);
+            // tJoint1DOFangle: +8=numKeys, +12=keyTimesOff(u8), +16=dofIndex,
+            // +20=keyValuesOff(s16). Evaluate at frame 0.
+            u32 numKeys = ReadU32(ch + 8);
+            if (numKeys == 0) {
+                continue;
+            }
+            u32 keyTimesOff = ReadU32(ch + 12);
+            u32 dofIndex = ReadU32(ch + 16);
+            u32 keyValsOff = ReadU32(ch + 20);
+            u32 keyTimesByteOff = keyTimesOff * 4;
+            u32 keyValsByteOff = keyValsOff * 4;
+            if (keyTimesByteOff + numKeys > rawAnimSize) {
+                continue;
+            }
+            if (keyValsByteOff + numKeys * 2 > rawAnimSize) {
+                continue;
+            }
+
+            const u8* times = rawAnimData + keyTimesByteOff;
+            s32 bracket = 0;
+            if (numKeys > 1) {
+                for (u32 k = 0; k < numKeys - 1; k++) {
+                    if (0 >= (s32)times[k] && 0 < (s32)times[k + 1]) {
+                        bracket = (s32)k;
+                        break;
+                    }
+                    if (0 >= (s32)times[k + 1]) {
+                        bracket = (s32)(k + 1);
+                    }
+                }
+            }
+
+            s16 val = ReadS16(rawAnimData + keyValsByteOff + bracket * 2);
+            if (dofIndex == 0) {
+                joint.rotationX = val;
+            } else if (dofIndex == 1) {
+                joint.rotationY = val;
+            } else {
+                joint.rotationZ = val;
+            }
         } else {
             LOG("[Anim] Rot channel %d: unknown type %u", i, keyType);
         }
@@ -240,19 +278,21 @@ void ApplyAnimFrame0(STreeData* skeleton, const u8* rawAnimData, u32 rawAnimSize
         }
     }
 
-    LOG("[Anim] Applied frame-0: %d rot channels, %d trans channels",
-        numRotCh, numTransCh);
-
-    // Debug: dump joint values after animation
-    for (u32 i = 0; i < skeleton->numJoints && i < 10; i++) {
-        const STreeJoint& j = skeleton->joints[i];
-        LOG("[Anim] Joint %u: flags=0x%02X trans=(%d,%d,%d) rot=(%d,%d,%d)",
-            i, j.flags, j.translationX, j.translationY, j.translationZ,
-            (int)j.rotationX, (int)j.rotationY, (int)j.rotationZ);
+    // Save a stable bind baseline used by runtime animation evaluation.
+    for (u32 i = 0; i < skeleton->numJoints; i++) {
+        STreeJoint& j = skeleton->joints[i];
+        j.bindTranslationX = j.translationX;
+        j.bindTranslationY = j.translationY;
+        j.bindTranslationZ = j.translationZ;
+        j.bindRotationX = j.rotationX;
+        j.bindRotationY = j.rotationY;
+        j.bindRotationZ = j.rotationZ;
     }
+
 }
 
-void BuildPerJointMeshes(STreeData* skeleton, const u8* primGeomData, u32 primGeomSize) {
+void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 primGeomSize) {
+    STreeData* skeleton = original->skeleton;
     if (!skeleton || !primGeomData || primGeomSize < 108) {
         return;
     }
@@ -276,32 +316,6 @@ void BuildPerJointMeshes(STreeData* skeleton, const u8* primGeomData, u32 primGe
     }
     if (polyDataOff + numPolys * 4 > primGeomSize) {
         return;
-    }
-
-    // Compute per-joint world matrices from current rotation/translation
-    Mat4* jointMatrices = new Mat4[skeleton->numJoints];
-    skeleton->ComputeWorldMatrices(jointMatrices);
-
-    // Debug: dump first few joint matrices
-    for (u32 j = 0; j < skeleton->numJoints && j < 6; j++) {
-        const Mat4& m = jointMatrices[j];
-        LOG("[Skel] Joint %u matrix: [%.1f %.1f %.1f %.1f] [%.1f %.1f %.1f %.1f] [%.1f %.1f %.1f %.1f] t=(%.1f,%.1f,%.1f)",
-            j, m.m[0], m.m[4], m.m[8], m.m[12],
-            m.m[1], m.m[5], m.m[9], m.m[13],
-            m.m[2], m.m[6], m.m[10], m.m[14],
-            m.m[12], m.m[13], m.m[14]);
-    }
-
-    // Build vertex-to-joint map: for each vertex, which joint owns it
-    std::vector<u32> vertJointMap(numVerts, 0);
-    for (u32 j = 0; j < skeleton->numJoints; j++) {
-        const STreeJoint& jt = skeleton->joints[j];
-        for (u32 v = 0; v < jt.primGeomCount; v++) {
-            u32 vi = jt.primGeomStartIdx + v;
-            if (vi < numVerts) {
-                vertJointMap[vi] = j;
-            }
-        }
     }
 
     const u8* verts = primGeomData + vertListOff;
@@ -329,10 +343,21 @@ void BuildPerJointMeshes(STreeData* skeleton, const u8* primGeomData, u32 primGe
         loops.push_back({numVerts, numPolys, 0, 0});
     }
 
-    // Collect triangles with per-joint transforms applied.
-    // Each vertex is transformed from joint-local to model space using its owning joint's matrix.
-    struct TriVert { f32 x, y, z, r, g, b, u, v, tpage, cba; };
-    std::vector<TriVert> allVerts;
+    // Build vertex-to-joint map: primGeomStartIdx/primGeomCount are vertex ranges
+    std::vector<u32> vertJointMap(numVerts, 0);
+    for (u32 j = 0; j < skeleton->numJoints; j++) {
+        const STreeJoint& jt = skeleton->joints[j];
+        if (!(jt.flags & STF_HAS_MESH)) continue;
+        for (u32 v = 0; v < jt.primGeomCount; v++) {
+            u32 vi = jt.primGeomStartIdx + v;
+            if (vi < numVerts) {
+                vertJointMap[vi] = j;
+            }
+        }
+    }
+
+    // Collect SkinVertex data (joint-local space) + indices
+    std::vector<SkinVertex> skinVerts;
     std::vector<u16> allIndices;
 
     u32 primCursor = primListOff;
@@ -356,22 +381,19 @@ void BuildPerJointMeshes(STreeData* skeleton, const u8* primGeomData, u32 primGe
             const u8* poly = polys + polyIdx * 4;
             u8 vi0 = poly[0], vi1 = poly[1], vi2 = poly[2], vi3 = poly[3];
 
-            auto makeVert = [&](u8 vi) -> TriVert {
+            auto makeSkinVert = [&](u8 vi) -> SkinVertex {
                 u32 idx = vertBase + vi;
                 if (idx >= numVerts) idx = 0;
                 const u8* vp = verts + idx * 8;
-                f32 lx = (f32)ReadS16(vp + 0);
-                f32 ly = (f32)ReadS16(vp + 2);
-                f32 lz = (f32)ReadS16(vp + 4);
-
-                // Transform from joint-local to model space
-                const Mat4& m = jointMatrices[vertJointMap[idx]];
-                TriVert tv;
-                Mat4TransformPoint(m, lx, ly, lz, tv.x, tv.y, tv.z);
-                tv.r = 0.7f; tv.g = 0.7f; tv.b = 0.7f;
-                tv.u = 0.0f; tv.v = 0.0f;
-                tv.tpage = -1.0f; tv.cba = 0.0f;
-                return tv;
+                SkinVertex sv;
+                sv.lx = (f32)ReadS16(vp + 0);
+                sv.ly = (f32)ReadS16(vp + 2);
+                sv.lz = (f32)ReadS16(vp + 4);
+                sv.r = 0.7f; sv.g = 0.7f; sv.b = 0.7f;
+                sv.u = 0.0f; sv.v = 0.0f;
+                sv.tpage = -1.0f; sv.cba = 0.0f;
+                sv.jointIdx = vertJointMap[idx];
+                return sv;
             };
 
             auto readRGB = [&](int off) {
@@ -383,15 +405,11 @@ void BuildPerJointMeshes(STreeData* skeleton, const u8* primGeomData, u32 primGe
             };
 
             if (cmdBase == 0x3C || cmdBase == 0x2C) {
-                // POLY_GT4 / POLY_FT4: textured quad
                 if (pktSize < 52) { primCursor += pktSize; continue; }
-
-                TriVert v0 = makeVert(vi0), v1 = makeVert(vi1);
-                TriVert v2 = makeVert(vi2), v3 = makeVert(vi3);
-
+                SkinVertex v0 = makeSkinVert(vi0), v1 = makeSkinVert(vi1);
+                SkinVertex v2 = makeSkinVert(vi2), v3 = makeSkinVert(vi3);
                 f32 tp = (f32)ReadU16(pkt + 26);
                 f32 cb = (f32)ReadU16(pkt + 14);
-
                 auto [r0,g0,b0] = readRGB(4);
                 auto [r1,g1,b1] = readRGB(16);
                 auto [r2,g2,b2] = readRGB(28);
@@ -402,22 +420,17 @@ void BuildPerJointMeshes(STreeData* skeleton, const u8* primGeomData, u32 primGe
                 v1.u=pkt[24]; v1.v=pkt[25]; v1.tpage=tp; v1.cba=cb;
                 v2.u=pkt[36]; v2.v=pkt[37]; v2.tpage=tp; v2.cba=cb;
                 v3.u=pkt[48]; v3.v=pkt[49]; v3.tpage=tp; v3.cba=cb;
-
-                u16 base = (u16)allVerts.size();
-                allVerts.push_back(v0); allVerts.push_back(v1);
-                allVerts.push_back(v2); allVerts.push_back(v3);
+                u16 base = (u16)skinVerts.size();
+                skinVerts.push_back(v0); skinVerts.push_back(v1);
+                skinVerts.push_back(v2); skinVerts.push_back(v3);
                 allIndices.push_back(base); allIndices.push_back(base+1); allIndices.push_back(base+2);
                 allIndices.push_back(base+1); allIndices.push_back(base+3); allIndices.push_back(base+2);
 
             } else if (cmdBase == 0x34 || cmdBase == 0x24) {
-                // POLY_GT3 / POLY_FT3: textured tri
                 if (pktSize < 40) { primCursor += pktSize; continue; }
-
-                TriVert v0 = makeVert(vi0), v1 = makeVert(vi1), v2 = makeVert(vi2);
-
+                SkinVertex v0 = makeSkinVert(vi0), v1 = makeSkinVert(vi1), v2 = makeSkinVert(vi2);
                 f32 tp = (f32)ReadU16(pkt + 26);
                 f32 cb = (f32)ReadU16(pkt + 14);
-
                 auto [r0,g0,b0] = readRGB(4);
                 auto [r1,g1,b1] = readRGB(16);
                 auto [r2,g2,b2] = readRGB(28);
@@ -427,16 +440,13 @@ void BuildPerJointMeshes(STreeData* skeleton, const u8* primGeomData, u32 primGe
                 v0.u=pkt[12]; v0.v=pkt[13]; v0.tpage=tp; v0.cba=cb;
                 v1.u=pkt[24]; v1.v=pkt[25]; v1.tpage=tp; v1.cba=cb;
                 v2.u=pkt[36]; v2.v=pkt[37]; v2.tpage=tp; v2.cba=cb;
-
-                u16 base = (u16)allVerts.size();
-                allVerts.push_back(v0); allVerts.push_back(v1); allVerts.push_back(v2);
+                u16 base = (u16)skinVerts.size();
+                skinVerts.push_back(v0); skinVerts.push_back(v1); skinVerts.push_back(v2);
                 allIndices.push_back(base); allIndices.push_back(base+1); allIndices.push_back(base+2);
 
             } else if (cmdBase == 0x38 || cmdBase == 0x28) {
-                // POLY_G4 / POLY_F4: untextured quad
-                TriVert v0 = makeVert(vi0), v1 = makeVert(vi1);
-                TriVert v2 = makeVert(vi2), v3 = makeVert(vi3);
-
+                SkinVertex v0 = makeSkinVert(vi0), v1 = makeSkinVert(vi1);
+                SkinVertex v2 = makeSkinVert(vi2), v3 = makeSkinVert(vi3);
                 if (cmdBase == 0x38) {
                     auto [r0,g0,b0] = readRGB(4);
                     auto [r1,g1,b1] = readRGB(12);
@@ -449,17 +459,14 @@ void BuildPerJointMeshes(STreeData* skeleton, const u8* primGeomData, u32 primGe
                     v0.r=r0; v0.g=g0; v0.b=b0; v1.r=r0; v1.g=g0; v1.b=b0;
                     v2.r=r0; v2.g=g0; v2.b=b0; v3.r=r0; v3.g=g0; v3.b=b0;
                 }
-
-                u16 base = (u16)allVerts.size();
-                allVerts.push_back(v0); allVerts.push_back(v1);
-                allVerts.push_back(v2); allVerts.push_back(v3);
+                u16 base = (u16)skinVerts.size();
+                skinVerts.push_back(v0); skinVerts.push_back(v1);
+                skinVerts.push_back(v2); skinVerts.push_back(v3);
                 allIndices.push_back(base); allIndices.push_back(base+1); allIndices.push_back(base+2);
                 allIndices.push_back(base+1); allIndices.push_back(base+3); allIndices.push_back(base+2);
 
             } else if (cmdBase == 0x30 || cmdBase == 0x20) {
-                // POLY_G3 / POLY_F3: untextured tri
-                TriVert v0 = makeVert(vi0), v1 = makeVert(vi1), v2 = makeVert(vi2);
-
+                SkinVertex v0 = makeSkinVert(vi0), v1 = makeSkinVert(vi1), v2 = makeSkinVert(vi2);
                 if (cmdBase == 0x30) {
                     auto [r0,g0,b0] = readRGB(4);
                     auto [r1,g1,b1] = readRGB(12);
@@ -473,9 +480,8 @@ void BuildPerJointMeshes(STreeData* skeleton, const u8* primGeomData, u32 primGe
                     v1.r=r0; v1.g=g0; v1.b=b0;
                     v2.r=r0; v2.g=g0; v2.b=b0;
                 }
-
-                u16 base = (u16)allVerts.size();
-                allVerts.push_back(v0); allVerts.push_back(v1); allVerts.push_back(v2);
+                u16 base = (u16)skinVerts.size();
+                skinVerts.push_back(v0); skinVerts.push_back(v1); skinVerts.push_back(v2);
                 allIndices.push_back(base); allIndices.push_back(base+1); allIndices.push_back(base+2);
             }
 
@@ -484,38 +490,53 @@ void BuildPerJointMeshes(STreeData* skeleton, const u8* primGeomData, u32 primGe
     }
 
     if (allIndices.empty()) {
-        delete[] jointMatrices;
         return;
     }
 
-    // Create combined pddiPrimBuffer
+    // Store SkinData for per-frame CPU skinning
+    SkinData* sd = new SkinData();
+    sd->numVerts = (u32)skinVerts.size();
+    sd->numIndices = (u32)allIndices.size();
+    sd->verts = new SkinVertex[sd->numVerts];
+    sd->indices = new u16[sd->numIndices];
+    memcpy(sd->verts, skinVerts.data(), sd->numVerts * sizeof(SkinVertex));
+    memcpy(sd->indices, allIndices.data(), sd->numIndices * sizeof(u16));
+    original->skinData = sd;
+
+    // Build initial mesh from current joint transforms
+    Mat4* jointMatrices = new Mat4[skeleton->numJoints];
+    skeleton->ComputeWorldMatrices(jointMatrices);
+
     u32 format = PDDI_V_POSITION | PDDI_V_COLOUR | PDDI_V_UV | PDDI_V_TEXINFO;
     pddiPrimBufferDesc desc(PDDI_PRIM_TRIANGLES, format,
-                            (u32)allVerts.size(), (u32)allIndices.size());
+                            sd->numVerts, sd->numIndices);
 
     pddiPrimBuffer* buffer = p3d::device->NewPrimBuffer(desc);
 
-    std::vector<f32> vertData(allVerts.size() * 10);
-    for (size_t i = 0; i < allVerts.size(); i++) {
-        vertData[i * 10 + 0] = allVerts[i].x;
-        vertData[i * 10 + 1] = allVerts[i].y;
-        vertData[i * 10 + 2] = allVerts[i].z;
-        vertData[i * 10 + 3] = allVerts[i].r;
-        vertData[i * 10 + 4] = allVerts[i].g;
-        vertData[i * 10 + 5] = allVerts[i].b;
-        vertData[i * 10 + 6] = allVerts[i].u;
-        vertData[i * 10 + 7] = allVerts[i].v;
-        vertData[i * 10 + 8] = allVerts[i].tpage;
-        vertData[i * 10 + 9] = allVerts[i].cba;
+    std::vector<f32> vertData(sd->numVerts * 10);
+    for (u32 i = 0; i < sd->numVerts; i++) {
+        const SkinVertex& sv = sd->verts[i];
+        const Mat4& m = jointMatrices[sv.jointIdx];
+        f32 wx, wy, wz;
+        Mat4TransformPoint(m, sv.lx, sv.ly, sv.lz, wx, wy, wz);
+        vertData[i * 10 + 0] = wx;
+        vertData[i * 10 + 1] = wy;
+        vertData[i * 10 + 2] = wz;
+        vertData[i * 10 + 3] = sv.r;
+        vertData[i * 10 + 4] = sv.g;
+        vertData[i * 10 + 5] = sv.b;
+        vertData[i * 10 + 6] = sv.u;
+        vertData[i * 10 + 7] = sv.v;
+        vertData[i * 10 + 8] = sv.tpage;
+        vertData[i * 10 + 9] = sv.cba;
     }
 
-    buffer->SetVertexData(vertData.data(), (u32)allVerts.size());
-    buffer->SetIndices(allIndices.data(), (u32)allIndices.size());
-
+    buffer->SetVertexData(vertData.data(), sd->numVerts);
+    buffer->SetIndices(sd->indices, sd->numIndices);
     skeleton->joints[0].meshBuffer = buffer;
 
     delete[] jointMatrices;
 
-    LOG("[Skeleton] Built combined mesh: %u verts, %u indices across %u joints",
-        (u32)allVerts.size(), (u32)allIndices.size(), skeleton->numJoints);
+    LOG("[Skeleton] Built skinned mesh: %u verts, %u indices across %u joints",
+        sd->numVerts, sd->numIndices, skeleton->numJoints);
 }

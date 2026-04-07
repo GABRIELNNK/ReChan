@@ -363,12 +363,9 @@ void Database::Scan(const u8* data, u32 size) {
     while (stream < end) {
         u32 tag = *stream++;
         if (tag >= 8 || tag == 0) {
-            LOG("[Database] Scan: skipping unknown tag %u at offset 0x%X", tag, (u32)((const u8*)(stream - 1) - data));
             continue;
         }
         if (stream >= end) break;
-
-        LOG("[Database] Scan: tag=%u at offset 0x%X", tag, (u32)((const u8*)(stream - 1) - data));
 
         switch (tag) {
         case 1: {
@@ -404,7 +401,6 @@ void Database::Scan(const u8* data, u32 size) {
 
             if (obj->subType == 0) {
                 // Block volume
-                LOG("[Database] Scan: volume subType=0 (block) type=%u name=%s", obj->type, obj->GetName() ? obj->GetName() : "null");
                 blockList.AddNodeTail(obj);
 
                 // Check attrib 15 for script info

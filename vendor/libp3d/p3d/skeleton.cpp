@@ -62,8 +62,30 @@ void STreeData::ComputeWorldMatrices(Mat4* outMatrices) const {
     s32 stackTop = 0;
     Mat4 current;
 
+    // Capture/load buffer keys are the raw dword offsets loaded from the joint chunk.
+    s32 captureKeys[64];
+    Mat4 captureValues[64];
+    bool captureValid[64];
+    s32 captureCount = 0;
+
+    auto findCaptureSlot = [&](s32 key) -> s32 {
+        for (s32 i = 0; i < captureCount; i++) {
+            if (captureKeys[i] == key) {
+                return i;
+            }
+        }
+        if (captureCount >= 64) {
+            return -1;
+        }
+        captureKeys[captureCount] = key;
+        captureValid[captureCount] = false;
+        return captureCount++;
+    };
+
     for (u32 i = 0; i < numJoints; i++) {
         const STreeJoint& j = joints[i];
+
+        // PSX order: PUSH -> TRANSFORM -> CAPTURE -> LOAD -> OUTPUT -> POP/POP_ALT
 
         if (j.flags & STF_PUSH_MATRIX) {
             if (stackTop < 32) {
@@ -71,30 +93,30 @@ void STreeData::ComputeWorldMatrices(Mat4* outMatrices) const {
             }
         }
 
-        if (j.flags & STF_LOAD_MATRIX) {
-            // TODO: load from captured anim matrix buffer
-        }
-
         if (j.flags & STF_TRANSFORM) {
             Mat4 local;
             p3dBuildRotMatrixYZX(j.rotationX, j.rotationY, j.rotationZ, local);
             local.SetTranslation((f32)j.translationX, (f32)j.translationY, (f32)j.translationZ);
+            current = current * local;
+        }
 
-            Mat4 temp = current;
-            for (int r = 0; r < 4; r++) {
-                for (int c = 0; c < 4; c++) {
-                    current.m[r * 4 + c] =
-                        local.m[r * 4 + 0] * temp.m[0 * 4 + c] +
-                        local.m[r * 4 + 1] * temp.m[1 * 4 + c] +
-                        local.m[r * 4 + 2] * temp.m[2 * 4 + c] +
-                        local.m[r * 4 + 3] * temp.m[3 * 4 + c];
+        if (j.flags & STF_CAPTURE_MATRIX) {
+            if (j.captureBufferIdx >= 0) {
+                s32 slot = findCaptureSlot(j.captureBufferIdx);
+                if (slot >= 0) {
+                    captureValues[slot] = current;
+                    captureValid[slot] = true;
                 }
             }
         }
 
-        // 0x80: capture current matrix for later loadMatrix joints
-        if (j.flags & STF_CAPTURE_MATRIX) {
-            // TODO: store matrix for Repeat joint loading
+        if (j.flags & STF_LOAD_MATRIX) {
+            if (j.captureBufferIdx >= 0) {
+                s32 slot = findCaptureSlot(j.captureBufferIdx);
+                if (slot >= 0 && captureValid[slot]) {
+                    current = captureValues[slot];
+                }
+            }
         }
 
         outMatrices[i] = current;
@@ -144,10 +166,11 @@ static bool ParseJointChunk(const u8* data, u32 dataSize, STreeJoint* out) {
     out->polyStartIdx = ReadU16(data + p);
     p += 2;
 
-    // Long -> extraMemOffset (skip - PSX memory management)
+    // Long -> matrix buffer dword offset (STLOAD AddJoint).
     if (p + 4 > dataSize) {
         return false;
     }
+    out->captureBufferIdx = (s32)ReadU32(data + p);
     p += 4;
 
     // Initialize runtime fields
@@ -160,16 +183,19 @@ static bool ParseJointChunk(const u8* data, u32 dataSize, STreeJoint* out) {
     out->restPoseRotX = 0;
     out->restPoseRotY = 0;
     out->restPoseRotZ = 0;
+    out->bindTranslationX = 0;
+    out->bindTranslationY = 0;
+    out->bindTranslationZ = 0;
+    out->bindRotationX = 0;
+    out->bindRotationY = 0;
+    out->bindRotationZ = 0;
     out->meshBuffer = nullptr;
 
-    // Look for optional 0x6125 rest-pose sub-chunk
-    while (p + 6 <= dataSize) {
+    // Optional 0x6125 rest-pose sub-chunk (single optional child in STLOAD AddJoint).
+    if (p + 6 <= dataSize) {
         u16 subId = ReadU16(data + p);
         u32 subSize = ReadU32(data + p + 2);
-        if (subSize < 6 || p + subSize > dataSize) {
-            break;
-        }
-        if (subId == CHUNK_REST_POSE) {
+        if (subSize >= 6 && p + subSize <= dataSize && subId == CHUNK_REST_POSE) {
             u32 sp = p + 6;
             if (sp + 6 <= p + subSize) {
                 out->restPoseRotX = ReadS16(data + sp);
@@ -177,7 +203,6 @@ static bool ParseJointChunk(const u8* data, u32 dataSize, STreeJoint* out) {
                 out->restPoseRotZ = ReadS16(data + sp + 4);
             }
         }
-        p += subSize;
     }
 
     return true;

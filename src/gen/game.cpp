@@ -11,6 +11,7 @@
 #include "gen/levelmgr.h"
 #include "gen/time.h"
 #include "gen/ai.h"
+#include "gen/model.h"
 #include "gen/director.h"
 #include "gen/scoremgr.h"
 #include "snd/sound.h"
@@ -89,6 +90,7 @@ Game::Game() {
     // AnimateEverythingHandler (pri=-48), EndFrameHandler (pri=-64)
     // Display::InternalOpen adds dispBeginFrameHandler (62) and dispEndFrameHandler (-62)
     handlerSet2.AddHandler(BeginFrameHandler, 64);
+    handlerSet2.AddHandler(AnimateEverythingHandler, -48);
     handlerSet2.AddHandler(DrawEverythingHandlerCB, -16);
     handlerSet2.AddHandler(EndFrameHandler, -64);
 
@@ -287,6 +289,26 @@ World* Game::GetWorld() const {
 void Game::BeginFrameHandler(Handler*) {
     MARKFUNCTION(0x8002B408);
     // PSX: gp[3404] = 0 (reset render counter)
+}
+
+// PSX: AnimateEverythingHandler (GAME.CPP:2620, pri=-48)
+static void AnimateLoop(ccList& list) {
+    for (ccMinNode* node = list.head; node != nullptr; node = node->next) {
+        Thing* thing = static_cast<Thing*>(node);
+        if (thing->model) {
+            Model* m = static_cast<Model*>(thing->model);
+            m->Animate();
+        }
+    }
+}
+
+void Game::AnimateEverythingHandler(Handler*) {
+    MARKFUNCTION(0x8002B2F0);
+    if (!g_ai) return;
+    AnimateLoop(g_ai->activeZoneList);
+    AnimateLoop(g_ai->humanoidList);
+    AnimateLoop(g_ai->pickupList);
+    AnimateLoop(g_ai->inactivePickupList);
 }
 
 // PSX: DrawEverythingHandler__FP7Handler (GAME.CPP:2211, 0x8002A98C)

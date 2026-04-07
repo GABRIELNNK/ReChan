@@ -6,6 +6,12 @@ static u16 ReadU16(const u8* p) { return p[0] | (p[1] << 8); }
 static u32 ReadU32(const u8* p) { return p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24); }
 static s16 ReadS16(const u8* p) { return (s16)(p[0] | (p[1] << 8)); }
 
+static s16 LerpAngle16(s16 a0, s16 a1, s32 frac16) {
+    // PSX interpolates angle deltas in 16-bit space (wrapped delta).
+    s16 delta = (s16)(a1 - a0);
+    return (s16)(a0 + (s16)(((s32)delta * (s64)frac16) >> 16));
+}
+
 // TransformAnim
 
 TransformAnim::TransformAnim()
@@ -101,7 +107,7 @@ TransformAnim* TransformAnim::Parse(const u8* rawData, u32 rawSize) {
 // TransformFlip
 
 TransformFlip::TransformFlip()
-    : frame(0), frameReal(0), dirty(1), anim(nullptr), tree(nullptr) {}
+    : frame(0), frameReal(0), dirty(1), additiveTranslation(false), anim(nullptr), tree(nullptr) {}
 
 TransformFlip::~TransformFlip() {
     // We don't own anim or tree - they are managed externally
@@ -181,30 +187,34 @@ void TransformFlip::UpdateJoints() {
     dirty = 0;
 }
 
-// Find the bracket index: returns i such that keyTimes[i] <= intFrame < keyTimes[i+1].
-// Returns -1 if frame is before all keys, numKeys-1 if at or after last key.
-s32 TransformFlip::FindBracket(const u8* rawBase, u32 keyTimesOff, s32 numKeys, s32 intFrame) {
-    // Key times are stored as s16 array at rawBase + keyTimesOff * 4
+// Find the bracket index for dynamic key lists using 16.16 frame time.
+// PSX stores dynamic key times as u8 frame values.
+s32 TransformFlip::FindBracket(const u8* rawBase, u32 keyTimesOff, s32 numKeys, s32 frameReal) {
+    // Key times are stored as u8 array at rawBase + keyTimesOff * 4
     u32 byteOff = keyTimesOff * 4;
     const u8* times = rawBase + byteOff;
 
     // Check bounds
-    s16 firstTime = ReadS16(times);
-    if (intFrame <= firstTime) {
+    s32 firstTimeReal = ((s32)times[0]) << 16;
+    if (frameReal <= firstTimeReal) {
         return 0;
     }
 
-    s16 lastTime = ReadS16(times + (numKeys - 1) * 2);
-    if (intFrame >= lastTime) {
+    s32 lastTimeReal = ((s32)times[numKeys - 1]) << 16;
+    if (frameReal >= lastTimeReal) {
         return numKeys - 1;
     }
 
-    // Linear search for bracket (numKeys is typically small)
+    // Linear search for bracket (numKeys is typically small).
+    // Match PSX edge handling: exact key boundary advances to next key.
     for (s32 i = 0; i < numKeys - 1; i++) {
-        s16 t0 = ReadS16(times + i * 2);
-        s16 t1 = ReadS16(times + (i + 1) * 2);
-        if (intFrame >= t0 && intFrame < t1) {
+        s32 t0Real = ((s32)times[i]) << 16;
+        s32 t1Real = ((s32)times[i + 1]) << 16;
+        if (frameReal >= t0Real && frameReal < t1Real) {
             return i;
+        }
+        if (frameReal == t1Real) {
+            return i + 1;
         }
     }
 
@@ -216,12 +226,12 @@ void TransformFlip::EvalRotChannel(const TransformAnim::Channel& ch, STreeJoint&
     const u8* raw = ch.rawBase;
     u32 rawSize = ch.rawSize;
 
-    if (ch.keyType == 11) {
+    if (ch.keyType == KEY_STATIC_3DOF_ANGLE) {
         // tStatic3DOFKeyList: constant values at +8, +12, +16
         joint.rotationX = (s16)(s32)ReadU32(data + 8);
         joint.rotationY = (s16)(s32)ReadU32(data + 12);
         joint.rotationZ = (s16)(s32)ReadU32(data + 16);
-    } else if (ch.keyType == 5) {
+    } else if (ch.keyType == KEY_JOINT_3DOF_ANGLE) {
         // tJoint3DOFangle: packed rotation values
         // +8: numKeys, +12: keyTimesOff, +16: keyValuesOff
         u32 numKeys = ReadU32(data + 8);
@@ -232,25 +242,35 @@ void TransformFlip::EvalRotChannel(const TransformAnim::Channel& ch, STreeJoint&
         u32 keyValsOff = ReadU32(data + 16);
         u32 keyValsByteOff = keyValsOff * 4;
 
-        if (numKeys == 1 || dirty) {
-            // Single key or first evaluation: just use the value at current frame
-            s32 bracket = FindBracket(raw, keyTimesOff, (s32)numKeys, frame);
+        auto decodePacked = [](u32 packed, s32& rx, s32& ry, s32& rz) {
+            // PSX CHANNEL.CPP packs 3DOF angles with 32-step quantization across axes.
+            rx = (s16)((packed << 5) & 0xFFFF);
+            ry = (s16)((packed >> 6) & 0xFFE0);
+            rz = (s16)((packed >> 16) & 0xFFC0);
+        };
+
+        if (numKeys == 1) {
+            s32 bracket = FindBracket(raw, keyTimesOff, (s32)numKeys, frameReal);
             u32 packed = ReadU32(raw + keyValsByteOff + bracket * 4);
-            joint.rotationX = (s16)((packed >> 11) * 64);
-            joint.rotationY = (s16)(((packed >> 5) & 0x3F) * 32);
-            joint.rotationZ = (s16)((packed & 0x1F) * 32);
+            s32 rx, ry, rz;
+            decodePacked(packed, rx, ry, rz);
+            joint.rotationX = (s16)rx;
+            joint.rotationY = (s16)ry;
+            joint.rotationZ = (s16)rz;
             return;
         }
 
         // Multi-key interpolation
-        s32 bracket = FindBracket(raw, keyTimesOff, (s32)numKeys, frame);
+        s32 bracket = FindBracket(raw, keyTimesOff, (s32)numKeys, frameReal);
 
         if (bracket >= (s32)numKeys - 1) {
             // At or past last key
             u32 packed = ReadU32(raw + keyValsByteOff + (numKeys - 1) * 4);
-            joint.rotationX = (s16)((packed >> 11) * 64);
-            joint.rotationY = (s16)(((packed >> 5) & 0x3F) * 32);
-            joint.rotationZ = (s16)((packed & 0x1F) * 32);
+            s32 rx, ry, rz;
+            decodePacked(packed, rx, ry, rz);
+            joint.rotationX = (s16)rx;
+            joint.rotationY = (s16)ry;
+            joint.rotationZ = (s16)rz;
             return;
         }
 
@@ -258,17 +278,15 @@ void TransformFlip::EvalRotChannel(const TransformAnim::Channel& ch, STreeJoint&
         u32 packed0 = ReadU32(raw + keyValsByteOff + bracket * 4);
         u32 packed1 = ReadU32(raw + keyValsByteOff + (bracket + 1) * 4);
 
-        s32 rx0 = (s32)((packed0 >> 11) * 64);
-        s32 ry0 = (s32)(((packed0 >> 5) & 0x3F) * 32);
-        s32 rz0 = (s32)((packed0 & 0x1F) * 32);
-        s32 rx1 = (s32)((packed1 >> 11) * 64);
-        s32 ry1 = (s32)(((packed1 >> 5) & 0x3F) * 32);
-        s32 rz1 = (s32)((packed1 & 0x1F) * 32);
+        s32 rx0, ry0, rz0;
+        s32 rx1, ry1, rz1;
+        decodePacked(packed0, rx0, ry0, rz0);
+        decodePacked(packed1, rx1, ry1, rz1);
 
         // Get bracket key times for interpolation fraction
         u32 timesByteOff = keyTimesOff * 4;
-        s16 t0 = ReadS16(raw + timesByteOff + bracket * 2);
-        s16 t1 = ReadS16(raw + timesByteOff + (bracket + 1) * 2);
+        s32 t0 = (s32)*(raw + timesByteOff + bracket);
+        s32 t1 = (s32)*(raw + timesByteOff + (bracket + 1));
         s32 timeDelta = t1 - t0;
         if (timeDelta <= 0) {
             joint.rotationX = (s16)rx0;
@@ -282,10 +300,10 @@ void TransformFlip::EvalRotChannel(const TransformAnim::Channel& ch, STreeJoint&
         s32 frac16 = (s32)(((s64)frameDelta << 16) / ((s64)timeDelta << 16));
 
         // Lerp: v0 + (v1 - v0) * frac16 >> 16
-        joint.rotationX = (s16)(rx0 + (((rx1 - rx0) * (s64)frac16) >> 16));
-        joint.rotationY = (s16)(ry0 + (((ry1 - ry0) * (s64)frac16) >> 16));
-        joint.rotationZ = (s16)(rz0 + (((rz1 - rz0) * (s64)frac16) >> 16));
-    } else if (ch.keyType == 3) {
+        joint.rotationX = LerpAngle16((s16)rx0, (s16)rx1, frac16);
+        joint.rotationY = LerpAngle16((s16)ry0, (s16)ry1, frac16);
+        joint.rotationZ = LerpAngle16((s16)rz0, (s16)rz1, frac16);
+    } else if (ch.keyType == KEY_JOINT_1DOF_ANGLE) {
         // tJoint1DOFangle: single axis rotation
         // +8=numKeys, +12=keyTimesOff(u8 array), +16=dofIndex, +20=keyValuesOff(s16 array)
         u32 numKeys = ReadU32(data + 8);
@@ -298,20 +316,9 @@ void TransformFlip::EvalRotChannel(const TransformAnim::Channel& ch, STreeJoint&
         u32 keyTimesByteOff = keyTimesOff * 4;
         u32 keyValsByteOff = keyValsOff * 4;
 
-        // Key times are u8, find bracket by linear search
+        // Key times are u8, find bracket by frameReal
         const u8* times = raw + keyTimesByteOff;
-        s32 bracket = 0;
-        if (numKeys > 1) {
-            for (u32 k = 0; k < numKeys - 1; k++) {
-                if (frame >= (s32)times[k] && frame < (s32)times[k + 1]) {
-                    bracket = (s32)k;
-                    break;
-                }
-                if (frame >= (s32)times[k + 1]) {
-                    bracket = (s32)(k + 1);
-                }
-            }
-        }
+        s32 bracket = FindBracket(raw, keyTimesOff, (s32)numKeys, frameReal);
 
         s16 val;
         if (numKeys == 1 || bracket >= (s32)numKeys - 1) {
@@ -327,13 +334,13 @@ void TransformFlip::EvalRotChannel(const TransformAnim::Channel& ch, STreeJoint&
                 s16 v1 = ReadS16(raw + keyValsByteOff + (bracket + 1) * 2);
                 s32 frameDelta = frameReal - (t0 << 16);
                 s32 frac16 = (s32)(((s64)frameDelta << 16) / ((s64)timeDelta << 16));
-                val = (s16)((s32)v0 + ((((s32)v1 - (s32)v0) * (s64)frac16) >> 16));
+                val = LerpAngle16(v0, v1, frac16);
             }
         }
 
-        if (dofIndex == 0) {
+        if (dofIndex == DOF_AXIS_X) {
             joint.rotationX = val;
-        } else if (dofIndex == 1) {
+        } else if (dofIndex == DOF_AXIS_Y) {
             joint.rotationY = val;
         } else {
             joint.rotationZ = val;
@@ -346,12 +353,19 @@ void TransformFlip::EvalTransChannel(const TransformAnim::Channel& ch, STreeJoin
     const u8* raw = ch.rawBase;
     u32 rawSize = ch.rawSize;
 
-    if (ch.keyType == 12) {
+    auto writeTranslation = [&](s32 x, s32 y, s32 z) {
+        joint.translationX = x;
+        joint.translationY = y;
+        joint.translationZ = z;
+    };
+
+    if (ch.keyType == KEY_STATIC_3DOF_POS) {
         // tStatic3DOFKeyList: constant values at +8, +12, +16
-        joint.translationX = (s32)ReadU32(data + 8);
-        joint.translationY = (s32)ReadU32(data + 12);
-        joint.translationZ = (s32)ReadU32(data + 16);
-    } else if (ch.keyType == 8) {
+        writeTranslation(
+            (s32)ReadU32(data + 8),
+            (s32)ReadU32(data + 12),
+            (s32)ReadU32(data + 16));
+    } else if (ch.keyType == KEY_JOINT_3DOF_LP_PSX) {
         // tJoint3DOFlpPSX: 3DOF linear position
         // +8: numKeys, +12: keyTimesOff, +16: keyValuesOff (3 x s16 per key)
         u32 numKeys = ReadU32(data + 8);
@@ -362,29 +376,31 @@ void TransformFlip::EvalTransChannel(const TransformAnim::Channel& ch, STreeJoin
         u32 keyValsOff = ReadU32(data + 16);
         u32 keyValsByteOff = keyValsOff * 4;
 
-        if (numKeys == 1 || dirty) {
-            s32 bracket = FindBracket(raw, keyTimesOff, (s32)numKeys, frame);
+        if (numKeys == 1) {
+            s32 bracket = FindBracket(raw, keyTimesOff, (s32)numKeys, frameReal);
             u32 vOff = keyValsByteOff + bracket * 6;
             if (vOff + 6 > rawSize) {
                 return;
             }
-            joint.translationX = (s32)ReadS16(raw + vOff + 0);
-            joint.translationY = (s32)ReadS16(raw + vOff + 2);
-            joint.translationZ = (s32)ReadS16(raw + vOff + 4);
+            writeTranslation(
+                (s32)ReadS16(raw + vOff + 0),
+                (s32)ReadS16(raw + vOff + 2),
+                (s32)ReadS16(raw + vOff + 4));
             return;
         }
 
         // Multi-key interpolation
-        s32 bracket = FindBracket(raw, keyTimesOff, (s32)numKeys, frame);
+        s32 bracket = FindBracket(raw, keyTimesOff, (s32)numKeys, frameReal);
 
         if (bracket >= (s32)numKeys - 1) {
             u32 vOff = keyValsByteOff + (numKeys - 1) * 6;
             if (vOff + 6 > rawSize) {
                 return;
             }
-            joint.translationX = (s32)ReadS16(raw + vOff + 0);
-            joint.translationY = (s32)ReadS16(raw + vOff + 2);
-            joint.translationZ = (s32)ReadS16(raw + vOff + 4);
+            writeTranslation(
+                (s32)ReadS16(raw + vOff + 0),
+                (s32)ReadS16(raw + vOff + 2),
+                (s32)ReadS16(raw + vOff + 4));
             return;
         }
 
@@ -402,21 +418,20 @@ void TransformFlip::EvalTransChannel(const TransformAnim::Channel& ch, STreeJoin
         s32 z1 = (s32)ReadS16(raw + vOff1 + 4);
 
         u32 timesByteOff = keyTimesOff * 4;
-        s16 t0 = ReadS16(raw + timesByteOff + bracket * 2);
-        s16 t1 = ReadS16(raw + timesByteOff + (bracket + 1) * 2);
+        s32 t0 = (s32)*(raw + timesByteOff + bracket);
+        s32 t1 = (s32)*(raw + timesByteOff + (bracket + 1));
         s32 timeDelta = t1 - t0;
         if (timeDelta <= 0) {
-            joint.translationX = x0;
-            joint.translationY = y0;
-            joint.translationZ = z0;
+            writeTranslation(x0, y0, z0);
             return;
         }
 
         s32 frameDelta = frameReal - ((s32)t0 << 16);
         s32 frac16 = (s32)(((s64)frameDelta << 16) / ((s64)timeDelta << 16));
 
-        joint.translationX = (s32)(x0 + (((x1 - x0) * (s64)frac16) >> 16));
-        joint.translationY = (s32)(y0 + (((y1 - y0) * (s64)frac16) >> 16));
-        joint.translationZ = (s32)(z0 + (((z1 - z0) * (s64)frac16) >> 16));
+        writeTranslation(
+            (s32)(x0 + (((x1 - x0) * (s64)frac16) >> 16)),
+            (s32)(y0 + (((y1 - y0) * (s64)frac16) >> 16)),
+            (s32)(z0 + (((z1 - z0) * (s64)frac16) >> 16)));
     }
 }

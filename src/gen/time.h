@@ -12,15 +12,11 @@
 class Time : public Manager {
 public:
     u32 frameCounter = 0; // +28: incremented each frame by Step()
-
-    // PC: target framerate - the game loop sleeps to maintain this rate.
-    // PSX ran at ~30 fps; all physics values are tuned for 30 fps per-frame.
-    // Set to 0 to uncap.
-    s32 targetFPS = 30;
+    s32 targetFPS = 60;
 
     // PC: measured real delta time (seconds) and FPS, updated each frame.
-    f32 deltaTime = 1.0f / 30.0f;
-    f32 fps = 30.0f;
+    f32 deltaTime = 1.0f / 60.0f;
+    f32 fps = 60.0f;
 
     // PSX: __4Time (TIME.CPP, 0x80044950)
     Time();

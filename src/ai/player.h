@@ -183,4 +183,11 @@ public:
 
     // PSX: PlayPlayerTauntResponse__6Player (PLAYER.CPP:4786)
     void PlayPlayerTauntResponse();
+
+    // PC helpers for debug/iteration: direct animation control on player model.
+    bool PlayAnimation(s32 animEnum, s32 loopType);
+    void PauseAnimation();
+    void ResumeAnimation();
+    void StopAnimation();
+    bool IsAnimationPaused() const;
 };
