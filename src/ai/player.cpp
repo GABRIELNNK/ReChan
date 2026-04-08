@@ -12,17 +12,18 @@
 #include "p3d/p3dmath.h"
 #include "pc/log.h"
 
-// Command bit positions - PSX Behaviour action IDs from FindActionRequest/RequestAction
+// Command bit masks - derived from GameAction enum bit positions.
 // RequestAction does: commandBits |= (1 << actionID)
-// PSX _Stand dispatches by checking bits in priority order.
-static constexpr s32 CB_GUARD_RELEASE = (1 << 1); // bit 1: release/stand request
-static constexpr s32 CB_RUN      = (1 << 2);  // bit 2: directional movement
-static constexpr s32 CB_JUMP     = (1 << 3);  // bit 3: jump (Cross)
-static constexpr s32 CB_GUARD    = (1 << 4);  // bit 4: guard/taunt (Circle)
-static constexpr s32 CB_DIVE_ROLL = (1 << 5); // bit 5: dive roll (R1)
-static constexpr s32 CB_BACKFLIP = (1 << 6);  // bit 6: backflip (L1)
-static constexpr s32 CB_ATTACK   = (1 << 7);  // bit 7: attack (Square)
-static constexpr s32 CB_PICKUP   = (1 << 15); // bit 15: pickup (Triangle)
+static constexpr s32 CB_GUARD_RELEASE = (1 << GA_GUARD_RELEASE); // bit 1
+static constexpr s32 CB_MOVE     = (1 << GA_MOVE);          // bit 2: directional movement
+static constexpr s32 CB_JUMP     = (1 << GA_JUMP);          // bit 3: jump (Cross tap)
+static constexpr s32 CB_JUMP_DIR = (1 << GA_JUMP_DIRECTIONAL); // bit 4: jump + direction
+static constexpr s32 CB_DIVE_ROLL = (1 << GA_DIVE_ROLL);    // bit 5: dive roll (R1)
+static constexpr s32 CB_STRAFE   = (1 << GA_STRAFE);        // bit 6: strafe (R2)
+static constexpr s32 CB_GRAB     = (1 << GA_GRAB);          // bit 7: grab/throw (Circle)
+static constexpr s32 CB_PUNCH    = (1 << GA_PUNCH);         // bit 8: punch (Square)
+static constexpr s32 CB_KICK     = (1 << GA_KICK);          // bit 9: kick (Triangle)
+static constexpr s32 CB_GRAB_FWD = (1 << GA_GRAB_FORWARD);  // bit 15: grab forward
 
 // Movement tuning constants (PSX original values)
 // PSX uses a ramping force accumulator (gp+392) that gradually increases from 0
@@ -756,11 +757,10 @@ void Player::DoWallJump() {
 void Player::FallingPhysics() {
     MARKFUNCTION(0x80032368);
 
-    // PSX: v2 = a1[88] (commandBits at +352)
-    // PSX: checks bits 2, 3, 4
+    // bits 2(move), 4(jump+dir) - GA_JUMP (bit 3) alone means no directional input
     u32 cb = (u32)commandBits;
     s32 hasInput = 0;
-    if (((cb >> 2) & 1) || ((cb >> 4) & 1) || ((cb >> 3) & 1)) {
+    if (((cb >> 2) & 1) || ((cb >> 4) & 1)) {
         hasInput = 1;
     }
 
@@ -793,7 +793,7 @@ void Player::CheckForLanding() {
     AnimStructure* anim = (m != nullptr) ? static_cast<AnimStructure*>(m->animStructure) : nullptr;
     s32 curAnim = anim ? anim->animEnum : 0;
 
-    if (commandBits & CB_RUN) {
+    if (commandBits & CB_MOVE) {
         SetActionState(AS_RUN, 0);
         if (m) {
             s32 nextAnim = PLAYER_ANIM_RUN;
@@ -1460,8 +1460,8 @@ void Player::_Flip() {
         dir.pad = 0;
         AddForce(runSpeed, &dir);
     } else {
-        // Default flip: check CB_RUN for directional control
-        if (!(commandBits & CB_RUN)) {
+        // Default flip: check CB_MOVE for directional control
+        if (!(commandBits & CB_MOVE)) {
             goto handleLanding;
         }
         // Check angle difference for immediate vs gradual turn
@@ -1550,10 +1550,11 @@ void Player::_Jump() {
             maxFallDivisor = field712[2];
         }
 
-        // Air control direction check: bits 2(run), 3(jump), 4(guard), 6(backflip)
+        // Air control direction check: bits 2(move), 4(jump+dir), 6(strafe)
+        // GA_JUMP (bit 3) is a pure vertical jump - no forward force
         u32 cb = (u32)commandBits;
         s32 hasDir = 0;
-        if (((cb >> 2) & 1) || ((cb >> 6) & 1) || ((cb >> 4) & 1) || ((cb >> 3) & 1)) {
+        if (((cb >> 2) & 1) || ((cb >> 6) & 1) || ((cb >> 4) & 1)) {
             hasDir = 1;
         }
 
@@ -1779,7 +1780,11 @@ void Player::_Run() {
         if (floorHeight != (s32)0x80000001 && pos.y - floorHeight < 129) {
             pos.y = floorHeight;
         } else {
-            SetActionState(AS_FALL, 3);
+            // Keep jump transitions (AS_PAUSE, etc.) from being overwritten to fall
+            // in the same _Run frame when floor tracking data is unavailable.
+            if (actionState == AS_RUN) {
+                SetActionState(AS_FALL, 3);
+            }
         }
     }
 

@@ -67,6 +67,36 @@ namespace pddiInput {
     constexpr int MouseMiddle = 2;
 }
 
+// Gamepad button indices (backend-agnostic)
+namespace GamepadButton {
+    static constexpr int A             = 0;  // Cross
+    static constexpr int B             = 1;  // Circle
+    static constexpr int X             = 2;  // Square
+    static constexpr int Y             = 3;  // Triangle
+    static constexpr int LeftBumper    = 4;  // L1
+    static constexpr int RightBumper   = 5;  // R1
+    static constexpr int Back          = 6;  // Select
+    static constexpr int Start         = 7;
+    static constexpr int LeftThumb     = 8;  // L3
+    static constexpr int RightThumb    = 9;  // R3
+    static constexpr int DpadUp        = 10;
+    static constexpr int DpadRight     = 11;
+    static constexpr int DpadDown      = 12;
+    static constexpr int DpadLeft      = 13;
+    static constexpr int COUNT         = 14;
+}
+
+// Gamepad axis indices (backend-agnostic)
+namespace GamepadAxis {
+    static constexpr int LeftX         = 0;
+    static constexpr int LeftY         = 1;
+    static constexpr int RightX        = 2;
+    static constexpr int RightY        = 3;
+    static constexpr int LeftTrigger   = 4;  // L2
+    static constexpr int RightTrigger  = 5;  // R2
+    static constexpr int COUNT         = 6;
+}
+
 class pddiDisplay : public pddiObject {
 public:
     virtual bool InitDisplay(const pddiDisplayInit& init) = 0;
@@ -153,12 +183,23 @@ public:
     virtual void DestroyVRAMTexture(u32 handle) = 0;
 };
 
-// pddiDevice — factory for all pddi objects──
+// pddiGamepad - abstract gamepad/controller interface
+
+class pddiGamepad : public pddiObject {
+public:
+    virtual void Poll() = 0;
+    virtual bool IsConnected() const = 0;
+    virtual bool IsButtonDown(int button) const = 0;
+    virtual float GetAxis(int axis) const = 0;
+};
+
+// pddiDevice - factory for all pddi objects
 
 class pddiDevice : public pddiObject {
 public:
     virtual pddiDisplay* NewDisplay() = 0;
     virtual pddiRenderContext* NewRenderContext(pddiDisplay* display) = 0;
+    virtual pddiGamepad* NewGamepad() = 0;
     virtual pddiTexture* NewTexture() = 0;
     virtual pddiPrimBuffer* NewPrimBuffer(const pddiPrimBufferDesc& desc) = 0;
     virtual pddiBaseShader* NewShader(const char* type = "simple") = 0;

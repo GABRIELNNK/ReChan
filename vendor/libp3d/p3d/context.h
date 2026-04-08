@@ -6,6 +6,7 @@
 class pddiDevice;
 class pddiDisplay;
 class pddiRenderContext;
+class pddiGamepad;
 class tInventory;
 class PlatformInput;
 
@@ -31,6 +32,7 @@ public:
     pddiDevice* GetDevice() { return device; }
     pddiDisplay* GetDisplay() { return display; }
     pddiRenderContext* GetContext() { return renderContext; }
+    pddiGamepad* GetGamepad() { return gamepad; }
     tInventory* GetInventory() { return inventory; }
     PlatformInput* GetInputManager() { return inputManager; }
 
@@ -42,6 +44,7 @@ private:
     pddiDevice* device = nullptr;
     pddiDisplay* display = nullptr;
     pddiRenderContext* renderContext = nullptr;
+    pddiGamepad* gamepad = nullptr;
     tInventory* inventory = nullptr;
     PlatformInput* inputManager = nullptr;
 };

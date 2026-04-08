@@ -5,6 +5,7 @@
 #include "ai/thing.h"
 #include "p3d/p3dmath.h"
 #include "ai/behaviour.h"
+#include "pc/inputaction.h"
 
 // Action state IDs for Humanoid::SetActionState
 // PSX: 74-case switch at 0x80065680. IDs confirmed from handler transitions.
@@ -173,6 +174,54 @@ public:
     // Bits: 1=guard, 2=kick, 3=punch, 4=taunt, 5=strafe, 6=backflip,
     //        7=combat, 8-20=combos, 21=dive roll, 30=env hit, 31=explosion
     s32 commandBits = 0;
+
+    // Action query helpers - read commandBits by named action.
+    // Returns false if the action bit is not set or controls are disabled.
+    inline bool HasAction(GameAction action) const {
+        if (g_actionInput && !g_actionInput->controlsEnabled) {
+            return false;
+        }
+        return (commandBits >> static_cast<s32>(action)) & 1;
+    }
+
+    inline bool HasGuardRelease() const { return HasAction(GA_GUARD_RELEASE); }
+    inline bool HasMove() const         { return HasAction(GA_MOVE); }
+    inline bool HasJump() const         { return HasAction(GA_JUMP); }
+    inline bool HasJumpDirectional() const { return HasAction(GA_JUMP_DIRECTIONAL); }
+    inline bool HasDiveRoll() const     { return HasAction(GA_DIVE_ROLL); }
+    inline bool HasStrafe() const       { return HasAction(GA_STRAFE); }
+    inline bool HasGrab() const         { return HasAction(GA_GRAB); }
+    inline bool HasPunch() const        { return HasAction(GA_PUNCH); }
+    inline bool HasKick() const         { return HasAction(GA_KICK); }
+    inline bool HasBackPunch() const    { return HasAction(GA_BACK_PUNCH); }
+    inline bool HasBackKick() const     { return HasAction(GA_BACK_KICK); }
+    inline bool HasHeavyPunch() const   { return HasAction(GA_HEAVY_PUNCH); }
+    inline bool HasHeavyKick() const    { return HasAction(GA_HEAVY_KICK); }
+    inline bool HasSpecialGrab() const  { return HasAction(GA_SPECIAL_GRAB); }
+    inline bool HasGrabForward() const  { return HasAction(GA_GRAB_FORWARD); }
+    inline bool HasGrabHeld() const     { return HasAction(GA_GRAB_HELD); }
+    inline bool HasGrabFwdHeld() const  { return HasAction(GA_GRAB_FWD_HELD); }
+    inline bool HasCounter() const      { return HasAction(GA_COUNTER); }
+    inline bool HasAIDiveRoll() const   { return HasAction(GA_AI_DIVE_ROLL); }
+
+    // Check if any attack bit (7-20) is set
+    inline bool HasAnyAttack() const {
+        if (g_actionInput && !g_actionInput->controlsEnabled) {
+            return false;
+        }
+        return (commandBits >> GA_GRAB) & 0x3FFF;
+    }
+
+    // Check if any pickup/grab bit is set (bits 7, 15, 16, 19)
+    inline bool HasAnyPickup() const {
+        if (g_actionInput && !g_actionInput->controlsEnabled) {
+            return false;
+        }
+        return ((commandBits >> GA_GRAB) & 1) ||
+               ((commandBits >> GA_GRAB_FORWARD) & 1) ||
+               (commandBits & 0x10000) ||
+               ((commandBits >> 19) & 1);
+    }
 
     // PSX +356 (s32): current action state number
     s32 actionState = -1;

@@ -31,6 +31,7 @@ project "rechan"
     includedirs {
         "src",
         "vendor/libp3d",
+        "vendor/libp3d/vendor/imgui",
         "vendor/miniaudio",
     }
 

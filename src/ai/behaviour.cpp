@@ -7,6 +7,7 @@
 #include "gen/control.h"
 #include "gen/game.h"
 #include "gen/camera.h"
+#include "pc/inputaction.h"
 #include "p3d/p3dmath.h"
 
 // PSX: Sony DualShock pad type bytes (analog mode)
@@ -95,93 +96,104 @@ void Behaviour::PlayerUserControl(Behaviour* self) {
     }
 
     Humanoid* owner = self->owner;
+    bool useKeyboard = g_actionInput && !g_actionInput->IsGamepadActive();
 
     s32 direction = 0;
     s16 analogX = 0;
     s32 analogY = 0;
-
-    u32 buttons;
-    if (self->behaviourFlags & 1) {
-        buttons = (u32)g_game->GetControlVal(self->padPort);
-        analogX = 0;
-    } else {
-        buttons = 0;
-        self->behaviourFlags |= 1u;
-    }
-
     s32 stickX = 0;
     s32 stickY = 0;
-
+    u32 buttons = 0;
     u16 port = (u16)self->padPort;
-    Control& ctrl = g_inputManager->controls[port & 1];
-    u16 padType = ctrl.padType;
 
-    if ((padType == PAD_TYPE_ANALOG_L || padType == PAD_TYPE_ANALOG_H) && buttons) {
-        // analog stick path
-        stickX = (s32)ctrl.analogLX - STICK_CENTER;
-        s32 absStickX = stickX;
-        if (stickX < 0) {
-            absStickX = STICK_CENTER - (s32)ctrl.analogLX;
+    if (useKeyboard) {
+        // PC keyboard path: movement from ActionInput, action buttons resolved later
+        if (!(self->behaviourFlags & 1)) {
+            self->behaviourFlags |= 1u;
         }
-        s32 rawY = (s32)ctrl.analogLY;
-        stickY = rawY - STICK_CENTER;
-
-        if (absStickX < STICK_DEADZONE) {
+        stickX = g_actionInput->GetMoveX();
+        stickY = g_actionInput->GetMoveY();
+        analogX = (s16)stickX;
+        analogY = stickY;
+    } else {
+        // PSX gamepad path: read from pad pipeline
+        if (self->behaviourFlags & 1) {
+            buttons = (u32)g_game->GetControlVal(self->padPort);
             analogX = 0;
         } else {
-            if (stickX <= 0) {
-                analogX = (s16)((s32)ctrl.analogLX - STICK_CENTER);
-                if (stickX < 0) {
-                    buttons |= PsxPad::Left;
-                }
-            } else {
-                buttons |= PsxPad::Right;
-            }
-            analogX = (s16)stickX;
+            buttons = 0;
+            self->behaviourFlags |= 1u;
         }
 
-        s32 absStickY = rawY - STICK_CENTER;
-        if (stickY < 0) {
-            absStickY = STICK_CENTER - rawY;
-        }
-        analogY = 0;
-        if (absStickY >= STICK_DEADZONE) {
-            analogY = rawY - STICK_CENTER;
-            if (stickY > 0) {
-                buttons |= PsxPad::Down;
-            } else if (stickY < 0) {
-                buttons |= PsxPad::Up;
+        Control& ctrl = g_inputManager->controls[port & 1];
+        u16 padType = ctrl.padType;
+
+        if ((padType == PAD_TYPE_ANALOG_L || padType == PAD_TYPE_ANALOG_H) && buttons) {
+            stickX = (s32)ctrl.analogLX - STICK_CENTER;
+            s32 absStickX = stickX;
+            if (stickX < 0) {
+                absStickX = STICK_CENTER - (s32)ctrl.analogLX;
             }
-        }
-    } else {
-        // digital d-pad path
-        if (buttons & (PsxPad::Up | PsxPad::Right | PsxPad::Down | PsxPad::Left)) {
-            analogX = -DPAD_ANALOG_MAG;
-            if (buttons & PsxPad::Left) {
-                stickX = -STICK_MAX;
+            s32 rawY = (s32)ctrl.analogLY;
+            stickY = rawY - STICK_CENTER;
+
+            if (absStickX < STICK_DEADZONE) {
+                analogX = 0;
             } else {
-                analogX = DPAD_ANALOG_MAG;
-                if (buttons & PsxPad::Right) {
-                    stickX = STICK_MAX;
+                if (stickX <= 0) {
+                    analogX = (s16)((s32)ctrl.analogLX - STICK_CENTER);
+                    if (stickX < 0) {
+                        buttons |= PsxPad::Left;
+                    }
                 } else {
-                    analogX = 0;
+                    buttons |= PsxPad::Right;
                 }
+                analogX = (s16)stickX;
             }
 
-            analogY = -DPAD_ANALOG_MAG;
-            if (buttons & PsxPad::Up) {
-                stickY = -STICK_MAX;
-            } else {
-                analogY = DPAD_ANALOG_MAG;
-                if (buttons & PsxPad::Down) {
-                    stickY = STICK_MAX;
+            s32 absStickY = rawY - STICK_CENTER;
+            if (stickY < 0) {
+                absStickY = STICK_CENTER - rawY;
+            }
+            analogY = 0;
+            if (absStickY >= STICK_DEADZONE) {
+                analogY = rawY - STICK_CENTER;
+                if (stickY > 0) {
+                    buttons |= PsxPad::Down;
+                } else if (stickY < 0) {
+                    buttons |= PsxPad::Up;
+                }
+            }
+        } else {
+            if (buttons & (PsxPad::Up | PsxPad::Right | PsxPad::Down | PsxPad::Left)) {
+                analogX = -DPAD_ANALOG_MAG;
+                if (buttons & PsxPad::Left) {
+                    stickX = -STICK_MAX;
                 } else {
-                    analogY = 0;
+                    analogX = DPAD_ANALOG_MAG;
+                    if (buttons & PsxPad::Right) {
+                        stickX = STICK_MAX;
+                    } else {
+                        analogX = 0;
+                    }
+                }
+
+                analogY = -DPAD_ANALOG_MAG;
+                if (buttons & PsxPad::Up) {
+                    stickY = -STICK_MAX;
+                } else {
+                    analogY = DPAD_ANALOG_MAG;
+                    if (buttons & PsxPad::Down) {
+                        stickY = STICK_MAX;
+                    } else {
+                        analogY = 0;
+                    }
                 }
             }
         }
     }
 
+    // Direction classification (shared between keyboard and gamepad)
     s32 ownerAngle = owner->orientation.y;
     s32 targetAngle = ownerAngle;
 
@@ -189,7 +201,6 @@ void Behaviour::PlayerUserControl(Behaviour* self) {
 
     if (analogX || (analogY << 16)) {
         Camera& cam = g_game->GetCamera();
-        // PSX reads theCamera+44 (camera orientation.y), not camAngleY.
         s32 cameraAngle = cam.GetOrientY();
 
         targetAngle = cameraAngle - rmATan216((f32)analogX, (f32)(-(s16)analogY)) + ANGLE_QUARTER_TURN;
@@ -234,7 +245,6 @@ void Behaviour::PlayerUserControl(Behaviour* self) {
             maxAxis = -maxAxis;
         }
 
-        // PSX: rmDiv16i(g_maxAttackRange << 16, 0x7F0000) then fixed-point multiply
         s32 range = (s32)(((s64)(maxAxis << 16) * (s64)rmDiv16i(g_maxAttackRange << 16, STICK_MAX_FP)) >> 16) >> 16;
         if (range) {
             owner->attackRange = range;
@@ -243,24 +253,34 @@ void Behaviour::PlayerUserControl(Behaviour* self) {
         }
     }
 
-    if (self->previousButtons == buttons) {
-        self->buttonHoldCounter++;
+    // Action resolution (branched per input device)
+    s32 actionReq;
+
+    if (useKeyboard) {
+        // PC keyboard: resolve action from ActionInput button state + direction
+        actionReq = g_actionInput->ResolveAction(direction);
     } else {
-        self->buttonHoldCounter = 0;
+        // PSX gamepad: FindActionRequest from pad button bitmask
+        if (self->previousButtons == buttons) {
+            self->buttonHoldCounter++;
+        } else {
+            self->buttonHoldCounter = 0;
+        }
+        self->previousButtons = buttons;
+
+        actionReq = FindActionRequest(
+            &self->actionRequestState[0],
+            buttons & DPAD_STRIP_MASK,
+            direction,
+            port);
     }
-    self->previousButtons = buttons;
 
-    s32 actionReq = FindActionRequest(
-        &self->actionRequestState[0],
-        buttons & DPAD_STRIP_MASK,
-        direction,
-        port);
-
+    // Set faceAngle for movement/direction-based actions
     if ((u32)(actionReq - 2) < 3
-        || actionReq == 6
+        || actionReq == GA_STRAFE
         || actionReq == 19
-        || actionReq == 7
-        || actionReq == 15
+        || actionReq == GA_GRAB
+        || actionReq == GA_GRAB_FORWARD
         || actionReq == 16) {
         owner->faceAngle = targetAngle;
     }

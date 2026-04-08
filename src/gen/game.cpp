@@ -25,6 +25,7 @@
 #include "fe/xcfont.h"
 #include "radmovie/movieplayer.h"
 #include "pc/tim.h"
+#include "pc/inputaction.h"
 #include "p3d/keycode.h"
 #include "p3d/input.h"
 #include "p3d/context.h"
@@ -170,6 +171,11 @@ void Game::InternalOpen() {
         g_inputManager = new InputManager();
         g_inputManager->SetName("InputManager", 0);
         managerList.AddNodePri(g_inputManager);
+    }
+
+    // PC: ActionInput system (keyboard -> game actions, bypassing pad emulation)
+    if (!g_actionInput) {
+        g_actionInput = new ActionInput();
     }
 
     // 10. LevelManager (PSX: 136 bytes)
@@ -388,13 +394,74 @@ bool Game::Step() {
         p3d::input->ServiceInput();
     }
 
-#if PAD_KEYBOARD_EMULATION
-    if (g_inputManager) {
-        // PSX services pad input from VBlank every frame. On PC we mirror that
-        // behavior by feeding keyboard state once per game Step.
-        g_inputManager->UpdateFromKeyboard(p3d::input, 0);
+    // Update ActionInput (keyboard button states + movement)
+    if (g_actionInput) {
+        g_actionInput->Update(p3d::input);
     }
-#endif
+
+    // For gamepad: feed PSX button bits through existing pipeline.
+    // For keyboard: menu systems still read GetControlVal, so we
+    // synthesize pad bits from ActionInput for menu compatibility.
+    if (g_inputManager && g_actionInput) {
+        if (g_actionInput->IsGamepadActive() && p3d::input) {
+            // Gamepad: build PSX pad bits from GLFW gamepad state.
+            // The existing FindActionRequest pipeline handles button combos,
+            // hold durations, and direction resolution for gamepad.
+            u32 padBits = 0;
+            if (p3d::input->IsGamepadButtonDown(GamepadButton::A))           padBits |= PsxPad::Cross;
+            if (p3d::input->IsGamepadButtonDown(GamepadButton::B))           padBits |= PsxPad::Circle;
+            if (p3d::input->IsGamepadButtonDown(GamepadButton::X))           padBits |= PsxPad::Square;
+            if (p3d::input->IsGamepadButtonDown(GamepadButton::Y))           padBits |= PsxPad::Triangle;
+            if (p3d::input->IsGamepadButtonDown(GamepadButton::LeftBumper))  padBits |= PsxPad::L1;
+            if (p3d::input->IsGamepadButtonDown(GamepadButton::RightBumper)) padBits |= PsxPad::R1;
+            if (p3d::input->IsGamepadButtonDown(GamepadButton::Back))        padBits |= PsxPad::Select;
+            if (p3d::input->IsGamepadButtonDown(GamepadButton::Start))       padBits |= PsxPad::Start;
+            if (p3d::input->IsGamepadButtonDown(GamepadButton::LeftThumb))   padBits |= PsxPad::L3;
+            if (p3d::input->IsGamepadButtonDown(GamepadButton::RightThumb))  padBits |= PsxPad::R3;
+            if (p3d::input->IsGamepadButtonDown(GamepadButton::DpadUp))      padBits |= PsxPad::Up;
+            if (p3d::input->IsGamepadButtonDown(GamepadButton::DpadDown))    padBits |= PsxPad::Down;
+            if (p3d::input->IsGamepadButtonDown(GamepadButton::DpadLeft))    padBits |= PsxPad::Left;
+            if (p3d::input->IsGamepadButtonDown(GamepadButton::DpadRight))   padBits |= PsxPad::Right;
+
+            // L2/R2 triggers as digital buttons
+            if (p3d::input->GetLeftTrigger() >= PlatformInput::TRIGGER_THRESHOLD) {
+                padBits |= PsxPad::L2;
+            }
+            if (p3d::input->GetRightTrigger() >= PlatformInput::TRIGGER_THRESHOLD) {
+                padBits |= PsxPad::R2;
+            }
+
+            g_inputManager->ServiceInput(padBits, 0);
+
+            // Set analog stick data so PlayerUserControl takes the analog path
+            Control& ctrl = g_inputManager->controls[0];
+            ctrl.padType = 0x73; // PAD_TYPE_ANALOG_L
+            float lx = p3d::input->GetLeftStickX();
+            float ly = p3d::input->GetLeftStickY();
+            ctrl.analogLX = (u8)(128 + (s32)(lx * 127.0f));
+            ctrl.analogLY = (u8)(128 + (s32)(ly * 127.0f));
+            float rx = p3d::input->GetRightStickX();
+            float ry = p3d::input->GetRightStickY();
+            ctrl.analogRX = (u8)(128 + (s32)(rx * 127.0f));
+            ctrl.analogRY = (u8)(128 + (s32)(ry * 127.0f));
+        } else {
+            // Synthesize minimal pad bits for menu/FE systems that
+            // read GetControlVal directly (menus, title screen, etc).
+            // Gameplay uses ActionInput -> commandBits directly.
+            u32 menuBits = 0;
+            if (g_actionInput->GetMoveY() < 0) menuBits |= PsxPad::Up;
+            if (g_actionInput->GetMoveY() > 0) menuBits |= PsxPad::Down;
+            if (g_actionInput->GetMoveX() < 0) menuBits |= PsxPad::Left;
+            if (g_actionInput->GetMoveX() > 0) menuBits |= PsxPad::Right;
+            if (g_actionInput->IsButtonActive(InputButton::Jump))  menuBits |= PsxPad::Cross;
+            if (g_actionInput->IsButtonActive(InputButton::Start)) menuBits |= PsxPad::Start;
+            if (g_actionInput->IsButtonActive(InputButton::Select)) menuBits |= PsxPad::Select;
+            if (g_actionInput->IsButtonActive(InputButton::Grab))  menuBits |= PsxPad::Circle;
+            if (g_actionInput->IsButtonActive(InputButton::Punch)) menuBits |= PsxPad::Square;
+            if (g_actionInput->IsButtonActive(InputButton::Kick))  menuBits |= PsxPad::Triangle;
+            g_inputManager->ServiceInput(menuBits, 0);
+        }
+    }
 
     if (stateFunc)
         return stateFunc(this);

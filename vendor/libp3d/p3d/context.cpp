@@ -38,9 +38,11 @@ bool tContext::Setup(const tContextInitData& init) {
         return false;
 
     renderContext = device->NewRenderContext(display);
+    gamepad = device->NewGamepad();
     inventory = new tInventory();
     inputManager = new PlatformInput();
     inputManager->SetDisplay(display);
+    inputManager->SetGamepad(gamepad);
 
     return true;
 }
@@ -59,6 +61,11 @@ void tContext::Shutdown() {
     if (renderContext) {
         renderContext->Release();
         renderContext = nullptr;
+    }
+
+    if (gamepad) {
+        gamepad->Release();
+        gamepad = nullptr;
     }
 
     if (display) {

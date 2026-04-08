@@ -1,13 +1,21 @@
-// input.cpp — PlatformInput implementation
 #include "p3d/input.h"
 #include "pddi/pddidev.h"
+#include <cmath>
+#include <cstring>
 
 void PlatformInput::TrackKey(int key) {
     if (prevKeys.find(key) == prevKeys.end()) {
-        // Set prev=false so the first press triggers correctly
         prevKeys[key] = false;
         currKeys[key] = display ? display->IsKeyDown(key) : false;
     }
+}
+
+float PlatformInput::ApplyDeadzone(float value, float deadzone) const {
+    if (std::fabs(value) < deadzone) {
+        return 0.0f;
+    }
+    float sign = (value > 0.0f) ? 1.0f : -1.0f;
+    return sign * (std::fabs(value) - deadzone) / (1.0f - deadzone);
 }
 
 void PlatformInput::ServiceInput() {
@@ -22,21 +30,46 @@ void PlatformInput::ServiceInput() {
     for (int i = 0; i < 3; i++)
         prevMouse[i] = currMouse[i];
 
+    // Save previous gamepad state
+    std::memcpy(gpButtonsPrev, gpButtonsCurr, sizeof(gpButtonsCurr));
+
     if (!enabled) {
-        // Clear all current state so nothing reads as pressed
         for (auto& [key, val] : currKeys)
             val = false;
         for (int i = 0; i < 3; i++)
             currMouse[i] = false;
+        std::memset(gpButtonsCurr, 0, sizeof(gpButtonsCurr));
+        std::memset(gpAxes, 0, sizeof(gpAxes));
+        gamepadConnected = false;
         return;
     }
 
-    // Poll current state
+    // Poll current keyboard/mouse state
     display->GetMousePosition(mouseX, mouseY);
     for (auto& [key, val] : currKeys)
         val = display->IsKeyDown(key);
     for (int i = 0; i < 3; i++)
         currMouse[i] = display->IsMouseButtonDown(i);
+
+    // Poll gamepad via abstract interface
+    if (gamepad) {
+        gamepad->Poll();
+        gamepadConnected = gamepad->IsConnected();
+
+        if (gamepadConnected) {
+            for (int b = 0; b < 14; b++) {
+                gpButtonsCurr[b] = gamepad->IsButtonDown(b);
+            }
+            for (int a = 0; a < 6; a++) {
+                gpAxes[a] = gamepad->GetAxis(a);
+            }
+        } else {
+            std::memset(gpButtonsCurr, 0, sizeof(gpButtonsCurr));
+            std::memset(gpAxes, 0, sizeof(gpAxes));
+        }
+    } else {
+        gamepadConnected = false;
+    }
 }
 
 bool PlatformInput::IsKeyDown(int key) const {
@@ -84,4 +117,52 @@ void PlatformInput::GetMousePosition(double& x, double& y) const {
 void PlatformInput::GetMouseDelta(double& dx, double& dy) const {
     dx = mouseX - prevMouseX;
     dy = mouseY - prevMouseY;
+}
+
+bool PlatformInput::IsGamepadButtonDown(int button) const {
+    if (button < 0 || button >= 14) {
+        return false;
+    }
+    return gpButtonsCurr[button];
+}
+
+bool PlatformInput::IsGamepadButtonTriggered(int button) const {
+    if (button < 0 || button >= 14) {
+        return false;
+    }
+    return gpButtonsCurr[button] && !gpButtonsPrev[button];
+}
+
+float PlatformInput::GetGamepadAxis(int axis) const {
+    if (axis < 0 || axis >= 6) {
+        return 0.0f;
+    }
+    return gpAxes[axis];
+}
+
+float PlatformInput::GetLeftStickX() const {
+    return ApplyDeadzone(gpAxes[GamepadAxis::LeftX], STICK_DEADZONE);
+}
+
+float PlatformInput::GetLeftStickY() const {
+    return ApplyDeadzone(gpAxes[GamepadAxis::LeftY], STICK_DEADZONE);
+}
+
+float PlatformInput::GetRightStickX() const {
+    return ApplyDeadzone(gpAxes[GamepadAxis::RightX], STICK_DEADZONE);
+}
+
+float PlatformInput::GetRightStickY() const {
+    return ApplyDeadzone(gpAxes[GamepadAxis::RightY], STICK_DEADZONE);
+}
+
+float PlatformInput::GetLeftTrigger() const {
+    // Triggers range from -1 (released) to +1 (fully pressed)
+    float raw = gpAxes[GamepadAxis::LeftTrigger];
+    return (raw + 1.0f) * 0.5f;
+}
+
+float PlatformInput::GetRightTrigger() const {
+    float raw = gpAxes[GamepadAxis::RightTrigger];
+    return (raw + 1.0f) * 0.5f;
 }

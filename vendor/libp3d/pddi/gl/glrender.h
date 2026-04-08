@@ -221,13 +221,29 @@ private:
     void Init3DShader();
 };
 
-// glDevice──
+// glDevice
 
 class glDevice : public pddiDevice {
 public:
     pddiDisplay* NewDisplay() override;
     pddiRenderContext* NewRenderContext(pddiDisplay* display) override;
+    pddiGamepad* NewGamepad() override;
     pddiTexture* NewTexture() override;
     pddiPrimBuffer* NewPrimBuffer(const pddiPrimBufferDesc& desc) override;
     pddiBaseShader* NewShader(const char* type) override;
+};
+
+// glGamepad
+
+class glGamepad : public pddiGamepad {
+public:
+    void Poll() override;
+    bool IsConnected() const override { return connected; }
+    bool IsButtonDown(int button) const override;
+    float GetAxis(int axis) const override;
+
+private:
+    bool connected = false;
+    bool buttons[GamepadButton::COUNT] = {};
+    float axes[GamepadAxis::COUNT] = {};
 };

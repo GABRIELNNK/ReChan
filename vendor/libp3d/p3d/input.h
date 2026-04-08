@@ -1,17 +1,17 @@
-// input.h — PlatformInput (PC platform-level keyboard/mouse wrapper around GLFW)
-// The game-level InputManager is reversed in src/gen/control.h from CONTROL.CPP.
 #pragma once
 
 #include "core.h"
 #include <unordered_map>
 
 class pddiDisplay;
+class pddiGamepad;
 
-// PlatformInput — polls display for keyboard/mouse state each frame.
+// PlatformInput - polls display for keyboard/mouse state and pddiGamepad for controller each frame.
 // This is the PC platform layer; the PSX had no equivalent (it used libpad directly).
 class PlatformInput {
 public:
     void SetDisplay(pddiDisplay* display) { this->display = display; }
+    void SetGamepad(pddiGamepad* gp) { this->gamepad = gp; }
 
     void SetEnabled(bool e) { enabled = e; }
     bool IsEnabled() const { return enabled; }
@@ -29,8 +29,30 @@ public:
     void GetMousePosition(double& x, double& y) const;
     void GetMouseDelta(double& dx, double& dy) const;
 
+    // Gamepad queries
+    bool IsGamepadConnected() const { return gamepadConnected; }
+    bool IsGamepadButtonDown(int button) const;
+    bool IsGamepadButtonTriggered(int button) const;
+    float GetGamepadAxis(int axis) const;
+
+    // Left stick with deadzone applied (-1..+1)
+    float GetLeftStickX() const;
+    float GetLeftStickY() const;
+
+    // Right stick with deadzone applied (-1..+1)
+    float GetRightStickX() const;
+    float GetRightStickY() const;
+
+    // L2/R2 triggers (0..+1)
+    float GetLeftTrigger() const;
+    float GetRightTrigger() const;
+
+    static constexpr float STICK_DEADZONE = 0.15f;
+    static constexpr float TRIGGER_THRESHOLD = 0.5f;
+
 private:
     pddiDisplay* display = nullptr;
+    pddiGamepad* gamepad = nullptr;
     bool enabled = true;
 
     // Previous-frame state for oneshot detection (PSX Button::Oneshot mode)
@@ -41,5 +63,12 @@ private:
     double mouseX = 0, mouseY = 0;
     double prevMouseX = 0, prevMouseY = 0;
 
+    // Gamepad state (previous frame for oneshot, current via pddiGamepad)
+    bool gamepadConnected = false;
+    bool gpButtonsPrev[14] = {};
+    bool gpButtonsCurr[14] = {};
+    float gpAxes[6] = {};
+
     void TrackKey(int key);
+    float ApplyDeadzone(float value, float deadzone) const;
 };

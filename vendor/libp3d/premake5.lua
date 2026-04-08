@@ -35,6 +35,8 @@ project "libp3d"
         libp3d_root,
         libp3d_root .. "/vendor/glad/include",
         libp3d_root .. "/vendor/glfw/include",
+        libp3d_root .. "/vendor/imgui",
+        libp3d_root .. "/vendor/imgui/backends",
     }
 
     filter "system:windows"

@@ -7,6 +7,7 @@
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
 #include <cstdio>
+#include <cstring>
 
 // Default shader GLSL
 
@@ -944,9 +945,50 @@ void glContext::DrawPrimBuffer(pddiPrimBuffer* buffer) {
 
 pddiDisplay* glDevice::NewDisplay() { return new glDisplay(); }
 pddiRenderContext* glDevice::NewRenderContext(pddiDisplay* d) { return new glContext(static_cast<glDisplay*>(d)); }
+pddiGamepad* glDevice::NewGamepad() { return new glGamepad(); }
 pddiTexture* glDevice::NewTexture() { return new glTexture(); }
 pddiPrimBuffer* glDevice::NewPrimBuffer(const pddiPrimBufferDesc& desc) { return new glPrimBuffer(desc); }
 pddiBaseShader* glDevice::NewShader(const char*) { return new glShader(); }
+
+// glGamepad
+
+void glGamepad::Poll() {
+    connected = false;
+    for (int jid = GLFW_JOYSTICK_1; jid <= GLFW_JOYSTICK_LAST; jid++) {
+        if (glfwJoystickIsGamepad(jid)) {
+            GLFWgamepadstate state;
+            if (glfwGetGamepadState(jid, &state)) {
+                connected = true;
+                for (int b = 0; b < GamepadButton::COUNT; b++) {
+                    buttons[b] = (state.buttons[b] == GLFW_PRESS);
+                }
+                for (int a = 0; a < GamepadAxis::COUNT; a++) {
+                    axes[a] = state.axes[a];
+                }
+            }
+            break;
+        }
+    }
+
+    if (!connected) {
+        std::memset(buttons, 0, sizeof(buttons));
+        std::memset(axes, 0, sizeof(axes));
+    }
+}
+
+bool glGamepad::IsButtonDown(int button) const {
+    if (button < 0 || button >= GamepadButton::COUNT) {
+        return false;
+    }
+    return buttons[button];
+}
+
+float glGamepad::GetAxis(int axis) const {
+    if (axis < 0 || axis >= GamepadAxis::COUNT) {
+        return 0.0f;
+    }
+    return axes[axis];
+}
 
 // Platform factory
 
