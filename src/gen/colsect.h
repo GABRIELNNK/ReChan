@@ -54,6 +54,13 @@ struct CollisionSector {
         s32* outHasRailing, LVector* outRailCorrection,
         const LVector* pos, s32 radius);
 
+    // PSX: LedgePrototype__15CollisionSectorRC10tagLVectorT1llR9_RMVECT16R10tagLVectorRll
+    static bool LedgePrototype(
+        const LVector& startPos, const LVector& endPos,
+        s32 minHeight, s32 maxHeight,
+        LVector& outNormal, LVector& outCorrectionPos,
+        u16& outMaterial, s32 clearance);
+
     // PSX: FillWorldWallArray__15CollisionSectorRC10tagLVectorT1PPC4Walli (COLSECT.CPP:863) 0x800411F8
     static s32 FillWorldWallArray(
         const LVector& searchMin, const LVector& searchMax,

@@ -61,6 +61,8 @@ public:
     s32 GetCurFOV() const { return curFOV; }
     s32 GetDesiredFOV() const { return desiredFOV; }
     const LVector& GetTargetPos() const { return targetPos; }
+    s32 GetOrientY() const { return orientAngles.y; }  // +44
+    s32 GetCamAngleY() const { return camAngleY; }     // +384
 
     // PSX: theCamera+0x188 = cameraAnchor assigned by CameraManager::SetupPaths
     void SetCameraAnchor(CameraAnchor* a) { cameraAnchor = a; }

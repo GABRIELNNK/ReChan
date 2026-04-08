@@ -6,6 +6,7 @@
 #include "gen/database.h"
 #include "gen/model.h"
 #include "gen/levelmgr.h"
+#include "gen/time.h"
 #include "p3d/hash.h"
 #include "p3d/p3dmath.h"
 #include "p3d/context.h"
@@ -16,6 +17,49 @@
 
 // Global Thing unique ID counter (PSX: gp+3868)
 u16 Thing::s_nextUniqueID = 0;
+
+static s32 LerpS32(s32 a, s32 b, f32 alpha) {
+    f64 af = (f64)a;
+    f64 bf = (f64)b;
+    f64 t = (f64)alpha;
+    return (s32)(af + (bf - af) * t);
+}
+
+#if INTERPOLATED_RENDERING
+static s32 LerpAngle16(s32 a, s32 b, f32 alpha) {
+    s32 a16 = (s16)(a & 0xFFFF);
+    s32 b16 = (s16)(b & 0xFFFF);
+    s32 delta = b16 - a16;
+
+    if (delta > 32767) {
+        delta -= 65536;
+    } else if (delta < -32768) {
+        delta += 65536;
+    }
+
+    return a16 + (s32)((f64)delta * (f64)alpha);
+}
+
+static bool IsRenderTeleport(const LVector& prevPos, const LVector& currPos) {
+    constexpr s32 teleportThreshold = 4096;
+
+    s32 dx = currPos.x - prevPos.x;
+    s32 dy = currPos.y - prevPos.y;
+    s32 dz = currPos.z - prevPos.z;
+
+    if (dx < 0) {
+        dx = -dx;
+    }
+    if (dy < 0) {
+        dy = -dy;
+    }
+    if (dz < 0) {
+        dz = -dz;
+    }
+
+    return (dx > teleportThreshold) || (dy > teleportThreshold) || (dz > teleportThreshold);
+}
+#endif
 
 // ThingHandle - lazy-allocated safe reference (8 bytes on PSX)
 struct ThingHandle {
@@ -81,19 +125,74 @@ void Thing::Think() {
     UpdatePosition();
 }
 
+void Thing::GetRenderTransform(LVector* outPos, LVector* outOrientation) {
+    if (!outPos || !outOrientation) {
+        return;
+    }
+
+#if INTERPOLATED_RENDERING
+    if (!g_time) {
+        *outPos = pos;
+        *outOrientation = orientation;
+        return;
+    }
+
+    const u32 tick = g_time->GetFrameCounter();
+    if (!renderSnapshotInit) {
+        renderPrevPos = pos;
+        renderPrevOrientation = orientation;
+        renderCurrPos = pos;
+        renderCurrOrientation = orientation;
+        renderSnapshotTick = tick;
+        renderSnapshotInit = true;
+    } else if (tick != renderSnapshotTick) {
+        if (IsRenderTeleport(renderCurrPos, pos)) {
+            renderPrevPos = pos;
+            renderPrevOrientation = orientation;
+            renderCurrPos = pos;
+            renderCurrOrientation = orientation;
+        } else {
+            renderPrevPos = renderCurrPos;
+            renderPrevOrientation = renderCurrOrientation;
+            renderCurrPos = pos;
+            renderCurrOrientation = orientation;
+        }
+        renderSnapshotTick = tick;
+    }
+
+    const f32 alpha = Clamp(g_time->renderAlpha, 0.0f, 1.0f);
+
+    outPos->x = LerpS32(renderPrevPos.x, renderCurrPos.x, alpha);
+    outPos->y = LerpS32(renderPrevPos.y, renderCurrPos.y, alpha);
+    outPos->z = LerpS32(renderPrevPos.z, renderCurrPos.z, alpha);
+
+    outOrientation->x = LerpAngle16(renderPrevOrientation.x, renderCurrOrientation.x, alpha);
+    outOrientation->y = LerpAngle16(renderPrevOrientation.y, renderCurrOrientation.y, alpha);
+    outOrientation->z = LerpAngle16(renderPrevOrientation.z, renderCurrOrientation.z, alpha);
+#else
+    *outPos = pos;
+    *outOrientation = orientation;
+#endif
+}
+
 // PSX: Draw__5Thing (THING.CPP:487)
 // Sets model position/orientation from Thing fields, then calls model->Show
 void Thing::Draw() {
     MARKFUNCTION(0x800616EC);
+
+    LVector drawPos = {};
+    LVector drawOrient = {};
+    GetRenderTransform(&drawPos, &drawOrient);
+
     if (model) {
         // PSX: copies pos/orientation to model, then calls Show
         Model* m = static_cast<Model*>(model);
-        m->posX = pos.x;
-        m->posY = pos.y;
-        m->posZ = pos.z;
-        m->rotX = (u16)(orientation.x & 0xFFFF);
-        m->rotY = (u16)(orientation.y & 0xFFFF);
-        m->rotZ = (u16)(orientation.z & 0xFFFF);
+        m->posX = drawPos.x;
+        m->posY = drawPos.y;
+        m->posZ = drawPos.z;
+        m->rotX = (u16)(drawOrient.x & 0xFFFF);
+        m->rotY = (u16)(drawOrient.y & 0xFFFF);
+        m->rotZ = (u16)(drawOrient.z & 0xFFFF);
         m->Show(0);
         return;
     }
@@ -104,9 +203,9 @@ void Thing::Draw() {
     f32 hh = 768.0f;  // full height
     f32 hd = 300.0f;  // half-depth
 
-    f32 cx = (f32)pos.x;
-    f32 cy = (f32)pos.y;
-    f32 cz = (f32)pos.z;
+    f32 cx = (f32)drawPos.x;
+    f32 cy = (f32)drawPos.y;
+    f32 cz = (f32)drawPos.z;
 
     f32 x0 = cx - hw, x1 = cx + hw;
     f32 y0 = cy, y1 = cy + hh;
@@ -170,6 +269,10 @@ void Thing::Reset() {
     activeRadius = initialActiveRadius;
     // PSX: flags2 &= 1 (keep only bit 0)
     flags2 &= TF2_KILLED;
+
+#if INTERPOLATED_RENDERING
+    renderSnapshotInit = false;
+#endif
 }
 
 // PSX: UpdatePosition__5Thing (THING.HPP:440)
@@ -400,17 +503,36 @@ u32 Thing::GetThingHandle() {
 // PSX: ClearFloorHeight__5Thing (THING.CPP:765)
 void Thing::ClearFloorHeight() {
     MARKFUNCTION(0x80061BFC);
-    // PSX: navigates model->+36 (floor tracking sub-object)
-    // Copies current floor to prev, resets current to min sentinel
-    // Requires model type to be fully reversed - no-op until then
+    if (!model) {
+        return;
+    }
+
+    Model* m = static_cast<Model*>(model);
+    if (!m->field36) {
+        return;
+    }
+
+    ModelFloorHeightState* floorState = static_cast<ModelFloorHeightState*>(m->field36);
+    floorState->previous = floorState->current;
+    floorState->current = (s32)0x80000001;
 }
 
 // PSX: SetFloorHeight__5Thingl (THING.CPP:777)
-void Thing::SetFloorHeight(s32 /*height*/) {
+void Thing::SetFloorHeight(s32 height) {
     MARKFUNCTION(0x80061C38);
-    // PSX: sets floor height on model->+36 sub-object if higher
-    // "highest floor wins" for collision
-    // Requires model type to be fully reversed - no-op until then
+    if (!model) {
+        return;
+    }
+
+    Model* m = static_cast<Model*>(model);
+    if (!m->field36) {
+        return;
+    }
+
+    ModelFloorHeightState* floorState = static_cast<ModelFloorHeightState*>(m->field36);
+    if (height > floorState->current) {
+        floorState->current = height;
+    }
 }
 
 // PSX: GetObjectToWorldSpaceVector__5Thing (THING.CPP:1352)

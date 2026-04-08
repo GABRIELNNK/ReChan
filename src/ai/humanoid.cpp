@@ -5,8 +5,10 @@
 #include "gen/model.h"
 #include "gen/animmat.h"
 #include "gen/animstruct.h"
+#include "gen/colsect.h"
 #include "snd/rsevent.h"
 #include "p3d/p3dmath.h"
+#include "p3d/skeleton.h"
 
 static constexpr s32 HUMANOID_ANIM_RUN = 2;
 static constexpr s32 HUMANOID_ANIM_DIVE_ROLL = 90;
@@ -130,6 +132,11 @@ void Humanoid::Think() {
 // then updates collision bbox from skeleton joints (debug draw skipped).
 void Humanoid::Draw() {
     MARKFUNCTION(0x80063A88);
+
+    LVector drawPos = {};
+    LVector drawOrient = {};
+    GetRenderTransform(&drawPos, &drawOrient);
+
     if (model) {
         HumanoidModel* hm = static_cast<HumanoidModel*>(model);
         // PSX: Swap__17AnimationMatrices(v2[24]) - swap double-buffered joint matrices
@@ -138,12 +145,12 @@ void Humanoid::Draw() {
         }
         // PSX: copy pos/orientation to model, then Show(0)
         Model* m = static_cast<Model*>(model);
-        m->posX = pos.x;
-        m->posY = pos.y;
-        m->posZ = pos.z;
-        m->rotX = (u16)(orientation.x & 0xFFFF);
-        m->rotY = (u16)(orientation.y & 0xFFFF);
-        m->rotZ = (u16)(orientation.z & 0xFFFF);
+        m->posX = drawPos.x;
+        m->posY = drawPos.y;
+        m->posZ = drawPos.z;
+        m->rotX = (u16)(drawOrient.x & 0xFFFF);
+        m->rotY = (u16)(drawOrient.y & 0xFFFF);
+        m->rotZ = (u16)(drawOrient.z & 0xFFFF);
         m->Show(0);
         return;
     }
@@ -197,6 +204,87 @@ void Humanoid::Move() {
     DynamicThing::Move();
     // PSX: HandleAnimationControl (animation system not yet implemented)
     // PSX: CheckSwitches for trigger volumes (world system not yet implemented)
+}
+
+// PSX: RestorePositionFromBip01__8Humanoid (HUMANOID.CPP:1681)
+s32 Humanoid::RestorePositionFromBip01() {
+    MARKFUNCTION(0x800643B8);
+
+    if (!model) {
+        return 0;
+    }
+
+    Model* m = static_cast<Model*>(model);
+    if (!m->drawable) {
+        return 0;
+    }
+
+    OriginalSTree* source = m->drawable->alternate;
+    if (!source) {
+        source = m->drawable->original;
+    }
+    if (!source || !source->skeleton || !source->skeleton->joints || source->skeleton->numJoints <= 1) {
+        return 0;
+    }
+
+    const STreeJoint& bip01 = source->skeleton->joints[1];
+    s32 localX = bip01.bindTranslationX;
+    s32 localY = bip01.bindTranslationY;
+    s32 localZ = bip01.bindTranslationZ;
+    if (localX == 0 && localY == 0 && localZ == 0) {
+        localX = bip01.translationX;
+        localY = bip01.translationY;
+        localZ = bip01.translationZ;
+    }
+
+    SVector local = {};
+    local.x = (s16)localX;
+    local.y = (s16)localY;
+    local.z = (s16)localZ;
+
+    SVector worldOffset = {};
+    GetObjectToWorldSpaceVector(local, worldOffset);
+
+    s32 nextX = homePos.x;
+    s32 nextY = homePos.y - worldOffset.y;
+    s32 nextZ = homePos.z;
+    if (((flags2 >> 6) & 1) == 0) {
+        nextX -= worldOffset.x;
+        nextZ -= worldOffset.z;
+    }
+
+    pos.x = nextX;
+    pos.y = nextY;
+    pos.z = nextZ;
+    homePos.x = nextX;
+    homePos.y = nextY;
+    homePos.z = nextZ;
+
+    if (((flags2 >> 6) & 1) != 0) {
+        return nextY;
+    }
+    return nextX;
+}
+
+// PSX: CheckForLedges2__8HumanoidR9_RMVECT16R10tagLVectorl (HUMANOID.CPP:6730)
+bool Humanoid::CheckForLedges2(LVector& outNormal, LVector& outCorrectionPos, s32 clearance) {
+    MARKFUNCTION(0x8006A3B0);
+
+    LVector startPos = pos;
+    LVector endPos = startPos;
+    endPos.x += (s32)(((s64)384 * rmSin16(orientation.y)) >> 16);
+    endPos.z += (s32)(((s64)384 * rmSin16((s16)(orientation.y + 0x4000))) >> 16);
+
+    u16 outMaterial = 0;
+    return CollisionSector::LedgePrototype(
+        startPos,
+        endPos,
+        startPos.y + 100,
+        startPos.y + 600,
+        outNormal,
+        outCorrectionPos,
+        outMaterial,
+        clearance);
 }
 
 // PSX: CreateModel__8HumanoidPCc (HUMANOID.CPP:795, 0x80063248)
@@ -285,12 +373,15 @@ void Humanoid::SetActionState(u32 state, s32 param) {
         if (model) {
             Model* m = static_cast<Model*>(model);
             s32 animEnum = (field316 != 0) ? field316 : HUMANOID_ANIM_DIVE_ROLL;
-            m->ApplyAnimToModel(0, animEnum, param, 0, 0);
+            // PSX uses model vtable SetAnim here (not direct ApplyAnimToModel).
+            m->SetAnim(animEnum, param, 0, 0);
             AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
             if (anim) {
                 anim->SetLoopType(ANIM_LOOP, 1);
             }
         }
+        // PSX LABEL_65 path clears bits 4-6 on dive roll setup.
+        flags2 &= ~0x70;
         break;
     }
     case AS_PAUSE:             stateDispatch = SD_PAUSE; break;
@@ -336,7 +427,7 @@ void Humanoid::ProcessAction() {
     case SD_FALL:         _Fall(); break;
     case SD_STRAFE:       _Straif(); break;
     case SD_DIVE_ROLL:    _DiveRoll(); break;
-    case SD_BACKFLIP:     _Jump(); break;
+    case SD_BACKFLIP:     _Straif(); break;
     case SD_PAUSE:        _Pause(); break;
     case SD_GOT_HIT_HIGH: _GotHitHigh(); break;
     case SD_GOT_HIT_MED:  _GotHitMed(); break;
@@ -355,6 +446,7 @@ void Humanoid::ProcessAction() {
 // PSX: ProcessControl__8Humanoid (HUMANOID.CPP:961)
 void Humanoid::ProcessControl() {
     MARKFUNCTION(0x80063660);
+    commandBits = 0;
     if (behaviour) {
         behaviour->Process();
     }
@@ -463,8 +555,9 @@ bool Humanoid::TestIdleAnimation() {
 // PSX: FindFoe__8HumanoidUlli (HUMANOID.CPP:2446)
 // Searches nearby humanoids within range for a combat target.
 // Requires FightingCollision system for entity iteration.
-void Humanoid::FindFoe(u32 /*range*/, s32 /*param*/, s32 /*immediate*/) {
+Humanoid* Humanoid::FindFoe(u32 /*range*/, s32 /*param*/, s32 /*immediate*/) {
     MARKFUNCTION(0x80064F94);
+    return nullptr;
 }
 
 // PSX: SetTarget__8HumanoidP8Humanoid (HUMANOID.CPP:2502)
@@ -475,10 +568,27 @@ void Humanoid::SetTarget(Humanoid* target) {
     field384 = (s32)(intptr_t)target;
 }
 
+// PSX: SetHumanoidTarget__8HumanoidP8Humanoid (HUMANOID.CPP:2535, 0x800651C0)
+// Releases old target, sets new one with refcount.
+void Humanoid::SetHumanoidTarget(Humanoid* target) {
+    ReleaseTarget();
+    if (target) {
+        target->field260++;
+    }
+    field256 = (s32)(intptr_t)target;
+}
+
 // PSX: ReleaseTarget__8Humanoid (HUMANOID.CPP:2553)
 void Humanoid::ReleaseTarget() {
     MARKFUNCTION(0x80065200);
-    field384 = 0;
+    s32 targetAddr = field256;
+    if (targetAddr) {
+        Humanoid* t = (Humanoid*)(intptr_t)targetAddr;
+        if (t->field260 > 0) {
+            t->field260--;
+        }
+        field256 = 0;
+    }
 }
 
 // PSX: FaceAngleY__8Humanoidli (HUMANOID.CPP:2402)
@@ -610,7 +720,8 @@ void Humanoid::_DiveRoll() {
         return;
     }
 
-    s16 frame = (s16)anim->currentFrame;
+    // PSX reads currentFrame high word (+62), not low word.
+    s16 frame = (s16)((u32)anim->currentFrame >> 16);
     u32 cb = (u32)commandBits;
 
     if (anim->loopCount > 0) {
@@ -628,7 +739,7 @@ void Humanoid::_DiveRoll() {
         }
         if ((cb >> 2) & 1) {
             SetActionState(AS_RUN, 0);
-            m->ApplyAnimToModel(0, HUMANOID_ANIM_RUN, ANIM_LOOP, 0, 0);
+            m->SetAnim(HUMANOID_ANIM_RUN, 0, 0, 0);
             return;
         }
         SetActionState(AS_STAND, 0);
@@ -655,7 +766,7 @@ void Humanoid::_DiveRoll() {
     if (frame >= DIVE_ROLL_RUN_STRAFE_FRAME) {
         if ((cb >> 2) & 1) {
             SetActionState(AS_RUN, 0);
-            m->ApplyAnimToModel(0, HUMANOID_ANIM_RUN, ANIM_LOOP, 0, 0);
+            m->SetAnim(HUMANOID_ANIM_RUN, 0, 0, 0);
         } else if ((cb >> 5) & 1) {
             SetActionState(AS_STRAFE, 0);
         }
@@ -1025,6 +1136,65 @@ void Humanoid::_Pickup() {
     }
 }
 
+// PSX: LadderDismount__8Humanoid - not yet reversed
+void Humanoid::_LadderDismount() {
+}
+
+// PSX: ClimbLadder__8Humanoid - not yet reversed
+void Humanoid::_ClimbLadder() {
+}
+
+// PSX: TestAndSetRisingAttack__8Humanoid (HUMANOID.CPP:5438, 0x80068D38)
+// Checks command bit 9 (rising attack), sets combat flags, finds combo node.
+// Combat system not fully reversed - stub for now.
+s32 Humanoid::TestAndSetRisingAttack() {
+    MARKFUNCTION(0x80068D38);
+    // PSX: checks field488 (combat lock), then commandBits bit 9
+    // If set, masks commandBits, calls FindSiblingWithRequestedCommand
+    // Returns combo node pointer (field488)
+    return field488;
+}
+
+// PSX: LetGoOfLedge__8Humanoid (HUMANOID.CPP:8735, 0x8006C478)
+// Releases from ledge: repositions away from ledge face and transitions to fall.
+s32 Humanoid::LetGoOfLedge() {
+    MARKFUNCTION(0x8006C478);
+
+    // PSX: check actionState == 23 and animEnum == 31 (LEDGE_LATCH)
+    s32 ok = 0;
+    if (actionState == (s32)AS_LEDGE_LATCH) {
+        if (model) {
+            Model* m = static_cast<Model*>(model);
+            AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+            if (anim && anim->animEnum == 31) {
+                ok = 1;
+            }
+        }
+    }
+
+    if (ok) {
+        SetActionState(AS_FALL, 0);
+
+        // PSX: reposition away from ledge face by -300 units along orientation
+        s32 hx = homePos.x;
+        s32 hy = homePos.y;
+        s32 hz = homePos.z;
+        s32 sinY = rmSin16(orientation.y);
+        s32 cosY = rmSin16((s16)(orientation.y + 0x4000));
+        s32 newX = hx + (s32)((-300LL * sinY) >> 16);
+        s32 newY = hy - 850;
+        s32 newZ = hz + (s32)((-300LL * cosY) >> 16);
+        pos.x = newX;
+        pos.y = newY;
+        pos.z = newZ;
+        homePos.x = newX;
+        homePos.y = newY;
+        homePos.z = newZ;
+    }
+
+    return ok;
+}
+
 // PSX: _Throw__8Humanoid (HUMANOID.CPP:4998, 0x800685A8)
 // Face target during early frames, release thrown object at animation
 // frame threshold, transition to stand when animation completes.
@@ -1040,7 +1210,7 @@ void Humanoid::_Throw() {
         return;
     }
 
-    s16 frame = (s16)anim->currentFrame;
+    s16 frame = (s16)((u32)anim->currentFrame >> 16);
 
     // PSX: face target during first 6 frames
     if (frame < 6 && field256 != 0) {
@@ -1259,8 +1429,8 @@ void Humanoid::_Collapse() {
 
     // PSX: LoadDialog(1, 50) - groan sound (dialog system not reversed)
 
-    // PSX: vtable+260 call - ProcessControl equivalent
-    ProcessControl();
+    // PSX: vtable+260 = TestAndSetRisingAttack
+    TestAndSetRisingAttack();
 
     // PSX: check loopCount > 0 AND on-ground
     if (anim->loopCount <= 0) {

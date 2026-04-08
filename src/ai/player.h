@@ -78,10 +78,10 @@ public:
     // PSX gp-relative globals (player-specific, one instance)
     // gp+392: running force accumulator (ramps up while running)
     s32 forceAccum = 0;
-    // gp+396: force ramp rate (added per frame in _Run)
-    static constexpr s32 FORCE_RAMP_RATE = 150;
-    // gp+400: force deceleration rate (subtracted per frame in _Stand anim 27)
-    static constexpr s32 FORCE_DECEL_RATE = 200;
+    // gp+396: runAccel (PSX .data: 0x800DCAD8 = 0x2000)
+    static constexpr s32 FORCE_RAMP_RATE = 0x2000;
+    // gp+400: decayRate (PSX .data: 0x800DCADC = 0x1000)
+    static constexpr s32 FORCE_DECEL_RATE = 0x1000;
     // gp+420: idle animation timer (incremented each frame in _Stand)
     s32 idleTimer = 0;
     // gp+444: turn-around flag (set when angle difference in turn range)

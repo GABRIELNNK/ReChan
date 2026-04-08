@@ -53,6 +53,7 @@ struct Button {
     s32 rawInput  = 0;    // current raw input (0 or 1)
     s32 prevInput = 0;    // previous frame raw input
     s32 state = 0;        // current reported state
+    s16 duration = 0;     // PSX +12: frames held (set by RawHandler, read by FindActionRequest)
     ButtonMode mode = BUTTON_MODE_DEFAULT;
 
     void Input(s32 bit);                // 0x8002D8C4 = process raw bit
@@ -138,6 +139,10 @@ public:
 
     // Direct access for game code that needs Control struct
     Control controls[2];
+
+    // PSX: GetMappedButton__C7Controlc (0x8002DF14)
+    // Maps PSX button bit index through reverseMap + controlMap to Button*
+    Button* GetButtonForBit(u16 padIndex, u8 bitIndex);
 
 private:
     s32 controlValFlags[2] = {};   // per-frame query flags (PSX: at +1484)

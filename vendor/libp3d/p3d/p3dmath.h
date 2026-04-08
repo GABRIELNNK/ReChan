@@ -106,6 +106,39 @@ inline void p3dBuildRotMatrixZYX(s32 ax, s32 ay, s32 az, Mat4& m) {
         ANGLE2RAD(az & 0xFFFF),
         m);
 }
+
+// p3dBuildRotMatrixXYZ - PSX: 0x800730F8
+// PSX params: (ax, ay, az) = (X angle, Y angle, Z angle)
+// PSX computes: R = Rz(az) * Ry(ay) * Rx(ax) (extrinsic XYZ)
+// Verified against PSX decompile at 0x800730F8
+inline void p3dBuildRotMatrixXYZ(f32 ax, f32 ay, f32 az, Mat4& m) {
+    f32 cx = std::cos(ax), sx = std::sin(ax);
+    f32 cy = std::cos(ay), sy = std::sin(ay);
+    f32 cz = std::cos(az), sz = std::sin(az);
+
+    m = Mat4();
+    m.m[0]  = cy * cz;
+    m.m[1]  = sx * sy * cz - cx * sz;
+    m.m[2]  = cx * sy * cz + sx * sz;
+
+    m.m[4]  = cy * sz;
+    m.m[5]  = sx * sy * sz + cx * cz;
+    m.m[6]  = cx * sy * sz - sx * cz;
+
+    m.m[8]  = -sy;
+    m.m[9]  = sx * cy;
+    m.m[10] = cx * cy;
+}
+
+// Overload taking PSX angle units (s32)
+inline void p3dBuildRotMatrixXYZ(s32 ax, s32 ay, s32 az, Mat4& m) {
+    p3dBuildRotMatrixXYZ(
+        ANGLE2RAD(ax & 0xFFFF),
+        ANGLE2RAD(ay & 0xFFFF),
+        ANGLE2RAD(az & 0xFFFF),
+        m);
+}
+
 // p3dBuildRotMatrixYZX - PSX: 0x800737A4
 // PSX params: (ax, ay, az) = (X angle, Y angle, Z angle)
 // PSX computes: R = Rx(ax) * Rz(az) * Ry(ay)

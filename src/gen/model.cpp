@@ -101,7 +101,7 @@ Model::Model() {
     drawable = nullptr;
     drawableType = 0;
     animStructure = nullptr;
-    field36 = nullptr;
+    field36 = new ModelFloorHeightState();
     ambientLight = nullptr;
     hwLights = nullptr;
     hwLightCount = 0;
@@ -119,6 +119,10 @@ Model::Model() {
 // PSX: __5Model (MODEL.CPP:697, 0x8006E6CC)
 Model::~Model() {
     MARKFUNCTION(0x8006E6CC);
+    if (field36) {
+        delete static_cast<ModelFloorHeightState*>(field36);
+        field36 = nullptr;
+    }
     DeleteDrawable();
 }
 

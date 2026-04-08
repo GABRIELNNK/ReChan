@@ -2,6 +2,7 @@
 // PSX source: C:\CHAN\GAME\SRC\GEN\TIME.CPP
 #include "gen/time.h"
 
+#include <cmath>
 #include <chrono>
 #include <thread>
 
@@ -45,17 +46,43 @@ void Time::Sleep(f32 seconds) {
 
 void Time::WaitForFrameEnd(f64 frameStart) const {
     f32 target = GetTargetDt();
-    if (target <= 0.0f) return;
-
-    // Hybrid: sleep for the bulk, spin for the last 2ms
-    constexpr f32 spinMargin = 0.002f;
-    f64 now = GetTimeInSeconds();
-    f32 remaining = target - (f32)(now - frameStart);
-    if (remaining > spinMargin) {
-        Sleep(remaining - spinMargin);
+    if (target <= 0.0f) {
+        return;
     }
-    // Spin-wait for the remainder
-    while ((f32)(GetTimeInSeconds() - frameStart) < target) {
-        // spin
+
+    // Adaptive 1ms sleep estimator keeps limiter accurate across platforms,
+    // including schedulers with coarse default sleep granularity.
+    static f64 sleepMean = 0.001f;
+    static f64 sleepM2 = 0.0;
+    static u32 sleepSamples = 1;
+    static f64 sleepEstimate = 0.002f;
+
+    const f64 frameEnd = frameStart + (f64)target;
+    while (true) {
+        f64 now = GetTimeInSeconds();
+        f64 remaining = frameEnd - now;
+        if (remaining <= 0.0) {
+            break;
+        }
+
+        if (remaining > sleepEstimate) {
+            f64 sleepStart = GetTimeInSeconds();
+            Sleep(0.001f);
+            f64 observed = GetTimeInSeconds() - sleepStart;
+
+            sleepSamples++;
+            f64 delta = observed - sleepMean;
+            sleepMean += delta / (f64)sleepSamples;
+            f64 delta2 = observed - sleepMean;
+            sleepM2 += delta * delta2;
+
+            f64 variance = sleepM2 / (f64)(sleepSamples - 1);
+            if (variance < 0.0) {
+                variance = 0.0;
+            }
+            sleepEstimate = sleepMean + std::sqrt(variance);
+        } else {
+            std::this_thread::yield();
+        }
     }
 }

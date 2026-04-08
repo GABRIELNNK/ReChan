@@ -62,9 +62,16 @@ static const u8 sPlayerMap[3][16] = {
 
 
 // Button::Input (0x8002D8C4) = process raw bit (0 or 1)
+// PSX: RawHandler__6Buttonl updates duration (frames held) and state.
 void Button::Input(s32 bit) {
     prevInput = rawInput;
     rawInput = bit;
+
+    if (rawInput) {
+        duration++;
+    } else {
+        duration = 0;
+    }
 
     if (mode == BUTTON_MODE_ONESHOT || mode == BUTTON_MODE_REPEAT) {
         state = (rawInput && !prevInput) ? 1 : 0;
@@ -193,6 +200,17 @@ u32 InputManager::GetControlVal(u16 padIndex) {
 u32 InputManager::GetRawButtons(u16 padIndex) const {
     if (padIndex > 1) return 0;
     return controls[padIndex].rawButtons;
+}
+
+// PSX: GetMappedButton__C7Controlc (0x8002DF14)
+// Maps PSX button bit index through reverseMap + controlMap to Button*.
+Button* InputManager::GetButtonForBit(u16 padIndex, u8 bitIndex) {
+    if (padIndex > 1) return &controls[0].buttons[0];
+    if (bitIndex >= 16) return &controls[padIndex].buttons[0];
+    Control& ctrl = controls[padIndex];
+    u8 logical = reverseMap[bitIndex];
+    u8 physical = ctrl.controlMap[logical & 0xF];
+    return &ctrl.buttons[physical & 0xF];
 }
 
 // InputManager::GetAnalog

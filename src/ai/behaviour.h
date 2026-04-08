@@ -14,14 +14,25 @@ struct Behaviour {
     // PSX +24: owning Humanoid pointer.
     Humanoid* owner = nullptr;
 
+    // PSX +196 (s16): controller pad port index (0 or 1)
+    s16 padPort = 0;
+
+    // PSX +200..+235: action request state data (used by FindActionRequest)
+    u32 actionRequestState[9] = {};
+
+    // PSX +236 (u32): flags (bit 0 = first frame init)
+    u32 behaviourFlags = 0;
+
     // PSX +220/+222/+224: behaviour handler dispatch thunk.
     s16 handlerThisOffset = 0;
     s16 handlerDispatch = -1;
     AIHandler handler = nullptr;
 
-    // PSX +272: previous controller mask cache.
+    // PSX +260 (s32): button hold counter (incremented each frame same buttons held)
+    s32 buttonHoldCounter = 0;
+
+    // PSX +272 (u32): previous controller mask cache.
     u32 previousButtons = 0;
-    bool previousRunPressed = false;
 
     // PSX: _9BehaviourP8HumanoidUll (BEHAVIOU.CPP)
     Behaviour(Humanoid* ownerHumanoid, u32 handlerType, s32 aiParam);

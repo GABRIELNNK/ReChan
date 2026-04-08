@@ -11,6 +11,9 @@ CollisionSector g_collisionSectors[12];
 // Scratch buffer for floor pointer collection (PSX: 0x800DFD58, capacity 64)
 static Floor* g_floorPtrScratch[64];
 
+// Scratch buffer for wall pointer collection used by ledge prototype checks
+static Wall* g_wallPtrScratch[64];
+
 // PSX: __15CollisionSector (COLSECT.CPP:415) 0x80042278
 CollisionSector::CollisionSector() {
     MARKFUNCTION(0x80042278);
@@ -227,6 +230,122 @@ void CollisionSector::GetArrayFloorAndCeilingHeight(
     // PSX output: a3 = v17 (floor to stand on), a4 = v13 (secondary ceiling)
     outFloorH = (v17 <= (s32)0x80000001) ? (s32)0x80000001 : v17;
     outCeilingH = (v13 == 0x7FFFFFFF) ? 0x7FFFFFFF : v13;
+}
+
+// PSX: LedgePrototype__15CollisionSectorRC10tagLVectorT1llR9_RMVECT16R10tagLVectorRll (COLSECT.CPP:1403)
+bool CollisionSector::LedgePrototype(
+    const LVector& startPos, const LVector& endPos,
+    s32 minHeight, s32 maxHeight,
+    LVector& outNormal, LVector& outCorrectionPos,
+    u16& outMaterial, s32 clearance) {
+    MARKFUNCTION(0x80041DC4);
+
+    LVector searchMin = {};
+    LVector searchMax = {};
+    searchMin.x = (startPos.x < endPos.x) ? startPos.x : endPos.x;
+    searchMin.y = (startPos.y < endPos.y) ? startPos.y : endPos.y;
+    searchMin.z = (startPos.z < endPos.z) ? startPos.z : endPos.z;
+    searchMax.x = (startPos.x > endPos.x) ? startPos.x : endPos.x;
+    searchMax.y = (startPos.y > endPos.y) ? startPos.y : endPos.y;
+    searchMax.z = (startPos.z > endPos.z) ? startPos.z : endPos.z;
+
+    s32 wallCount = FillWorldWallArray(searchMin, searchMax, g_wallPtrScratch, 64);
+    if (wallCount > 64) {
+        wallCount = 64;
+    }
+
+    s32 floorCount = FillWorldFloorArray(searchMin, searchMax, g_floorPtrScratch, 64);
+    if (floorCount > 64) {
+        floorCount = 64;
+    }
+
+    for (s32 floorIdx = 0; floorIdx < floorCount; floorIdx++) {
+        Floor* floor = g_floorPtrScratch[floorIdx];
+        if (!floor->LedgePrototype(startPos, endPos, minHeight, maxHeight, outNormal, outCorrectionPos)) {
+            continue;
+        }
+
+        outMaterial = (u16)floor->field0C;
+
+        LVector floorNormal = {};
+        floor->GetFloorNormal(floorNormal);
+        if (floorNormal.y <= 46347) {
+            s32 dot =
+                fixmul16(outNormal.x, floorNormal.x) +
+                fixmul16(outNormal.z, floorNormal.z);
+            if (dot >= 0) {
+                continue;
+            }
+        }
+
+        LVector probePos = {};
+        probePos.x = outCorrectionPos.x + (s16)((s64)outNormal.x >> 9);
+        probePos.y = outCorrectionPos.y;
+        probePos.z = outCorrectionPos.z + (s16)((s64)outNormal.z >> 9);
+
+        s32 floorH = 0;
+        s32 ceilingH = 0;
+        LVector floorNorm = {};
+        LVector ceilingNorm = {};
+        s32 hasRailing = 0;
+        LVector railCorrection = {};
+        GetArrayFloorAndCeilingHeight(
+            g_floorPtrScratch,
+            floorCount,
+            floorH,
+            ceilingH,
+            floorNorm,
+            ceilingNorm,
+            &hasRailing,
+            &railCorrection,
+            &probePos,
+            0);
+
+        if (outCorrectionPos.y < floorH + clearance) {
+            continue;
+        }
+
+        s32 normalStepX = (s16)((s64)outNormal.x >> 10);
+        s32 normalStepZ = (s16)((s64)outNormal.z >> 10);
+
+        LVector wallStart = {};
+        wallStart.x = outCorrectionPos.x + normalStepX;
+        wallStart.y = outCorrectionPos.y + 64;
+        wallStart.z = outCorrectionPos.z + normalStepZ;
+
+        LVector wallEnd = {};
+        wallEnd.x = outCorrectionPos.x - normalStepX;
+        wallEnd.y = outCorrectionPos.y + 64;
+        wallEnd.z = outCorrectionPos.z - normalStepZ;
+
+        bool blocked = false;
+        for (s32 wallIdx = 0; wallIdx < wallCount; wallIdx++) {
+            s32 outFrac = 0;
+            LVector outWallNormal = {};
+            LVector outHitPoint = {};
+            if (g_wallPtrScratch[wallIdx]->CheckWallCollision(
+                    wallStart,
+                    wallEnd,
+                    0,
+                    0,
+                    0,
+                    0,
+                    outFrac,
+                    outWallNormal,
+                    outHitPoint)) {
+                blocked = true;
+                break;
+            }
+        }
+
+        if (blocked) {
+            continue;
+        }
+
+        return true;
+    }
+
+    return false;
 }
 
 // Wall collision result globals

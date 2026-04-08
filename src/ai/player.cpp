@@ -7,6 +7,7 @@
 #include "gen/animstruct.h"
 #include "gen/charmgr.h"
 #include "gen/control.h"
+#include "gen/colsect.h"
 #include "snd/rsevent.h"
 #include "p3d/p3dmath.h"
 #include "pc/log.h"
@@ -18,7 +19,7 @@ static constexpr s32 CB_GUARD_RELEASE = (1 << 1); // bit 1: release/stand reques
 static constexpr s32 CB_RUN      = (1 << 2);  // bit 2: directional movement
 static constexpr s32 CB_JUMP     = (1 << 3);  // bit 3: jump (Cross)
 static constexpr s32 CB_GUARD    = (1 << 4);  // bit 4: guard/taunt (Circle)
-static constexpr s32 CB_STRAFE   = (1 << 5);  // bit 5: strafe (R1/R2)
+static constexpr s32 CB_DIVE_ROLL = (1 << 5); // bit 5: dive roll (R1)
 static constexpr s32 CB_BACKFLIP = (1 << 6);  // bit 6: backflip (L1)
 static constexpr s32 CB_ATTACK   = (1 << 7);  // bit 7: attack (Square)
 static constexpr s32 CB_PICKUP   = (1 << 15); // bit 15: pickup (Triangle)
@@ -30,6 +31,10 @@ static constexpr s32 PLAYER_RUN_FORCE  = 2500;  // per-frame AddForce magnitude
 static constexpr s32 PLAYER_JUMP_FORCE = 17000;  // upward contactForce on jump (gp+460, PSX 0x4268)
 static constexpr s32 PLAYER_RUNNING_JUMP_BONUS = -1500; // running jump Y offset (gp+464, PSX 0xFFFFFA24)
 static constexpr s32 PLAYER_RUNNING_JUMP_BURST = 2500; // initial horizontal burst (runJumpHold[0], PSX 0x9C4)
+static constexpr s16 TABLE_ROLL_HANGTIME_START = 0;
+static constexpr s16 TABLE_ROLL_HANGTIME_END = 100;
+static constexpr s32 TABLE_LOOK_AHEAD_DISTANCE = 200;
+static constexpr s32 STRAFE_MULTIPLIER = 0xC000;
 
 // PSX jump parameter tables at 0x800D652C-0x800D6558: [force, gravity, maxFallDivisor]
 static const s32 s_runJumpTap[3]       = { 2000,  20480, 20 };  // 0x7D0, 0x5000, 0x14
@@ -39,6 +44,25 @@ static const s32 s_standingJumpHold[3] = { 150,   4096,  25 };  // 0x96,  0x1000
 
 // PSX: gp+492 - hard-fall velocity threshold (velocity.y must be <= this to trigger)
 static constexpr s32 g_hardFallThreshold = -8192;
+
+static bool DetectObstacleAboveLedge(const LVector& /*normal*/, const LVector& /*ledgePos*/) {
+    // Obstacle ledge system is not reversed yet in this repo.
+    return false;
+}
+
+static s32 GetTrackedFloorHeight(const Player* player) {
+    if (!player || !player->model) {
+        return (s32)0x80000001;
+    }
+
+    const Model* m = static_cast<const Model*>(player->model);
+    if (!m->field36) {
+        return (s32)0x80000001;
+    }
+
+    const ModelFloorHeightState* floorState = static_cast<const ModelFloorHeightState*>(m->field36);
+    return floorState->current;
+}
 
 // All animation IDs routed through PlayerModel::SetAnim or referenced by Player handlers.
 // IDs named ANIM_ID_X are placeholders for anims not yet identified.
@@ -394,7 +418,7 @@ void Player::SetActionState(u32 state, s32 param) {
         // PSX case 11: face enemy + strafe init.
         // FindFoe, SetHumanoidTarget, stateDispatch=26(SD_BACKFLIP)
         stateTimer = 0;
-        FindFoe(distantTargetRange, 0, 0);
+        SetHumanoidTarget(FindFoe(distantTargetRange, 0, 0));
         field344 = 0;
         stateDispatch = SD_BACKFLIP;
         field348 = 8;
@@ -516,6 +540,11 @@ void Player::SetActionState(u32 state, s32 param) {
         if (((f2 >> 4) & 1) == 0 || (((f2 >> 5) & 1) != 0 && ((f2 >> 6) & 1) != 0)) {
             flags2 = (flags2 & ~0x70) | 0x10;
         }
+        // PSX: model->SetAnim(86, ...) - start table roll animation
+        if (model) {
+            Model* m = static_cast<Model*>(model);
+            m->SetAnim(PLAYER_ANIM_TABLE_ROLL, 0, 0, 0);
+        }
         velocity = {};
         contactForce = {};
         maxFallDivisor = 0;
@@ -539,7 +568,7 @@ void Player::SetActionState(u32 state, s32 param) {
     case AS_KICK_ATTACK: {
         // PSX cases 32,34: FindFoe, SetHumanoidTarget, EnterCombatCombo.
         // While combo tree is still unreversed, fall back to Humanoid setup.
-        FindFoe(750, 10922, 0);
+        SetHumanoidTarget(FindFoe(750, 10922, 0));
         if (!EnterCombatCombo()) {
             Humanoid::SetActionState(state, param);
             return;
@@ -1273,9 +1302,12 @@ void Player::_Stand() {
 
     // PSX: not on ground -> fall off ledge
     if (!(flags & TF_ON_GROUND)) {
-        // PSX: checks floor height; if homePos.y - floorHeight < 129, copies pos + goto LABEL_87
-        // Floor height query not yet reversed - fall directly
-        SetActionState(AS_FALL, 3);
+        s32 floorHeight = GetTrackedFloorHeight(this);
+        if (floorHeight != (s32)0x80000001 && pos.y - floorHeight < 129) {
+            homePos.y = floorHeight;
+        } else {
+            SetActionState(AS_FALL, 3);
+        }
         goto standPostDispatch;
     }
 
@@ -1721,8 +1753,18 @@ void Player::_Run() {
 
     // LABEL_45: strafe (returns) or force path (falls through to LABEL_58)
     if ((cb >> 5) & 1) {
-        // PSX: CheckForLedges2 -> table roll or strafe
-        // Ledge detection not yet reversed - default to strafe
+        LVector ledgeNormal = {};
+        LVector ledgePos = {};
+        if (CheckForLedges2(ledgeNormal, ledgePos, 200)) {
+            s32 ledgeDelta = ledgePos.y - pos.y - 365;
+            if ((u32)ledgeDelta < 0x4F) {
+                if (!DetectObstacleAboveLedge(ledgeNormal, ledgePos)) {
+                    SetActionState(AS_TABLE_ROLL, 0);
+                    return;
+                }
+            }
+        }
+
         SetActionState(AS_STRAFE, 0);
         FaceAngleY(faceAngle, 0);
         return;
@@ -1733,10 +1775,12 @@ void Player::_Run() {
 
     // PSX: if NOT on ground, check for falling off ledge
     if (!(flags & TF_ON_GROUND)) {
-        // PSX: checks floor height from model data; if close (< 129), copies pos + LABEL_58.
-        // Floor height query not yet reversed - fall directly.
-        // PSX: falls through to LABEL_58 (force accumulator still runs!)
-        SetActionState(AS_FALL, 3);
+        s32 floorHeight = GetTrackedFloorHeight(this);
+        if (floorHeight != (s32)0x80000001 && pos.y - floorHeight < 129) {
+            pos.y = floorHeight;
+        } else {
+            SetActionState(AS_FALL, 3);
+        }
     }
 
     // LABEL_58: force accumulator (runs unconditionally on non-strafe path)
@@ -1839,7 +1883,7 @@ void Player::_PushObject() {
         dir.y = (s16)((orientation.x >> 16) & 0xFFFF);
         dir.z = (s16)(orientation.y & 0xFFFF);
         dir.pad = (s16)((orientation.y >> 16) & 0xFFFF);
-        AddForce(faceAngle, &dir);
+        AddForce(forceAccum, &dir);
         FaceAngleY(faceAngle, 1);
         return;
     }
@@ -1854,8 +1898,8 @@ void Player::_Teetering() {
 }
 
 // PSX: _WallJump__6Player (PLAYER.CPP:3688, 0x80032D8C)
-// Handles wall jump sequence: start (32) -> launch (33) with force.
-// Transitions to fall or stand on ground contact.
+// Handles wall jump sequence: wall contact anim (32) -> launch anim (33) with force.
+// Transitions to fall on launch completion, or stand on ground contact.
 void Player::_WallJump() {
     MARKFUNCTION(0x80032D8C);
 
@@ -1868,14 +1912,18 @@ void Player::_WallJump() {
         return;
     }
 
+    s32 animStructAddr = (s32)(uintptr_t)anim;
     s32 animE = anim->animEnum;
 
+    // PSX: anim 32 -> zero maxFallDivisor
     if (animE == PLAYER_ANIM_WALL_JUMP_START) {
-        // Phase 1: wall contact, zero maxFallDivisor
         maxFallDivisor = 0;
-        // Fall through to check completion
-    } else if (animE == PLAYER_ANIM_WALL_JUMP_LAUNCH) {
-        // Phase 2: launching off wall - apply forward force
+    }
+
+    // PSX: check anim 33 (launch) completion
+    s32 launchDone = 0;
+    if (animE == PLAYER_ANIM_WALL_JUMP_LAUNCH) {
+        // PSX: AddForce(4000, &orientation) - apply launch force
         SVector dir;
         dir.x = (s16)(orientation.x & 0xFFFF);
         dir.y = (s16)((orientation.x >> 16) & 0xFFFF);
@@ -1885,38 +1933,36 @@ void Player::_WallJump() {
         maxFallDivisor = 0;
     }
 
-    // PSX: check if anim 33 completed (loopCount > 0)
-    bool animDone = false;
+    // PSX: if anim 33 completed (loopCount > 0) -> transition to fall
     if (anim->animEnum == PLAYER_ANIM_WALL_JUMP_LAUNCH) {
-        animDone = (anim->loopCount > 0);
+        launchDone = (anim->loopCount != 0) ? 1 : 0;
     }
 
-    if (animDone) {
-        // Wall jump complete - transition to fall
+    if (launchDone) {
         SetActionState(AS_FALL, 0);
-        // Set desired move direction and face angle from orientation
+        SetDesiredMoveDirection(orientation.y);
         FaceAngleY(orientation.y, 0);
         return;
     }
 
-    // PSX: call CheckForLanding, then HandleLand
+    // PSX: CheckForLanding (vtable+228), then HandleLand (vtable+204)
     CheckForLanding();
-    HandleLand(0);
 
-    // If on ground after HandleLand, set move direction
+    HandleLand(0);
     if (flags & TF_ON_GROUND) {
+        SetDesiredMoveDirection(orientation.y);
         FaceAngleY(orientation.y, 0);
     }
 }
 
 // PSX: _Collapse__6Player (PLAYER.CPP:3732, 0x80032EB0)
-// Player-specific collapse: calls vtable handler, increments counter,
-// checks humanoidDataID threshold for GET_UP vs DEAD transition.
+// Player-specific collapse: calls TestAndSetRisingAttack (vtable+260),
+// increments counter, checks humanoidDataID threshold for GET_UP vs DEAD.
 void Player::_Collapse() {
     MARKFUNCTION(0x80032EB0);
 
-    // PSX: vtable+260 call (ProcessControl or animation handler)
-    ProcessControl();
+    // PSX: vtable+260 = TestAndSetRisingAttack
+    TestAndSetRisingAttack();
 
     // PSX: increment field616 counter
     field616++;
@@ -1940,62 +1986,96 @@ void Player::_DoStand() {
     SetActionState(AS_STAND, 0);
     velocity = {};
 }
-// PSX: _HorizontalPoleSwing__6Player (PLAYER.CPP:3776, 0x80032F8C)
-// Complex pole swing physics: pendulum motion around X axis,
-// applies angular velocity, checks for dismount on jump/taunt.
+// PSX: _HorizontalPoleSwing__6Player (PLAYER.CPP:3802, 0x80032F8C)
+// Pendulum swing physics on horizontal pole. Builds rotation matrix from
+// orientation, applies angular velocity driven by gravity torque,
+// transforms pendulum arm to get world position.
 void Player::_HorizontalPoleSwing() {
     MARKFUNCTION(0x80032F8C);
 
-    if (!model) {
-        return;
-    }
-    Model* m = static_cast<Model*>(model);
-    AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
-    if (!anim) {
-        return;
-    }
+    // PSX: pendulum arm offset (0, -660, 0)
+    LVector pendulumArm = {0, -660, 0};
 
-    // PSX: pendulum physics
-    // field424 = angular velocity accumulator for pole swing
-    // Compute torque from gravity: torque = -660 * sin(orientation.x) * stateCounter
-    s32 sinX = rmSin16(orientation.x);
-    s64 torque = (-660LL * sinX) >> 16;
-    torque = (4000 * stateCounter * torque);
-    s32 accel = (s32)((torque >> 16) / 1); // simplified from rmDiv16i
+    // PSX: save orientation
+    s32 angleX = orientation.x;
+    s32 angleY = orientation.y;
+    s32 angleZ = orientation.z;
 
-    // PSX: accumulate angular velocity
-    s32 angVel = field424 + (s32)((2182LL * (accel / 2000)) >> 16);
-    field424 = angVel;
+    // PSX: save pos into stack vars (v30/v31/v32)
+    LVector savedPos = pos;
 
-    // PSX: update orientation.x with angular velocity
-    s32 newAngleX = orientation.x + (s32)((2182LL * angVel) >> 16);
+    // PSX: pole anchor position at byte offset 296 = {collBboxMax.y, collBboxMax.z, field304}
+    LVector poleAnchor = {collBboxMax.y, collBboxMax.z, field304};
+
+    // PSX: pendulum torque: (-660 * sin(angleX)) >> 16, then * 4000 * stateCounter
+    s32 sinX = rmSin16(angleX);
+    s64 torqueBase = (-660LL * sinX) >> 16;
+    s64 torqueScaled = 4000 * (s64)stateCounter * torqueBase;
+
+    // PSX: field424 += (2182 * rmDiv16i(torqueScaled >> 16, 2000)) >> 16
+    s32 accel = rmDiv16i((s32)(torqueScaled >> 16), 2000);
+    field424 = field424 + (s32)((2182LL * accel) >> 16);
+
+    // PSX: update angleX with angular velocity, wrap to [0, 65535]
+    s32 newAngleX = angleX + (s32)((2182LL * field424) >> 16);
     if (newAngleX < 0) {
         newAngleX += PSX_ANGLE_360;
     }
-    newAngleX %= PSX_ANGLE_360;
-    orientation.x = newAngleX;
+    newAngleX = newAngleX % PSX_ANGLE_360;
 
-    // PSX: check anim midpoint for swing count tracking
-    s32 halfFrame = ((anim->endFrame >> 16) + (anim->endFrame >> 31)) >> 1;
-    if (halfFrame < anim->currentFrame) {
-        field616++;
-    }
+    // PSX: build rotation matrix from updated angles
+    Mat4 rotMatrix;
+    p3dBuildRotMatrixXYZ(newAngleX, angleY, angleZ, rotMatrix);
 
-    // PSX: switch animation based on swing direction
-    s32 targetAnim = (field424 >= 0) ? PLAYER_ANIM_POLE_SWING_FWD : PLAYER_ANIM_POLE_SWING_BACK;
-    if (anim->animEnum != targetAnim) {
-        m->ApplyAnimToModel(0, targetAnim, ANIM_HOLD_FIRST, 0, 0);
-        actionStateFlag = 1;
-    }
+    // PSX: fill translation from pole anchor position
+    p3dFillTransMatrix(poleAnchor, rotMatrix);
 
-    // PSX: check if swing passed through bottom (actionStateFlag + angle range)
-    if (actionStateFlag) {
-        if (newAngleX < 5461 || newAngleX > 0xE38F) {
-            // Passed through bottom of swing
-            actionStateFlag = 0;
-            // PSX: PoleSwing sound - not yet reversed
+    // PSX: transform pendulum arm by matrix to get new position
+    Vec3 armVec((f32)pendulumArm.x, (f32)pendulumArm.y, (f32)pendulumArm.z);
+    Vec3 newPosVec = p3dVecTimesMatrix(armVec, rotMatrix);
+    savedPos.x = (s32)newPosVec.x;
+    savedPos.y = (s32)newPosVec.y;
+    savedPos.z = (s32)newPosVec.z;
+
+    // PSX: check animation midpoint for swing count
+    if (model) {
+        Model* m = static_cast<Model*>(model);
+        AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+        if (anim) {
+            s32 halfFrame = ((anim->endFrame >> 16) + (anim->endFrame >> 31)) >> 1;
+            if (halfFrame < anim->currentFrame) {
+                field616++;
+            }
+
+            // PSX: switch animation based on angular velocity direction
+            s32 targetAnim = (field424 >= 0) ? PLAYER_ANIM_POLE_SWING_FWD : PLAYER_ANIM_POLE_SWING_BACK;
+            if (anim->animEnum != targetAnim) {
+                m->ApplyAnimToModel(0, targetAnim, ANIM_HOLD_FIRST, 0, 0);
+                actionStateFlag = 1;
+            }
         }
     }
+
+    // PSX: check if swing passed through bottom (angle range check)
+    s32 wantSound = 0;
+    if (actionStateFlag) {
+        if ((u32)newAngleX < 5461 || (u32)newAngleX > 0xE38F) {
+            actionStateFlag = 0;
+            if (soundHandle) {
+                // PSX: PoleSwing__14CHumanoidSound(a1[82])
+            }
+            wantSound = 0;
+        }
+    }
+
+    // PSX: update orientation
+    orientation.x = newAngleX;
+    orientation.y = angleY;
+    orientation.z = angleZ;
+
+    // PSX: update pos and homePos from transformed position
+    pos = savedPos;
+    homePos = savedPos;
 
     // PSX: check dismount (jump bit 3 or taunt bit 4)
     maxFallDivisor = 0;
@@ -2004,26 +2084,61 @@ void Player::_HorizontalPoleSwing() {
     if (((cb >> 3) & 1) || ((cb >> 4) & 1)) {
         wantDismount = 1;
     }
+    if (wantDismount) {
+        wantSound = 1;
+    }
 
-    if (wantDismount && field616 > 0) {
-        // Dismount from pole
-        // PSX: complex matrix math for launch direction
-        // Simplified: transition to flip and apply launch force
-        SetActionState(AS_FLIP, 0); // PSX: SetActionState(16, 0) - flip from pole
+    if (wantSound && field616 > 0) {
+        // PSX: dismount from pole - matrix math for launch direction
+        LVector launchOffset = {0, 0, 0};
+        p3dFillTransMatrix(launchOffset, rotMatrix);
 
-        m->ApplyAnimToModel(0, PLAYER_ANIM_FORWARD_FLIP, ANIM_LOOP, 0, 0);
-
-        // PSX: set faceAngle based on swing direction
-        if (newAngleX <= PSX_ANGLE_180) {
-            faceAngle = orientation.y + PSX_ANGLE_180;
+        SetActionState(AS_FLIP, 0);
+        if (model) {
+            Model* m = static_cast<Model*>(model);
+            m->ApplyAnimToModel(0, PLAYER_ANIM_FORWARD_FLIP, ANIM_LOOP, 0, 0);
         }
 
-        // Reset orientation and swing state
+        // PSX: launch direction depends on swing side
+        if (newAngleX <= PSX_ANGLE_180) {
+            // PSX: forward side - offset = (350*sin(angleY), 0, 350*cos(angleY))
+            savedPos.x += (s32)((350LL * rmSin16(angleY)) >> 16);
+            savedPos.z += (s32)((350LL * rmSin16((s16)(angleY + 0x4000))) >> 16);
+            homePos = savedPos;
+            launchOffset.z = -100;
+            faceAngle = angleY + PSX_ANGLE_180;
+        } else {
+            // PSX: backward side - offset = (-350*sin(angleY), 0, -350*cos(angleY))
+            savedPos.x += (s32)((-350LL * rmSin16(angleY)) >> 16);
+            savedPos.z += (s32)((-350LL * rmSin16((s16)(angleY + 0x4000))) >> 16);
+            homePos = savedPos;
+            launchOffset.z = 100;
+        }
+
+        // PSX: transform launch offset by rotation matrix
+        launchOffset.y = 0;
+        Vec3 launchVec((f32)launchOffset.x, (f32)launchOffset.y, (f32)launchOffset.z);
+        Vec3 launchWorld = p3dVecTimesMatrix(launchVec, rotMatrix);
+
+        // PSX: abs(launch.y)
+        s32 launchY = (s32)launchWorld.y;
+        if (launchY < 0) {
+            launchY = -launchY;
+        }
+
+        // PSX: set velocity from launch direction
+        velocity.x = (s32)launchWorld.x;
+        velocity.y = launchY;
+        velocity.z = (s32)launchWorld.z;
+
+        // PSX: set facing and reset swing state
         orientation.x = 0;
+        orientation.y = faceAngle;
+        orientation.z = angleZ;
         field424 = 0;
     }
 }
-// PSX: _LedgeLatch__6Player (PLAYER.CPP:4062, 0x8003352C)
+// PSX: _LedgeLatch__6Player (PLAYER.CPP:4099, 0x8003352C)
 // Holds player on a ledge. Zeros velocity/force, waits 4 frames,
 // then checks for dismount (jump/taunt) or pull-up.
 void Player::_LedgeLatch() {
@@ -2096,8 +2211,8 @@ void Player::_LedgeLatch() {
             // PSX: transition to ledge pull-up
             SetActionState(AS_LEDGE_PULLUP, 0);
         } else {
-            // PSX: LetGoOfLedge - not yet reversed, transition to fall
-            SetActionState(AS_FALL, 0);
+            // PSX: LetGoOfLedge__8Humanoid - drop from ledge
+            LetGoOfLedge();
         }
     }
 }
@@ -2146,9 +2261,9 @@ void Player::_Dead() {
     }
 }
 
-// PSX: _SlopeSlide__6Player (PLAYER.CPP:4280, 0x8003389C)
-// Handles sliding on slopes. Applies force along slope normal,
-// checks for dismount or falling off.
+// PSX: _SlopeSlide__6Player (PLAYER.CPP:4274, 0x8003389C)
+// Handles sliding on slopes. Determines slide direction from collision
+// normal, projects velocity along slope surface, faces slide direction.
 void Player::_SlopeSlide() {
     MARKFUNCTION(0x8003389C);
 
@@ -2160,14 +2275,15 @@ void Player::_SlopeSlide() {
     if (((cb >> 3) & 1) || ((cb >> 4) & 1)) {
         wantDismount = 1;
     }
-    if (wantDismount && field616 >= 8) {
+    if (wantDismount && (u32)field616 >= 8) {
         SetActionState(AS_PAUSE, 0);
         return;
     }
 
     // PSX: check flags bit 16 (on slope surface)
-    if (!(flags & 0x10000)) {
-        // Not on slope - transition to fall
+    u32 fl = (u32)flags;
+    if ((fl & 0x10000) == 0) {
+        // Not on slope - fall with forward force
         SetActionState(AS_FALL, 0);
         SVector dir;
         dir.x = (s16)(orientation.x & 0xFFFF);
@@ -2179,55 +2295,91 @@ void Player::_SlopeSlide() {
     }
 
     // PSX: check flags bit 17 (slope physics active)
-    if (!((flags >> 17) & 1)) {
+    if (((fl >> 17) & 1) == 0) {
         SetActionState(AS_STAND, 0);
         return;
     }
 
     // PSX: compute slide direction from collision normal
-    // field148[6] = normalX at DynamicThing +172
-    // field148[8] = normalZ at DynamicThing +180
-    s32 normalX = field148[6]; // +172 relative to DynThing
-    s32 normalZ = field148[8]; // +180 relative to DynThing
+    // field148[6] = normalX at +172, field148[8] = normalZ at +180
+    s32 normalX = field148[6];
+    s32 normalZ = field148[8];
 
-    if (normalX == 0 && normalZ == 0) {
-        return;
-    }
+    if (normalX != 0 || normalZ != 0) {
+        // PSX: determine face angle from dominant slope axis
+        s32 slideAngle = 0;
+        s32 projX, projZ;
 
-    // PSX: determine face direction from dominant slope axis
-    s32 slideAngle = 0;
-    if (normalX != 0) {
-        slideAngle = (normalX > 0) ? 0x4000 : 0xC000;
-    } else {
-        if (normalZ <= 0) {
-            slideAngle = PSX_ANGLE_180;
+        if (normalX != 0) {
+            slideAngle = 0x4000;
+            if (normalX > 0) {
+                projX = PSX_ANGLE_360;
+            } else {
+                slideAngle = 0xC000;
+                projX = -PSX_ANGLE_360;
+            }
+            projZ = 0;
+        } else {
+            projX = 0;
+            if (normalZ > 0) {
+                projZ = PSX_ANGLE_360;
+            } else {
+                slideAngle = PSX_ANGLE_180;
+                projZ = -PSX_ANGLE_360;
+            }
         }
+
+        // PSX: compute velocity from facing direction
+        s32 sinA = rmSin16(faceAngle);
+        s32 cosA = rmSin16((s16)(faceAngle + 0x4000));
+        s32 velX = (s32)(((s64)sinA * (u32)runSpeed) >> 16);
+        s32 velZ = (s32)(((s64)cosA * (u32)runSpeed) >> 16);
+
+        // PSX: project out slope-normal component
+        // dot = projX * velX + projZ * velZ (in fixed-point)
+        s32 dot = (s32)(((s64)projX * (s64)velX) >> 16) + (s32)(((s64)projZ * (s64)velZ) >> 16);
+
+        // PSX: subtract normal component from velocity
+        contactForce.x += velX - (s32)(((s64)dot * (s64)projX) >> 16);
+        contactForce.y = contactForce.y; // PSX: no change to Y
+        contactForce.z += velZ - (s32)(((s64)dot * (s64)projZ) >> 16);
+
+        FaceAngleY(slideAngle, 0);
+        SetDesiredMoveDirection(slideAngle);
     }
-
-    // PSX: apply slide force along slope
-    s32 sinA = rmSin16(faceAngle);
-    s32 cosA = rmSin16((s16)(faceAngle + 0x4000));
-    s32 velX = (s32)((sinA * (s64)runSpeed) >> 16);
-    s32 velZ = (s32)((cosA * (s64)runSpeed) >> 16);
-
-    // Project out the slope-normal component
-    // (simplified from PSX matrix projection)
-    contactForce.x += velX;
-    contactForce.z += velZ;
-
-    FaceAngleY(slideAngle, 0);
 }
 // PSX: _Straif__6Player (PLAYER.CPP:4606, 0x80033FF8)
+// PSX: _Straif__6Player (PLAYER.CPP:4614, 0x80033FF8)
 // Player override of Humanoid::_Straif. Finds target if none,
-// checks flag transitions, scales runSpeed by deltaTime.
+// checks flag transitions, scales attackRange by strafe multiplier.
 void Player::_Straif() {
     MARKFUNCTION(0x80033FF8);
 
-    // PSX: if no target (field256 == 0), find one via FindFoe
+    // PC: when dive roll anim (24) is playing from R1, wait for completion
+    // before allowing command-driven exits. PSX relies on anim blending
+    // which we don't have yet.
+    if (model) {
+        Model* m = static_cast<Model*>(model);
+        AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+        if (anim && anim->animEnum == PLAYER_ANIM_STRAFE) {
+            s16 frame = (s16)((u32)anim->currentFrame >> 16);
+            s16 endF = (s16)((u32)anim->endFrame >> 16);
+            if (frame < endF) {
+                SVector dir;
+                dir.x = (s16)(orientation.x & 0xFFFF);
+                dir.y = (s16)((orientation.x >> 16) & 0xFFFF);
+                dir.z = (s16)(orientation.y & 0xFFFF);
+                dir.pad = (s16)((orientation.y >> 16) & 0xFFFF);
+                AddForce(runSpeed, &dir);
+                return;
+            }
+        }
+    }
+
+    // PSX: if no target (field256 == 0), find one via FindFoe + SetHumanoidTarget
     if (field256 == 0) {
-        // PSX: FindFoe(gp+468, gp+472, 0) - use default range values
-        FindFoe(distantTargetRange, 0, 0);
-        // PSX: SetHumanoidTarget with result - using FindFoe side effect
+        Humanoid* foe = FindFoe(distantTargetRange, 0, 0);
+        SetHumanoidTarget(foe);
     }
 
     // PSX: check flags bit 17 (slope/special surface)
@@ -2238,7 +2390,7 @@ void Player::_Straif() {
 
     u32 cb = (u32)commandBits;
 
-    // PSX: bit 4 (taunt) -> release target, run
+    // PSX: bit 4 (taunt) -> release target, pause
     if ((cb >> 4) & 1) {
         ReleaseTarget();
         SetActionState(AS_PAUSE, 0);
@@ -2252,30 +2404,25 @@ void Player::_Straif() {
         return;
     }
 
-    // PSX: scale runSpeed by global deltaTime multiplier
     // PSX: a1[52] = (gp+532 * a1[52]) >> 16
-    s64 scaled = (s64)deltaTime * (s64)runSpeed;
-    s32 scaledSpeed = (s32)(scaled >> 16);
-    (void)scaledSpeed;
+    attackRange = (s32)(((s64)STRAFE_MULTIPLIER * (u32)attackRange) >> 16);
 
     // Delegate to base Humanoid strafe logic
     Humanoid::_Straif();
 }
 
-// PSX: _LadderDismount__6Player (PLAYER.CPP:4660, 0x80033DB8)
-// Delegates to Humanoid::_LadderDismount (not yet reversed).
+// PSX: _LadderDismount__6Player (PLAYER.CPP:4477, 0x80033DB8)
+// PSX: return LadderDismount__8Humanoid(a1) - direct delegate
 void Player::_LadderDismount() {
     MARKFUNCTION(0x80033DB8);
-    // PSX: direct call to _LadderDismount__8Humanoid
-    // Humanoid ladder system not yet reversed - stub
+    Humanoid::_LadderDismount();
 }
 
-// PSX: _ClimbLadder__6Player (PLAYER.CPP:4680, 0x80033DD8)
-// Delegates to Humanoid::_ClimbLadder (not yet reversed).
+// PSX: _ClimbLadder__6Player (PLAYER.CPP:4488, 0x80033DD8)
+// PSX: return ClimbLadder__8Humanoid(a1) - direct delegate
 void Player::_ClimbLadder() {
     MARKFUNCTION(0x80033DD8);
-    // PSX: direct call to _ClimbLadder__8Humanoid
-    // Humanoid ladder system not yet reversed - stub
+    Humanoid::_ClimbLadder();
 }
 
 // PSX: _TableRoll__6Player (PLAYER.CPP:4700, 0x80033DF8)
@@ -2293,45 +2440,46 @@ void Player::_TableRoll() {
         return;
     }
 
-    s16 frame = (s16)anim->currentFrame;
+    s16 frame = (s16)((u32)anim->currentFrame >> 16);
 
-    // PSX: check animEnum == 86 (TABLE_ROLL)
-    if (anim->animEnum != PLAYER_ANIM_TABLE_ROLL) {
-        maxFallDivisor = 0;
-
-        // PSX: check loopCount for animation completion
-        if (anim->loopCount > 0) {
-            // PSX: clear flags2 bits 4-6, transition to stand
-            flags2 &= ~0x70u;
-            SetActionState(AS_STAND, 0);
-            // PSX: RestorePositionFromBip01 - not yet reversed
+    if (anim->animEnum == PLAYER_ANIM_TABLE_ROLL) {
+        if (frame < 5) {
+            SVector dir;
+            dir.x = (s16)(orientation.x & 0xFFFF);
+            dir.y = (s16)((orientation.x >> 16) & 0xFFFF);
+            dir.z = (s16)(orientation.y & 0xFFFF);
+            dir.pad = (s16)((orientation.y >> 16) & 0xFFFF);
+            AddForce(20, &dir);
+            maxFallDivisor = 0;
         }
-        return;
-    }
 
-    // PSX: early frames (< 5): apply small forward force
-    if (frame < 5) {
-        SVector dir;
-        dir.x = (s16)(orientation.x & 0xFFFF);
-        dir.y = (s16)((orientation.x >> 16) & 0xFFFF);
-        dir.z = (s16)(orientation.y & 0xFFFF);
-        dir.pad = (s16)((orientation.y >> 16) & 0xFFFF);
-        AddForce(20, &dir);
+        if (TABLE_ROLL_HANGTIME_START < frame && frame < TABLE_ROLL_HANGTIME_END) {
+            maxFallDivisor = 0;
+        }
+
+        if (frame == 13) {
+            LVector testPos = pos;
+            testPos.x += (s32)(((s64)rmSin16(faceAngle) * TABLE_LOOK_AHEAD_DISTANCE) >> 16);
+            testPos.z += (s32)(((s64)rmSin16((s16)(faceAngle + 0x4000)) * TABLE_LOOK_AHEAD_DISTANCE) >> 16);
+
+            s32 floorHeight = g_collisionSectors[0].GetWorldFloorHeight(testPos, 10);
+            if (floorHeight != (s32)0x80000001) {
+                s32 floorDiff = testPos.y - floorHeight;
+                if (floorDiff < 0) {
+                    floorDiff = -floorDiff;
+                }
+                if (floorDiff < 151) {
+                    m->ApplyAnimToModel(0, PLAYER_ANIM_TABLE_ROLL_END, ANIM_LOOP, 0, 0);
+                }
+            }
+        }
+    } else {
         maxFallDivisor = 0;
     }
 
-    // PSX: at frame 13, check for table edge (floor height query)
-    if (frame == 13) {
-        // PSX: GetWorldFloorHeight and check if within 150 units
-        // Collision system floor height query not yet reversed
-        // If at edge, switch to TABLE_ROLL_END animation
-        m->ApplyAnimToModel(0, PLAYER_ANIM_TABLE_ROLL_END, ANIM_LOOP, 0, 0);
-    }
-
-    // PSX: check loopCount for completion
-    maxFallDivisor = 0;
     if (anim->loopCount > 0) {
         flags2 &= ~0x70u;
         SetActionState(AS_STAND, 0);
+        RestorePositionFromBip01();
     }
 }

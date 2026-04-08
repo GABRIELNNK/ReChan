@@ -132,8 +132,13 @@ public:
 
     // PSX +280 (s32,s32,s32): bounding box for collision
     // Initialized to {175, 0, 768} then {175, 0, 768} (two sets)
+    // Note: fields at +296..+307 are reused as pole anchor position
+    // during HorizontalPoleSwing (p3dFillTransMatrix reads 3 ints at +296)
     LVector collBboxMin = {175, 0, 768};
     LVector collBboxMax = {175, 0, 768};
+
+    // PSX +304 (s32): undeclared (part of pole anchor z when on pole)
+    s32 field304 = 0;
 
     // PSX +308 (s32): state timer (cleared on reset / state change)
     s32 stateTimer = 0;
@@ -318,7 +323,7 @@ public:
     void FacePoint(const LVector& point, s32 immediate);
 
     // PSX: FindFoe__8HumanoidUlli (HUMANOID.CPP:2446)
-    void FindFoe(u32 range, s32 param, s32 immediate);
+    Humanoid* FindFoe(u32 range, s32 param, s32 immediate);
 
     // PSX: SetTarget__8HumanoidP8Humanoid (HUMANOID.CPP:2502)
     void SetTarget(Humanoid* target);
@@ -346,6 +351,24 @@ public:
     // PSX: EnterCombatCombo__8Humanoid (HUMANOID.CPP)
     s32 EnterCombatCombo();
 
+    // PSX: CheckForLedges2__8HumanoidR9_RMVECT16R10tagLVectorl (HUMANOID.CPP:6730)
+    bool CheckForLedges2(LVector& outNormal, LVector& outCorrectionPos, s32 clearance);
+
+    // PSX: RestorePositionFromBip01__8Humanoid (HUMANOID.CPP:1681)
+    s32 RestorePositionFromBip01();
+
+    // PSX: SetDesiredMoveDirection__8Humanoidl (0x80064EA8)
+    void SetDesiredMoveDirection(s32 angle) { faceAngle = angle; }
+
+    // PSX: TestAndSetRisingAttack__8Humanoid (HUMANOID.CPP:5438, 0x80068D38)
+    virtual s32 TestAndSetRisingAttack();
+
+    // PSX: LetGoOfLedge__8Humanoid (HUMANOID.CPP:8735, 0x8006C478)
+    s32 LetGoOfLedge();
+
+    // PSX: SetHumanoidTarget__8HumanoidP8Humanoid (HUMANOID.CPP:2535, 0x800651C0)
+    void SetHumanoidTarget(Humanoid* target);
+
     virtual void _Stand();
     virtual void _Run();
     virtual void _Jump();
@@ -364,6 +387,8 @@ public:
     virtual void _Stunned();
     virtual void _Throw();
     virtual void _Pickup();
+    virtual void _LadderDismount();
+    virtual void _ClimbLadder();
 
     // PSX callback targets used by AnimStructure::ProcessHumanoidCB.
     // Selector 61 -> _DoStand, selector 62 -> _DoRun.

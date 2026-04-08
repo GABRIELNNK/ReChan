@@ -6,6 +6,7 @@
 #include "p3d/lvector.h"
 #include "p3d/p3dmath.h"
 #include "gen/cclist.h"
+#include "gen/config.h"
 
 struct DBRoot;
 class BlockManager;
@@ -156,6 +157,15 @@ public:
     // PSX +92 (u32): secondary flags (see ThingFlags2 enum)
     u32 flags2 = 0;
 
+#if INTERPOLATED_RENDERING
+    LVector renderPrevPos = {};
+    LVector renderPrevOrientation = {};
+    LVector renderCurrPos = {};
+    LVector renderCurrOrientation = {};
+    u32 renderSnapshotTick = 0;
+    bool renderSnapshotInit = false;
+#endif
+
     // Global Thing counter - PSX: gp+3868
     static u16 s_nextUniqueID;
 
@@ -172,6 +182,9 @@ public:
 
     // PSX: Draw__5Thing (THING.CPP:487) - renders model at pos/orientation
     virtual void Draw();
+
+    // PC: helper for smooth render-only interpolation.
+    void GetRenderTransform(LVector* outPos, LVector* outOrientation);
 
     // PSX: Reset__5Thing (THING.CPP:502) - reset to initial state
     virtual void Reset();

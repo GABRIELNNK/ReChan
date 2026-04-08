@@ -22,6 +22,11 @@ class AnimStructure;
 struct AnimationMatrices;
 struct STreeData;
 
+struct ModelFloorHeightState {
+    s32 current = (s32)0x80000001;
+    s32 previous = (s32)0x80000001;
+};
+
 // Pre-parsed skinning data for CPU vertex skinning each frame
 struct SkinVertex {
     f32 lx, ly, lz;          // joint-local position

@@ -134,51 +134,75 @@ bool Floor::LedgePrototype(const LVector& startPos, const LVector& endPos,
     LVector& outNormal, LVector& outCorrectionPos) const {
     MARKFUNCTION(0x80092B24);
 
-    // Early exit: ledge flag (bit 16) must be set
-    if (!(flags & 0x0001)) return false;  // bit0 = ledge flag in u16
-    // Early exit: railing flag (bit 2) must NOT be set
-    if ((flags >> 2) & 1) return false;
-
-    // Evaluate each boundary line at endPos
-    s32 dotEnd[4];
-    for (int i = 0; i < 4; i++) {
-        dotEnd[i] = fixmul16(bound[i].a, endPos.x) + fixmul16(bound[i].b, endPos.z) + bound[i].c;
+    if ((flags & 0x0001) == 0) {
+        return false;
+    }
+    if (((flags >> 2) & 1) != 0) {
+        return false;
     }
 
-    // Check if endPos is inside the polygon (all dots >= 0)
-    for (int i = 0; i < 4; i++) {
-        if (dotEnd[i] < 0) return false;
+    s32 endDots[4] = {};
+    for (s32 i = 0; i < 4; i++) {
+        endDots[i] =
+            fixmul16(bound[i].a, endPos.x) +
+            fixmul16(bound[i].b, endPos.z) +
+            bound[i].c;
     }
 
-    // Evaluate each boundary line at startPos
-    s32 dotStart[4];
-    for (int i = 0; i < 4; i++) {
-        dotStart[i] = fixmul16(bound[i].a, startPos.x) + fixmul16(bound[i].b, startPos.z) + bound[i].c;
+    if (endDots[0] < 0 || endDots[1] < 0 || endDots[2] < 0 || endDots[3] < 0) {
+        return false;
     }
 
-    // Find edges where startPos was outside but endPos is inside (edge crossing)
-    s32 numEdges = BoundNumber();
-    for (int i = 1; i < numEdges; i++) {
-        if (dotStart[i] >= 0) continue; // start was inside this half-plane
+    s32 startDots[4] = {};
+    for (s32 i = 0; i < 4; i++) {
+        startDots[i] =
+            fixmul16(bound[i].a, startPos.x) +
+            fixmul16(bound[i].b, startPos.z) +
+            bound[i].c;
+    }
 
-        // Compute correction for this crossed edge
+    s32 numBounds = BoundNumber();
+    for (s32 i = 0; i < numBounds; i++) {
+        s32 edgeDot = startDots[i];
+        if (edgeDot >= 0) {
+            continue;
+        }
+
         outNormal.x = -bound[i].a;
         outNormal.y = 0;
         outNormal.z = -bound[i].b;
 
-        // Push correction: move back along the edge normal
-        s32 pushDist = dotEnd[i] + 2;
-        outCorrectionPos.x = endPos.x - fixmul16(bound[i].a, pushDist);
-        outCorrectionPos.y = endPos.y;
-        outCorrectionPos.z = endPos.z - fixmul16(bound[i].b, pushDist);
+        outCorrectionPos.x = startPos.x + fixmul16(outNormal.x, edgeDot);
+        outCorrectionPos.z = startPos.z + fixmul16(outNormal.z, edgeDot);
+        outCorrectionPos.y = GetFloorHeight(outCorrectionPos);
 
-        // Verify the height at correction position is within tolerance
-        s32 floorH = GetFloorHeight(outCorrectionPos);
-        s32 diff = outCorrectionPos.y - floorH;
-        if (diff < 0) diff = -diff;
-        if (diff < maxFallHeight) {
-            return true;
+        if (outCorrectionPos.y < height) {
+            continue;
         }
+        if (outCorrectionPos.y > maxFallHeight) {
+            continue;
+        }
+
+        s32 prev = (i - 1 + numBounds) % numBounds;
+        s32 next = (i + 1) % numBounds;
+
+        s32 prevDot =
+            fixmul16(bound[prev].a, outCorrectionPos.x) +
+            fixmul16(bound[prev].b, outCorrectionPos.z) +
+            bound[prev].c;
+        if (prevDot < 0) {
+            continue;
+        }
+
+        s32 nextDot =
+            fixmul16(bound[next].a, outCorrectionPos.x) +
+            fixmul16(bound[next].b, outCorrectionPos.z) +
+            bound[next].c;
+        if (nextDot < 0) {
+            continue;
+        }
+
+        return true;
     }
 
     return false;
