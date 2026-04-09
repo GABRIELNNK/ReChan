@@ -12,6 +12,7 @@
 #include "snd/sndfact.h"
 #include "p3d/p3dmath.h"
 #include "p3d/skeleton.h"
+#include "pc/log.h"
 
 static constexpr s32 HUMANOID_ANIM_RUN = 2;
 static constexpr s32 HUMANOID_ANIM_DIVE_ROLL = 90;
@@ -297,6 +298,13 @@ bool Humanoid::CheckForLedges2(LVector& outNormal, LVector& outCorrectionPos, s3
         clearance);
 }
 
+// PSX: CheckForPickup__8Humanoid (HUMANOID.CPP:6081, 0x800697C4)
+s32 Humanoid::CheckForPickup() {
+    MARKFUNCTION(0x800697C4);
+    // TODO: reverse from PSX - searches nearby pickup items
+    return 0;
+}
+
 // PSX: CreateModel__8HumanoidPCc (HUMANOID.CPP:795, 0x80063248)
 // PSX: creates HumanoidModel if not exists, creates Behaviour, then calls Thing::CreateModel
 void Humanoid::CreateModel(const char* name) {
@@ -454,7 +462,13 @@ void Humanoid::SetActionState(u32 state, s32 param) {
     }
     case AS_PAUSE:             stateDispatch = SD_PAUSE; break;
     case AS_JUMP:              stateDispatch = SD_JUMP; break;
-    case AS_RUN:               stateDispatch = SD_RUN; break;
+    case AS_RUN:
+        stateDispatch = SD_RUN;
+        if (model) {
+            Model* m = static_cast<Model*>(model);
+            m->SetAnim(HUMANOID_ANIM_RUN, param, 0, 0);
+        }
+        break;
     case AS_BACKFLIP:          stateDispatch = SD_BACKFLIP; break;
     case AS_STRAFE:            stateDispatch = SD_STRAFE; break;
     case AS_SLOPE_SLIDE:       stateDispatch = SD_STRAFE; break;
@@ -721,12 +735,14 @@ void Humanoid::_Stand() {
     s32 cmd = ReturnMostSignificant32BitNumber((u32)commandBits);
     flags2 |= 0x0008; // ground sticking
 
+    LOG("_Stand: commandBits=0x%X cmd=%d actionState=%d stateDispatch=%d", commandBits, cmd, actionState, stateDispatch);
+
     if (cmd < 1 || cmd > 31) return;
 
     SVector dir;
     dir.x = (s16)orientation.x;
-    dir.y = (s16)orientation.y;
-    dir.z = (s16)orientation.z;
+    dir.y = 0;
+    dir.z = (s16)orientation.y;
     dir.pad = 0;
 
     switch (cmd) {
@@ -823,10 +839,10 @@ void Humanoid::_DiveRoll() {
 
     if (frame < DIVE_ROLL_FORCE_END_FRAME) {
         SVector dir;
-        dir.x = (s16)(orientation.x & 0xFFFF);
-        dir.y = (s16)((orientation.x >> 16) & 0xFFFF);
-        dir.z = (s16)(orientation.y & 0xFFFF);
-        dir.pad = (s16)((orientation.y >> 16) & 0xFFFF);
+        dir.x = (s16)orientation.x;
+        dir.y = 0;
+        dir.z = (s16)orientation.y;
+        dir.pad = 0;
         AddForce(DIVE_ROLL_FORCE, &dir);
     }
 
@@ -855,10 +871,19 @@ void Humanoid::_DiveRoll() {
 void Humanoid::_Taunt() {
     MARKFUNCTION(0x8006710C);
 
-    // PSX: waits for animation complete flag, then dispatches
-    // Without animation system, use stateTimer as frame proxy
-    stateTimer++;
-    if (stateTimer < 30) return;
+    if (!model) {
+        return;
+    }
+    Model* m = static_cast<Model*>(model);
+    AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+    if (!anim) {
+        return;
+    }
+
+    // PSX: wait for animation to complete (loopCount > 0)
+    if (anim->loopCount == 0) {
+        return;
+    }
 
     s32 cmd = ReturnMostSignificant32BitNumber((u32)commandBits);
     if (cmd < 2 || cmd > 31) {
@@ -867,40 +892,54 @@ void Humanoid::_Taunt() {
     }
 
     switch (cmd) {
-    case 2: // kick -> run
+    case 2:
         SetActionState(AS_RUN, runSpeed);
         return;
-    case 3: // taunt -> backflip
+    case 6:
         SetActionState(AS_BACKFLIP, 0);
         return;
-    case 5: // face+roll -> punch
-        SetActionState(AS_PUNCH_ATTACK, 0);
-        return;
-    case 6: // backflip -> pickup/throw or combat idle
+    case 7:
+    case 15:
+    case 16:
         if (field500 != 0 || field504 != 0) {
-            if (field500 != 0 && field316 != 0) {
+            s32 weaponField = 0;
+            if (field500 != 0) {
+                Humanoid* pickup = (Humanoid*)(intptr_t)field500;
+                weaponField = pickup->field316;
+            }
+            if (weaponField != 0) {
                 SetActionState(AS_COMBAT_IDLE, 0);
             } else {
                 SetActionState(AS_THROW_PICKUP, 0);
             }
         } else {
+            if (CheckForPickup() == 1) {
+                return;
+            }
             SetActionState(AS_COMBAT_IDLE, 0);
         }
         return;
-    case 7: // combat idle
+    case 8:
+    case 9:
+    case 10:
+    case 11:
+    case 12:
+    case 13:
+    case 14:
+    case 20:
+        SetActionState(AS_PUNCH_ATTACK, 0);
+        return;
+    case 19:
         SetActionState(AS_COMBAT_IDLE, 0);
         return;
-    case 8: // dodge -> combat idle
-        SetActionState(AS_COMBAT_IDLE, 0);
-        return;
-    case 9: // face+strafe
+    case 21:
         FaceAngleY(faceAngle, 0);
         return;
-    case 11: // hit env
-        SetActionState(AS_HIT_ENVIRONMENT, 0);
-        return;
-    case 12: // hit explosion
+    case 30:
         SetActionState(AS_HIT_EXPLOSION, 0);
+        return;
+    case 31:
+        SetActionState(AS_HIT_ENVIRONMENT, 0);
         return;
     default:
         SetActionState(AS_STAND, 0);
@@ -991,10 +1030,10 @@ void Humanoid::_Run() {
     if (sd & 0x0004) {
         FaceAngleY(faceAngle, 0);
         SVector dir;
-        dir.x = (s16)(orientation.x & 0xFFFF);
-        dir.y = (s16)((orientation.x >> 16) & 0xFFFF);
-        dir.z = (s16)(orientation.y & 0xFFFF);
-        dir.pad = (s16)((orientation.y >> 16) & 0xFFFF);
+        dir.x = (s16)orientation.x;
+        dir.y = 0;
+        dir.z = (s16)orientation.y;
+        dir.pad = 0;
         AddForce(runSpeed, &dir);
         return;
     }
@@ -1129,10 +1168,10 @@ void Humanoid::_Straif() {
     // Apply movement force in facing direction
     if (attackRange != 0) {
         SVector dir;
-        dir.x = (s16)(orientation.x & 0xFFFF);
-        dir.y = (s16)((orientation.x >> 16) & 0xFFFF);
-        dir.z = (s16)(orientation.y & 0xFFFF);
-        dir.pad = (s16)((orientation.y >> 16) & 0xFFFF);
+        dir.x = (s16)orientation.x;
+        dir.y = 0;
+        dir.z = (s16)orientation.y;
+        dir.pad = 0;
         AddForce(attackRange, &dir);
     }
 }
@@ -1148,10 +1187,10 @@ void Humanoid::_Jump() {
     if (commandBits & 0x0004) {
         FaceAngleY(faceAngle, 1);
         SVector dir;
-        dir.x = (s16)(orientation.x & 0xFFFF);
-        dir.y = (s16)((orientation.x >> 16) & 0xFFFF);
-        dir.z = (s16)(orientation.y & 0xFFFF);
-        dir.pad = (s16)((orientation.y >> 16) & 0xFFFF);
+        dir.x = (s16)orientation.x;
+        dir.y = 0;
+        dir.z = (s16)orientation.y;
+        dir.pad = 0;
         AddForce(runSpeed, &dir);
     }
 

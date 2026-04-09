@@ -57,7 +57,7 @@ void PlatformInput::ServiceInput() {
         gamepadConnected = gamepad->IsConnected();
 
         if (gamepadConnected) {
-            for (int b = 0; b < 14; b++) {
+            for (int b = 0; b < 15; b++) {
                 gpButtonsCurr[b] = gamepad->IsButtonDown(b);
             }
             for (int a = 0; a < 6; a++) {
@@ -70,6 +70,33 @@ void PlatformInput::ServiceInput() {
     } else {
         gamepadConnected = false;
     }
+}
+
+bool PlatformInput::HasAnyKeyboardInput() const {
+    for (auto& [key, val] : currKeys) {
+        if (val) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool PlatformInput::HasAnyGamepadInput() const {
+    if (!gamepadConnected) {
+        return false;
+    }
+    for (int b = 0; b < 15; b++) {
+        if (gpButtonsCurr[b]) {
+            return true;
+        }
+    }
+    // Only check sticks (0-3), not triggers (4-5) which rest at -1.0 in GLFW
+    for (int a = 0; a < 4; a++) {
+        if (std::fabs(gpAxes[a]) > STICK_DEADZONE) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool PlatformInput::IsKeyDown(int key) const {
@@ -120,14 +147,14 @@ void PlatformInput::GetMouseDelta(double& dx, double& dy) const {
 }
 
 bool PlatformInput::IsGamepadButtonDown(int button) const {
-    if (button < 0 || button >= 14) {
+    if (button < 0 || button >= 15) {
         return false;
     }
     return gpButtonsCurr[button];
 }
 
 bool PlatformInput::IsGamepadButtonTriggered(int button) const {
-    if (button < 0 || button >= 14) {
+    if (button < 0 || button >= 15) {
         return false;
     }
     return gpButtonsCurr[button] && !gpButtonsPrev[button];

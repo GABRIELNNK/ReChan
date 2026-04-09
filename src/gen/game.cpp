@@ -45,8 +45,7 @@ s16 g_selectedLevel = -1;   // gp+44: queued level ID (-1 = none)
 s32 g_directorActive = 0;   // gp+20: director intro script active
 s32 g_feInitialized = 0;    // gp+88: FE memory puddle initialized
 
-static constexpr u32 kControlStartAction = PsxPad::Start;
-static constexpr u32 kControlConfirmAction = PsxPad::Cross;
+
 
 const Game::StateFunc Game::sStateTable[static_cast<int>(GameState::COUNT)] = {
     gsNullState,
@@ -394,74 +393,12 @@ bool Game::Step() {
         p3d::input->ServiceInput();
     }
 
-    // Update ActionInput (keyboard button states + movement)
+    // Update ActionInput (polls keyboard + gamepad, updates action states)
     if (g_actionInput) {
         g_actionInput->Update(p3d::input);
     }
 
-    // For gamepad: feed PSX button bits through existing pipeline.
-    // For keyboard: menu systems still read GetControlVal, so we
-    // synthesize pad bits from ActionInput for menu compatibility.
-    if (g_inputManager && g_actionInput) {
-        if (g_actionInput->IsGamepadActive() && p3d::input) {
-            // Gamepad: build PSX pad bits from GLFW gamepad state.
-            // The existing FindActionRequest pipeline handles button combos,
-            // hold durations, and direction resolution for gamepad.
-            u32 padBits = 0;
-            if (p3d::input->IsGamepadButtonDown(GamepadButton::A))           padBits |= PsxPad::Cross;
-            if (p3d::input->IsGamepadButtonDown(GamepadButton::B))           padBits |= PsxPad::Circle;
-            if (p3d::input->IsGamepadButtonDown(GamepadButton::X))           padBits |= PsxPad::Square;
-            if (p3d::input->IsGamepadButtonDown(GamepadButton::Y))           padBits |= PsxPad::Triangle;
-            if (p3d::input->IsGamepadButtonDown(GamepadButton::LeftBumper))  padBits |= PsxPad::L1;
-            if (p3d::input->IsGamepadButtonDown(GamepadButton::RightBumper)) padBits |= PsxPad::R1;
-            if (p3d::input->IsGamepadButtonDown(GamepadButton::Back))        padBits |= PsxPad::Select;
-            if (p3d::input->IsGamepadButtonDown(GamepadButton::Start))       padBits |= PsxPad::Start;
-            if (p3d::input->IsGamepadButtonDown(GamepadButton::LeftThumb))   padBits |= PsxPad::L3;
-            if (p3d::input->IsGamepadButtonDown(GamepadButton::RightThumb))  padBits |= PsxPad::R3;
-            if (p3d::input->IsGamepadButtonDown(GamepadButton::DpadUp))      padBits |= PsxPad::Up;
-            if (p3d::input->IsGamepadButtonDown(GamepadButton::DpadDown))    padBits |= PsxPad::Down;
-            if (p3d::input->IsGamepadButtonDown(GamepadButton::DpadLeft))    padBits |= PsxPad::Left;
-            if (p3d::input->IsGamepadButtonDown(GamepadButton::DpadRight))   padBits |= PsxPad::Right;
 
-            // L2/R2 triggers as digital buttons
-            if (p3d::input->GetLeftTrigger() >= PlatformInput::TRIGGER_THRESHOLD) {
-                padBits |= PsxPad::L2;
-            }
-            if (p3d::input->GetRightTrigger() >= PlatformInput::TRIGGER_THRESHOLD) {
-                padBits |= PsxPad::R2;
-            }
-
-            g_inputManager->ServiceInput(padBits, 0);
-
-            // Set analog stick data so PlayerUserControl takes the analog path
-            Control& ctrl = g_inputManager->controls[0];
-            ctrl.padType = 0x73; // PAD_TYPE_ANALOG_L
-            float lx = p3d::input->GetLeftStickX();
-            float ly = p3d::input->GetLeftStickY();
-            ctrl.analogLX = (u8)(128 + (s32)(lx * 127.0f));
-            ctrl.analogLY = (u8)(128 + (s32)(ly * 127.0f));
-            float rx = p3d::input->GetRightStickX();
-            float ry = p3d::input->GetRightStickY();
-            ctrl.analogRX = (u8)(128 + (s32)(rx * 127.0f));
-            ctrl.analogRY = (u8)(128 + (s32)(ry * 127.0f));
-        } else {
-            // Synthesize minimal pad bits for menu/FE systems that
-            // read GetControlVal directly (menus, title screen, etc).
-            // Gameplay uses ActionInput -> commandBits directly.
-            u32 menuBits = 0;
-            if (g_actionInput->GetMoveY() < 0) menuBits |= PsxPad::Up;
-            if (g_actionInput->GetMoveY() > 0) menuBits |= PsxPad::Down;
-            if (g_actionInput->GetMoveX() < 0) menuBits |= PsxPad::Left;
-            if (g_actionInput->GetMoveX() > 0) menuBits |= PsxPad::Right;
-            if (g_actionInput->IsButtonActive(InputButton::Jump))  menuBits |= PsxPad::Cross;
-            if (g_actionInput->IsButtonActive(InputButton::Start)) menuBits |= PsxPad::Start;
-            if (g_actionInput->IsButtonActive(InputButton::Select)) menuBits |= PsxPad::Select;
-            if (g_actionInput->IsButtonActive(InputButton::Grab))  menuBits |= PsxPad::Circle;
-            if (g_actionInput->IsButtonActive(InputButton::Punch)) menuBits |= PsxPad::Square;
-            if (g_actionInput->IsButtonActive(InputButton::Kick))  menuBits |= PsxPad::Triangle;
-            g_inputManager->ServiceInput(menuBits, 0);
-        }
-    }
 
     if (stateFunc)
         return stateFunc(this);
@@ -483,12 +420,7 @@ void Game::SetState(GameState s) {
 
     // PSX: for states that require input (TitleLoop=3, Play=8, EndGameLoop=26),
     // check if a pad is connected. If not, redirect to Error state.
-    if (s == GameState::TitleLoop || s == GameState::Play || s == GameState::EndGameLoop) {
-        if (g_inputManager) {
-            // PSX: checks inputManager+56 (control flags) bit 0 = connected
-            // On PC with keyboard, always connected
-        }
-    }
+    // PC: keyboard always available, no check needed.
 
     LOG("[Game] State: %d -> %d", static_cast<int>(prevState), static_cast<int>(state));
 }
@@ -525,11 +457,8 @@ bool Game::gsIntroState(Game* game) {
         g_display->EndFrame();
         game->introTimer++;
 
-        g_inputManager->Step();
-        u32 buttons = g_inputManager->GetControlVal(0);
-
         // 300 on psx
-        if (game->introTimer >= 100 || buttons != 0) {
+        if (game->introTimer >= 100 || (g_actionInput && g_actionInput->AnyJustPressed())) {
             if (game->introTexture) {
                 game->introTexture->Release();
                 game->introTexture = nullptr;
@@ -566,16 +495,7 @@ bool Game::gsTitleState(Game* game) {
     game->titleScreen = new TitleScreen();
     game->titleScreen->Init("XC/TITLE.1", g_oxFontFile);
 
-    // PSX: poll input to clear buffer
-    g_inputManager->Step();
-    g_inputManager->GetControlVal(0);
 
-    // PSX: setup title control mode for both pads
-    if (g_inputManager) {
-        for (s16 pad = 0; pad < 2; pad++) {
-            g_inputManager->SetControlModeArray(pad, TitleControlModeArray());
-        }
-    }
 
     // PSX: rsEvent(4, 22, 0, 0) - set sound location to title music
     rsEvent(RS_SET_LOCATION, 22, 0, 0);
@@ -660,11 +580,6 @@ bool Game::gsTitleLoopState(Game* game) {
     }
     g_display->EndFrame();
 
-    // PSX: InputManager::Step, GetControlVal(0)
-    g_inputManager->Step();
-    u32 buttons = g_inputManager->GetControlVal(0);
-    game->controlVal[0] = (s32)buttons;
-
     // PSX: attract mode timer check (gp+128 - gp+124) >= 900
     s32 elapsed = game->titleIdleTimer - game->titleIdleBase;
     if (elapsed >= 900) {
@@ -674,7 +589,7 @@ bool Game::gsTitleLoopState(Game* game) {
         return true;
     }
 
-    if (buttons & kControlStartAction) {
+    if (g_actionInput && g_actionInput->JustPressed(ACTION_START)) {
         // PSX: ProcessSoundEvent(gp[72], 8)
         if (g_frontEndSound) {
             g_frontEndSound->ProcessSoundEvent(FE_SND_MENU_OPEN);
@@ -710,12 +625,7 @@ bool Game::gsInitState(Game* game) {
     }
 
     // PSX: setup input control mode arrays for both pads (loop i=0,1)
-    if (g_inputManager) {
-        for (s16 pad = 0; pad < 2; pad++) {
-            g_inputManager->SetControlModeArray(pad, GameControlModeArray());
-            g_inputManager->SetControlMapArray(pad, g_inputManager->PlayerMapArray());
-        }
-    }
+    // PC: no longer needed, ActionInput handles input directly
 
     // PSX: VBlankLogo::StopLogo
     StopLogo();
@@ -813,12 +723,6 @@ bool Game::gsPrePlayState(Game* game) {
     game->controlVal[1] = 0;
 
     // PSX: loop i=0..1: SetControlModeArray, PlayerMapArray, SetControlMapArray
-    if (g_inputManager) {
-        for (s16 pad = 0; pad < 2; pad++) {
-            g_inputManager->SetControlModeArray(pad, GameControlModeArray());
-            g_inputManager->SetControlMapArray(pad, g_inputManager->PlayerMapArray());
-        }
-    }
 
     // PSX: if level != 7: SetHUDVisible(0, 1, 1)
     // TODO: HUD not yet reversed
@@ -844,19 +748,13 @@ bool Game::gsPlayState(Game* game) {
     }
 
     // PSX: InputManager::Step, then loop 2 pads storing GetControlVal
-    g_inputManager->Step();
-
-    for (s32 pad = 0; pad < 2; pad++) {
-        game->controlVal[pad] = (s32)g_inputManager->GetControlVal((u16)pad);
-    }
-
     // PSX: ProcessHandlers(game) - runs handlerSet1 (think) + handlerSet2 (draw)
     game->ProcessHandlers();
 
     // PSX: check state==Play AND director scriptState==0 for pause eligibility
     if (game->state == GameState::Play) {
         s32 canPause = (!g_director || g_director->scriptState == 0);
-        if (canPause && (game->controlVal[0] & kControlStartAction)) {
+        if (canPause && g_actionInput && g_actionInput->JustPressed(ACTION_START)) {
             game->SetState(GameState::Menu);
             // PSX: Shock(18) - controller vibration on pause
             // TODO: Shock not yet reversed
@@ -1086,10 +984,6 @@ bool Game::gsQueueLevelLoad(Game* game) {
     // PSX: jcsStartDialog() - initialize dialog/subtitle system
     // TODO: jcsStartDialog not yet reversed
 
-    // PSX: InputManager::Step(), GetControlVal(0) - flush input buffer
-    g_inputManager->Step();
-    g_inputManager->GetControlVal(0);
-
     return true;
 }
 
@@ -1127,10 +1021,6 @@ bool Game::gsQueuePetalLoad(Game* game) {
     // PSX: jcsStartDialog()
     // TODO: not yet reversed
 
-    // PSX: InputManager::Step(), GetControlVal(0) - flush input buffer
-    g_inputManager->Step();
-    g_inputManager->GetControlVal(0);
-
     return true;
 }
 
@@ -1158,12 +1048,6 @@ bool Game::gsQueueLevelPetalLoad(Game* game) {
 
     // PSX: jcsStartDialog()
     // TODO: not yet reversed
-
-    // PSX: InputManager::Step(), GetControlVal(0)
-    if (g_inputManager) {
-        g_inputManager->Step();
-        g_inputManager->GetControlVal(0);
-    }
 
     return true;
 }
@@ -1261,12 +1145,8 @@ bool Game::gsEndGameLoopState(Game* game) {
 
     g_display->EndFrame();
 
-    g_inputManager->Step();
-    u32 buttons = g_inputManager->GetControlVal(0);
-    game->controlVal[0] = (s32)buttons;
-
-    // PSX: check start-action (0x0800) or confirm-action (0x0040): 0x0840
-    if (buttons & (kControlStartAction | kControlConfirmAction)) {
+    // PSX: check start or confirm to continue
+    if (g_actionInput && (g_actionInput->JustPressed(ACTION_START) || g_actionInput->JustPressed(ACTION_MENU_CONFIRM))) {
         // PSX: ProcessSoundEvent(frontEndSound, 19) = FE_SND_JT_0
         if (g_frontEndSound) {
             g_frontEndSound->ProcessSoundEvent(FE_SND_JT_0);
@@ -1339,13 +1219,22 @@ void Game::PlayMovie(const char* name, s32 skippable, s32 unloadLevel) {
             p3d::display->PollEvents();
 
             // PSX: skip callback checks Start button
-            // PC: Enter (Start), Escape, or Space to skip
             if (skippable) {
+                // Keyboard: Enter/Escape/Space
                 if (p3d::display->IsKeyDown(KEY_ENTER) ||
                     p3d::display->IsKeyDown(KEY_ESCAPE) ||
                     p3d::display->IsKeyDown(KEY_SPACE)) {
                     LOG("[Game] PlayMovie: skipped by user");
                     break;
+                }
+                // Gamepad: poll and check Start/A
+                if (p3d::input) {
+                    p3d::input->ServiceInput();
+                    if (p3d::input->IsGamepadButtonDown(GpBtn::Start) ||
+                        p3d::input->IsGamepadButtonDown(GpBtn::A)) {
+                        LOG("[Game] PlayMovie: skipped by gamepad");
+                        break;
+                    }
                 }
             }
 

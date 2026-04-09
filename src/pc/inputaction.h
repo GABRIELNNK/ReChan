@@ -10,110 +10,163 @@ class PlatformInput;
 // RequestAction(id) does: commandBits |= (1 << id)
 enum GameAction : s32 {
     GA_NONE             = 0,
-    GA_GUARD_RELEASE    = 1,   // no button - idle/stand request
-    GA_MOVE             = 2,   // analog stick or d-pad movement
-    GA_JUMP             = 3,   // Cross tap (no direction)
-    GA_JUMP_DIRECTIONAL = 4,   // Cross + direction
-    GA_DIVE_ROLL        = 5,   // R1
-    GA_STRAFE           = 6,   // R2
-    GA_GRAB             = 7,   // Circle tap (grab/throw)
-    GA_PUNCH            = 8,   // Square tap
-    GA_KICK             = 9,   // Triangle tap
-    GA_BACK_PUNCH       = 10,  // Square + backward
-    GA_BACK_KICK        = 11,  // Triangle + backward
-    GA_HEAVY_PUNCH      = 12,  // Square held / Triangle+Square
-    GA_HEAVY_KICK       = 13,  // Triangle held
-    GA_SPECIAL_GRAB     = 14,  // two-button grab combo
-    GA_GRAB_FORWARD     = 15,  // Circle + forward
-    GA_GRAB_HELD        = 17,  // Circle held
-    GA_GRAB_FWD_HELD    = 18,  // Circle + forward + held
-    GA_COUNTER          = 20,  // L1 / Triangle+Circle
-    GA_AI_DIVE_ROLL     = 21,  // AI only
+    GA_GUARD_RELEASE    = 1,
+    GA_MOVE             = 2,
+    GA_JUMP             = 3,
+    GA_JUMP_DIRECTIONAL = 4,
+    GA_DIVE_ROLL        = 5,
+    GA_STRAFE           = 6,
+    GA_GRAB             = 7,
+    GA_PUNCH            = 8,
+    GA_KICK             = 9,
+    GA_BACK_PUNCH       = 10,
+    GA_BACK_KICK        = 11,
+    GA_HEAVY_PUNCH      = 12,
+    GA_HEAVY_KICK       = 13,
+    GA_SPECIAL_GRAB     = 14,
+    GA_GRAB_FORWARD     = 15,
+    GA_GRAB_HELD        = 17,
+    GA_GRAB_FWD_HELD    = 18,
+    GA_COUNTER          = 20,
+    GA_AI_DIVE_ROLL     = 21,
 };
 
-// Abstract input buttons for keyboard binding.
-// Each maps to a semantic action group; the actual GameAction ID
-// is resolved from button + direction + hold time.
-enum class InputButton : s32 {
-    Jump,
-    Punch,
-    Kick,
-    Grab,
-    DiveRoll,
-    Strafe,
-    Counter,
-    Start,
-    Select,
-    COUNT,
+// Input actions - abstract game inputs that can be bound to keyboard or gamepad.
+// The game queries these directly. No PSX pad bit emulation.
+enum Action : s32 {
+    ACTION_JUMP,
+    ACTION_PUNCH,
+    ACTION_KICK,
+    ACTION_GRAB,
+    ACTION_DIVE_ROLL,
+    ACTION_STRAFE,
+    ACTION_COUNTER,
+    ACTION_MOVE_UP,
+    ACTION_MOVE_DOWN,
+    ACTION_MOVE_LEFT,
+    ACTION_MOVE_RIGHT,
+    ACTION_LOOK_UP,
+    ACTION_LOOK_DOWN,
+    ACTION_LOOK_LEFT,
+    ACTION_LOOK_RIGHT,
+    ACTION_START,
+    ACTION_SELECT,
+    ACTION_MENU_UP,
+    ACTION_MENU_DOWN,
+    ACTION_MENU_LEFT,
+    ACTION_MENU_RIGHT,
+    ACTION_MENU_CONFIRM,
+    ACTION_MENU_BACK,
+    ACTION_COUNT,
 };
 
-static constexpr s32 INPUT_BUTTON_COUNT = static_cast<s32>(InputButton::COUNT);
-
-struct KeyBinding {
-    int key;
-    InputButton button;
+// Gamepad button IDs for bindings (matches GLFW gamepad layout)
+namespace GpBtn {
+    static constexpr s32 A = 0;
+    static constexpr s32 B = 1;
+    static constexpr s32 X = 2;
+    static constexpr s32 Y = 3;
+    static constexpr s32 LB = 4;
+    static constexpr s32 RB = 5;
+    static constexpr s32 Back = 6;
+    static constexpr s32 Start = 7;
+    static constexpr s32 Guide = 8;
+    static constexpr s32 LStick = 9;
+    static constexpr s32 RStick = 10;
+    static constexpr s32 DpadUp = 11;
+    static constexpr s32 DpadRight = 12;
+    static constexpr s32 DpadDown = 13;
+    static constexpr s32 DpadLeft = 14;
+    static constexpr s32 NONE = -1;
 };
 
-// ActionInput - PC input system that maps keyboard/mouse directly to game actions.
-// For gamepad, the existing PSX pipeline (ServiceInput -> FindActionRequest) is used.
-// For keyboard, this system resolves actions from key state + direction + hold time.
+// Gamepad axis IDs for bindings
+namespace GpAxis {
+    static constexpr s32 LeftX = 0;
+    static constexpr s32 LeftY = 1;
+    static constexpr s32 RightX = 2;
+    static constexpr s32 RightY = 3;
+    static constexpr s32 LTrigger = 4;
+    static constexpr s32 RTrigger = 5;
+    static constexpr s32 NONE = -1;
+};
+
+struct ActionBinding {
+    int keyboardKey;       // keyboard key, or 0 for none
+    s32 gamepadButton;     // GpBtn value, or GpBtn::NONE
+    s32 gamepadButton2;    // alternate GpBtn (e.g. D-pad for movement), or GpBtn::NONE
+    s32 gamepadAxis;       // GpAxis value, or GpAxis::NONE
+    float axisThreshold;   // axis value threshold (>0 for positive, <0 for negative direction)
+};
+
+struct InputState {
+    bool down = false;
+    bool prevDown = false;
+    s16 duration = 0;
+};
+
+// ActionInput - modern action-based input system.
+// All game input flows through named actions with per-device bindings.
+// Both keyboard and gamepad are treated as first-class input sources.
 class ActionInput {
 public:
     ActionInput();
 
-    // Call once per frame before behaviour processing.
-    // Polls keyboard for movement and action button states.
+    // Call once per frame before anything reads input.
     void Update(PlatformInput* platform);
 
-    // Resolve the highest-priority action ID from current keyboard state.
-    // direction: camera-relative direction flags (DIR_FORWARD/BACKWARD/LEFT/RIGHT)
-    // Returns a GameAction value matching what FindActionRequest would return.
-    s32 ResolveAction(s32 direction) const;
+    // Action state queries
+    bool JustPressed(Action action) const;
+    bool IsHeld(Action action) const;
+    bool JustReleased(Action action) const;
+    s16 GetDuration(Action action) const;
 
-    // Movement axes from WASD (same scale as PSX d-pad: -127..+127)
+    // Analog movement axes (-127..+127), from WASD or left stick
     s32 GetMoveX() const { return moveX; }
     s32 GetMoveY() const { return moveY; }
     bool HasMovement() const { return moveX != 0 || moveY != 0; }
 
-    // Is an abstract button currently active (key held)?
-    bool IsButtonActive(InputButton btn) const;
+    // Right stick axes (-127..+127)
+    s32 GetLookX() const { return lookX; }
+    s32 GetLookY() const { return lookY; }
 
-    // True on first frame of press (oneshot semantics).
-    bool IsButtonTriggered(InputButton btn) const;
-
-    // Hold duration in frames for an abstract button
-    s16 GetButtonDuration(InputButton btn) const;
-
-    // Returns true if a real gamepad is connected
+    // True if gamepad is the active input device (for UI glyph display, etc.)
     bool IsGamepadActive() const { return gamepadActive; }
 
+    // True if any action was just pressed this frame (for "press any button" screens)
+    bool AnyJustPressed() const;
+
+    // Rebinding
+    void SetKeyBinding(Action action, int key);
+    void SetGamepadButtonBinding(Action action, s32 gpButton);
+    int GetKeyBinding(Action action) const;
+    s32 GetGamepadButtonBinding(Action action) const;
+
+    // When false, gameplay actions return inactive (menus still work)
     bool controlsEnabled = true;
 
-private:
-    struct ButtonState {
-        bool active = false;
-        bool prevActive = false;
-        s16 duration = 0;
-    };
+    // Resolve the highest-priority combat action from current input state.
+    // direction: camera-relative direction from PlayerUserControl
+    // Returns a GameAction value for RequestAction().
+    s32 ResolveGameAction(s32 direction) const;
 
-    ButtonState buttonStates[INPUT_BUTTON_COUNT] = {};
+private:
+    InputState states[ACTION_COUNT] = {};
+    ActionBinding bindings[ACTION_COUNT] = {};
+
     bool gamepadActive = false;
+    bool keysRegistered = false;
     s32 moveX = 0;
     s32 moveY = 0;
+    s32 lookX = 0;
+    s32 lookY = 0;
 
-    // Hold thresholds from PSX command table
+    // Hold thresholds matching PSX FindActionRequest command table
     static constexpr s16 GRAB_HOLD_THRESHOLD = 6;
     static constexpr s16 HEAVY_PUNCH_THRESHOLD = 8;
     static constexpr s16 HEAVY_KICK_THRESHOLD = 10;
 
-    static const KeyBinding s_defaultBindings[];
-    static const int s_numBindings;
-
-    // Movement key codes
-    static constexpr int MOVE_UP    = KEY_W;
-    static constexpr int MOVE_DOWN  = KEY_S;
-    static constexpr int MOVE_LEFT  = KEY_A;
-    static constexpr int MOVE_RIGHT = KEY_D;
+    bool PollAction(Action action, PlatformInput* platform) const;
 };
 
 extern ActionInput* g_actionInput;

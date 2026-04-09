@@ -77,13 +77,14 @@ namespace GamepadButton {
     static constexpr int RightBumper   = 5;  // R1
     static constexpr int Back          = 6;  // Select
     static constexpr int Start         = 7;
-    static constexpr int LeftThumb     = 8;  // L3
-    static constexpr int RightThumb    = 9;  // R3
-    static constexpr int DpadUp        = 10;
-    static constexpr int DpadRight     = 11;
-    static constexpr int DpadDown      = 12;
-    static constexpr int DpadLeft      = 13;
-    static constexpr int COUNT         = 14;
+    static constexpr int Guide         = 8;
+    static constexpr int LeftThumb     = 9;  // L3
+    static constexpr int RightThumb    = 10; // R3
+    static constexpr int DpadUp        = 11;
+    static constexpr int DpadRight     = 12;
+    static constexpr int DpadDown      = 13;
+    static constexpr int DpadLeft      = 14;
+    static constexpr int COUNT         = 15;
 }
 
 // Gamepad axis indices (backend-agnostic)

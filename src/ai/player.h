@@ -87,7 +87,7 @@ public:
     // gp+444: turn-around flag (set when angle difference in turn range)
     s32 turnAroundFlag = 0;
     // gp+476: turn delay threshold (s16, frames before turn-around completes)
-    s16 turnDelayThreshold = 8;
+    s16 turnDelayThreshold = 2;
     // gp+478: idle anim threshold (s16, frames before idle animation change)
     s16 idleAnimThreshold = 1800;
     // gp+3436: stored turn target angle

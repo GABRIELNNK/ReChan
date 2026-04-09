@@ -4,21 +4,11 @@
 #include "ai/cominter.h"
 #include "ai/humanoid.h"
 #include "ai/thing.h"
-#include "gen/control.h"
 #include "gen/game.h"
 #include "gen/camera.h"
 #include "pc/inputaction.h"
 #include "p3d/p3dmath.h"
-
-// PSX: Sony DualShock pad type bytes (analog mode)
-static constexpr u16 PAD_TYPE_ANALOG_L = 0x73; // 's'
-static constexpr u16 PAD_TYPE_ANALOG_H = 0x53; // 'S'
-
-// Analog stick constants
-static constexpr s32 STICK_CENTER  = 127;
-static constexpr s32 STICK_DEADZONE = 64;
-static constexpr s32 STICK_MAX     = 127;
-static constexpr s16 DPAD_ANALOG_MAG = 32;
+#include "pc/log.h"
 
 // PSX binary angle constants
 static constexpr s32 ANGLE_FULL_ROTATION = 0xFFFF;
@@ -42,9 +32,6 @@ static constexpr s32 DIR_FORWARD  = 1;  // angleDiff near 0 - pushing same direc
 static constexpr s32 DIR_BACKWARD = 2;  // angleDiff near 180 - pushing opposite to facing
 static constexpr s32 DIR_RIGHT    = 4;  // angleDiff near 270 - pushing to character's right
 static constexpr s32 DIR_LEFT     = 8;  // angleDiff near 90 - pushing to character's left
-
-// D-pad strip mask (removes d-pad bits from button word for FindActionRequest)
-static constexpr u32 DPAD_STRIP_MASK = 0xFFFF0FFF;
 
 // Fixed-point 127 << 16
 static constexpr s32 STICK_MAX_FP = 0x7F0000;
@@ -91,109 +78,20 @@ void Behaviour::Process() {
 // PSX: PlayerUserControl__9Behaviour (BEHAVE.CPP:1474, 0x80074F5C)
 void Behaviour::PlayerUserControl(Behaviour* self) {
     MARKFUNCTION(0x80074F5C);
-    if (!self || !self->owner || !g_game || !g_inputManager) {
+    if (!self || !self->owner || !g_game || !g_actionInput) {
         return;
     }
 
     Humanoid* owner = self->owner;
-    bool useKeyboard = g_actionInput && !g_actionInput->IsGamepadActive();
 
+    // Read movement from ActionInput (works for both keyboard and gamepad)
+    s32 analogX = (s16)g_actionInput->GetMoveX();
+    s32 analogY = g_actionInput->GetMoveY();
+    s32 stickX = g_actionInput->GetMoveX();
+    s32 stickY = g_actionInput->GetMoveY();
     s32 direction = 0;
-    s16 analogX = 0;
-    s32 analogY = 0;
-    s32 stickX = 0;
-    s32 stickY = 0;
-    u32 buttons = 0;
-    u16 port = (u16)self->padPort;
 
-    if (useKeyboard) {
-        // PC keyboard path: movement from ActionInput, action buttons resolved later
-        if (!(self->behaviourFlags & 1)) {
-            self->behaviourFlags |= 1u;
-        }
-        stickX = g_actionInput->GetMoveX();
-        stickY = g_actionInput->GetMoveY();
-        analogX = (s16)stickX;
-        analogY = stickY;
-    } else {
-        // PSX gamepad path: read from pad pipeline
-        if (self->behaviourFlags & 1) {
-            buttons = (u32)g_game->GetControlVal(self->padPort);
-            analogX = 0;
-        } else {
-            buttons = 0;
-            self->behaviourFlags |= 1u;
-        }
-
-        Control& ctrl = g_inputManager->controls[port & 1];
-        u16 padType = ctrl.padType;
-
-        if ((padType == PAD_TYPE_ANALOG_L || padType == PAD_TYPE_ANALOG_H) && buttons) {
-            stickX = (s32)ctrl.analogLX - STICK_CENTER;
-            s32 absStickX = stickX;
-            if (stickX < 0) {
-                absStickX = STICK_CENTER - (s32)ctrl.analogLX;
-            }
-            s32 rawY = (s32)ctrl.analogLY;
-            stickY = rawY - STICK_CENTER;
-
-            if (absStickX < STICK_DEADZONE) {
-                analogX = 0;
-            } else {
-                if (stickX <= 0) {
-                    analogX = (s16)((s32)ctrl.analogLX - STICK_CENTER);
-                    if (stickX < 0) {
-                        buttons |= PsxPad::Left;
-                    }
-                } else {
-                    buttons |= PsxPad::Right;
-                }
-                analogX = (s16)stickX;
-            }
-
-            s32 absStickY = rawY - STICK_CENTER;
-            if (stickY < 0) {
-                absStickY = STICK_CENTER - rawY;
-            }
-            analogY = 0;
-            if (absStickY >= STICK_DEADZONE) {
-                analogY = rawY - STICK_CENTER;
-                if (stickY > 0) {
-                    buttons |= PsxPad::Down;
-                } else if (stickY < 0) {
-                    buttons |= PsxPad::Up;
-                }
-            }
-        } else {
-            if (buttons & (PsxPad::Up | PsxPad::Right | PsxPad::Down | PsxPad::Left)) {
-                analogX = -DPAD_ANALOG_MAG;
-                if (buttons & PsxPad::Left) {
-                    stickX = -STICK_MAX;
-                } else {
-                    analogX = DPAD_ANALOG_MAG;
-                    if (buttons & PsxPad::Right) {
-                        stickX = STICK_MAX;
-                    } else {
-                        analogX = 0;
-                    }
-                }
-
-                analogY = -DPAD_ANALOG_MAG;
-                if (buttons & PsxPad::Up) {
-                    stickY = -STICK_MAX;
-                } else {
-                    analogY = DPAD_ANALOG_MAG;
-                    if (buttons & PsxPad::Down) {
-                        stickY = STICK_MAX;
-                    } else {
-                        analogY = 0;
-                    }
-                }
-            }
-        }
-    }
-
-    // Direction classification (shared between keyboard and gamepad)
+    // Direction classification
     s32 ownerAngle = owner->orientation.y;
     s32 targetAngle = ownerAngle;
 
@@ -253,27 +151,10 @@ void Behaviour::PlayerUserControl(Behaviour* self) {
         }
     }
 
-    // Action resolution (branched per input device)
-    s32 actionReq;
+    // Resolve combat action from ActionInput state + direction
+    s32 actionReq = g_actionInput->ResolveGameAction(direction);
 
-    if (useKeyboard) {
-        // PC keyboard: resolve action from ActionInput button state + direction
-        actionReq = g_actionInput->ResolveAction(direction);
-    } else {
-        // PSX gamepad: FindActionRequest from pad button bitmask
-        if (self->previousButtons == buttons) {
-            self->buttonHoldCounter++;
-        } else {
-            self->buttonHoldCounter = 0;
-        }
-        self->previousButtons = buttons;
-
-        actionReq = FindActionRequest(
-            &self->actionRequestState[0],
-            buttons & DPAD_STRIP_MASK,
-            direction,
-            port);
-    }
+    LOG("PlayerUserControl: moveX=%d moveY=%d dir=%d actionReq=%d faceAngle=%d", analogX, analogY, direction, actionReq, owner->faceAngle);
 
     // Set faceAngle for movement/direction-based actions
     if ((u32)(actionReq - 2) < 3

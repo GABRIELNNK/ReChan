@@ -4,6 +4,7 @@
 #include "fe/hdmenuitems.h"
 #include "gen/linefile.h"
 #include "gen/control.h"
+#include "pc/inputaction.h"
 #include "xclib/xclib.h"
 
 // PSX: __7MenuMgr (0x8005F4A4)
@@ -214,12 +215,6 @@ void MenuMgr::Activate() {
     // PSX: ProcessSoundEvent(0, 10)
     // PSX: if soundFlag, play ambient music (rsEvent(30, ...))
     state = 1;
-    if (g_inputManager) {
-        for (s16 pad = 0; pad < 2; ++pad) {
-            g_inputManager->SetControlModeArray(pad, MenuControlModeArray());
-            g_inputManager->SetControlMapArray(pad, g_inputManager->DefaultMapArray());
-        }
-    }
     // PSX: save MEMORY[0x1C] into savedControl
     if (topMenu) {
         topMenu->DynSetup();
@@ -238,12 +233,6 @@ void MenuMgr::Deactivate() {
     active = 0;
     // PSX: ProcessSoundEvent(0, 11) — menu close sound
     // PSX: rsEvent(11, 0, 0, 0)
-    if (g_inputManager) {
-        for (s16 pad = 0; pad < 2; ++pad) {
-            g_inputManager->SetControlModeArray(pad, GameControlModeArray());
-            g_inputManager->SetControlMapArray(pad, g_inputManager->PlayerMapArray());
-        }
-    }
     screenStackDepth = 0;
     // PSX: MEMORY[0x1C] = savedControl
 }
@@ -346,42 +335,36 @@ void MenuMgr::PopMenu() {
 }
 
 // PSX: QueryInput__7MenuMgrb (0x8005FDF4)
-// Polls InputManager and dispatches button presses to virtual Input* functions.
+// Polls input and dispatches to virtual Input* functions.
 // processInput: when true, process buttons; false = poll only.
 void MenuMgr::QueryInput(bool processInput) {
     MARKFUNCTION(0x8005FDF4);
-    if (!g_inputManager) return;
-    g_inputManager->Step();
-    u32 buttons = g_inputManager->GetControlVal(0);
+    if (!g_actionInput) return;
     if (!processInput) return;
-    if (!buttons) return;
 
-    // 0x800 = Back/Triangle (remapped via menu control mode)
-    if (buttons & 0x800) {
+    // Back/Start
+    if (g_actionInput->JustPressed(ACTION_START)) {
         state = 8;
     }
-    // 0x1000 = Up
-    if (buttons & 0x1000) {
+    // D-pad navigation
+    if (g_actionInput->JustPressed(ACTION_MENU_UP)) {
         InputPadUp();
     }
-    // 0x4000 = Down
-    if (buttons & 0x4000) {
+    if (g_actionInput->JustPressed(ACTION_MENU_DOWN)) {
         InputPadDown();
     }
-    // 0x8000 = Left
-    if (buttons & 0x8000) {
+    if (g_actionInput->JustPressed(ACTION_MENU_LEFT)) {
         InputPadLeft();
     }
-    // 0x2000 = Right
-    if (buttons & 0x2000) {
+    if (g_actionInput->JustPressed(ACTION_MENU_RIGHT)) {
         InputPadRight();
     }
-    // 0x10 = Cancel/Pop
-    if (buttons & 0x10) {
+    // Cancel/Pop
+    if (g_actionInput->JustPressed(ACTION_MENU_BACK)) {
         InputItemPop();
     }
-    // 0x40 = Confirm/Push
-    if (buttons & 0x40) {
+    // Confirm/Push
+    if (g_actionInput->JustPressed(ACTION_MENU_CONFIRM)) {
         InputItemPush();
     }
 }

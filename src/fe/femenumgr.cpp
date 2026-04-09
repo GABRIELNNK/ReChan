@@ -6,6 +6,7 @@
 #include "gen/game.h"
 #include "gen/scoremgr.h"
 #include "gen/control.h"
+#include "pc/inputaction.h"
 
 // Global feMenuMgr pointer
 feMenuMgr* g_feMenuMgr = nullptr;
@@ -296,21 +297,14 @@ void feMenuMgr::PopMenu() {
 }
 
 // PSX: QueryInput__9feMenuMgrb (Overlay4 0x80011774)
-// Polls input, dispatches buttons to virtual Input* functions.
-// Uses menu-remapped button constants (set by Activate's control mode).
+// Polls input, dispatches to virtual Input* functions.
 void feMenuMgr::QueryInput(bool processInput) {
     MARKFUNCTION(0x80011774);
-    if (!g_inputManager) return;
-
-    g_inputManager->Step();
-    u32 buttons = g_inputManager->GetControlVal(0);
-
+    if (!g_actionInput) return;
     if (!processInput) return;
-    if (!buttons) return;
 
-    // 0x800 = Back/Triangle (remapped)
-    if (buttons & 0x800) {
-        // If not on the level select screen, set state=8 (exit) and deselect
+    // Back/Start - only if not on level select screen
+    if (g_actionInput->JustPressed(ACTION_START)) {
         hdMenu* levelMenu = FindMenu(HASH_LEVEL_SCREEN);
         if (curMenu != levelMenu) {
             state = 8;
@@ -320,28 +314,25 @@ void feMenuMgr::QueryInput(bool processInput) {
         }
     }
 
-    // 0x1000 = Up
-    if (buttons & 0x1000) {
+    // D-pad navigation
+    if (g_actionInput->JustPressed(ACTION_MENU_UP)) {
         InputPadUp();
     }
-    // 0x4000 = Down
-    if (buttons & 0x4000) {
+    if (g_actionInput->JustPressed(ACTION_MENU_DOWN)) {
         InputPadDown();
     }
-    // 0x8000 = Left
-    if (buttons & 0x8000) {
+    if (g_actionInput->JustPressed(ACTION_MENU_LEFT)) {
         InputPadLeft();
     }
-    // 0x2000 = Right
-    if (buttons & 0x2000) {
+    if (g_actionInput->JustPressed(ACTION_MENU_RIGHT)) {
         InputPadRight();
     }
-    // 0x10 = Cancel/Pop (L1 remapped)
-    if (buttons & 0x10) {
+    // Cancel/Pop
+    if (g_actionInput->JustPressed(ACTION_MENU_BACK)) {
         InputItemPop();
     }
-    // 0x40 = Confirm/Push (R1 remapped)
-    if (buttons & 0x40) {
+    // Confirm/Push
+    if (g_actionInput->JustPressed(ACTION_MENU_CONFIRM)) {
         InputItemPush();
     }
 }

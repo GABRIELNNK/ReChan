@@ -1,38 +1,71 @@
 #include "pc/inputaction.h"
 #include "p3d/input.h"
 #include "pddi/pddidev.h"
+#include <cmath>
 
 ActionInput* g_actionInput = nullptr;
 
-// Default keyboard bindings - maps keys to abstract input buttons.
-// The actual GameAction ID is resolved by ResolveAction based on
-// button + direction + hold time, matching PSX FindActionRequest behavior.
-const KeyBinding ActionInput::s_defaultBindings[] = {
-    // Jump
-    { KEY_SPACE,       InputButton::Jump },
-    // Punch
-    { KEY_J,           InputButton::Punch },
-    // Kick
-    { KEY_K,           InputButton::Kick },
-    // Grab / throw
-    { KEY_L,           InputButton::Grab },
-    // Dive roll
-    { KEY_LEFT_SHIFT,  InputButton::DiveRoll },
-    // Strafe
-    { KEY_F,           InputButton::Strafe },
-    // Counter
-    { KEY_Q,           InputButton::Counter },
-    // Start
-    { KEY_ENTER,       InputButton::Start },
-    { KEY_ESCAPE,      InputButton::Start },
-    // Select
-    { KEY_TAB,         InputButton::Select },
-    { KEY_BACKSPACE,   InputButton::Select },
-};
-
-const int ActionInput::s_numBindings = sizeof(s_defaultBindings) / sizeof(s_defaultBindings[0]);
-
 ActionInput::ActionInput() {
+    //                            keyboard         gpBtn           gpBtn2              gpAxis          threshold
+    bindings[ACTION_JUMP]       = { KEY_SPACE,       GpBtn::A,       GpBtn::NONE,        GpAxis::NONE,   0 };
+    bindings[ACTION_PUNCH]      = { KEY_J,           GpBtn::X,       GpBtn::NONE,        GpAxis::NONE,   0 };
+    bindings[ACTION_KICK]       = { KEY_K,           GpBtn::Y,       GpBtn::NONE,        GpAxis::NONE,   0 };
+    bindings[ACTION_GRAB]       = { KEY_L,           GpBtn::B,       GpBtn::NONE,        GpAxis::NONE,   0 };
+    bindings[ACTION_DIVE_ROLL]  = { KEY_LEFT_SHIFT,  GpBtn::RB,      GpBtn::NONE,        GpAxis::NONE,   0 };
+    bindings[ACTION_STRAFE]     = { KEY_F,           GpBtn::NONE,    GpBtn::NONE,        GpAxis::RTrigger, 0.5f };
+    bindings[ACTION_COUNTER]    = { KEY_Q,           GpBtn::LB,      GpBtn::NONE,        GpAxis::NONE,   0 };
+
+    bindings[ACTION_MOVE_UP]    = { KEY_W,           GpBtn::NONE,    GpBtn::DpadUp,      GpAxis::LeftY, -0.3f };
+    bindings[ACTION_MOVE_DOWN]  = { KEY_S,           GpBtn::NONE,    GpBtn::DpadDown,    GpAxis::LeftY,  0.3f };
+    bindings[ACTION_MOVE_LEFT]  = { KEY_A,           GpBtn::NONE,    GpBtn::DpadLeft,    GpAxis::LeftX, -0.3f };
+    bindings[ACTION_MOVE_RIGHT] = { KEY_D,           GpBtn::NONE,    GpBtn::DpadRight,   GpAxis::LeftX,  0.3f };
+
+    bindings[ACTION_LOOK_UP]    = { 0,               GpBtn::NONE,    GpBtn::NONE,        GpAxis::RightY, -0.3f };
+    bindings[ACTION_LOOK_DOWN]  = { 0,               GpBtn::NONE,    GpBtn::NONE,        GpAxis::RightY,  0.3f };
+    bindings[ACTION_LOOK_LEFT]  = { 0,               GpBtn::NONE,    GpBtn::NONE,        GpAxis::RightX, -0.3f };
+    bindings[ACTION_LOOK_RIGHT] = { 0,               GpBtn::NONE,    GpBtn::NONE,        GpAxis::RightX,  0.3f };
+
+    bindings[ACTION_START]      = { KEY_ENTER,       GpBtn::Start,   GpBtn::NONE,        GpAxis::NONE,   0 };
+    bindings[ACTION_SELECT]     = { KEY_TAB,         GpBtn::Back,    GpBtn::NONE,        GpAxis::NONE,   0 };
+
+    bindings[ACTION_MENU_UP]      = { KEY_W,         GpBtn::DpadUp,    GpBtn::NONE,      GpAxis::LeftY, -0.5f };
+    bindings[ACTION_MENU_DOWN]    = { KEY_S,         GpBtn::DpadDown,  GpBtn::NONE,      GpAxis::LeftY,  0.5f };
+    bindings[ACTION_MENU_LEFT]    = { KEY_A,         GpBtn::DpadLeft,  GpBtn::NONE,      GpAxis::LeftX, -0.5f };
+    bindings[ACTION_MENU_RIGHT]   = { KEY_D,         GpBtn::DpadRight, GpBtn::NONE,      GpAxis::LeftX,  0.5f };
+    bindings[ACTION_MENU_CONFIRM] = { KEY_ENTER,     GpBtn::A,       GpBtn::NONE,        GpAxis::NONE,   0 };
+    bindings[ACTION_MENU_BACK]    = { KEY_ESCAPE,    GpBtn::B,       GpBtn::NONE,        GpAxis::NONE,   0 };
+}
+
+bool ActionInput::PollAction(Action action, PlatformInput* platform) const {
+    const ActionBinding& b = bindings[action];
+
+    // Check keyboard
+    if (b.keyboardKey && platform->IsKeyDown(b.keyboardKey)) {
+        return true;
+    }
+
+    // Check gamepad button
+    if (b.gamepadButton != GpBtn::NONE && platform->IsGamepadButtonDown(b.gamepadButton)) {
+        return true;
+    }
+
+    // Check alternate gamepad button (e.g. D-pad)
+    if (b.gamepadButton2 != GpBtn::NONE && platform->IsGamepadButtonDown(b.gamepadButton2)) {
+        return true;
+    }
+
+    // Check gamepad axis
+    if (b.gamepadAxis != GpAxis::NONE) {
+        float val = platform->GetGamepadAxis(b.gamepadAxis);
+        if (b.axisThreshold > 0 && val >= b.axisThreshold) {
+            return true;
+        }
+        if (b.axisThreshold < 0 && val <= b.axisThreshold) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 void ActionInput::Update(PlatformInput* platform) {
@@ -40,159 +73,211 @@ void ActionInput::Update(PlatformInput* platform) {
         return;
     }
 
-    gamepadActive = platform->IsGamepadConnected();
-
-    if (gamepadActive) {
-        // Gamepad path: movement from left stick
-        float sx = platform->GetLeftStickX();
-        float sy = platform->GetLeftStickY();
-        moveX = (s32)(sx * 127.0f);
-        moveY = (s32)(sy * 127.0f);
-
-        // D-pad contributes to movement when stick is idle
-        if (moveX == 0 && moveY == 0) {
-            if (platform->IsGamepadButtonDown(GamepadButton::DpadLeft))  moveX = -127;
-            if (platform->IsGamepadButtonDown(GamepadButton::DpadRight)) moveX = 127;
-            if (platform->IsGamepadButtonDown(GamepadButton::DpadUp))    moveY = -127;
-            if (platform->IsGamepadButtonDown(GamepadButton::DpadDown))  moveY = 127;
+    // Ensure all bound keyboard keys are tracked for HasAnyKeyboardInput()
+    if (!keysRegistered) {
+        for (s32 i = 0; i < ACTION_COUNT; i++) {
+            if (bindings[i].keyboardKey) {
+                platform->TrackKey(bindings[i].keyboardKey);
+            }
         }
-
-        return;
+        keysRegistered = true;
     }
 
-    // Keyboard path: WASD movement
+    // Switch active device based on last input used
+    bool gpConnected = platform->IsGamepadConnected();
+    if (!gpConnected) {
+        gamepadActive = false;
+    } else {
+        bool hasKb = platform->HasAnyKeyboardInput();
+        bool hasGp = platform->HasAnyGamepadInput();
+        if (hasGp) {
+            gamepadActive = true;
+        }
+        if (hasKb) {
+            gamepadActive = false;
+        }
+    }
+
+    // Update all action states
+    for (s32 i = 0; i < ACTION_COUNT; i++) {
+        InputState& s = states[i];
+        s.prevDown = s.down;
+        s.down = PollAction(static_cast<Action>(i), platform);
+
+        if (s.down) {
+            s.duration++;
+        } else {
+            s.duration = 0;
+        }
+    }
+
+    // Compute analog movement axes
+    // Start with digital input from action states (works for both keyboard and D-pad)
     moveX = 0;
     moveY = 0;
-    if (platform->IsKeyDown(MOVE_LEFT)) {
-        moveX = -127;
-    } else if (platform->IsKeyDown(MOVE_RIGHT)) {
-        moveX = 127;
-    }
-    if (platform->IsKeyDown(MOVE_UP)) {
-        moveY = -127;
-    } else if (platform->IsKeyDown(MOVE_DOWN)) {
-        moveY = 127;
-    }
+    if (states[ACTION_MOVE_LEFT].down)  moveX -= 127;
+    if (states[ACTION_MOVE_RIGHT].down) moveX += 127;
+    if (states[ACTION_MOVE_UP].down)    moveY -= 127;
+    if (states[ACTION_MOVE_DOWN].down)  moveY += 127;
 
-    // Update abstract button states from key bindings
-    // First, mark all buttons as inactive for this frame
-    bool anyActive[INPUT_BUTTON_COUNT] = {};
-
-    for (int i = 0; i < s_numBindings; i++) {
-        if (platform->IsKeyDown(s_defaultBindings[i].key)) {
-            s32 idx = static_cast<s32>(s_defaultBindings[i].button);
-            anyActive[idx] = true;
+    // Analog stick overrides digital when active
+    if (gamepadActive) {
+        float lx = platform->GetLeftStickX();
+        float ly = platform->GetLeftStickY();
+        s32 stickX = (s32)(lx * 127.0f);
+        s32 stickY = (s32)(ly * 127.0f);
+        if (stickX != 0 || stickY != 0) {
+            moveX = stickX;
+            moveY = stickY;
         }
+
+        float rx = platform->GetRightStickX();
+        float ry = platform->GetRightStickY();
+        lookX = (s32)(rx * 127.0f);
+        lookY = (s32)(ry * 127.0f);
+    } else {
+        lookX = 0;
+        lookY = 0;
     }
 
-    for (int i = 0; i < INPUT_BUTTON_COUNT; i++) {
-        ButtonState& bs = buttonStates[i];
-        bs.prevActive = bs.active;
-        bs.active = anyActive[i];
-
-        if (bs.active) {
-            bs.duration++;
-        } else {
-            bs.duration = 0;
-        }
-    }
+    if (moveX > 127) moveX = 127;
+    if (moveX < -127) moveX = -127;
+    if (moveY > 127) moveY = 127;
+    if (moveY < -127) moveY = -127;
 }
 
-bool ActionInput::IsButtonActive(InputButton btn) const {
-    s32 idx = static_cast<s32>(btn);
-    if (idx < 0 || idx >= INPUT_BUTTON_COUNT) {
+bool ActionInput::JustPressed(Action action) const {
+    if (action < 0 || action >= ACTION_COUNT) {
         return false;
     }
-    return buttonStates[idx].active;
+    const InputState& s = states[action];
+    return s.down && !s.prevDown;
 }
 
-bool ActionInput::IsButtonTriggered(InputButton btn) const {
-    s32 idx = static_cast<s32>(btn);
-    if (idx < 0 || idx >= INPUT_BUTTON_COUNT) {
+bool ActionInput::IsHeld(Action action) const {
+    if (action < 0 || action >= ACTION_COUNT) {
         return false;
     }
-
-    const ButtonState& bs = buttonStates[idx];
-    return bs.active && !bs.prevActive;
+    return states[action].down;
 }
 
-s16 ActionInput::GetButtonDuration(InputButton btn) const {
-    s32 idx = static_cast<s32>(btn);
-    if (idx < 0 || idx >= INPUT_BUTTON_COUNT) {
+bool ActionInput::JustReleased(Action action) const {
+    if (action < 0 || action >= ACTION_COUNT) {
+        return false;
+    }
+    const InputState& s = states[action];
+    return !s.down && s.prevDown;
+}
+
+s16 ActionInput::GetDuration(Action action) const {
+    if (action < 0 || action >= ACTION_COUNT) {
         return 0;
     }
-    return buttonStates[idx].duration;
+    return states[action].duration;
 }
 
-// Resolve keyboard input to a game action ID, matching PSX FindActionRequest priority.
-// Returns GA_GUARD_RELEASE (1) if no action button is pressed.
-s32 ActionInput::ResolveAction(s32 direction) const {
+bool ActionInput::AnyJustPressed() const {
+    for (s32 i = 0; i < ACTION_COUNT; i++) {
+        if (states[i].down && !states[i].prevDown) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void ActionInput::SetKeyBinding(Action action, int key) {
+    if (action >= 0 && action < ACTION_COUNT) {
+        bindings[action].keyboardKey = key;
+    }
+}
+
+void ActionInput::SetGamepadButtonBinding(Action action, s32 gpButton) {
+    if (action >= 0 && action < ACTION_COUNT) {
+        bindings[action].gamepadButton = gpButton;
+    }
+}
+
+int ActionInput::GetKeyBinding(Action action) const {
+    if (action >= 0 && action < ACTION_COUNT) {
+        return bindings[action].keyboardKey;
+    }
+    return 0;
+}
+
+s32 ActionInput::GetGamepadButtonBinding(Action action) const {
+    if (action >= 0 && action < ACTION_COUNT) {
+        return bindings[action].gamepadButton;
+    }
+    return GpBtn::NONE;
+}
+
+// Resolve combat action from input state + direction.
+// Matches PSX FindActionRequest priority ordering.
+s32 ActionInput::ResolveGameAction(s32 direction) const {
     if (!controlsEnabled) {
         return GA_GUARD_RELEASE;
     }
 
-    // Priority order matches PSX command table (highest priority first)
-
-    // 1. Dive roll (R1 equivalent - oneshot semantics handled by caller)
-    if (IsButtonActive(InputButton::DiveRoll)) {
+    // Priority 1: Dive roll
+    if (IsHeld(ACTION_DIVE_ROLL)) {
         return GA_DIVE_ROLL;
     }
 
-    // 2. Counter (L1 equivalent)
-    if (IsButtonActive(InputButton::Counter)) {
+    // Priority 2: Counter
+    if (IsHeld(ACTION_COUNTER)) {
         return GA_COUNTER;
     }
 
-    // 3. Punch variants (direction + hold time)
-    if (IsButtonActive(InputButton::Punch)) {
-        if (direction & 2) { // DIR_BACKWARD
+    // Priority 3: Punch variants
+    if (IsHeld(ACTION_PUNCH)) {
+        if (direction & 2) {
             return GA_BACK_PUNCH;
         }
-        if (GetButtonDuration(InputButton::Punch) >= HEAVY_PUNCH_THRESHOLD) {
+        if (GetDuration(ACTION_PUNCH) >= HEAVY_PUNCH_THRESHOLD) {
             return GA_HEAVY_PUNCH;
         }
         return GA_PUNCH;
     }
 
-    // 4. Kick variants (direction + hold time)
-    if (IsButtonActive(InputButton::Kick)) {
-        if (direction & 2) { // DIR_BACKWARD
+    // Priority 4: Kick variants
+    if (IsHeld(ACTION_KICK)) {
+        if (direction & 2) {
             return GA_BACK_KICK;
         }
-        if (GetButtonDuration(InputButton::Kick) >= HEAVY_KICK_THRESHOLD) {
+        if (GetDuration(ACTION_KICK) >= HEAVY_KICK_THRESHOLD) {
             return GA_HEAVY_KICK;
         }
         return GA_KICK;
     }
 
-    // 5. Jump variants (direction) - oneshot press behavior
-    if (IsButtonTriggered(InputButton::Jump)) {
+    // Priority 5: Jump (oneshot)
+    if (JustPressed(ACTION_JUMP)) {
         if (direction != 0) {
             return GA_JUMP_DIRECTIONAL;
         }
         return GA_JUMP;
     }
 
-    // 6. Grab variants (direction + hold time)
-    if (IsButtonActive(InputButton::Grab)) {
-        if ((direction & 1) && GetButtonDuration(InputButton::Grab) >= GRAB_HOLD_THRESHOLD) {
+    // Priority 6: Grab variants
+    if (IsHeld(ACTION_GRAB)) {
+        if ((direction & 1) && GetDuration(ACTION_GRAB) >= GRAB_HOLD_THRESHOLD) {
             return GA_GRAB_FWD_HELD;
         }
-        if (GetButtonDuration(InputButton::Grab) >= GRAB_HOLD_THRESHOLD) {
+        if (GetDuration(ACTION_GRAB) >= GRAB_HOLD_THRESHOLD) {
             return GA_GRAB_HELD;
         }
-        if (direction & 1) { // DIR_FORWARD
+        if (direction & 1) {
             return GA_GRAB_FORWARD;
         }
         return GA_GRAB;
     }
 
-    // 7. Strafe (R2 equivalent)
-    if (IsButtonActive(InputButton::Strafe)) {
+    // Priority 7: Strafe
+    if (IsHeld(ACTION_STRAFE)) {
         return GA_STRAFE;
     }
 
-    // 8. Movement (from WASD)
+    // Priority 8: Movement
     if (HasMovement()) {
         return GA_MOVE;
     }

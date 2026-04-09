@@ -1674,9 +1674,6 @@ void Player::_Jump() {
     MARKFUNCTION(0x80031C68);
 
     s32 jumpHeld = (commandBits & CB_JUMP) ? 1 : 0;
-    if (g_actionInput && !g_actionInput->IsGamepadActive()) {
-        jumpHeld = g_actionInput->IsButtonActive(InputButton::Jump) ? 1 : 0;
-    }
 
     // PSX: check playerFlags bit 1 for wall jump eligibility
     // PSX: check commandBits bits 8,9,14 for combat air attack

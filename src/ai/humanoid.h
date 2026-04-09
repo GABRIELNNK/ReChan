@@ -415,6 +415,9 @@ public:
     // PSX: CheckForLedges2__8HumanoidR9_RMVECT16R10tagLVectorl (HUMANOID.CPP:6730)
     bool CheckForLedges2(LVector& outNormal, LVector& outCorrectionPos, s32 clearance);
 
+    // PSX: CheckForPickup__8Humanoid (HUMANOID.CPP:6081)
+    s32 CheckForPickup();
+
     // PSX: RestorePositionFromBip01__8Humanoid (HUMANOID.CPP:1681)
     s32 RestorePositionFromBip01();
 

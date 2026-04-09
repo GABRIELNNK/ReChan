@@ -35,6 +35,10 @@ public:
     bool IsGamepadButtonTriggered(int button) const;
     float GetGamepadAxis(int axis) const;
 
+    // Device activity detection - true if any input on that device this frame
+    bool HasAnyKeyboardInput() const;
+    bool HasAnyGamepadInput() const;
+
     // Left stick with deadzone applied (-1..+1)
     float GetLeftStickX() const;
     float GetLeftStickY() const;
@@ -49,6 +53,9 @@ public:
 
     static constexpr float STICK_DEADZONE = 0.15f;
     static constexpr float TRIGGER_THRESHOLD = 0.5f;
+
+    // Register a keyboard key for tracking (so HasAnyKeyboardInput detects it)
+    void TrackKey(int key);
 
 private:
     pddiDisplay* display = nullptr;
@@ -65,10 +72,9 @@ private:
 
     // Gamepad state (previous frame for oneshot, current via pddiGamepad)
     bool gamepadConnected = false;
-    bool gpButtonsPrev[14] = {};
-    bool gpButtonsCurr[14] = {};
+    bool gpButtonsPrev[15] = {};
+    bool gpButtonsCurr[15] = {};
     float gpAxes[6] = {};
 
-    void TrackKey(int key);
     float ApplyDeadzone(float value, float deadzone) const;
 };
