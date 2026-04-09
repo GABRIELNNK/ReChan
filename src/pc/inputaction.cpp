@@ -106,6 +106,16 @@ bool ActionInput::IsButtonActive(InputButton btn) const {
     return buttonStates[idx].active;
 }
 
+bool ActionInput::IsButtonTriggered(InputButton btn) const {
+    s32 idx = static_cast<s32>(btn);
+    if (idx < 0 || idx >= INPUT_BUTTON_COUNT) {
+        return false;
+    }
+
+    const ButtonState& bs = buttonStates[idx];
+    return bs.active && !bs.prevActive;
+}
+
 s16 ActionInput::GetButtonDuration(InputButton btn) const {
     s32 idx = static_cast<s32>(btn);
     if (idx < 0 || idx >= INPUT_BUTTON_COUNT) {
@@ -155,8 +165,8 @@ s32 ActionInput::ResolveAction(s32 direction) const {
         return GA_KICK;
     }
 
-    // 5. Jump variants (direction)
-    if (IsButtonActive(InputButton::Jump)) {
+    // 5. Jump variants (direction) - oneshot press behavior
+    if (IsButtonTriggered(InputButton::Jump)) {
         if (direction != 0) {
             return GA_JUMP_DIRECTIONAL;
         }

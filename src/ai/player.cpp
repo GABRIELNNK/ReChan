@@ -36,6 +36,12 @@ static constexpr s16 TABLE_ROLL_HANGTIME_START = 0;
 static constexpr s16 TABLE_ROLL_HANGTIME_END = 100;
 static constexpr s32 TABLE_LOOK_AHEAD_DISTANCE = 200;
 static constexpr s32 STRAFE_MULTIPLIER = 0xC000;
+static constexpr s32 WALL_JUMP_TRACE_DISTANCE = 256;
+static constexpr s32 WALL_JUMP_COLLISION_RADIUS = 16;
+static constexpr s32 WALL_JUMP_COLLISION_HEIGHT = 500;
+static constexpr s32 WALL_JUMP_MIN_HEIGHT_ABOVE_FLOOR = 0;
+static constexpr u32 WALL_JUMP_MIN_COLLISION_RATIO = 0;
+static constexpr s32 WALL_JUMP_MIN_ANGLE = 0;
 
 // PSX jump parameter tables at 0x800D652C-0x800D6558: [force, gravity, maxFallDivisor]
 static const s32 s_runJumpTap[3]       = { 2000,  20480, 20 };  // 0x7D0, 0x5000, 0x14
@@ -63,6 +69,146 @@ static s32 GetTrackedFloorHeight(const Player* player) {
 
     const ModelFloorHeightState* floorState = static_cast<const ModelFloorHeightState*>(m->field36);
     return floorState->current;
+}
+
+static s32 CheckWallCollisionForJump(
+    const Player* player,
+    s16 angle,
+    s32 distance,
+    s32 radius,
+    s32 height,
+    s32& outCollisionRatio,
+    LVector& outNormal,
+    LVector& outHitPos,
+    s32& outVerticalSpan) {
+    if (!player) {
+        return 0;
+    }
+
+    LVector start = player->pos;
+    LVector end = start;
+    end.x = start.x + (s32)(((s64)rmSin16(angle) * distance) >> 16);
+    end.z = start.z + (s32)(((s64)rmSin16((s16)(angle + 0x4000)) * distance) >> 16);
+
+    LVector searchMin = {};
+    LVector searchMax = {};
+
+    if (start.x >= end.x) {
+        searchMin.x = end.x - radius;
+        searchMax.x = start.x + radius;
+    } else {
+        searchMin.x = start.x - radius;
+        searchMax.x = end.x + radius;
+    }
+
+    if (start.y >= end.y) {
+        searchMin.y = end.y;
+        searchMax.y = start.y + height;
+    } else {
+        searchMin.y = start.y;
+        searchMax.y = end.y + height;
+    }
+
+    if (start.z >= end.z) {
+        searchMin.z = end.z - radius;
+        searchMax.z = start.z + radius;
+    } else {
+        searchMin.z = start.z - radius;
+        searchMax.z = end.z + radius;
+    }
+
+    Wall* wallArray[64] = {};
+    s32 wallCount = CollisionSector::FillWorldWallArray(searchMin, searchMax, wallArray, 64);
+    if (wallCount > 64) {
+        wallCount = 64;
+    }
+
+    s32 hit = CollisionSector::CheckArrayWallCollision(
+        wallArray,
+        wallCount,
+        start,
+        end,
+        radius,
+        0,
+        height,
+        1);
+
+    outCollisionRatio = g_wallCollisionInfo.collisionRatio;
+    outNormal = g_wallCollisionInfo.wallNormal;
+    outHitPos = g_wallCollisionInfo.hitPoint;
+    outVerticalSpan = g_wallCollisionInfo.wallVerticalMax - g_wallCollisionInfo.wallVerticalMin;
+    return hit;
+}
+
+static s32 CheckWallConstraintForJump(
+    const Player* player,
+    u32 minCollisionRatio,
+    s32 distance,
+    s32 minAngle,
+    s32& outWallAngle,
+    LVector& outHitPos) {
+    if (!player) {
+        return 0;
+    }
+
+    s32 collisionRatio = 0;
+    LVector wallNormal = {};
+    s32 wallVerticalSpan = 0;
+    s32 hit = CheckWallCollisionForJump(
+        player,
+        (s16)(player->orientation.y & 0xFFFF),
+        distance,
+        WALL_JUMP_COLLISION_RADIUS,
+        WALL_JUMP_COLLISION_HEIGHT,
+        collisionRatio,
+        wallNormal,
+        outHitPos,
+        wallVerticalSpan);
+    if (!hit) {
+        return 0;
+    }
+
+    if (minCollisionRatio >= (u32)collisionRatio) {
+        return 0;
+    }
+
+    s32 wallAngle = 0;
+    if (wallNormal.x != 0) {
+        if (wallNormal.z != 0) {
+            s32 a = 0x4000 - (s32)rmATan216((f32)(-wallNormal.x), (f32)(-wallNormal.z));
+            s32 absA = (a < 0) ? -a : a;
+            if (absA > 0x7FFF) {
+                if (a <= 0) {
+                    a += 0xFFFF;
+                } else {
+                    a -= 0xFFFF;
+                }
+            }
+            wallAngle = a;
+        } else {
+            wallAngle = (wallNormal.x > 0) ? 49152 : 0x4000;
+        }
+    } else {
+        wallAngle = (wallNormal.z > 0) ? 0x8000 : 0;
+    }
+
+    s32 diff = player->faceAngle - wallAngle;
+    s32 wrapped = diff + 0x8000;
+    s32 absWrapped = (wrapped < 0) ? -wrapped : wrapped;
+    if (absWrapped > 0x7FFF) {
+        if (wrapped <= 0) {
+            wrapped = diff + 98303;
+        } else {
+            wrapped = diff - 0x7FFF;
+        }
+    }
+    s32 absFinal = (wrapped < 0) ? -wrapped : wrapped;
+    if (absFinal < minAngle) {
+        return 0;
+    }
+
+    outWallAngle = wallAngle;
+    return 1;
 }
 
 // All animation IDs routed through PlayerModel::SetAnim or referenced by Player handlers.
@@ -394,11 +540,11 @@ void Player::SetActionState(u32 state, s32 param) {
         return;
     }
     case AS_LEDGE_LATCH: {
-        // PSX case 9: ledge grab. stateDispatch=33(SD_WALLJUMP), zero velocity/force.
+        // PSX case 9: dispatch 33 path for wall jump sequence.
         field344 = 0;
-        stateDispatch = SD_LEDGE_LATCH;
+        stateDispatch = SD_WALLJUMP;
         field348 = 8;
-        PlayAnimation(PLAYER_ANIM_LEDGE_LATCH, ANIM_LOOP);
+        PlayAnimation(PLAYER_ANIM_WALL_JUMP_START, ANIM_RUN_TO_LAST);
         velocity = {};
         contactForce = {};
         maxFallDivisor = 0;
@@ -749,6 +895,7 @@ void Player::DoWallJump() {
     velocity.x += (s32)((-50LL * rmSin16((s16)(orientation.y + PSX_ANGLE_180))) >> 16);
     velocity.y += 120;
     velocity.z += (s32)((-50LL * rmSin16((s16)(angle + PSX_ANGLE_90))) >> 16);
+
 
     // PSX calls WallJump sound via humanoid sound object at +328.
 }
@@ -1498,8 +1645,42 @@ handleLanding:
 void Player::_Jump() {
     MARKFUNCTION(0x80031C68);
 
+    s32 jumpHeld = (commandBits & CB_JUMP) ? 1 : 0;
+    if (g_actionInput && !g_actionInput->IsGamepadActive()) {
+        jumpHeld = g_actionInput->IsButtonActive(InputButton::Jump) ? 1 : 0;
+    }
+
     // PSX: check playerFlags bit 1 for wall jump eligibility
     // PSX: check commandBits bits 8,9,14 for combat air attack
+
+    if ((playerFlags & 2) != 0) {
+        u32 cb = (u32)commandBits;
+        s32 wantsWallJump = 0;
+        if (((cb >> 3) & 1) || ((cb >> 4) & 1)) {
+            wantsWallJump = 1;
+        }
+
+        if (wantsWallJump && ((flags & TF_ON_GROUND) == 0)) {
+            s32 floorHeight = GetTrackedFloorHeight(this);
+            if (floorHeight == (s32)0x80000001 || (pos.y - floorHeight) > WALL_JUMP_MIN_HEIGHT_ABOVE_FLOOR) {
+                s32 wallAngle = 0;
+                LVector wallPos = {};
+                s32 hasWall = CheckWallConstraintForJump(
+                    this,
+                    WALL_JUMP_MIN_COLLISION_RATIO,
+                    WALL_JUMP_TRACE_DISTANCE,
+                    WALL_JUMP_MIN_ANGLE,
+                    wallAngle,
+                    wallPos);
+                if (hasWall) {
+                    orientation.y = wallAngle + 0x8000;
+                    homePos = wallPos;
+                    SetActionState(AS_LEDGE_LATCH, 0);
+                    return;
+                }
+            }
+        }
+    }
 
     // PSX: vtable+204 call = HandleLand (empty on DynamicThing, fall damage on Humanoid)
     HandleLand(0);
@@ -1508,7 +1689,7 @@ void Player::_Jump() {
     if (field700 == 0) {
         if (playerFlags & 1) {
             // Standing jump: determine hold vs tap on first frame
-            if (commandBits & CB_JUMP) {
+            if (jumpHeld) {
                 // Button still held
                 field700 = 1;
                 field704 = 1;
@@ -1541,7 +1722,7 @@ void Player::_Jump() {
 
         // maxFallDivisor from jump table
         // PSX: if holding button, reduce gravity by 4 for higher jump
-        if (field704 && (commandBits & CB_JUMP)) {
+        if (field704 && jumpHeld) {
             maxFallDivisor = field712[2] - 4;
         } else {
             if (field704) {
@@ -1928,13 +2109,17 @@ void Player::_WallJump() {
     // PSX: check anim 33 (launch) completion
     s32 launchDone = 0;
     if (animE == PLAYER_ANIM_WALL_JUMP_LAUNCH) {
-        // PSX: AddForce(4000, &orientation) - apply launch force
-        SVector dir;
-        dir.x = (s16)(orientation.x & 0xFFFF);
-        dir.y = (s16)((orientation.x >> 16) & 0xFFFF);
-        dir.z = (s16)(orientation.y & 0xFFFF);
-        dir.pad = (s16)((orientation.y >> 16) & 0xFFFF);
-        AddForce(4000, &dir);
+        // PC timing can keep anim 33 active for multiple ticks, so gate this
+        // launch impulse to one application per wall jump.
+        if (field616 == 0) {
+            SVector dir;
+            dir.x = (s16)(orientation.x & 0xFFFF);
+            dir.y = (s16)((orientation.x >> 16) & 0xFFFF);
+            dir.z = (s16)(orientation.y & 0xFFFF);
+            dir.pad = (s16)((orientation.y >> 16) & 0xFFFF);
+            AddForce(4000, &dir);
+            field616 = 1;
+        }
         maxFallDivisor = 0;
     }
 

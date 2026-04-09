@@ -78,6 +78,9 @@ public:
     // Is an abstract button currently active (key held)?
     bool IsButtonActive(InputButton btn) const;
 
+    // True on first frame of press (oneshot semantics).
+    bool IsButtonTriggered(InputButton btn) const;
+
     // Hold duration in frames for an abstract button
     s16 GetButtonDuration(InputButton btn) const;
 
