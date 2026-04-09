@@ -9,6 +9,7 @@
 #include "gen/control.h"
 #include "gen/colsect.h"
 #include "snd/rsevent.h"
+#include "snd/hmndsnd.h"
 #include "p3d/p3dmath.h"
 #include "pc/log.h"
 
@@ -327,6 +328,9 @@ void Player::Think() {
     MARKFUNCTION(0x8002FE30);
     // PSX: CHumanoidSound think, encounter check, behaviour process,
     // ProcessAction, Move, combo tracking, input read
+    if (humanoidSound) {
+        humanoidSound->Think();
+    }
     PlayerSingleEncounterCheak();
 
     ProcessControl();
@@ -413,6 +417,14 @@ void Player::CreateModel(const char* name) {
         SModel* sm = static_cast<SModel*>(m);
         sm->InitSemiTransMode();
     }
+
+    // PSX: (*(a1[2] + 232))(a1, 1, 0) - SetActionState(1, 0)
+    SetActionState(AS_STAND, 0);
+
+    // PSX: InitBlendPose (not yet reversed)
+
+    // PSX: (*(a1[2] + 212))(a1) - vtable call to CreateSound
+    CreateSound();
 }
 
 // PSX: SetActionState__6PlayerUll (PLAYER.CPP:1579, 0x800303BC)
@@ -425,6 +437,9 @@ void Player::SetActionState(u32 state, s32 param) {
     // PSX preamble
     combatFlag = 0;
     flags |= TF_DYNAMIC;
+    if (humanoidSound) {
+        humanoidSound->EndAllSounds();
+    }
 
     // PSX: if previous actionState was 3, unload stored animation
     if (actionState == 3) {
@@ -602,6 +617,9 @@ void Player::SetActionState(u32 state, s32 param) {
         field616 = 0;
         playerFlags |= 1;
         jumpReturnHeight = homePos.y;
+        if (humanoidSound) {
+            humanoidSound->Fall();
+        }
         actionState = (s32)state;
         stateTimer = 0;
         return;
@@ -632,6 +650,9 @@ void Player::SetActionState(u32 state, s32 param) {
             m->SetAnim(PLAYER_ANIM_FLIP_VARIANT, param, 1, 0);
         }
         field616 = 0;
+        if (humanoidSound) {
+            humanoidSound->FrontFlip();
+        }
         actionState = (s32)state;
         return;
     }
@@ -677,6 +698,9 @@ void Player::SetActionState(u32 state, s32 param) {
             m->SetAnim(PLAYER_ANIM_ID_34, 3, 0, 0);
         }
         field616 = 0;
+        if (humanoidSound) {
+            humanoidSound->BeginSlideOnSurface((CSoundMaterial)field436);
+        }
         actionState = (s32)state;
         return;
     }
@@ -896,8 +920,9 @@ void Player::DoWallJump() {
     velocity.y += 120;
     velocity.z += (s32)((-50LL * rmSin16((s16)(angle + PSX_ANGLE_90))) >> 16);
 
-
-    // PSX calls WallJump sound via humanoid sound object at +328.
+    if (humanoidSound) {
+        humanoidSound->WallJump();
+    }
 }
 
 // PSX: FallingPhysics__6Player (PLAYER.CPP:3187, 0x80032368)
@@ -956,6 +981,9 @@ void Player::CheckForLanding() {
         if (m) {
             m->SetAnim(PLAYER_ANIM_HARD_FALL, 0, 0, 0);
         }
+    }
+    if (humanoidSound) {
+        humanoidSound->Land((CSoundMaterial)field436);
     }
 }
 
@@ -2251,8 +2279,8 @@ void Player::_HorizontalPoleSwing() {
     if (actionStateFlag) {
         if ((u32)newAngleX < 5461 || (u32)newAngleX > 0xE38F) {
             actionStateFlag = 0;
-            if (soundHandle) {
-                // PSX: PoleSwing__14CHumanoidSound(a1[82])
+            if (humanoidSound) {
+                humanoidSound->PoleSwing();
             }
             wantSound = 0;
         }

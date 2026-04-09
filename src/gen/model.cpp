@@ -10,6 +10,7 @@
 #include "p3d/p3dmath.h"
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
+#include "snd/hmndsnd.h"
 #include "pc/log.h"
 #include <cstdlib>
 #include <vector>
@@ -348,6 +349,21 @@ HumanoidModel::~HumanoidModel() {
     }
 }
 
+// PSX: Animate__13HumanoidModel (MHUMAN.CPP:207, 0x8006E418)
+void HumanoidModel::Animate() {
+    MARKFUNCTION(0x8006E418);
+    SModel::Animate();
+
+    Humanoid* owner = static_cast<Humanoid*>(backPtr);
+    if (owner && owner->humanoidSound && animStructure) {
+        AnimStructure* anim = static_cast<AnimStructure*>(animStructure);
+        owner->humanoidSound->ProcessSoundScript(
+            (u32)anim->animEnum,
+            (u32)(s16)((u32)anim->currentFrame >> 16)
+        );
+    }
+}
+
 // PSX: _Loop__13HumanoidModelP13AnimStructure (MHUMAN.CPP:196)
 // Only calls base Loop when mode == 0 (normal). For reverse/runToLast/camera
 // modes, the loop handler intentionally does nothing.
@@ -399,7 +415,12 @@ void PlayerModel::SetAnim(s32 animEnum, s32 a3, s32 force, s32 extra) {
         loopType = ANIM_RUN_TO_LAST;
     } else if (animEnum == 24) {
         // PSX: strafe - plays DiveRoll sound if frame < 29
-        // TODO: CHumanoidSound::DiveRoll sound trigger
+        if (backPtr && backPtr->thingType < 29) {
+            Humanoid* owner = static_cast<Humanoid*>(backPtr);
+            if (owner->humanoidSound) {
+                owner->humanoidSound->DiveRoll(SMAT_CONCRETE);
+            }
+        }
         loopType = ANIM_RUN_TO_LAST;
     } else if (animEnum >= 27 && animEnum <= 30) {
         // PSX: 27 gets blend data, 28 goes to LABEL_58, 29-30 are RunToLast
@@ -415,7 +436,12 @@ void PlayerModel::SetAnim(s32 animEnum, s32 a3, s32 force, s32 extra) {
         loopType = ANIM_RUN_TO_LAST;
     } else if (animEnum == 42) {
         // PSX: plays HitWorldStructure sound if frame < 29
-        // TODO: CHumanoidSound::HitWorldStructure sound trigger
+        if (backPtr && backPtr->thingType < 29) {
+            Humanoid* owner = static_cast<Humanoid*>(backPtr);
+            if (owner->humanoidSound) {
+                owner->humanoidSound->HitWorldStructure(SMAT_CONCRETE);
+            }
+        }
         setBlendData = true;
         loopType = ANIM_RUN_TO_LAST;
     } else if (animEnum == 46) {

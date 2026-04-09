@@ -2,11 +2,14 @@
 // Reversed from PSX C:\CHAN\GAME\SRC\AI\HUMANOID.CPP
 #include "ai/humanoid.h"
 #include "ai/player.h"
+#include "gen/common.h"
 #include "gen/model.h"
 #include "gen/animmat.h"
 #include "gen/animstruct.h"
 #include "gen/colsect.h"
 #include "snd/rsevent.h"
+#include "snd/hmndsnd.h"
+#include "snd/sndfact.h"
 #include "p3d/p3dmath.h"
 #include "p3d/skeleton.h"
 
@@ -26,7 +29,7 @@ Humanoid::Humanoid(const LVector* initialPos, u16 type)
     prevAttackJointIndex = -1;
     collBboxMin = {175, 0, 768};
     collBboxMax = {175, 0, 768};
-    field328 = 0;
+    humanoidSound = nullptr;
     combatFlag = 0;
     turnRate = 2730;
     field344 = 0;
@@ -86,6 +89,10 @@ Humanoid::Humanoid(const LVector* initialPos, u16 type)
 Humanoid::~Humanoid() {
     MARKFUNCTION(0x80062C58);
     // PSX: KillDialog, delete sound, delete behaviour, etc.
+    if (humanoidSound) {
+        humanoidSound->Release();
+        humanoidSound = nullptr;
+    }
     delete behaviour;
     behaviour = nullptr;
     fightingSystem = nullptr;
@@ -98,7 +105,10 @@ Humanoid::~Humanoid() {
 void Humanoid::Think() {
     MARKFUNCTION(0x80063808);
 
-    // PSX step 1: CHumanoidSound::Think (sound system not yet implemented)
+    // PSX step 1: CHumanoidSound::Think
+    if (humanoidSound) {
+        humanoidSound->Think();
+    }
     // PSX step 2-3: random() + LoadEnemyTaunts (dialog system not yet implemented)
     // PSX step 4: check flags2 bit 7 for dialog state (not yet implemented)
 
@@ -314,12 +324,40 @@ void Humanoid::CreateModel(const char* name) {
         SModel* sm = static_cast<SModel*>(m);
         sm->InitSemiTransMode();
     }
+
+    // PSX: vtable+212 call -> CreateSound
+    CreateSound();
 }
 
 // PSX: DeleteModel__8Humanoid (HUMANOID.CPP:910)
 void Humanoid::DeleteModel() {
     MARKFUNCTION(0x80063514);
     Thing::DeleteModel();
+    ReleaseSound();
+}
+
+// PSX: CreateSound__8Humanoid (HUMANOID.CPP:888, 0x800634C4)
+void Humanoid::CreateSound() {
+    MARKFUNCTION(0x800634C4);
+    if (humanoidSound) {
+        return;
+    }
+    CSound* tmp = nullptr;
+    s32 result = CSoundFactory::CreateObject(10060, &tmp, thingType);
+    LOG("[Humanoid] CreateSound type=%u result=%d ptr=%p", thingType, result, tmp);
+    if (result >= 0) {
+        humanoidSound = static_cast<CHumanoidSound*>(tmp);
+        humanoidSound->Initialize(&pos, this);
+    }
+}
+
+// PSX: ReleaseSound__8Humanoid (HUMANOID.CPP:952, 0x80063614)
+void Humanoid::ReleaseSound() {
+    MARKFUNCTION(0x80063614);
+    if (humanoidSound) {
+        humanoidSound->Release();
+        humanoidSound = nullptr;
+    }
 }
 
 // PSX: HandleCollision__8HumanoidP5Thingle (HUMANOID.CPP:1997)
@@ -334,6 +372,33 @@ void Humanoid::HandleCollision(Thing* other, s32 damage) {
     if (health <= 0) {
         health = 0;
         SetActionState(AS_DEAD, 0);
+    }
+}
+
+// PSX: HandleCollisionSound__8Humanoidl (HUMANOID.CPP:1978, 0x8006475C)
+void Humanoid::HandleCollisionSound(s32 hitType) {
+    MARKFUNCTION(0x8006475C);
+    if (!humanoidSound) {
+        return;
+    }
+    switch (hitType) {
+    case 1:
+    case 8:
+        humanoidSound->PunchHit();
+        break;
+    case 2:
+    case 3:
+        humanoidSound->SuperPunch();
+        break;
+    case 4:
+        humanoidSound->KickHit();
+        break;
+    case 5:
+        humanoidSound->SuperKick();
+        break;
+    case 18:
+        humanoidSound->HitByFireBlast();
+        break;
     }
 }
 
@@ -356,6 +421,9 @@ void Humanoid::SetActionState(u32 state, s32 param) {
     // PSX preamble: clear combatFlag, set flags bit 11, end sounds
     combatFlag = 0;
     flags |= TF_DYNAMIC;
+    if (humanoidSound) {
+        humanoidSound->EndAllSounds();
+    }
 
     if (state >= AS_COUNT) return;
 
@@ -389,11 +457,18 @@ void Humanoid::SetActionState(u32 state, s32 param) {
     case AS_RUN:               stateDispatch = SD_RUN; break;
     case AS_BACKFLIP:          stateDispatch = SD_BACKFLIP; break;
     case AS_STRAFE:            stateDispatch = SD_STRAFE; break;
-    case AS_SLOPE_SLIDE:      stateDispatch = SD_STRAFE; break;
+    case AS_SLOPE_SLIDE:       stateDispatch = SD_STRAFE; break;
     case AS_PUNCH_ATTACK:      stateDispatch = SD_THROW; break;
     case AS_KICK_ATTACK:       stateDispatch = SD_THROW; break;
     case AS_COMBAT_IDLE:       stateDispatch = SD_STAND; break;
     case AS_THROW_PICKUP:      stateDispatch = SD_THROW; break;
+    case AS_STUNNED: {
+        stateDispatch = SD_STUNNED;
+        if (humanoidSound) {
+            humanoidSound->BeginStun();
+        }
+        break;
+    }
     case AS_FLYING_BACK_LAND:  stateDispatch = SD_FLYING_BACK; break;
     case AS_BACK_GRAB_RECOVER: stateDispatch = SD_STAND; break;
     case AS_GET_UP:            stateDispatch = SD_STAND; break;
@@ -1140,8 +1215,99 @@ void Humanoid::_Pickup() {
 void Humanoid::_LadderDismount() {
 }
 
-// PSX: ClimbLadder__8Humanoid - not yet reversed
+// PSX: ClimbLadder__8Humanoid (HUMANOID.CPP:6448, 0x80069CF8)
 void Humanoid::_ClimbLadder() {
+    MARKFUNCTION(0x80069CF8);
+
+    s32 climbUp = 0;
+    s32 slideDown = 0;
+
+    Model* m = static_cast<Model*>(model);
+    AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+
+    // PSX: check commandBits bit 2 (directional input active)
+    if ((commandBits >> 2) & 1) {
+        // wrap (orientation.y - faceAngle) into 0..0xFFFF range
+        s32 angleDiff = orientation.y - faceAngle;
+        while (angleDiff > 0xFFFF) {
+            angleDiff -= 0xFFFF;
+        }
+        while (angleDiff < 0) {
+            angleDiff += 0xFFFF;
+        }
+
+        climbUp = (u32)(angleDiff - 0x2000) > 0xC000;
+        slideDown = (u32)(angleDiff - 0x6001) < 0x3FFF;
+    }
+
+    // clear velocity, contactForce, maxFallDivisor
+    velocity = {};
+    contactForce = {};
+    maxFallDivisor = 0;
+
+    // PSX: NIS override check - if player and director is running NIS ladder script,
+    // force climbing behavior (skip dismount check)
+    s32 nisOverride = 0;
+    if (this == Player::s_player) {
+        // PSX: checks theDirector->field_0xA8 and theDirector->currentScript == NISladder1
+        // Director not yet reversed - nisOverride stays 0
+    }
+
+    if (!nisOverride) {
+        // dismount check: if not holding ladder input, jump off
+        s32 shouldDismount = 0;
+        if (!(field368 & 2) || (commandBits & 8) || (commandBits & 16)) {
+            shouldDismount = 1;
+        }
+        if (shouldDismount) {
+            SetActionState(AS_LADDER_DISMOUNT, 0);
+            return;
+        }
+    }
+
+    if (climbUp) {
+        // end any slide sound
+        if (humanoidSound) {
+            humanoidSound->EndSlideDownLadder();
+        }
+
+        // switch to climb-up anim (292) if not already playing
+        if (anim->animEnum != 292) {
+            m->SetAnim(292, 0, 0, 0);
+            anim->SetLoopType(ANIM_BLEND, 1);
+            // clear bits 4,5,6 then set bits 4,6 (0x50)
+            flags2 = (flags2 & ~0x70) | 0x50;
+            field516 = 0;
+            field520 = 0;
+            field524 = 0;
+        }
+
+        anim->IncFrame();
+
+        // play footstep at frames 10 and 2
+        s16 frame = (s16)((u32)anim->currentFrame >> 16);
+        if (frame == 10 || frame == 2) {
+            if (humanoidSound) {
+                humanoidSound->Footstep(CSoundMaterial(2));
+            }
+        }
+    } else if (slideDown) {
+        // begin slide sound
+        if (humanoidSound) {
+            humanoidSound->BeginSlideDownLadder();
+        }
+
+        // switch to slide-down anim (293) if not already playing
+        if (anim->animEnum != 293) {
+            m->SetAnim(293, 0, 0, 0);
+            RestorePositionFromBip01();
+            // clear bits 4,5,6
+            flags2 &= ~0x70;
+        }
+
+        // slide down: decrease homePos.y
+        homePos.y -= 64;
+    }
 }
 
 // PSX: TestAndSetRisingAttack__8Humanoid (HUMANOID.CPP:5438, 0x80068D38)

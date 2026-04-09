@@ -10,9 +10,9 @@ class CSound;
 
 // PSX: CSoundFactory (SNDFACT.CPP)
 // Type IDs:
+//   10060 = CHumanoidSound (132 bytes)
 //   10070 = CGenericTransientSound (28 bytes)
 //   10080 = CGenericPersistentSound (24 bytes)
-//   (other types not yet reversed)
 class CSoundFactory {
 public:
     // PSX: CreateObject__13CSoundFactoryUlPP6CSoundUl (SNDFACT.CPP:178, 0x8005759C)

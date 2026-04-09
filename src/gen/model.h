@@ -265,6 +265,9 @@ public:
     HumanoidModel();
     ~HumanoidModel() override;
 
+    // PSX: Animate__13HumanoidModel (MHUMAN.CPP:207, 0x8006E418)
+    void Animate() override;
+
     // PSX: SetAnim__13HumanoidModelllil (MHUMAN.CPP:166)
     void SetAnim(s32 animEnum, s32 a3, s32 force, s32 extra) override;
 

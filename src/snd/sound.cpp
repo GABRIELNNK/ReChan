@@ -3,6 +3,7 @@
 #include "gen/common.h"
 #include "snd/sound.h"
 #include "snd/rsdformat.h"
+#include "snd/hmndsnd.h"
 #include "xclib/xcfile.h"
 
 // PSX: gp-relative global
@@ -98,11 +99,16 @@ void Sound::SetupSound() {
     }
 
     LOG("Sound: loaded %u WAX banks (%u total samples)", numWaxBanks, totalSamples);
+
+    // PSX: called from CSoundFactory::Setup; PC: call here during sound init
+    CHumanoidSound::LoadHumanoidSoundScripts();
 }
 
 // PSX: CleanupSound__5Sound (0x800599B0) - unloads sound data
 void Sound::CleanupSound() {
     MARKFUNCTION(0x800599B0);
+
+    CHumanoidSound::UnloadHumanoidSoundScripts();
 
     StopMusic();
     AudioEngine::StopAllVoices();

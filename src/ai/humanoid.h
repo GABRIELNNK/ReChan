@@ -6,6 +6,7 @@
 #include "p3d/p3dmath.h"
 #include "ai/behaviour.h"
 #include "pc/inputaction.h"
+#include "snd/hmndsnd.h"
 
 // Action state IDs for Humanoid::SetActionState
 // PSX: 74-case switch at 0x80065680. IDs confirmed from handler transitions.
@@ -32,11 +33,13 @@ enum ActionState : u32 {
     AS_TABLE_ROLL        = 21,  // PSX Player case 21: table roll
     AS_POLE_SWING        = 23,  // PSX Player case 23: horizontal pole swing
     AS_LEDGE_PULLUP      = 24,  // PSX: ledge pull-up sequence
+    AS_LADDER_DISMOUNT   = 28,  // PSX: exit ladder (jump off)
     AS_PUNCH_ATTACK      = 32,
     AS_KICK_ATTACK       = 34,
     AS_COMBAT_IDLE       = 36,
     AS_PICKUP            = 44,  // PSX Player case 44: pick up object
     AS_THROW_PICKUP      = 45,
+    AS_STUNNED           = 55,
     AS_FLYING_BACK_LAND  = 58,
     AS_BACK_GRAB_RECOVER = 62,
     AS_GET_UP            = 68,
@@ -150,7 +153,8 @@ public:
     s32 field316 = 0;
     s32 field320 = 0;
     s32 field324 = 0;
-    s32 field328 = 0;
+    // PSX +328 (ptr): CHumanoidSound*
+    CHumanoidSound* humanoidSound = nullptr;
     // PSX +332 (s32): sound handle
     s32 soundHandle = 0;
     // PSX +336 (s32): sound param
@@ -305,6 +309,11 @@ public:
     // PSX +512 (ptr): Trails* (visual trail effect)
     void* trails = nullptr;
 
+    // PSX +516,+520,+524 (s32): cleared during ladder climb-up
+    s32 field516 = 0;
+    s32 field520 = 0;
+    s32 field524 = 0;
+
     // PSX +528 (s32): reserved
     s32 field528 = 0;
 
@@ -348,6 +357,9 @@ public:
 
     // PSX: HandleCollision__8HumanoidP5Thingle (HUMANOID.CPP:1997)
     void HandleCollision(Thing* other, s32 damage) override;
+
+    // PSX: HandleCollisionSound__8Humanoidl (HUMANOID.CPP:1978, 0x8006475C)
+    void HandleCollisionSound(s32 hitType);
 
     // PSX: AnalyzeMesh__8HumanoidP6DBRoot (HUMANOID.CPP:535)
     void AnalyzeMesh(DBRoot* root) override;
@@ -438,6 +450,12 @@ public:
     virtual void _Pickup();
     virtual void _LadderDismount();
     virtual void _ClimbLadder();
+
+    // PSX: CreateSound__8Humanoid (HUMANOID.CPP:888, vtable+212)
+    virtual void CreateSound();
+
+    // PSX: ReleaseSound__8Humanoid (HUMANOID.CPP:952, vtable+216)
+    virtual void ReleaseSound();
 
     // PSX callback targets used by AnimStructure::ProcessHumanoidCB.
     // Selector 61 -> _DoStand, selector 62 -> _DoRun.

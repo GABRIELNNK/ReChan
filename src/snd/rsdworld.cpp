@@ -4,6 +4,7 @@
 #include "snd/rsdworld.h"
 #include "snd/sound.h"
 #include "snd/sndmath.h"
+#include "gen/common.h"
 #include "pc/audio.h"
 
 // PC: resolve rsd sample ID to the active WAX bank.
@@ -57,6 +58,8 @@ s32 rsdWorld::PlayTransientPositional(u32 sampleId, void* posPtr, u16 volume, s1
     }
 
     AudioVoice v = AudioEngine::PlaySample(s, vol, 0.0f, false);
+    LOG("[rsdWorld] PlayPositional: sample=%u bank=%u idx=%u vol=%.3f pitch=%.3f voice=%u",
+        sampleId, bank, sample, vol, pitchF, v);
     if (v != AUDIO_VOICE_INVALID && pitchF != 1.0f) {
         AudioEngine::SetVoicePitch(v, pitchF);
     }
