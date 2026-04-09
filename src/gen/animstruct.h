@@ -1,9 +1,4 @@
-// animstruct.h - AnimStructure reversed from PSX MODEL.CPP:2335
-// PSX source: C:\CHAN\GAME\SRC\GEN\MODEL.CPP
-// Controls animation playback for models and camera.
-// 104 bytes (26 DWORDs), inherits ccNode (24 bytes).
 #pragma once
-
 #include "core.h"
 #include "p3d/p3dmath.h"
 #include "p3d/flip.h"
@@ -13,15 +8,15 @@ class Model;
 
 // Loop type constants (PSX SetLoopType parameter)
 enum AnimLoopType : s32 {
-    ANIM_LOOP           = 0,
-    ANIM_LOOP_REVERSE   = 1,
-    ANIM_RUN_TO_LAST    = 2,
-    ANIM_HOLD_FIRST     = 3,
-    ANIM_HOLD_LAST      = 4,
-    ANIM_BLEND          = 5,  // mode 5 = no frame advance in ExecuteHandler
-    ANIM_DEC_FRAME      = 6,
-    ANIM_BLEND2         = 7,
-    ANIM_STOP           = 8,
+    ANIM_LOOP = 0,
+    ANIM_LOOP_REVERSE = 1,
+    ANIM_RUN_TO_LAST = 2,
+    ANIM_HOLD_FIRST = 3,
+    ANIM_HOLD_LAST = 4,
+    ANIM_BLEND = 5,  // mode 5 = no frame advance in ExecuteHandler
+    ANIM_DEC_FRAME = 6,
+    ANIM_BLEND2 = 7,
+    ANIM_STOP = 8,
 };
 
 // Humanoid callback info (PSX +96..+103)
@@ -56,25 +51,12 @@ struct AnimHumanoidCB {
 //   [25] +100: void* cbFuncPtr
 class AnimStructure : public ccNode {
 public:
-    // PSX: _13AnimStructurelP10tAnimationlP5ModelP13DrawableBasic (0x80070740)
     AnimStructure(s32 mode, void* animation, s32 loopType, Model* model = nullptr, void* drawableBasic = nullptr);
-
-    // PSX: __13AnimStructure (0x80070AB8)
     ~AnimStructure() override;
-
-    // PSX: ExecuteHandler__13AnimStructurei (0x80070E1C)
     void ExecuteHandler(s32 doFlip);
-
-    // PSX: SetLoopType__13AnimStructureli (0x80070C20)
     void SetLoopType(s32 type, s32 resetCounts);
-
-    // PSX: ResetCountsToAnim__13AnimStructure (0x80070D30)
     void ResetCountsToAnim();
-
-    // PSX: ForceFrame__13AnimStructurel (0x80070DB8)
     void ForceFrame(s32 frame);
-
-    // PSX: ReAttachTree__13AnimStructurell (0x80070B6C)
     void ReAttachTree(s32 type, s32 animEnum);
 
     // Accessors

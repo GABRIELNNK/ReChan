@@ -1,8 +1,4 @@
-// time.h - Time manager reversed from PSX TIME.CPP
-// PSX source: C:\CHAN\GAME\SRC\GEN\TIME.CPP
-// Simple frame counter manager. Step() increments each frame.
 #pragma once
-
 #include "gen/manager.h"
 #include "config.h"
 
@@ -30,16 +26,9 @@ public:
     // PSX: _._4Time (TIME.CPP, 0x800449E8)
     ~Time() override;
 
-    // PSX: InternalOpen__4Time (0x80044A10) - NOP stub
     void InternalOpen() override;
-
-    // PSX: InternalClose__4Time (0x80044A18) - calls base
     void InternalClose() override;
-
-    // PSX: InternalReset__4Time (0x80044A38) - resets counter
     void InternalReset() override;
-
-    // PSX: Step__4Time (0x80044A40) - increment frame counter
     void Step();
 
     // PC: call each frame with the real wall-clock elapsed time.

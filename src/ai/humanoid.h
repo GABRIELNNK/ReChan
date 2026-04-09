@@ -11,90 +11,88 @@
 // Action state IDs for Humanoid::SetActionState
 // PSX: 74-case switch at 0x80065680. IDs confirmed from handler transitions.
 enum ActionState : u32 {
-    AS_INACTIVE_IDLE     = 0,
-    AS_STAND             = 1,
-    AS_STAND_ANIM        = 2,
-    AS_WALL_JUMP_TAUNT   = 3,   // PSX Player case 3: wall jump taunt/idle
-    AS_DIVE_ROLL         = 4,
-    AS_PAUSE             = 6,   // Humanoid: pause/guard. Player: running jump
-    AS_JUMP              = 8,   // standing jump (no tables)
-    AS_LEDGE_LATCH       = 9,   // PSX Player case 9: ledge grab
-    AS_RUN               = 10,
-    AS_BACKFLIP          = 11,  // PSX Player case 11: face enemy + strafe init
-    AS_STRAFE            = 12,
-    AS_FALL              = 13,
-    AS_HARDFALL          = 14,
-    AS_HARDLAND          = 15,
-    AS_FLIP              = 16,  // PSX: pole swing dismount / flip variant 295
-    AS_FLIP_VARIANT      = 17,  // PSX Player case 17: flip variant
-    AS_POLE_IDLE         = 18,  // PSX Player case 18: pole/table idle setup
-    AS_PUSH_OBJECT       = 19,  // PSX Player case 19: push object
-    AS_SLOPE_SLIDE       = 20,  // PSX Player case 20: slope slide
-    AS_TABLE_ROLL        = 21,  // PSX Player case 21: table roll
-    AS_POLE_SWING        = 23,  // PSX Player case 23: horizontal pole swing
-    AS_LEDGE_PULLUP      = 24,  // PSX: ledge pull-up sequence
-    AS_LADDER_DISMOUNT   = 28,  // PSX: exit ladder (jump off)
-    AS_PUNCH_ATTACK      = 32,
-    AS_KICK_ATTACK       = 34,
-    AS_COMBAT_IDLE       = 36,
-    AS_PICKUP            = 44,  // PSX Player case 44: pick up object
-    AS_THROW_PICKUP      = 45,
-    AS_STUNNED           = 55,
-    AS_FLYING_BACK_LAND  = 58,
+    AS_INACTIVE_IDLE = 0,
+    AS_STAND = 1,
+    AS_STAND_ANIM = 2,
+    AS_WALL_JUMP_TAUNT = 3,   // PSX Player case 3: wall jump taunt/idle
+    AS_DIVE_ROLL = 4,
+    AS_PAUSE = 6,             // Humanoid: pause/guard. Player: running jump
+    AS_JUMP = 8,              // standing jump (no tables)
+    AS_LEDGE_LATCH = 9,       // PSX Player case 9: ledge grab
+    AS_RUN = 10,
+    AS_BACKFLIP = 11,         // PSX Player case 11: face enemy + strafe init
+    AS_STRAFE = 12,
+    AS_FALL = 13,
+    AS_HARDFALL = 14,
+    AS_HARDLAND = 15,
+    AS_FLIP = 16,             // PSX: pole swing dismount / flip variant 295
+    AS_FLIP_VARIANT = 17,     // PSX Player case 17: flip variant
+    AS_POLE_IDLE = 18,        // PSX Player case 18: pole/table idle setup
+    AS_PUSH_OBJECT = 19,      // PSX Player case 19: push object
+    AS_SLOPE_SLIDE = 20,      // PSX Player case 20: slope slide
+    AS_TABLE_ROLL = 21,       // PSX Player case 21: table roll
+    AS_POLE_SWING = 23,       // PSX Player case 23: horizontal pole swing
+    AS_LEDGE_PULLUP = 24,     // PSX: ledge pull-up sequence
+    AS_LADDER_DISMOUNT = 28,  // PSX: exit ladder (jump off)
+    AS_PUNCH_ATTACK = 32,
+    AS_KICK_ATTACK = 34,
+    AS_COMBAT_IDLE = 36,
+    AS_PICKUP = 44,           // PSX Player case 44: pick up object
+    AS_THROW_PICKUP = 45,
+    AS_STUNNED = 55,
+    AS_FLYING_BACK_LAND = 58,
     AS_BACK_GRAB_RECOVER = 62,
-    AS_GET_UP            = 68,
+    AS_GET_UP = 68,
     AS_FLYING_BACK_CHECK = 70,
     AS_SPIN_BACK_RECOVER = 71,
-    AS_DEAD              = 72,
-    AS_HIT_EXPLOSION     = 74,
-    AS_HIT_ENVIRONMENT   = 75,
-    AS_COUNT             = 76,
+    AS_DEAD = 72,
+    AS_HIT_EXPLOSION = 74,
+    AS_HIT_ENVIRONMENT = 75,
+    AS_COUNT = 76,
 };
 
 // State dispatch indices for Humanoid::ProcessAction
 // PSX: stateDispatch > 0 = vtable index, stateDispatch < 0 = direct function pointer
 enum StateDispatch : u16 {
-    SD_NONE         = 0,
-    SD_STAND        = 22,
-    SD_DIVE_ROLL    = 23,
-    SD_PAUSE        = 24,
-    SD_RUN          = 25,
-    SD_BACKFLIP     = 26,
-    SD_STRAFE       = 27,
-    SD_JUMP         = 28,
-    SD_FALL         = 29,
+    SD_NONE = 0,
+    SD_STAND = 22,
+    SD_DIVE_ROLL = 23,
+    SD_PAUSE = 24,
+    SD_RUN = 25,
+    SD_BACKFLIP = 26,
+    SD_STRAFE = 27,
+    SD_JUMP = 28,
+    SD_FALL = 29,
     SD_GOT_HIT_HIGH = 30,
-    SD_GOT_HIT_MED  = 31,
-    SD_GOT_HIT_LOW  = 32,
-    SD_WALLJUMP     = 33,
-    SD_COLLAPSE     = 34,
-    SD_DEAD         = 35,
-    SD_SPIN_BACK    = 36,
-    SD_FLYING_BACK  = 37,
-    SD_STUNNED      = 38,
-    SD_THROW        = 39,
-    SD_PICKUP       = 40,
+    SD_GOT_HIT_MED = 31,
+    SD_GOT_HIT_LOW = 32,
+    SD_WALLJUMP = 33,
+    SD_COLLAPSE = 34,
+    SD_DEAD = 35,
+    SD_SPIN_BACK = 36,
+    SD_FLYING_BACK = 37,
+    SD_STUNNED = 38,
+    SD_THROW = 39,
+    SD_PICKUP = 40,
     // PSX vtable indices 41-48 used by Player-specific handlers
-    SD_GET_UP       = 43,   // PSX case 68: get up from knockdown
-    SD_POLE_IDLE    = 44,   // PSX case 18: pole/table idle
-    SD_POLE_SWING   = 45,   // PSX case 23: horizontal pole swing
-    SD_SLOPE_SLIDE  = 47,   // PSX case 20: slope slide
-    SD_DEAD_PLAYER  = 48,   // PSX case 72: player death
+    SD_GET_UP = 43,   // PSX case 68: get up from knockdown
+    SD_POLE_IDLE = 44,   // PSX case 18: pole/table idle
+    SD_POLE_SWING = 45,   // PSX case 23: horizontal pole swing
+    SD_SLOPE_SLIDE = 47,   // PSX case 20: slope slide
+    SD_DEAD_PLAYER = 48,   // PSX case 72: player death
     // Player-specific dispatch via direct function pointer (stateDispatch = -1 on PSX)
-    SD_HARDFALL        = 250,
-    SD_HARDLAND        = 251,
-    SD_FLIP            = 252,
-    SD_INACTIVE_IDLE   = 253,
-    SD_PUSH_OBJECT     = 254,
-    SD_TABLE_ROLL      = 255,
-    SD_LEDGE_LATCH     = 256,
-    SD_LEDGE_PULLUP    = 257,
-    SD_DO_STAND        = 258,
+    SD_HARDFALL = 250,
+    SD_HARDLAND = 251,
+    SD_FLIP = 252,
+    SD_INACTIVE_IDLE = 253,
+    SD_PUSH_OBJECT = 254,
+    SD_TABLE_ROLL = 255,
+    SD_LEDGE_LATCH = 256,
+    SD_LEDGE_PULLUP = 257,
+    SD_DO_STAND = 258,
 };
 
 // Humanoid - DynamicThing with combat, animation, and AI state
-// PSX: ~560 bytes. Base class for Player and all enemy types.
-// Source: C:\CHAN\GAME\SRC\AI\HUMANOID.CPP
 class Humanoid : public DynamicThing {
 public:
     // PSX +200 (s32): attack joint/bone index for GetAttack (0-9, -1=none)
@@ -138,8 +136,8 @@ public:
     // Initialized to {175, 0, 768} then {175, 0, 768} (two sets)
     // Note: fields at +296..+307 are reused as pole anchor position
     // during HorizontalPoleSwing (p3dFillTransMatrix reads 3 ints at +296)
-    LVector collBboxMin = {175, 0, 768};
-    LVector collBboxMax = {175, 0, 768};
+    LVector collBboxMin = { 175, 0, 768 };
+    LVector collBboxMax = { 175, 0, 768 };
 
     // PSX +304 (s32): undeclared (part of pole anchor z when on pole)
     s32 field304 = 0;
@@ -189,24 +187,24 @@ public:
     }
 
     inline bool HasGuardRelease() const { return HasAction(GA_GUARD_RELEASE); }
-    inline bool HasMove() const         { return HasAction(GA_MOVE); }
-    inline bool HasJump() const         { return HasAction(GA_JUMP); }
+    inline bool HasMove() const { return HasAction(GA_MOVE); }
+    inline bool HasJump() const { return HasAction(GA_JUMP); }
     inline bool HasJumpDirectional() const { return HasAction(GA_JUMP_DIRECTIONAL); }
-    inline bool HasDiveRoll() const     { return HasAction(GA_DIVE_ROLL); }
-    inline bool HasStrafe() const       { return HasAction(GA_STRAFE); }
-    inline bool HasGrab() const         { return HasAction(GA_GRAB); }
-    inline bool HasPunch() const        { return HasAction(GA_PUNCH); }
-    inline bool HasKick() const         { return HasAction(GA_KICK); }
-    inline bool HasBackPunch() const    { return HasAction(GA_BACK_PUNCH); }
-    inline bool HasBackKick() const     { return HasAction(GA_BACK_KICK); }
-    inline bool HasHeavyPunch() const   { return HasAction(GA_HEAVY_PUNCH); }
-    inline bool HasHeavyKick() const    { return HasAction(GA_HEAVY_KICK); }
-    inline bool HasSpecialGrab() const  { return HasAction(GA_SPECIAL_GRAB); }
-    inline bool HasGrabForward() const  { return HasAction(GA_GRAB_FORWARD); }
-    inline bool HasGrabHeld() const     { return HasAction(GA_GRAB_HELD); }
-    inline bool HasGrabFwdHeld() const  { return HasAction(GA_GRAB_FWD_HELD); }
-    inline bool HasCounter() const      { return HasAction(GA_COUNTER); }
-    inline bool HasAIDiveRoll() const   { return HasAction(GA_AI_DIVE_ROLL); }
+    inline bool HasDiveRoll() const { return HasAction(GA_DIVE_ROLL); }
+    inline bool HasStrafe() const { return HasAction(GA_STRAFE); }
+    inline bool HasGrab() const { return HasAction(GA_GRAB); }
+    inline bool HasPunch() const { return HasAction(GA_PUNCH); }
+    inline bool HasKick() const { return HasAction(GA_KICK); }
+    inline bool HasBackPunch() const { return HasAction(GA_BACK_PUNCH); }
+    inline bool HasBackKick() const { return HasAction(GA_BACK_KICK); }
+    inline bool HasHeavyPunch() const { return HasAction(GA_HEAVY_PUNCH); }
+    inline bool HasHeavyKick() const { return HasAction(GA_HEAVY_KICK); }
+    inline bool HasSpecialGrab() const { return HasAction(GA_SPECIAL_GRAB); }
+    inline bool HasGrabForward() const { return HasAction(GA_GRAB_FORWARD); }
+    inline bool HasGrabHeld() const { return HasAction(GA_GRAB_HELD); }
+    inline bool HasGrabFwdHeld() const { return HasAction(GA_GRAB_FWD_HELD); }
+    inline bool HasCounter() const { return HasAction(GA_COUNTER); }
+    inline bool HasAIDiveRoll() const { return HasAction(GA_AI_DIVE_ROLL); }
 
     // Check if any attack bit (7-20) is set
     inline bool HasAnyAttack() const {
@@ -222,9 +220,9 @@ public:
             return false;
         }
         return ((commandBits >> GA_GRAB) & 1) ||
-               ((commandBits >> GA_GRAB_FORWARD) & 1) ||
-               (commandBits & 0x10000) ||
-               ((commandBits >> 19) & 1);
+            ((commandBits >> GA_GRAB_FORWARD) & 1) ||
+            (commandBits & 0x10000) ||
+            ((commandBits >> 19) & 1);
     }
 
     // PSX +356 (s32): current action state number
@@ -323,114 +321,42 @@ public:
     // PSX +536: embedded ccNode for combat/targeting list
     ccNode combatNode;
 
-
-    // PSX: __8HumanoidPC10tagLVectorUs (HUMANOID.CPP:350)
     Humanoid(const LVector* initialPos, u16 type);
-
-    // PSX: _._8Humanoid (HUMANOID.CPP:490)
     ~Humanoid() override;
-
-
-    // PSX: Think__8Humanoid (HUMANOID.CPP:1133)
     void Think() override;
-
-    // PSX: Draw__8Humanoid (HUMANOID.CPP:1280)
     void Draw() override;
-
-    // PSX: Reset__8Humanoid (HUMANOID.CPP:513)
     void Reset() override;
-
-    // PSX: Activate__8Humanoid (HUMANOID.CPP:760)
     void Activate() override;
-
-    // PSX: Deactivate__8Humanoid (HUMANOID.CPP:776)
     void Deactivate() override;
-
-    // PSX: Move__8Humanoid (HUMANOID.CPP:1544)
     void Move() override;
-
-    // PSX: CreateModel__8HumanoidPCc (HUMANOID.CPP:795)
     void CreateModel(const char* name) override;
-
-    // PSX: DeleteModel__8Humanoid (HUMANOID.CPP:910)
     void DeleteModel() override;
-
-    // PSX: HandleCollision__8HumanoidP5Thingle (HUMANOID.CPP:1997)
     void HandleCollision(Thing* other, s32 damage) override;
-
-    // PSX: HandleCollisionSound__8Humanoidl (HUMANOID.CPP:1978, 0x8006475C)
     void HandleCollisionSound(s32 hitType);
-
-    // PSX: AnalyzeMesh__8HumanoidP6DBRoot (HUMANOID.CPP:535)
     void AnalyzeMesh(DBRoot* root) override;
 
-
-    // PSX: SetActionState__8HumanoidUll (HUMANOID.CPP:2792)
     virtual void SetActionState(u32 state, s32 param);
-
-    // PSX: ProcessAction__8Humanoid (HUMANOID.CPP:2659)
     virtual void ProcessAction();
-
-    // PSX: ProcessControl__8Humanoid (HUMANOID.CPP:961)
     virtual void ProcessControl();
 
-    // PSX: RequestAction__8HumanoidUl (HUMANOID.CPP:2727)
     void RequestAction(u32 actionID);
-
-    // PSX: FaceThing__8HumanoidP5Thingi (HUMANOID.CPP:2252)
     void FaceThing(Thing* target, s32 immediate);
-
-    // PSX: FacePoint__8HumanoidRC10tagLVectori (HUMANOID.CPP:2260)
     void FacePoint(const LVector& point, s32 immediate);
-
-    // PSX: FindFoe__8HumanoidUlli (HUMANOID.CPP:2446)
     Humanoid* FindFoe(u32 range, s32 param, s32 immediate);
-
-    // PSX: SetTarget__8HumanoidP8Humanoid (HUMANOID.CPP:2502)
     void SetTarget(Humanoid* target);
-
-    // PSX: ReleaseTarget__8Humanoid (HUMANOID.CPP:2553)
     void ReleaseTarget();
-
-    // PSX: FaceAngleY__8Humanoidli (HUMANOID.CPP:2402)
     void FaceAngleY(s32 angle, s32 immediate);
-
-    // PSX: SetIdleAnimation__8Humanoidli (HUMANOID.CPP:2717, 0x800654C4)
-    // Plays idle animation (22 or weapon idle) via model->SetAnim.
     void SetIdleAnimation(s32 loopType, s32 doTransition);
-
-    // PSX: TestIdleAnimation__8Humanoid (HUMANOID.CPP:2763, 0x80065618)
-    // Returns true if currently playing the idle animation.
     bool TestIdleAnimation();
-
-    // PSX: LoadDialog__8HumanoidUll (HUMANOID.CPP, 0x8006CB54)
     s32 LoadDialog(u32 dialogID, s32 priority);
-
-    // PSX: PlayDialog__8HumanoidUlUl (HUMANOID.CPP, 0x8006CBA0)
     s32 PlayDialog(u32 dialogID, s32 priority);
-
-    // PSX: EnterCombatCombo__8Humanoid (HUMANOID.CPP)
     s32 EnterCombatCombo();
-
-    // PSX: CheckForLedges2__8HumanoidR9_RMVECT16R10tagLVectorl (HUMANOID.CPP:6730)
     bool CheckForLedges2(LVector& outNormal, LVector& outCorrectionPos, s32 clearance);
-
-    // PSX: CheckForPickup__8Humanoid (HUMANOID.CPP:6081)
     s32 CheckForPickup();
-
-    // PSX: RestorePositionFromBip01__8Humanoid (HUMANOID.CPP:1681)
     s32 RestorePositionFromBip01();
-
-    // PSX: SetDesiredMoveDirection__8Humanoidl (0x80064EA8)
     void SetDesiredMoveDirection(s32 angle) { faceAngle = angle; }
-
-    // PSX: TestAndSetRisingAttack__8Humanoid (HUMANOID.CPP:5438, 0x80068D38)
     virtual s32 TestAndSetRisingAttack();
-
-    // PSX: LetGoOfLedge__8Humanoid (HUMANOID.CPP:8735, 0x8006C478)
     s32 LetGoOfLedge();
-
-    // PSX: SetHumanoidTarget__8HumanoidP8Humanoid (HUMANOID.CPP:2535, 0x800651C0)
     void SetHumanoidTarget(Humanoid* target);
 
     virtual void _Stand();
@@ -453,15 +379,8 @@ public:
     virtual void _Pickup();
     virtual void _LadderDismount();
     virtual void _ClimbLadder();
-
-    // PSX: CreateSound__8Humanoid (HUMANOID.CPP:888, vtable+212)
     virtual void CreateSound();
-
-    // PSX: ReleaseSound__8Humanoid (HUMANOID.CPP:952, vtable+216)
     virtual void ReleaseSound();
-
-    // PSX callback targets used by AnimStructure::ProcessHumanoidCB.
-    // Selector 61 -> _DoStand, selector 62 -> _DoRun.
     virtual void _DoStand();
     virtual void _DoRun();
 };

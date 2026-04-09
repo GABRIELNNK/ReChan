@@ -1,5 +1,3 @@
-// path.cpp - Path interpolation system reversed from PSX PATH.CPP
-// Original: C:\CHAN\GAME\SRC\GEN\PATH.CPP
 #include "gen/path.h"
 #include "p3d/p3dmath.h"
 #include "p3d/hash.h"
@@ -61,7 +59,8 @@ NodeAttribs& NodeAttribs::operator=(const NodeAttribs& other) {
         memcpy(ids, other.ids, count);
         values = new s32[count];
         memcpy(values, other.values, count * sizeof(s32));
-    } else {
+    }
+    else {
         ids = nullptr;
         values = nullptr;
     }
@@ -91,7 +90,8 @@ void NodeAttribs::Init(const DBPoint* point) {
         if (attrib->type != 0) {
             // Numeric attribute
             values[i] = (s32)attrib->value;
-        } else {
+        }
+        else {
             // String attribute: hash to integer
             values[i] = (s32)p3dHash(attrib->strValue ? attrib->strValue : "");
         }
@@ -211,7 +211,8 @@ s32 LinearPath::Subdivide(s32 threshold) {
                 tempList.AddNode(prev, mid);
                 // Re-check from prev to mid next iteration
                 cur = mid;
-            } else {
+            }
+            else {
                 prev = cur;
                 cur = static_cast<SubDivNode*>(cur->next);
             }
@@ -351,7 +352,8 @@ s32 LinearPath::Move(s32 speed) {
         velocity.x = (s32)(((s64)speed * dir[0]) >> 16);
         velocity.y = (s32)(((s64)speed * dir[1]) >> 16);
         velocity.z = (s32)(((s64)speed * dir[2]) >> 16);
-    } else {
+    }
+    else {
         // Update accumulated position
         current.x += velocity.x;
         current.y += velocity.y;
@@ -370,8 +372,8 @@ s32 LinearPath::Move(s32 speed) {
 
         // Dot product: segment direction dot velocity
         s64 dot = (s64)segDx * (s64)velocity.x
-                + (s64)segDy * (s64)velocity.y
-                + (s64)segDz * (s64)velocity.z;
+            + (s64)segDy * (s64)velocity.y
+            + (s64)segDz * (s64)velocity.z;
 
         if (dot <= 0) {
             // Passed the endpoint, advance segment
@@ -385,7 +387,8 @@ s32 LinearPath::Move(s32 speed) {
                 current.y = positions[lastSeg].y;
                 current.z = positions[lastSeg].z;
                 velocity.x = VELOCITY_SENTINEL;
-            } else {
+            }
+            else {
                 // Compute new direction for next segment
                 s32 dir[3];
                 dir[0] = (positions[currentSegment + 1].x - current.x) << 16;
@@ -428,7 +431,7 @@ s32 SplinePath::Subdivide(s32 /*threshold*/) {
 //   c = (-p0 + p2) / 2
 //   d = p1
 void SplinePath::CalcCMRCoefficients(s32& a, s32& b, s32& c, s32& d,
-                                      s32 p0, s32 p1, s32 p2, s32 p3) {
+                                     s32 p0, s32 p1, s32 p2, s32 p3) {
     // PSX uses integer division by 2 (rounds toward zero)
     d = p1;
     c = -(p0 / 2) + (p2 / 2);
@@ -548,14 +551,14 @@ s32 SplinePath::Move(s32 speed) {
     s32 az, bz, cz, dz;
 
     CalcCMRCoefficients(ax, bx, cx, dx,
-                         positions[i0].x, positions[i1].x,
-                         positions[i2].x, positions[i3].x);
+                        positions[i0].x, positions[i1].x,
+                        positions[i2].x, positions[i3].x);
     CalcCMRCoefficients(ay, by, cy, dy,
-                         positions[i0].y, positions[i1].y,
-                         positions[i2].y, positions[i3].y);
+                        positions[i0].y, positions[i1].y,
+                        positions[i2].y, positions[i3].y);
     CalcCMRCoefficients(az, bz, cz, dz,
-                         positions[i0].z, positions[i1].z,
-                         positions[i2].z, positions[i3].z);
+                        positions[i0].z, positions[i1].z,
+                        positions[i2].z, positions[i3].z);
 
     // Evaluate derivative: direction = 3*a*t^2 + 2*b*t + c
     direction.x = (s32)((3 * (s64)ax * tSq + 2 * (s64)bx * t64 + ((s64)cx << 16)) >> 16);

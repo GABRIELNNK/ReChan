@@ -1,5 +1,3 @@
-// menumgr.cpp - MenuMgr reversed from PSX MENUMGR.CPP
-// PSX source: C:\CHAN\GAME\SRC\FE\MENUMGR.CPP
 #include "fe/menumgr.h"
 #include "fe/hdmenuitems.h"
 #include "gen/linefile.h"
@@ -77,8 +75,7 @@ void MenuMgr::ParseDefFile(const char* filename) {
 }
 
 // PSX: ParseMenu__7MenuMgr
-void MenuMgr::ParseMenu() {
-}
+void MenuMgr::ParseMenu() {}
 
 // PSX: ParseMenu__7MenuMgrR8LineFileP6hdMenu (0x8005FFD0)
 // Reads the menu definition line (ID, screen, overlay) then reads item lines
@@ -289,7 +286,8 @@ void MenuMgr::InputItemPop() {
         curMenu->ClearItem();
         if (curMenu == topMenu) {
             state = 8;
-        } else {
+        }
+        else {
             // PSX: calls curMenu vtable+32 (DeselectItem) then vtable+36 (???)
             // PSX: ProcessSoundEvent(0, 12) — back sound
             Deactivate();
@@ -370,8 +368,7 @@ void MenuMgr::QueryInput(bool processInput) {
 }
 
 // PSX: HandleInputChange__7MenuMgr
-void MenuMgr::HandleInputChange() {
-}
+void MenuMgr::HandleInputChange() {}
 
 // PSX: Invoke__7MenuMgr (0x8005FB00)
 // Main per-frame entry point for menu system. Called by Game during FE state.

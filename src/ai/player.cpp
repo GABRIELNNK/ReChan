@@ -1,5 +1,3 @@
-// player.cpp - Player class implementation
-// Reversed from PSX C:\CHAN\GAME\SRC\AI\PLAYER.CPP
 #include "ai/player.h"
 #include "ai/colfight.h"
 #include "gen/model.h"
@@ -16,20 +14,20 @@
 // Command bit masks - derived from GameAction enum bit positions.
 // RequestAction does: commandBits |= (1 << actionID)
 static constexpr s32 CB_GUARD_RELEASE = (1 << GA_GUARD_RELEASE); // bit 1
-static constexpr s32 CB_MOVE     = (1 << GA_MOVE);          // bit 2: directional movement
-static constexpr s32 CB_JUMP     = (1 << GA_JUMP);          // bit 3: jump (Cross tap)
+static constexpr s32 CB_MOVE = (1 << GA_MOVE);          // bit 2: directional movement
+static constexpr s32 CB_JUMP = (1 << GA_JUMP);          // bit 3: jump (Cross tap)
 static constexpr s32 CB_JUMP_DIR = (1 << GA_JUMP_DIRECTIONAL); // bit 4: jump + direction
 static constexpr s32 CB_DIVE_ROLL = (1 << GA_DIVE_ROLL);    // bit 5: dive roll (R1)
-static constexpr s32 CB_STRAFE   = (1 << GA_STRAFE);        // bit 6: strafe (R2)
-static constexpr s32 CB_GRAB     = (1 << GA_GRAB);          // bit 7: grab/throw (Circle)
-static constexpr s32 CB_PUNCH    = (1 << GA_PUNCH);         // bit 8: punch (Square)
-static constexpr s32 CB_KICK     = (1 << GA_KICK);          // bit 9: kick (Triangle)
+static constexpr s32 CB_STRAFE = (1 << GA_STRAFE);        // bit 6: strafe (R2)
+static constexpr s32 CB_GRAB = (1 << GA_GRAB);          // bit 7: grab/throw (Circle)
+static constexpr s32 CB_PUNCH = (1 << GA_PUNCH);         // bit 8: punch (Square)
+static constexpr s32 CB_KICK = (1 << GA_KICK);          // bit 9: kick (Triangle)
 static constexpr s32 CB_GRAB_FWD = (1 << GA_GRAB_FORWARD);  // bit 15: grab forward
 
 // Movement tuning constants (PSX original values)
 // PSX uses a ramping force accumulator (gp+392) that gradually increases from 0
 // to runSpeed. AddForce accumulates into DynamicThing::force (80% damped per frame).
-static constexpr s32 PLAYER_RUN_FORCE  = 2500;  // per-frame AddForce magnitude
+static constexpr s32 PLAYER_RUN_FORCE = 2500;  // per-frame AddForce magnitude
 static constexpr s32 PLAYER_JUMP_FORCE = 17000;  // upward contactForce on jump (gp+460, PSX 0x4268)
 static constexpr s32 PLAYER_RUNNING_JUMP_BONUS = -1500; // running jump Y offset (gp+464, PSX 0xFFFFFA24)
 static constexpr s32 PLAYER_RUNNING_JUMP_BURST = 2500; // initial horizontal burst (runJumpHold[0], PSX 0x9C4)
@@ -45,9 +43,9 @@ static constexpr u32 WALL_JUMP_MIN_COLLISION_RATIO = 0;
 static constexpr s32 WALL_JUMP_MIN_ANGLE = 0;
 
 // PSX jump parameter tables at 0x800D652C-0x800D6558: [force, gravity, maxFallDivisor]
-static const s32 s_runJumpTap[3]       = { 2000,  20480, 20 };  // 0x7D0, 0x5000, 0x14
-static const s32 s_runJumpHold[3]      = { 2500,  16000, 23 };  // 0x9C4, 0x3E80, 0x17
-static const s32 s_standingJumpTap[3]  = { 150,   4096,  20 };  // 0x96,  0x1000, 0x14
+static const s32 s_runJumpTap[3] = { 2000,  20480, 20 };  // 0x7D0, 0x5000, 0x14
+static const s32 s_runJumpHold[3] = { 2500,  16000, 23 };  // 0x9C4, 0x3E80, 0x17
+static const s32 s_standingJumpTap[3] = { 150,   4096,  20 };  // 0x96,  0x1000, 0x14
 static const s32 s_standingJumpHold[3] = { 150,   4096,  25 };  // 0x96,  0x1000, 0x19
 
 // PSX: gp+492 - hard-fall velocity threshold (velocity.y must be <= this to trigger)
@@ -97,7 +95,8 @@ static s32 CheckWallCollisionForJump(
     if (start.x >= end.x) {
         searchMin.x = end.x - radius;
         searchMax.x = start.x + radius;
-    } else {
+    }
+    else {
         searchMin.x = start.x - radius;
         searchMax.x = end.x + radius;
     }
@@ -105,7 +104,8 @@ static s32 CheckWallCollisionForJump(
     if (start.y >= end.y) {
         searchMin.y = end.y;
         searchMax.y = start.y + height;
-    } else {
+    }
+    else {
         searchMin.y = start.y;
         searchMax.y = end.y + height;
     }
@@ -113,7 +113,8 @@ static s32 CheckWallCollisionForJump(
     if (start.z >= end.z) {
         searchMin.z = end.z - radius;
         searchMax.z = start.z + radius;
-    } else {
+    }
+    else {
         searchMin.z = start.z - radius;
         searchMax.z = end.z + radius;
     }
@@ -181,15 +182,18 @@ static s32 CheckWallConstraintForJump(
             if (absA > 0x7FFF) {
                 if (a <= 0) {
                     a += 0xFFFF;
-                } else {
+                }
+                else {
                     a -= 0xFFFF;
                 }
             }
             wallAngle = a;
-        } else {
+        }
+        else {
             wallAngle = (wallNormal.x > 0) ? 49152 : 0x4000;
         }
-    } else {
+    }
+    else {
         wallAngle = (wallNormal.z > 0) ? 0x8000 : 0;
     }
 
@@ -199,7 +203,8 @@ static s32 CheckWallConstraintForJump(
     if (absWrapped > 0x7FFF) {
         if (wrapped <= 0) {
             wrapped = diff + 98303;
-        } else {
+        }
+        else {
             wrapped = diff - 0x7FFF;
         }
     }
@@ -449,345 +454,369 @@ void Player::SetActionState(u32 state, s32 param) {
     }
 
     switch (state) {
-    case AS_INACTIVE_IDLE: {
-        // PSX case 0: clear animations, set dispatch to none
-        playerFlags &= ~4;
-        field344 = 0;
-        stateDispatch = SD_NONE;
-        field348 = 0;
-        if (model) {
-            Model* m = static_cast<Model*>(model);
-            m->SetAnim(PLAYER_ANIM_INACTIVE_IDLE, param, 0, 0);
-        }
-        actionState = (s32)state;
-        return;
-    }
-    case AS_STAND: {
-        // PSX case 1: stateDispatch=22, SetIdleAnimation, reset fields, playerFlags|=4
-        field344 = 0;
-        stateDispatch = SD_STAND;
-        turnAroundTimer = 0;
-        turnAroundFlag = 0;
-        field348 = 8;
-        SetIdleAnimation(param, 1);
-        field616 = 0;
-        idleTimer = 0;
-        field424 = 0;
-        playerFlags |= PF_COMBAT_READY;
-        flags |= TF_DYNAMIC;
-        flags2 &= ~0x70; // clear bits 4,5,6
-        actionState = (s32)state;
-        stateTimer = 0;
-        return;
-    }
-    case AS_WALL_JUMP_TAUNT: {
-        // PSX case 3: wall jump taunt/idle - loads angle-based animations (308-315)
-        // Uses InactiveIdle handler. Complex anim selection not yet reversed.
-        field344 = 0;
-        stateDispatch = SD_INACTIVE_IDLE;
-        animCallbackData = 0;
-        currentAnimEnum = PLAYER_ANIM_FLIP_VARIANT; // placeholder
-        animLoadState = 2;
-        actionState = (s32)state;
-        return;
-    }
-    case AS_PAUSE: {
-        // PSX case 6: running jump (from _Run context).
-        // stateDispatch=28(SD_JUMP), DoJump with combined base+running force,
-        // field704=1 (hold flag), runJumpHold table, AddForce initial burst.
-        if (!field500 && !field504) {
-            // PSX: model->ClearSemiTransMode() if no pickups
-        }
-        field344 = 0;
-        stateDispatch = SD_JUMP;
-        field348 = 8;
-        field704 = 1;  // jump hold flag (running jump has hold detection)
-        field700 = 0;
-        field706 = 0;
-        field712 = s_runJumpHold;
-        DoJump(PLAYER_JUMP_FORCE + PLAYER_RUNNING_JUMP_BONUS);
-
-        if (model) {
-            Model* m = static_cast<Model*>(model);
-            m->SetAnim(PLAYER_ANIM_ID_36, 0, 0, 0);
-        }
-
-        // PSX: AddForce(jumpTable[0], (s16*)&orientation) - rotY comes from orientation.y
-        SVector dir;
-        dir.x = (s16)(orientation.x & 0xFFFF);
-        dir.y = (s16)((orientation.x >> 16) & 0xFFFF);
-        dir.z = (s16)(orientation.y & 0xFFFF);
-        dir.pad = (s16)((orientation.y >> 16) & 0xFFFF);
-        AddForce(PLAYER_RUNNING_JUMP_BURST, &dir);
-
-        turnRate = 1500;
-        playerFlags = (playerFlags & ~3) | 2;
-        actionState = (s32)state;
-        return;
-    }
-    case AS_JUMP: {
-        // PSX case 8: standing jump. DoJump, set direction cosines, playerFlags|=3.
-        field344 = 0;
-        stateDispatch = SD_JUMP;
-        field348 = 8;
-        if (model) {
-            Model* m = static_cast<Model*>(model);
-            m->SetAnim(PLAYER_ANIM_FALL, 0, 0, 0);
-        }
-
-        DoJump();
-
-        field700 = 0;
-        field712 = nullptr;
-        field704 = 0;
-        field706 = 0;
-        playerFlags |= 3;
-
-        // PSX: store jump direction cosines
-        field720 = rmSin16(orientation.y);
-        field724 = 0;
-        field728 = rmSin16((s16)(orientation.y + 0x4000));
-
-        field616 = 0;
-        jumpReturnHeight = homePos.y;
-        actionState = (s32)state;
-        stateTimer = 0;
-        return;
-    }
-    case AS_LEDGE_LATCH: {
-        // PSX case 9: dispatch 33 path for wall jump sequence.
-        field344 = 0;
-        stateDispatch = SD_WALLJUMP;
-        field348 = 8;
-        PlayAnimation(PLAYER_ANIM_WALL_JUMP_START, ANIM_RUN_TO_LAST);
-        velocity = {};
-        contactForce = {};
-        maxFallDivisor = 0;
-        playerFlags &= ~2;
-        field616 = 0;
-        actionState = (s32)state;
-        return;
-    }
-    case AS_RUN: {
-        // PSX case 10: turnRate=4000, field616=0, gp+392=0
-        turnRate = 4000;
-        field616 = 0;
-        forceAccum = 0;
-        // Fall through to Humanoid for stateDispatch + animation setup
-        break;
-    }
-    case AS_BACKFLIP: {
-        // PSX case 11: face enemy + strafe init.
-        // FindFoe, SetHumanoidTarget, stateDispatch=26(SD_BACKFLIP)
-        stateTimer = 0;
-        SetHumanoidTarget(FindFoe(distantTargetRange, 0, 0));
-        field344 = 0;
-        stateDispatch = SD_BACKFLIP;
-        field348 = 8;
-        actionState = (s32)state;
-        return;
-    }
-    case AS_STRAFE: {
-        // PSX case 12: stateDispatch=27(SD_STRAFE), play anim 24
-        field344 = 0;
-        stateDispatch = SD_STRAFE;
-        field348 = 8;
-        if (model) {
-            Model* m = static_cast<Model*>(model);
-            m->SetAnim(PLAYER_ANIM_STRAFE, param, 1, 0);
-        }
-        field488 = 0;
-        actionState = (s32)state;
-        return;
-    }
-    case AS_FALL: {
-        // PSX case 13: stateDispatch=29, play anim 39 frame 5,
-        // field616=0, playerFlags|=1, jumpReturnHeight=homePos.y
-        field344 = 0;
-        stateDispatch = SD_FALL;
-        field348 = 8;
-        if (model) {
-            Model* m = static_cast<Model*>(model);
-            m->SetAnim(PLAYER_ANIM_FALL, param, 0, 0);
-            AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
-            if (anim) {
-                anim->ForceFrame(5);
+        case AS_INACTIVE_IDLE:
+        {
+            // PSX case 0: clear animations, set dispatch to none
+            playerFlags &= ~4;
+            field344 = 0;
+            stateDispatch = SD_NONE;
+            field348 = 0;
+            if (model) {
+                Model* m = static_cast<Model*>(model);
+                m->SetAnim(PLAYER_ANIM_INACTIVE_IDLE, param, 0, 0);
             }
-        }
-        field616 = 0;
-        playerFlags |= 1;
-        jumpReturnHeight = homePos.y;
-        if (humanoidSound) {
-            humanoidSound->Fall();
-        }
-        actionState = (s32)state;
-        stateTimer = 0;
-        return;
-    }
-    case AS_HARDFALL: {
-        // PSX case 14: stateDispatch=-1, HardFall handler
-        field344 = 0;
-        stateDispatch = SD_HARDFALL;
-        actionState = (s32)state;
-        stateTimer = 0;
-        return;
-    }
-    case AS_HARDLAND: {
-        // PSX case 15: stateDispatch=-1, HardLand handler
-        field344 = 0;
-        stateDispatch = SD_HARDLAND;
-        actionState = (s32)state;
-        stateTimer = 0;
-        return;
-    }
-    case AS_FLIP: {
-        // PSX case 16: stateDispatch=-1, Flip handler, play anim 295, playerFlags|=2
-        playerFlags |= 2;
-        field344 = 0;
-        stateDispatch = SD_FLIP;
-        if (model) {
-            Model* m = static_cast<Model*>(model);
-            m->SetAnim(PLAYER_ANIM_FLIP_VARIANT, param, 1, 0);
-        }
-        field616 = 0;
-        if (humanoidSound) {
-            humanoidSound->FrontFlip();
-        }
-        actionState = (s32)state;
-        return;
-    }
-    case AS_FLIP_VARIANT: {
-        // PSX case 17: stateDispatch=-1, Flip handler, play default anim
-        field344 = 0;
-        stateDispatch = SD_FLIP;
-        if (model) {
-            Model* m = static_cast<Model*>(model);
-            m->SetAnim(PLAYER_ANIM_ID_296, param, 1, 0);
-        }
-        actionState = (s32)state;
-        return;
-    }
-    case AS_POLE_IDLE: {
-        // PSX case 18: stateDispatch=44, zero velocity/force, pole idle setup
-        field344 = 0;
-        stateDispatch = SD_POLE_IDLE;
-        field348 = 8;
-        velocity = {};
-        contactForce = {};
-        flags2 &= ~0x70; // clear bits 4,5,6
-        field616 = 0;
-        actionStateFlag = 1;
-        field424 = -38000;
-        actionState = (s32)state;
-        return;
-    }
-    case AS_PUSH_OBJECT: {
-        // PSX case 19: stateDispatch=-1, PushObject handler
-        field344 = 0;
-        stateDispatch = SD_PUSH_OBJECT;
-        actionState = (s32)state;
-        return;
-    }
-    case AS_SLOPE_SLIDE: {
-        // PSX case 20: stateDispatch=47, play anim 34 frame 3, field616=0
-        field344 = 0;
-        stateDispatch = SD_SLOPE_SLIDE;
-        field348 = 8;
-        if (model) {
-            Model* m = static_cast<Model*>(model);
-            m->SetAnim(PLAYER_ANIM_ID_34, 3, 0, 0);
-        }
-        field616 = 0;
-        if (humanoidSound) {
-            humanoidSound->BeginSlideOnSurface((CSoundMaterial)field436);
-        }
-        actionState = (s32)state;
-        return;
-    }
-    case AS_TABLE_ROLL: {
-        // PSX case 21: stateDispatch=-1, TableRoll handler.
-        // Zero velocity/force/maxFallDivisor, setup flags2.
-        u32 f2 = (u32)flags2;
-        if (((f2 >> 4) & 1) == 0 || (((f2 >> 5) & 1) != 0 && ((f2 >> 6) & 1) != 0)) {
-            flags2 = (flags2 & ~0x70) | 0x10;
-        }
-        // PSX: model->SetAnim(86, ...) - start table roll animation
-        if (model) {
-            Model* m = static_cast<Model*>(model);
-            m->SetAnim(PLAYER_ANIM_TABLE_ROLL, 0, 0, 0);
-        }
-        velocity = {};
-        contactForce = {};
-        maxFallDivisor = 0;
-        field344 = 0;
-        stateDispatch = SD_TABLE_ROLL;
-        actionState = (s32)state;
-        return;
-    }
-    case AS_POLE_SWING: {
-        // PSX case 23: stateDispatch=45, zero velocity/force, field616=0
-        field344 = 0;
-        stateDispatch = SD_POLE_SWING;
-        field348 = 8;
-        velocity = {};
-        contactForce = {};
-        field616 = 0;
-        actionState = (s32)state;
-        return;
-    }
-    case AS_PUNCH_ATTACK:
-    case AS_KICK_ATTACK: {
-        // PSX cases 32,34: FindFoe, SetHumanoidTarget, EnterCombatCombo.
-        // While combo tree is still unreversed, fall back to Humanoid setup.
-        SetHumanoidTarget(FindFoe(750, 10922, 0));
-        if (!EnterCombatCombo()) {
-            Humanoid::SetActionState(state, param);
+            actionState = (s32)state;
             return;
         }
-        actionState = (s32)state;
-        return;
-    }
-    case AS_PICKUP: {
-        // PSX case 44: pickup object - stateDispatch=-1, Pickup handler
-        // TODO: full pickup system with GetPickupMove, WeaponPickupDialog
-        field344 = 0;
-        stateDispatch = SD_PICKUP;
-        actionState = (s32)state;
-        return;
-    }
-    case AS_THROW_PICKUP: {
-        // PSX case 45: throw object - stateDispatch=-1, Throw handler
-        // TODO: full throw system with GetThrowMove, target finding
-        field344 = 0;
-        stateDispatch = SD_THROW;
-        actionState = (s32)state;
-        return;
-    }
-    case AS_GET_UP: {
-        // PSX case 68: get up from knockdown. stateDispatch=43, field616=0
-        flags2 &= ~0x70;
-        field344 = 0;
-        stateDispatch = SD_GET_UP;
-        field348 = 8;
-        field616 = 0;
-        stateTimer = 0;
-        actionState = (s32)state;
-        return;
-    }
-    case AS_DEAD: {
-        // PSX case 72: player death. Complex death dialog/anim sequence.
-        // stateDispatch=48, flags|=0x80, field616=0
-        field616 = 0;
-        stateTimer = 0;
-        flags |= 0x80;
-        field344 = 0;
-        stateDispatch = SD_DEAD_PLAYER;
-        field348 = 8;
-        actionState = (s32)state;
-        return;
-    }
-    default:
-        break;
+        case AS_STAND:
+        {
+            // PSX case 1: stateDispatch=22, SetIdleAnimation, reset fields, playerFlags|=4
+            field344 = 0;
+            stateDispatch = SD_STAND;
+            turnAroundTimer = 0;
+            turnAroundFlag = 0;
+            field348 = 8;
+            SetIdleAnimation(param, 1);
+            field616 = 0;
+            idleTimer = 0;
+            field424 = 0;
+            playerFlags |= PF_COMBAT_READY;
+            flags |= TF_DYNAMIC;
+            flags2 &= ~0x70; // clear bits 4,5,6
+            actionState = (s32)state;
+            stateTimer = 0;
+            return;
+        }
+        case AS_WALL_JUMP_TAUNT:
+        {
+            // PSX case 3: wall jump taunt/idle - loads angle-based animations (308-315)
+            // Uses InactiveIdle handler. Complex anim selection not yet reversed.
+            field344 = 0;
+            stateDispatch = SD_INACTIVE_IDLE;
+            animCallbackData = 0;
+            currentAnimEnum = PLAYER_ANIM_FLIP_VARIANT; // placeholder
+            animLoadState = 2;
+            actionState = (s32)state;
+            return;
+        }
+        case AS_PAUSE:
+        {
+            // PSX case 6: running jump (from _Run context).
+            // stateDispatch=28(SD_JUMP), DoJump with combined base+running force,
+            // field704=1 (hold flag), runJumpHold table, AddForce initial burst.
+            if (!field500 && !field504) {
+                // PSX: model->ClearSemiTransMode() if no pickups
+            }
+            field344 = 0;
+            stateDispatch = SD_JUMP;
+            field348 = 8;
+            field704 = 1;  // jump hold flag (running jump has hold detection)
+            field700 = 0;
+            field706 = 0;
+            field712 = s_runJumpHold;
+            DoJump(PLAYER_JUMP_FORCE + PLAYER_RUNNING_JUMP_BONUS);
+
+            if (model) {
+                Model* m = static_cast<Model*>(model);
+                m->SetAnim(PLAYER_ANIM_ID_36, 0, 0, 0);
+            }
+
+            // PSX: AddForce(jumpTable[0], (s16*)&orientation) - rotY comes from orientation.y
+            SVector dir;
+            dir.x = (s16)(orientation.x & 0xFFFF);
+            dir.y = (s16)((orientation.x >> 16) & 0xFFFF);
+            dir.z = (s16)(orientation.y & 0xFFFF);
+            dir.pad = (s16)((orientation.y >> 16) & 0xFFFF);
+            AddForce(PLAYER_RUNNING_JUMP_BURST, &dir);
+
+            turnRate = 1500;
+            playerFlags = (playerFlags & ~3) | 2;
+            actionState = (s32)state;
+            return;
+        }
+        case AS_JUMP:
+        {
+            // PSX case 8: standing jump. DoJump, set direction cosines, playerFlags|=3.
+            field344 = 0;
+            stateDispatch = SD_JUMP;
+            field348 = 8;
+            if (model) {
+                Model* m = static_cast<Model*>(model);
+                m->SetAnim(PLAYER_ANIM_FALL, 0, 0, 0);
+            }
+
+            DoJump();
+
+            field700 = 0;
+            field712 = nullptr;
+            field704 = 0;
+            field706 = 0;
+            playerFlags |= 3;
+
+            // PSX: store jump direction cosines
+            field720 = rmSin16(orientation.y);
+            field724 = 0;
+            field728 = rmSin16((s16)(orientation.y + 0x4000));
+
+            field616 = 0;
+            jumpReturnHeight = homePos.y;
+            actionState = (s32)state;
+            stateTimer = 0;
+            return;
+        }
+        case AS_LEDGE_LATCH:
+        {
+            // PSX case 9: dispatch 33 path for wall jump sequence.
+            field344 = 0;
+            stateDispatch = SD_WALLJUMP;
+            field348 = 8;
+            PlayAnimation(PLAYER_ANIM_WALL_JUMP_START, ANIM_RUN_TO_LAST);
+            velocity = {};
+            contactForce = {};
+            maxFallDivisor = 0;
+            playerFlags &= ~2;
+            field616 = 0;
+            actionState = (s32)state;
+            return;
+        }
+        case AS_RUN:
+        {
+            // PSX case 10: turnRate=4000, field616=0, gp+392=0
+            turnRate = 4000;
+            field616 = 0;
+            forceAccum = 0;
+            // Fall through to Humanoid for stateDispatch + animation setup
+            break;
+        }
+        case AS_BACKFLIP:
+        {
+            // PSX case 11: face enemy + strafe init.
+            // FindFoe, SetHumanoidTarget, stateDispatch=26(SD_BACKFLIP)
+            stateTimer = 0;
+            SetHumanoidTarget(FindFoe(distantTargetRange, 0, 0));
+            field344 = 0;
+            stateDispatch = SD_BACKFLIP;
+            field348 = 8;
+            actionState = (s32)state;
+            return;
+        }
+        case AS_STRAFE:
+        {
+            // PSX case 12: stateDispatch=27(SD_STRAFE), play anim 24
+            field344 = 0;
+            stateDispatch = SD_STRAFE;
+            field348 = 8;
+            if (model) {
+                Model* m = static_cast<Model*>(model);
+                m->SetAnim(PLAYER_ANIM_STRAFE, param, 1, 0);
+            }
+            field488 = 0;
+            actionState = (s32)state;
+            return;
+        }
+        case AS_FALL:
+        {
+            // PSX case 13: stateDispatch=29, play anim 39 frame 5,
+            // field616=0, playerFlags|=1, jumpReturnHeight=homePos.y
+            field344 = 0;
+            stateDispatch = SD_FALL;
+            field348 = 8;
+            if (model) {
+                Model* m = static_cast<Model*>(model);
+                m->SetAnim(PLAYER_ANIM_FALL, param, 0, 0);
+                AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+                if (anim) {
+                    anim->ForceFrame(5);
+                }
+            }
+            field616 = 0;
+            playerFlags |= 1;
+            jumpReturnHeight = homePos.y;
+            if (humanoidSound) {
+                humanoidSound->Fall();
+            }
+            actionState = (s32)state;
+            stateTimer = 0;
+            return;
+        }
+        case AS_HARDFALL:
+        {
+            // PSX case 14: stateDispatch=-1, HardFall handler
+            field344 = 0;
+            stateDispatch = SD_HARDFALL;
+            actionState = (s32)state;
+            stateTimer = 0;
+            return;
+        }
+        case AS_HARDLAND:
+        {
+            // PSX case 15: stateDispatch=-1, HardLand handler
+            field344 = 0;
+            stateDispatch = SD_HARDLAND;
+            actionState = (s32)state;
+            stateTimer = 0;
+            return;
+        }
+        case AS_FLIP:
+        {
+            // PSX case 16: stateDispatch=-1, Flip handler, play anim 295, playerFlags|=2
+            playerFlags |= 2;
+            field344 = 0;
+            stateDispatch = SD_FLIP;
+            if (model) {
+                Model* m = static_cast<Model*>(model);
+                m->SetAnim(PLAYER_ANIM_FLIP_VARIANT, param, 1, 0);
+            }
+            field616 = 0;
+            if (humanoidSound) {
+                humanoidSound->FrontFlip();
+            }
+            actionState = (s32)state;
+            return;
+        }
+        case AS_FLIP_VARIANT:
+        {
+            // PSX case 17: stateDispatch=-1, Flip handler, play default anim
+            field344 = 0;
+            stateDispatch = SD_FLIP;
+            if (model) {
+                Model* m = static_cast<Model*>(model);
+                m->SetAnim(PLAYER_ANIM_ID_296, param, 1, 0);
+            }
+            actionState = (s32)state;
+            return;
+        }
+        case AS_POLE_IDLE:
+        {
+            // PSX case 18: stateDispatch=44, zero velocity/force, pole idle setup
+            field344 = 0;
+            stateDispatch = SD_POLE_IDLE;
+            field348 = 8;
+            velocity = {};
+            contactForce = {};
+            flags2 &= ~0x70; // clear bits 4,5,6
+            field616 = 0;
+            actionStateFlag = 1;
+            field424 = -38000;
+            actionState = (s32)state;
+            return;
+        }
+        case AS_PUSH_OBJECT:
+        {
+            // PSX case 19: stateDispatch=-1, PushObject handler
+            field344 = 0;
+            stateDispatch = SD_PUSH_OBJECT;
+            actionState = (s32)state;
+            return;
+        }
+        case AS_SLOPE_SLIDE:
+        {
+            // PSX case 20: stateDispatch=47, play anim 34 frame 3, field616=0
+            field344 = 0;
+            stateDispatch = SD_SLOPE_SLIDE;
+            field348 = 8;
+            if (model) {
+                Model* m = static_cast<Model*>(model);
+                m->SetAnim(PLAYER_ANIM_ID_34, 3, 0, 0);
+            }
+            field616 = 0;
+            if (humanoidSound) {
+                humanoidSound->BeginSlideOnSurface((CSoundMaterial)field436);
+            }
+            actionState = (s32)state;
+            return;
+        }
+        case AS_TABLE_ROLL:
+        {
+            // PSX case 21: stateDispatch=-1, TableRoll handler.
+            // Zero velocity/force/maxFallDivisor, setup flags2.
+            u32 f2 = (u32)flags2;
+            if (((f2 >> 4) & 1) == 0 || (((f2 >> 5) & 1) != 0 && ((f2 >> 6) & 1) != 0)) {
+                flags2 = (flags2 & ~0x70) | 0x10;
+            }
+            // PSX: model->SetAnim(86, ...) - start table roll animation
+            if (model) {
+                Model* m = static_cast<Model*>(model);
+                m->SetAnim(PLAYER_ANIM_TABLE_ROLL, 0, 0, 0);
+            }
+            velocity = {};
+            contactForce = {};
+            maxFallDivisor = 0;
+            field344 = 0;
+            stateDispatch = SD_TABLE_ROLL;
+            actionState = (s32)state;
+            return;
+        }
+        case AS_POLE_SWING:
+        {
+            // PSX case 23: stateDispatch=45, zero velocity/force, field616=0
+            field344 = 0;
+            stateDispatch = SD_POLE_SWING;
+            field348 = 8;
+            velocity = {};
+            contactForce = {};
+            field616 = 0;
+            actionState = (s32)state;
+            return;
+        }
+        case AS_PUNCH_ATTACK:
+        case AS_KICK_ATTACK:
+        {
+            // PSX cases 32,34: FindFoe, SetHumanoidTarget, EnterCombatCombo.
+            // While combo tree is still unreversed, fall back to Humanoid setup.
+            SetHumanoidTarget(FindFoe(750, 10922, 0));
+            if (!EnterCombatCombo()) {
+                Humanoid::SetActionState(state, param);
+                return;
+            }
+            actionState = (s32)state;
+            return;
+        }
+        case AS_PICKUP:
+        {
+            // PSX case 44: pickup object - stateDispatch=-1, Pickup handler
+            // TODO: full pickup system with GetPickupMove, WeaponPickupDialog
+            field344 = 0;
+            stateDispatch = SD_PICKUP;
+            actionState = (s32)state;
+            return;
+        }
+        case AS_THROW_PICKUP:
+        {
+            // PSX case 45: throw object - stateDispatch=-1, Throw handler
+            // TODO: full throw system with GetThrowMove, target finding
+            field344 = 0;
+            stateDispatch = SD_THROW;
+            actionState = (s32)state;
+            return;
+        }
+        case AS_GET_UP:
+        {
+            // PSX case 68: get up from knockdown. stateDispatch=43, field616=0
+            flags2 &= ~0x70;
+            field344 = 0;
+            stateDispatch = SD_GET_UP;
+            field348 = 8;
+            field616 = 0;
+            stateTimer = 0;
+            actionState = (s32)state;
+            return;
+        }
+        case AS_DEAD:
+        {
+            // PSX case 72: player death. Complex death dialog/anim sequence.
+            // stateDispatch=48, flags|=0x80, field616=0
+            field616 = 0;
+            stateTimer = 0;
+            flags |= 0x80;
+            field344 = 0;
+            stateDispatch = SD_DEAD_PLAYER;
+            field348 = 8;
+            actionState = (s32)state;
+            return;
+        }
+        default:
+            break;
     }
 
     // Delegate to Humanoid for the core state mapping and remaining cases
@@ -795,14 +824,14 @@ void Player::SetActionState(u32 state, s32 param) {
 
     // Animation fallbacks for states that go through Humanoid path
     switch (state) {
-    case AS_RUN:
-        if (model) {
-            Model* m = static_cast<Model*>(model);
-            m->SetAnim(PLAYER_ANIM_RUN, param, 0, 0);
-        }
-        break;
-    default:
-        break;
+        case AS_RUN:
+            if (model) {
+                Model* m = static_cast<Model*>(model);
+                m->SetAnim(PLAYER_ANIM_RUN, param, 0, 0);
+            }
+            break;
+        default:
+            break;
     }
 }
 
@@ -812,24 +841,24 @@ void Player::SetActionState(u32 state, s32 param) {
 // then falls through to Humanoid::ProcessAction for shared Humanoid dispatches.
 void Player::ProcessAction() {
     switch (stateDispatch) {
-    // Player-specific handlers (PSX: direct function pointer, stateDispatch = -1)
-    case SD_HARDFALL:      _HardFall(); return;
-    case SD_HARDLAND:      _HardLand(); return;
-    case SD_FLIP:          _Flip(); return;
-    case SD_INACTIVE_IDLE: _InactiveIdle(); return;
-    case SD_PUSH_OBJECT:   _PushObject(); return;
-    case SD_TABLE_ROLL:    _TableRoll(); return;
-    case SD_LEDGE_LATCH:   _LedgeLatch(); return;
-    case SD_LEDGE_PULLUP:  _LedgePullup(); return;
-    case SD_DO_STAND:      _DoStand(); return;
-    // Player-specific handlers (PSX: vtable index dispatch)
-    case SD_GET_UP:        _DoStand(); return;
-    case SD_POLE_IDLE:     _Push(); return;
-    case SD_POLE_SWING:    _HorizontalPoleSwing(); return;
-    case SD_SLOPE_SLIDE:   _SlopeSlide(); return;
-    case SD_DEAD_PLAYER:   _Dead(); return;
-    case SD_WALLJUMP:      _WallJump(); return;
-    default: Humanoid::ProcessAction(); return;
+        // Player-specific handlers (PSX: direct function pointer, stateDispatch = -1)
+        case SD_HARDFALL:      _HardFall(); return;
+        case SD_HARDLAND:      _HardLand(); return;
+        case SD_FLIP:          _Flip(); return;
+        case SD_INACTIVE_IDLE: _InactiveIdle(); return;
+        case SD_PUSH_OBJECT:   _PushObject(); return;
+        case SD_TABLE_ROLL:    _TableRoll(); return;
+        case SD_LEDGE_LATCH:   _LedgeLatch(); return;
+        case SD_LEDGE_PULLUP:  _LedgePullup(); return;
+        case SD_DO_STAND:      _DoStand(); return;
+            // Player-specific handlers (PSX: vtable index dispatch)
+        case SD_GET_UP:        _DoStand(); return;
+        case SD_POLE_IDLE:     _Push(); return;
+        case SD_POLE_SWING:    _HorizontalPoleSwing(); return;
+        case SD_SLOPE_SLIDE:   _SlopeSlide(); return;
+        case SD_DEAD_PLAYER:   _Dead(); return;
+        case SD_WALLJUMP:      _WallJump(); return;
+        default: Humanoid::ProcessAction(); return;
     }
 }
 
@@ -842,7 +871,8 @@ void Player::GetViewSpot(LVector* outPos, LVector* outTarget) {
     if (outPos) {
         if (state == 18) {
             *outPos = pos;
-        } else {
+        }
+        else {
             *outPos = homePos;
         }
     }
@@ -850,7 +880,8 @@ void Player::GetViewSpot(LVector* outPos, LVector* outTarget) {
     if (outTarget) {
         if (state == 18) {
             *outTarget = pos;
-        } else if (state == 23) {
+        }
+        else if (state == 23) {
             bool usedAnimMatrix = false;
 
             if (model) {
@@ -871,7 +902,8 @@ void Player::GetViewSpot(LVector* outPos, LVector* outTarget) {
                 *outTarget = homePos;
                 outTarget->y += 450;
             }
-        } else {
+        }
+        else {
             *outTarget = homePos;
             outTarget->y += 450;
         }
@@ -948,7 +980,8 @@ void Player::FallingPhysics() {
         dir.pad = 0;
         AddForce(150, &dir);
         gravity = 4096;
-    } else {
+    }
+    else {
         gravity = 2048;
     }
 }
@@ -971,12 +1004,14 @@ void Player::CheckForLanding() {
             s32 nextAnim = PLAYER_ANIM_RUN;
             if (curAnim == PLAYER_ANIM_ID_35) {
                 nextAnim = PLAYER_ANIM_ID_37;
-            } else if (curAnim == PLAYER_ANIM_ID_36) {
+            }
+            else if (curAnim == PLAYER_ANIM_ID_36) {
                 nextAnim = PLAYER_ANIM_ID_38;
             }
             m->SetAnim(nextAnim, 0, 0, 0);
         }
-    } else {
+    }
+    else {
         SetActionState(AS_STAND, 0);
         if (m) {
             m->SetAnim(PLAYER_ANIM_HARD_FALL, 0, 0, 0);
@@ -1005,35 +1040,35 @@ void Player::SetLivesLeft(s32 lives) {
 static s32 GetWeaponFinalBlowDialog(s32 weaponType) {
     MARKFUNCTION(0x80034338);
     switch (weaponType) {
-    case 301: case 318: case 321: case 324:
-        return 102;
-    case 302:
-        return 108;
-    case 303: case 304: case 305: case 306: case 310: case 312:
-    case 314: case 315: case 316: case 317: case 320: case 322: case 328:
-        return 104;
-    case 307:
-        return 86;
-    case 308:
-        return 101;
-    case 309:
-        return 88;
-    case 311:
-        return 105;
-    case 313:
-        return 103;
-    case 319:
-        return 97;
-    case 323:
-        return 87;
-    case 325:
-        return 98;
-    case 326:
-        return 107;
-    case 327:
-        return 85;
-    default:
-        return 104;
+        case 301: case 318: case 321: case 324:
+            return 102;
+        case 302:
+            return 108;
+        case 303: case 304: case 305: case 306: case 310: case 312:
+        case 314: case 315: case 316: case 317: case 320: case 322: case 328:
+            return 104;
+        case 307:
+            return 86;
+        case 308:
+            return 101;
+        case 309:
+            return 88;
+        case 311:
+            return 105;
+        case 313:
+            return 103;
+        case 319:
+            return 97;
+        case 323:
+            return 87;
+        case 325:
+            return 98;
+        case 326:
+            return 107;
+        case 327:
+            return 85;
+        default:
+            return 104;
     }
 }
 
@@ -1088,7 +1123,8 @@ void Player::LoadCombatDialog() {
             LoadDialog(26, 0x33);
             return;
         }
-    } else if ((commandBits >> 9) & 1) {
+    }
+    else if ((commandBits >> 9) & 1) {
         if (rnd) {
             LoadDialog(25, 0x33);
             return;
@@ -1102,26 +1138,28 @@ void Player::LoadCombatDialog() {
 void Player::PlayCombatKnockDownDialog(s32 damageType) {
     MARKFUNCTION(0x80034510);
     switch (damageType) {
-    case 2:
-    case 3:
-    case 5: {
-        s32 sp = soundParam;
-        if ((u32)(sp - 25) < 2 || sp == 76) {
-            PlayDialog((u32)sp, 10);
+        case 2:
+        case 3:
+        case 5:
+        {
+            s32 sp = soundParam;
+            if ((u32)(sp - 25) < 2 || sp == 76) {
+                PlayDialog((u32)sp, 10);
+            }
+            break;
         }
-        break;
-    }
-    case 11:
-    case 12: {
-        Thing* weapon = (Thing*)(uintptr_t)field500;
-        if (weapon) {
-            s32 dialogID = GetWeaponFinalBlowDialog((s32)weapon->thingType);
-            PlayDialog((u32)dialogID, 51);
+        case 11:
+        case 12:
+        {
+            Thing* weapon = (Thing*)(uintptr_t)field500;
+            if (weapon) {
+                s32 dialogID = GetWeaponFinalBlowDialog((s32)weapon->thingType);
+                PlayDialog((u32)dialogID, 51);
+            }
+            break;
         }
-        break;
-    }
-    default:
-        break;
+        default:
+            break;
     }
 }
 
@@ -1129,19 +1167,19 @@ void Player::PlayCombatKnockDownDialog(s32 damageType) {
 void Player::HandleHitShock(s32 damageType) {
     MARKFUNCTION(0x800345B8);
     switch (damageType) {
-    case 1:
-        Shock(SHOCK_1);
-        break;
-    case 2:
-    case 3:
-    case 5:
-        Shock(SHOCK_3);
-        break;
-    case 4:
-        Shock(SHOCK_2);
-        break;
-    default:
-        break;
+        case 1:
+            Shock(SHOCK_1);
+            break;
+        case 2:
+        case 3:
+        case 5:
+            Shock(SHOCK_3);
+            break;
+        case 4:
+            Shock(SHOCK_2);
+            break;
+        default:
+            break;
     }
 }
 
@@ -1171,7 +1209,8 @@ bool Player::PlayerSingleEncounterCheak() {
             if (h) {
                 if (h->actionState == 2) {
                     ++nearbyCount;
-                } else {
+                }
+                else {
                     s32 dist = DistanceFromPointXZ(h->pos);
                     if (dist < encounterRange) {
                         ++nearbyCount;
@@ -1192,24 +1231,24 @@ void Player::LoadPlayerTauntResponse(Humanoid* target) {
 
     s32 dialogID;
     switch (target->thingType) {
-    case 10:  // TT_GRONTAR
-        dialogID = 66;
-        break;
-    case 12:  // TT_PAUL
-        dialogID = 72;
-        break;
-    case 13:  // TT_OSCAR
-        dialogID = 71;
-        break;
-    case 15:  // TT_DANTE
-        dialogID = 70;
-        break;
-    case 17:  // TT_BUTCH
-        dialogID = 67;
-        break;
-    default:
-        dialogID = 73;
-        break;
+        case 10:  // TT_GRONTAR
+            dialogID = 66;
+            break;
+        case 12:  // TT_PAUL
+            dialogID = 72;
+            break;
+        case 13:  // TT_OSCAR
+            dialogID = 71;
+            break;
+        case 15:  // TT_DANTE
+            dialogID = 70;
+            break;
+        case 17:  // TT_BUTCH
+            dialogID = 67;
+            break;
+        default:
+            dialogID = 73;
+            break;
     }
 
     LoadDialog((u32)dialogID, 0x33);
@@ -1333,7 +1372,8 @@ void Player::_InactiveIdle() {
         animCallbackData = 0;
         m->ApplyAnimToModel(0, currentAnimEnum, ANIM_RUN_TO_LAST, 0, 0);
         // PSX: PlayDialogBasedOnPriority(54, 54) - dialog system not reversed
-    } else if (animLoadState == 2 && anim) {
+    }
+    else if (animLoadState == 2 && anim) {
         // Check if animation enum matches and has completed a loop
         if (anim->animEnum == currentAnimEnum && anim->loopCount > 0) {
             animDone = true;
@@ -1383,7 +1423,8 @@ void Player::_Stand() {
         if (hasPickupBits) {
             if (field500 != 0 || field504 != 0) {
                 SetActionState(AS_THROW_PICKUP, 0);
-            } else {
+            }
+            else {
                 // PSX: CheckForPickup__8Humanoid; if returns 1, skip to LABEL_87
                 // CheckForPickup not yet reversed - fall through to combat idle
                 SetActionState(AS_COMBAT_IDLE, 0);
@@ -1448,7 +1489,8 @@ void Player::_Stand() {
                 SVector dir = {};
                 dir.z = (s16)(faceAngle & 0xFFFF);
                 AddForce(PLAYER_RUN_FORCE, &dir);
-            } else {
+            }
+            else {
                 SetActionState(AS_RUN, 3);
             }
             goto standPostDispatch;
@@ -1480,7 +1522,8 @@ void Player::_Stand() {
         s32 floorHeight = GetTrackedFloorHeight(this);
         if (floorHeight != (s32)0x80000001 && pos.y - floorHeight < 129) {
             homePos.y = floorHeight;
-        } else {
+        }
+        else {
             SetActionState(AS_FALL, 3);
         }
         goto standPostDispatch;
@@ -1505,17 +1548,20 @@ void Player::_Stand() {
                     m->SetAnim(PLAYER_ANIM_TAUNT_IDLE, 4, 0, 0);
                     playerFlags &= ~PF_COMBAT_READY;
                 }
-            } else if (curAnim == PLAYER_ANIM_FORWARD_ROLL) {
+            }
+            else if (curAnim == PLAYER_ANIM_FORWARD_ROLL) {
                 // PSX: anim 27 - decelerate force accumulator (gp+392 -= gp+400)
                 forceAccum -= FORCE_DECEL_RATE;
                 if (forceAccum <= 0) {
                     forceAccum = 0;
-                } else {
+                }
+                else {
                     SVector dir = {};
                     dir.z = (s16)(faceAngle & 0xFFFF);
                     AddForce(forceAccum, &dir);
                 }
-            } else {
+            }
+            else {
                 // PSX: anim 40, 46 wait for completion; else check idle
                 s32 loopTypeParam;
                 if (curAnim == PLAYER_ANIM_HARD_FALL) {
@@ -1523,12 +1569,14 @@ void Player::_Stand() {
                         goto standPostDispatch;
                     }
                     loopTypeParam = 2;
-                } else if (curAnim == PLAYER_ANIM_DIVE_ROLL_TURN) {
+                }
+                else if (curAnim == PLAYER_ANIM_DIVE_ROLL_TURN) {
                     if (anim->loopCount <= 0) {
                         goto standPostDispatch;
                     }
                     loopTypeParam = 0;
-                } else {
+                }
+                else {
                     if (TestIdleAnimation()) {
                         goto standPostDispatch;
                     }
@@ -1551,7 +1599,8 @@ standPostDispatch:
             if ((commandBits >> 2) & 1) {
                 // Still pressing run -> transition to run
                 SetActionState(AS_RUN, 0);
-            } else {
+            }
+            else {
                 // Face stored angle and play turn anim
                 FaceAngleY(turnTargetAngle, 1);
                 if (model) {
@@ -1569,7 +1618,8 @@ standPostDispatch:
                 turnAroundTimer = 0;
             }
         }
-    } else {
+    }
+    else {
         FaceAngleY(faceAngle, 1);
     }
 
@@ -1607,7 +1657,8 @@ void Player::_Flip() {
     if (animE == PLAYER_ANIM_FLIP_VARIANT) {
         maxFallDivisor = 13;
         force = 1500;
-    } else {
+    }
+    else {
         maxFallDivisor = 15;
         force = 1000;
     }
@@ -1622,7 +1673,8 @@ void Player::_Flip() {
         dir.z = (s16)(faceAngle & 0xFFFF);
         dir.pad = 0;
         AddForce(runSpeed, &dir);
-    } else if (animE == PLAYER_ANIM_TURNING_FLIP) {
+    }
+    else if (animE == PLAYER_ANIM_TURNING_FLIP) {
         // Turning flip: temporarily boost turnRate, face target angle
         u16 savedTurnRate = turnRate;
         turnRate = 5000;
@@ -1634,7 +1686,8 @@ void Player::_Flip() {
         dir.z = (s16)(faceAngle & 0xFFFF);
         dir.pad = 0;
         AddForce(runSpeed, &dir);
-    } else {
+    }
+    else {
         // Default flip: check CB_MOVE for directional control
         if (!(commandBits & CB_MOVE)) {
             goto handleLanding;
@@ -1659,7 +1712,8 @@ handleLanding:
     // PSX: check TF_ON_GROUND (flags bit 12)
     if (flags & TF_ON_GROUND) {
         gravity = 0x8000;
-    } else {
+    }
+    else {
         gravity = 4999;
         CheckForLanding();
     }
@@ -1720,21 +1774,24 @@ void Player::_Jump() {
                 field704 = 1;
                 field706 = 0;
                 field712 = s_standingJumpHold;
-            } else {
+            }
+            else {
                 // Button released (tap)
                 field700 = 2;
                 field706 = 1;
                 field704 = 0;
                 field712 = s_standingJumpTap;
             }
-        } else {
+        }
+        else {
             // Running jump: field712 already set to s_runJumpHold from SetActionState
             if (field712 == s_runJumpHold) {
                 if (!(commandBits & CB_JUMP)) {
                     // Button released - switch to tap table
                     field712 = s_runJumpTap;
                     field700 = 2;
-                } else {
+                }
+                else {
                     field700 = 1;
                 }
             }
@@ -1749,7 +1806,8 @@ void Player::_Jump() {
         // PSX: if holding button, reduce gravity by 4 for higher jump
         if (field704 && jumpHeld) {
             maxFallDivisor = field712[2] - 4;
-        } else {
+        }
+        else {
             if (field704) {
                 field704 = 0;  // clear hold flag on release
             }
@@ -1767,7 +1825,8 @@ void Player::_Jump() {
         // Gravity (XZ drag): full from table with input, half without
         if (hasDir) {
             gravity = field712[1];
-        } else {
+        }
+        else {
             gravity = field712[1] / 2;
         }
 
@@ -1782,7 +1841,7 @@ void Player::_Jump() {
                 s32 sinY = rmSin16(faceAngle);
                 s32 cosY = rmSin16((s16)(faceAngle + 0x4000));
                 s64 momentum = ((s64)field720 * (s64)sinY >> 16)
-                             + ((s64)field728 * (s64)cosY >> 16);
+                    + ((s64)field728 * (s64)cosY >> 16);
                 if ((s32)momentum > 58982) {
                     AddForce(6000, &dir);
                     field720 = 0;
@@ -1874,7 +1933,8 @@ void Player::_HardLand() {
         // PSX: if health > 0, GET_UP (68); else DEAD (72)
         if (health > 0) {
             SetActionState(AS_GET_UP, 0);
-        } else {
+        }
+        else {
             SetActionState(AS_DEAD, 0);
         }
     }
@@ -1899,10 +1959,12 @@ void Player::_Run() {
             if (field500 != 0 || field504 != 0) {
                 SetActionState(AS_THROW_PICKUP, 0);
                 // PSX: falls through to LABEL_13
-            } else {
+            }
+            else {
                 // PSX: CheckForPickup__8Humanoid - result discarded, goto LABEL_13
             }
-        } else if ((cb >> 6) & 1) {
+        }
+        else if ((cb >> 6) & 1) {
             SetActionState(AS_BACKFLIP, 0);
             // PSX: falls through to LABEL_13
         }
@@ -1934,7 +1996,8 @@ void Player::_Run() {
     if ((flags >> 17) & 1) {
         // PSX: slope -> SetActionState(20) -> falls to LABEL_45
         SetActionState(AS_SLOPE_SLIDE, 0);
-    } else {
+    }
+    else {
         s32 hasJumpTaunt = 0;
         if (((cb >> 3) & 1) || ((cb >> 4) & 1)) {
             hasJumpTaunt = 1;
@@ -1942,7 +2005,8 @@ void Player::_Run() {
         if (hasJumpTaunt) {
             // PSX: jump/taunt -> SetActionState(6) -> falls to LABEL_45
             SetActionState(AS_PAUSE, 0);
-        } else {
+        }
+        else {
             s32 hasCombat = 0;
             if (((cb >> 7) & 1) || ((cb >> 8) & 1) || ((cb >> 9) & 1) ||
                 ((cb >> 10) & 1) || ((cb >> 11) & 1) || ((cb >> 12) & 1) ||
@@ -1985,7 +2049,8 @@ void Player::_Run() {
         s32 floorHeight = GetTrackedFloorHeight(this);
         if (floorHeight != (s32)0x80000001 && pos.y - floorHeight < 129) {
             pos.y = floorHeight;
-        } else {
+        }
+        else {
             // Keep jump transitions (AS_PAUSE, etc.) from being overwritten to fall
             // in the same _Run frame when floor tracking data is unavailable.
             if (actionState == AS_RUN) {
@@ -2034,7 +2099,8 @@ void Player::_Push() {
     s32 targetAngle = faceAngle;
     if (targetAngle == 0) {
         targetAngle = PSX_ANGLE_360;
-    } else if (targetAngle > PSX_ANGLE_360) {
+    }
+    else if (targetAngle > PSX_ANGLE_360) {
         targetAngle %= PSX_ANGLE_360;
     }
 
@@ -2187,7 +2253,8 @@ void Player::_Collapse() {
     if ((s16)humanoidDataID < counter) {
         if (health > 0) {
             SetActionState(AS_GET_UP, 0);
-        } else {
+        }
+        else {
             field616 = 0;
             SetActionState(AS_DEAD, 0);
         }
@@ -2209,7 +2276,7 @@ void Player::_HorizontalPoleSwing() {
     MARKFUNCTION(0x80032F8C);
 
     // PSX: pendulum arm offset (0, -660, 0)
-    LVector pendulumArm = {0, -660, 0};
+    LVector pendulumArm = { 0, -660, 0 };
 
     // PSX: save orientation
     s32 angleX = orientation.x;
@@ -2220,7 +2287,7 @@ void Player::_HorizontalPoleSwing() {
     LVector savedPos = pos;
 
     // PSX: pole anchor position at byte offset 296 = {collBboxMax.y, collBboxMax.z, field304}
-    LVector poleAnchor = {collBboxMax.y, collBboxMax.z, field304};
+    LVector poleAnchor = { collBboxMax.y, collBboxMax.z, field304 };
 
     // PSX: pendulum torque: (-660 * sin(angleX)) >> 16, then * 4000 * stateCounter
     s32 sinX = rmSin16(angleX);
@@ -2305,7 +2372,7 @@ void Player::_HorizontalPoleSwing() {
 
     if (wantSound && field616 > 0) {
         // PSX: dismount from pole - matrix math for launch direction
-        LVector launchOffset = {0, 0, 0};
+        LVector launchOffset = { 0, 0, 0 };
         p3dFillTransMatrix(launchOffset, rotMatrix);
 
         SetActionState(AS_FLIP, 0);
@@ -2322,7 +2389,8 @@ void Player::_HorizontalPoleSwing() {
             homePos = savedPos;
             launchOffset.z = -100;
             faceAngle = angleY + PSX_ANGLE_180;
-        } else {
+        }
+        else {
             // PSX: backward side - offset = (-350*sin(angleY), 0, -350*cos(angleY))
             savedPos.x += (s32)((-350LL * rmSin16(angleY)) >> 16);
             savedPos.z += (s32)((-350LL * rmSin16((s16)(angleY + 0x4000))) >> 16);
@@ -2425,7 +2493,8 @@ void Player::_LedgeLatch() {
         if (shouldPullUp) {
             // PSX: transition to ledge pull-up
             SetActionState(AS_LEDGE_PULLUP, 0);
-        } else {
+        }
+        else {
             // PSX: LetGoOfLedge__8Humanoid - drop from ledge
             LetGoOfLedge();
         }
@@ -2529,16 +2598,19 @@ void Player::_SlopeSlide() {
             slideAngle = 0x4000;
             if (normalX > 0) {
                 projX = PSX_ANGLE_360;
-            } else {
+            }
+            else {
                 slideAngle = 0xC000;
                 projX = -PSX_ANGLE_360;
             }
             projZ = 0;
-        } else {
+        }
+        else {
             projX = 0;
             if (normalZ > 0) {
                 projZ = PSX_ANGLE_360;
-            } else {
+            }
+            else {
                 slideAngle = PSX_ANGLE_180;
                 projZ = -PSX_ANGLE_360;
             }
@@ -2688,7 +2760,8 @@ void Player::_TableRoll() {
                 }
             }
         }
-    } else {
+    }
+    else {
         maxFallDivisor = 0;
     }
 

@@ -1,6 +1,3 @@
-// tim.cpp - PSX TIM file loader and fullscreen 2D drawing
-// PSX TIM format: magic(4) + flags(4) + [CLUT section] + image section
-// Converts 4/8/16/24bpp PSX format to RGBA32 for PC.
 #include "gen/common.h"
 #include "pc/tim.h"
 #include "gen/config.h"

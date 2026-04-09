@@ -1,5 +1,3 @@
-// sound.cpp - Sound manager reversed from PSX SOUND.CPP
-// PSX source: C:\CHAN\GAME\SRC\SND\SOUND.CPP
 #include "gen/common.h"
 #include "snd/sound.h"
 #include "snd/rsdformat.h"

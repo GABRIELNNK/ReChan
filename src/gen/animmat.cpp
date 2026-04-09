@@ -1,20 +1,16 @@
-// animmat.cpp - AnimationMatrices implementation
-// Reversed from PSX ANIMMAT.CPP
+#include "gen/common.h"
 #include "gen/animmat.h"
 
-#include <cstring>
-
 namespace {
+    void BuildPsxIdentityMatrix(s32* matrixData) {
+        std::memset(matrixData, 0, sizeof(s32) * 8);
 
-void BuildPsxIdentityMatrix(s32* matrixData) {
-    std::memset(matrixData, 0, sizeof(s32) * 8);
-
-    // PSX MATRIX rotation is Q12 fixed-point shorts at [0..8].
-    s16* rot = reinterpret_cast<s16*>(matrixData);
-    rot[0] = 0x1000;
-    rot[4] = 0x1000;
-    rot[8] = 0x1000;
-}
+        // PSX MATRIX rotation is Q12 fixed-point shorts at [0..8].
+        s16* rot = reinterpret_cast<s16*>(matrixData);
+        rot[0] = 0x1000;
+        rot[4] = 0x1000;
+        rot[8] = 0x1000;
+    }
 
 }
 

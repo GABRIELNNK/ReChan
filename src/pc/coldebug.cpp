@@ -1,4 +1,3 @@
-// coldebug.cpp - Debug visualization for collision data
 #include "pc/coldebug.h"
 #include "gen/blockmgr.h"
 #include "gen/colsect.h"
@@ -12,7 +11,6 @@
 #include <vector>
 
 namespace CollisionDebug {
-
     bool enabled = false;
 
     // Vertex: position(3) + color(3)
@@ -182,4 +180,4 @@ namespace CollisionDebug {
         buf->Release();
     }
 
-} // namespace CollisionDebug
+}

@@ -1,13 +1,11 @@
-// game.h - Game class reversed from PSX GAME.CPP
-// PSX source: C:\CHAN\GAME\SRC\GEN\GAME.CPP
-// Game is the top-level Manager that owns all other managers via a ccList,
-// and two HandlerSets for per-frame think and draw callbacks.
 #pragma once
-
 #include "core.h"
 #include "gen/manager.h"
 #include "gen/handler.h"
 #include "gen/control.h"
+
+// Game is the top-level Manager that owns all other managers via a ccList,
+// and two HandlerSets for per-frame think and draw callbacks.
 
 class Camera;
 class tView;
@@ -126,28 +124,19 @@ private:
     // PSX: PlayMovie__4GamePcii (GAME.CPP:3309, 0x8002BBF0)
     void PlayMovie(const char* name, s32 skippable, s32 unloadLevel);
 
-    // PSX: FadeBegin__4Game (GAME.CPP:3869, 0x8002C9A0)
     static void FadeBegin();
-    // PSX: FadeUpdate__4Game (GAME.CPP:3879, 0x8002C9BC)
     // Returns true (1) if fade is still in progress, false (0) when complete.
     static s32 FadeUpdate();
-    // PSX: FadeEnd__4Game (GAME.CPP:3875, 0x8002C9B4)
     static void FadeEnd();
-    // PSX: FadeRender__4Game (GAME.CPP:3893, 0x8002C9F8)
     // Draws a fullscreen black quad with alpha=fadeCounter.
     static void FadeRender();
 
-    // PSX: fade globals (gp+3388, gp+3392)
     static u8 s_fadeStep;     // gp+3388: step per frame (init=17)
     static u8 s_fadeCounter;  // gp+3392: accumulated alpha (0-255)
 
-    // PSX: FreeXconFE__4Game (GAME.CPP:3812, 0x8002C7A4)
     static void FreeXconFE();
-    // PSX: InitXconFSImage__4Game (GAME.CPP:3826, 0x8002C838)
     static void InitXconFSImage();
-    // PSX: FreeXconFSImage__4Game (GAME.CPP:3859, 0x8002C998)
     static void FreeXconFSImage();
-    // PSX: LoadXconFE__4Game (GAME.CPP:3789, 0x8002C648)
     static void LoadXconFE();
 
     static const StateFunc sStateTable[static_cast<int>(GameState::COUNT)];

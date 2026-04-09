@@ -1,8 +1,4 @@
-// cclist.h - Intrusive linked list reversed from PSX CC library
-// PSX source: C:\CHAN\GAME\SRC\GEN\CCLIST.CPP / CCLIST.HPP
-// PSX uses these for callback chains, path lists, entity management, etc.
 #pragma once
-
 #include "core.h"
 #include "p3d/hash.h"
 
@@ -12,9 +8,7 @@ struct ccMinNode {
     ccMinNode* next = nullptr;  // +0
     ccMinNode* prev = nullptr;  // +4
 
-    // PSX: __9ccMinNode (CCLIST.CPP:245, 0x80037310)
     ccMinNode() = default;
-    // PSX: _._9ccMinNode (CCLIST.CPP:253, 0x80037324)
     virtual ~ccMinNode() = default;
 
     // Unlink from whatever list this node is in
@@ -34,14 +28,12 @@ struct ccMinList {
 
     virtual ~ccMinList() { Purge(); }
 
-    // PSX: GetNumElements__9ccMinList (CCLIST.CPP:369, 0x800374EC)
     s32 GetNumElements() const {
         s32 count = 0;
         for (ccMinNode* n = head; n; n = n->next) count++;
         return count;
     }
 
-    // PSX: AddNode__9ccMinListP9ccMinNodeT1 (CCLIST.CPP:389, 0x80037510)
     // Insert 'newNode' after 'after'. If after==nullptr, insert at head.
     void AddNode(ccMinNode* after, ccMinNode* newNode) {
         if (!after) {
@@ -51,7 +43,8 @@ struct ccMinList {
             if (head) head->prev = newNode;
             head = newNode;
             if (!tail) tail = newNode;
-        } else {
+        }
+        else {
             // Insert after 'after'
             newNode->next = after->next;
             newNode->prev = after;
@@ -61,7 +54,6 @@ struct ccMinList {
         }
     }
 
-    // PSX: RemNode__9ccMinList (CCLIST.CPP:447, 0x80037570)
     ccMinNode* RemNode(ccMinNode* node) {
         if (node == head) head = node->next;
         if (node == tail) tail = node->prev;
@@ -72,14 +64,12 @@ struct ccMinList {
         return node;
     }
 
-    // PSX: RemHead__9ccMinList (CCLIST.CPP:486, 0x800375E8)
     ccMinNode* RemHead() {
         ccMinNode* h = head;
         if (h) RemNode(h);
         return h;
     }
 
-    // PSX: Purge__9ccMinList (CCLIST.CPP, 0x8002CD44)
     // Removes and deletes all nodes via virtual destructor
     void Purge() {
         while (ccMinNode* n = RemHead()) {
@@ -104,10 +94,7 @@ struct ccNode : public ccMinNode {
     s8 pri = 0;              // +18: priority for sorted insertion (signed)
     u32 nameCRC = 0;         // +20: hash of name via p3dHash
 
-    // PSX: __6ccNode (CCLIST.CPP:259, 0x80037358)
     ccNode() = default;
-
-    // PSX: _._6ccNode (CCLIST.CPP:276, 0x8003739C)
     ~ccNode() override {
         if (name && (flags & 1)) {
             std::free(name);
@@ -116,7 +103,6 @@ struct ccNode : public ccMinNode {
         nameCRC = 0;
     }
 
-    // PSX: SetName__6ccNodePCci (CCLIST.CPP:296, 0x800373F0)
     // If alloc!=0, allocates a copy. Otherwise just stores pointer and CRC.
     void SetName(const char* str, s32 alloc) {
         if (name && (flags & 1)) {
@@ -131,13 +117,13 @@ struct ccNode : public ccMinNode {
             name = (char*)std::malloc(len + 1);
             memcpy(name, str, len + 1);
             flags |= 1; // mark as allocated
-        } else {
+        }
+        else {
             name = const_cast<char*>(str);
         }
         nameCRC = p3dHash(str);
     }
 
-    // PSX: SetNameNoAlloc__6ccNodePCc (CCLIST.CPP:341, 0x80037494)
     void SetNameNoAlloc(const char* str) {
         if (name && (flags & 1)) {
             std::free(name);
@@ -156,7 +142,6 @@ struct ccNode : public ccMinNode {
 };
 
 // ccList - extended list with priority insertion and named lookup
-// PSX source: CCLIST.CPP
 struct ccList : public ccMinList {
     // PSX: FindNodeCRC__6ccListUlP6ccNode (CCLIST.CPP:565, 0x80037664)
     ccNode* FindNodeCRC(u32 crc, ccNode* startAfter = nullptr) const {
@@ -168,12 +153,10 @@ struct ccList : public ccMinList {
         return nullptr;
     }
 
-    // PSX: FindNode__6ccListPCcP6ccNode (CCLIST.CPP:559, 0x80037620)
     ccNode* FindNode(const char* name, ccNode* startAfter = nullptr) const {
         return FindNodeCRC(p3dHash(name), startAfter);
     }
 
-    // PSX: AddNodePri__6ccListP6ccNode (CCLIST.CPP:764, 0x80037830)
     // Insert in priority-descending order (highest pri first)
     void AddNodePri(ccNode* newNode) {
         ccNode* cur = (ccNode*)head;
@@ -189,6 +172,5 @@ struct ccList : public ccMinList {
         AddNode(tail, newNode);
     }
 
-    // PSX: SortPriReverse__6ccList (CCLIST.CPP:740, 0x8003780C)
     void SortPriReverse();
 };

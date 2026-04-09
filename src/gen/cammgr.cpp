@@ -1,5 +1,3 @@
-// cammgr.cpp - CameraManager
-// Original: C:\CHAN\GAME\SRC\GEN\CAMMGR.CPP
 #include "common.h"
 #include "gen/cammgr.h"
 #include "gen/blockmgr.h"
@@ -39,17 +37,17 @@ void DBCameraPath::AddSourceNode(DBPoint* point) {
         u32 id = attr->id;
         u32 val = attr->value;
         switch (id) {
-        case 7:  node->fov       = (s16)val; break;
-        case 8:  node->camAngleY = (s16)val; break;
-        case 9:  node->camAngleX = (s16)val; break;
-        case 10: node->camAngleZ = (s16)val; break;
-        case 11: node->zoom      = (s16)val; break;
-        case 12: node->speed     = (s16)val; break;
-        case 13: node->flags     = (u8)val;  break;
-        case 20: node->param0    = (s32)val; break;
-        case 21: node->param1    = (s32)val; break;
-        case 22: node->param2    = (s32)val; break;
-        default: break;
+            case 7:  node->fov = (s16)val; break;
+            case 8:  node->camAngleY = (s16)val; break;
+            case 9:  node->camAngleX = (s16)val; break;
+            case 10: node->camAngleZ = (s16)val; break;
+            case 11: node->zoom = (s16)val; break;
+            case 12: node->speed = (s16)val; break;
+            case 13: node->flags = (u8)val;  break;
+            case 20: node->param0 = (s32)val; break;
+            case 21: node->param1 = (s32)val; break;
+            case 22: node->param2 = (s32)val; break;
+            default: break;
         }
     }
 
@@ -76,7 +74,8 @@ void DBCameraPath::AddTargetNode(DBPoint* point, s32 reverseOrder) {
 
         if (reverseOrder) {
             point = static_cast<DBPoint*>(point->next);
-        } else {
+        }
+        else {
             point = static_cast<DBPoint*>(point->prev);
         }
         node = static_cast<DBCameraPathNode*>(node->next);
@@ -156,7 +155,8 @@ s32 DBCameraPath::FindClosestNodes(LVector pos,
         if ((u32)dist < (u32)minDist) {
             minDist = dist;
             closest = node;
-        } else if (dist == minDist && closest) {
+        }
+        else if (dist == minDist && closest) {
             // Equal distance - use rmMag3 to pick closer of the two candidates
             s32 vecA_x = (pos.x - node->targetPos.x) << 16;
             s32 vecA_y = (pos.y - node->targetPos.y) << 16;
@@ -187,7 +187,7 @@ s32 DBCameraPath::FindClosestNodes(LVector pos,
         bool levelException = (g_game && g_game->GetWorld() &&
                                g_game->GetWorld()->GetCurrentLevelIndex() == 7);
         bool farBlocks = !levelException &&
-                         ((blockA - blockB) >= 3u) && ((blockB - blockA) >= 3u);
+            ((blockA - blockB) >= 3u) && ((blockB - blockA) >= 3u);
         if (!g_blockManager->IsValidBlockNumber(blockA) || farBlocks) {
             outOfRange = true;
         }
@@ -240,7 +240,8 @@ s32 DBCameraPath::FindClosestNodes(LVector pos,
             if ((s32)dot < 0) {
                 *outNodeA = prevNode;
                 *outNodeB = closest;
-            } else {
+            }
+            else {
                 *outNodeA = closest;
                 *outNodeB = nextNode;
             }
@@ -249,10 +250,12 @@ s32 DBCameraPath::FindClosestNodes(LVector pos,
 
         *outNodeA = closest;
         *outNodeB = nextNode;
-    } else if (prevNode) {
+    }
+    else if (prevNode) {
         *outNodeA = prevNode;
         *outNodeB = closest;
-    } else {
+    }
+    else {
         *outNodeA = closest;
         *outNodeB = nullptr;
     }
@@ -284,7 +287,8 @@ void CameraAnchor::AddCameraSourcePath(DBPath* path) {
         const DBAttrib* attr4 = point->FindAttrib(4);
         if (attr4 && attr4->value != 0) {
             reverseOrder = 1;
-        } else {
+        }
+        else {
             point = static_cast<DBPoint*>(path->points.GetLast());
         }
 
@@ -298,7 +302,8 @@ void CameraAnchor::AddCameraSourcePath(DBPath* path) {
         camPath->AddSourceNode(point);
         if (reverseOrder) {
             point = static_cast<DBPoint*>(point->next);
-        } else {
+        }
+        else {
             point = static_cast<DBPoint*>(point->prev);
         }
     }
@@ -320,7 +325,8 @@ void CameraAnchor::AddCameraTargetPath(DBPath* path) {
         const DBAttrib* attr4 = point->FindAttrib(4);
         if (attr4 && attr4->value != 0) {
             reverseOrder = 1;
-        } else {
+        }
+        else {
             point = static_cast<DBPoint*>(path->points.GetLast());
             reverseOrder = 0;
         }
@@ -355,8 +361,8 @@ DBCameraPath* CameraAnchor::GetPathWithID(u32 id) {
 // Searches all source paths for the two closest nodes to 'pos'.
 // Only considers paths where pos is InRange of the bounding box.
 s32 CameraAnchor::FindClosestNodes(LVector pos,
-                                    DBCameraPathNode** outNodeA,
-                                    DBCameraPathNode** outNodeB) {
+                                   DBCameraPathNode** outNodeA,
+                                   DBCameraPathNode** outNodeB) {
     MARKFUNCTION(0x8004AA6C);
 
     s32 bestDist = -1;

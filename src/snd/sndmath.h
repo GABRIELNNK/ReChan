@@ -1,7 +1,4 @@
-// sndmath.h - Sound math utilities reversed from PSX SNDMATH.CPP
-// PSX source: C:\CHAN\GAME\SRC\SND\SNDMATH.CPP
 #pragma once
-
 #include "core.h"
 
 // PSX: Decibel100 lookup table (0x800DA768)
@@ -22,8 +19,7 @@ static const u8 g_decibelTable[101] = {
 
 // PSX: Decibel100__FUl (SNDMATH.CPP:18, 0x800BA0E0)
 static inline u32 Decibel100(u32 val) {
-    if (val >= 101)
-    {
+    if (val >= 101) {
         return 0;
     }
     return g_decibelTable[val];

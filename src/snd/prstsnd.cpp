@@ -1,5 +1,3 @@
-// prstsnd.cpp - CGenericPersistentSound reversed from PSX PRSTSND.CPP
-// PSX source: C:\CHAN\GAME\SRC\SND\PRSTSND.CPP
 #include "snd/prstsnd.h"
 #include "snd/sndmath.h"
 #include "snd/rsdworld.h"
@@ -57,8 +55,7 @@ s32 CGenericPersistentSound::Initialize(void* pos) {
 s32 CGenericPersistentSound::Begin() {
     MARKFUNCTION(0x800AC3CC);
 
-    if (persist)
-    {
+    if (persist) {
         return -3000;
     }
 
@@ -70,8 +67,7 @@ s32 CGenericPersistentSound::Begin() {
     u8 reverb = data[6];
 
     persist = new rsdPersistent(sampleId, posPtr, reverb, psxVol, psxPitch, flags);
-    if (!persist)
-    {
+    if (!persist) {
         return -200;
     }
 
@@ -82,13 +78,11 @@ s32 CGenericPersistentSound::Begin() {
 s32 CGenericPersistentSound::End() {
     MARKFUNCTION(0x800AC498);
 
-    if (!persist)
-    {
+    if (!persist) {
         return -3001;
     }
 
-    if (!rsdPersistent::ObjectExists(persist))
-    {
+    if (!rsdPersistent::ObjectExists(persist)) {
         return -3001;
     }
 
@@ -101,8 +95,7 @@ s32 CGenericPersistentSound::End() {
 s32 CGenericPersistentSound::SetVol(u8 vol) {
     MARKFUNCTION(0x800AC328);
 
-    if (!persist)
-    {
+    if (!persist) {
         return -3001;
     }
 

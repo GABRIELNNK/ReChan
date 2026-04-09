@@ -1,5 +1,3 @@
-// database.cpp - WDB database system reversed from PSX DATABASE.CPP
-// Original: C:\CHAN\GAME\SRC\GEN\DATABASE.CPP
 #include "common.h"
 #include "gen/database.h"
 
@@ -129,7 +127,8 @@ u32* DBRoot::Process(u32* data, const u32* end) {
             delete[] str;
 
             nameAttribs++;
-        } else if (attrType == 0) {
+        }
+        else if (attrType == 0) {
             u32 idx = i - nameAttribs;
             if (idx < count) {
                 DBAttrib& a = attribs[idx];
@@ -148,7 +147,8 @@ u32* DBRoot::Process(u32* data, const u32* end) {
                 str[len] = '\0';
                 a.strValue = str;
             }
-        } else if (attrType == 1) {
+        }
+        else if (attrType == 1) {
             u32 idx = i - nameAttribs;
             if (idx < count) {
                 DBAttrib& a = attribs[idx];
@@ -371,150 +371,158 @@ void Database::Scan(const u8* data, u32 size) {
         LOG("[Database] Scan: tag=%u at offset 0x%X", tag, (u32)((const u8*)(stream - 1) - data));
 
         switch (tag) {
-        case 1: {
-            // DBPoint
-            if (stream + 9 > end) goto done;
-            DBPoint* obj = new DBPoint();
-            stream = obj->Process(const_cast<u32*>(stream), end);
-            pointList.AddNodeTail(obj);
-            break;
-        }
-        case 2: {
-            // DBVolume
-            if (stream + 9 > end) goto done;
-            DBVolume* obj = new DBVolume();
-            stream = obj->Process(const_cast<u32*>(stream), end);
-            if (stream + 3 > end) { delete obj; goto done; }
+            case 1:
+            {
+                // DBPoint
+                if (stream + 9 > end) goto done;
+                DBPoint* obj = new DBPoint();
+                stream = obj->Process(const_cast<u32*>(stream), end);
+                pointList.AddNodeTail(obj);
+                break;
+            }
+            case 2:
+            {
+                // DBVolume
+                if (stream + 9 > end) goto done;
+                DBVolume* obj = new DBVolume();
+                stream = obj->Process(const_cast<u32*>(stream), end);
+                if (stream + 3 > end) { delete obj; goto done; }
 
-            // Read 3 dimensions: width, height, depth
-            s32 sizeX = static_cast<s32>(*stream++);
-            s32 sizeY = static_cast<s32>(*stream++);
-            s32 sizeZ = static_cast<s32>(*stream++);
+                // Read 3 dimensions: width, height, depth
+                s32 sizeX = static_cast<s32>(*stream++);
+                s32 sizeY = static_cast<s32>(*stream++);
+                s32 sizeZ = static_cast<s32>(*stream++);
 
-            s32 halfX = sizeX >> 1;
-            s32 halfY = sizeY >> 1;
-            s32 halfZ = sizeZ >> 1;
+                s32 halfX = sizeX >> 1;
+                s32 halfY = sizeY >> 1;
+                s32 halfZ = sizeZ >> 1;
 
-            obj->bboxMin.x = obj->pos.x - halfX;
-            obj->bboxMax.x = obj->pos.x + halfX;
-            obj->bboxMin.y = obj->pos.y - halfY;
-            obj->bboxMax.y = obj->pos.y + halfY;
-            obj->bboxMin.z = obj->pos.z - halfZ;
-            obj->bboxMax.z = obj->pos.z + halfZ;
+                obj->bboxMin.x = obj->pos.x - halfX;
+                obj->bboxMax.x = obj->pos.x + halfX;
+                obj->bboxMin.y = obj->pos.y - halfY;
+                obj->bboxMax.y = obj->pos.y + halfY;
+                obj->bboxMin.z = obj->pos.z - halfZ;
+                obj->bboxMax.z = obj->pos.z + halfZ;
 
-            if (obj->subType == 0) {
-                // Block volume
-                LOG("[Database] Scan: volume subType=0 (block) type=%u name=%s", obj->type, obj->GetName() ? obj->GetName() : "null");
-                blockList.AddNodeTail(obj);
+                if (obj->subType == 0) {
+                    // Block volume
+                    LOG("[Database] Scan: volume subType=0 (block) type=%u name=%s", obj->type, obj->GetName() ? obj->GetName() : "null");
+                    blockList.AddNodeTail(obj);
 
-                // Check attrib 15 for script info
-                const DBAttrib* a = obj->FindAttrib(15);
-                if (a && a->strValue) {
-                    // Get script axis byte - simplified for PC
-                    obj->scriptAxis = 0;
+                    // Check attrib 15 for script info
+                    const DBAttrib* a = obj->FindAttrib(15);
+                    if (a && a->strValue) {
+                        // Get script axis byte - simplified for PC
+                        obj->scriptAxis = 0;
+                    }
                 }
-            } else {
-                // Regular volume
-                volumeList.AddNodeTail(obj);
-            }
-            break;
-        }
-        case 3: {
-            // DBSphere
-            if (stream + 9 > end) goto done;
-            DBSphere* obj = new DBSphere();
-            stream = obj->Process(const_cast<u32*>(stream), end);
-            if (stream + 1 > end) { delete obj; goto done; }
-            obj->radius = static_cast<s32>(*stream++);
-            sphereList.AddNodeTail(obj);
-            break;
-        }
-        case 4: {
-            // DBLine
-            if (stream + 9 > end) goto done;
-            DBLine* obj = new DBLine();
-            stream = obj->Process(const_cast<u32*>(stream), end);
-            if (stream + 1 > end) { delete obj; goto done; }
-
-            // Read vertex count
-            obj->vertexCount = *stream++;
-
-            // Read vertices as deltas from base position
-            s32 curX = obj->pos.x;
-            s32 curY = obj->pos.y;
-            s32 curZ = obj->pos.z;
-
-            for (u32 i = 0; i < obj->vertexCount; i++) {
-                if (stream + 4 > end) break;
-                // Skip padding word before vertex
-                stream++;
-                s32 dx = static_cast<s32>(*stream++);
-                s32 dy = static_cast<s32>(*stream++);
-                s32 dz = static_cast<s32>(*stream++);
-                curX += dx;
-                curY += dy;
-                curZ += dz;
-                obj->AddVertex(curX, curY, curZ);
-            }
-
-            lineList.AddNodeTail(obj);
-            break;
-        }
-        case 5: {
-            // Reserved on PSX
-            break;
-        }
-        case 6: {
-            // DBPath
-            if (stream + 9 > end) goto done;
-            DBPath* obj = new DBPath();
-            stream = obj->Process(const_cast<u32*>(stream), end);
-            if (stream + 1 > end) { delete obj; goto done; }
-
-            // Read child point count
-            obj->pointCount = *stream++;
-
-            // Parse child points
-            for (u32 i = 0; i < obj->pointCount; i++) {
-                if (stream + 9 > end) break;
-                DBPoint* pt = new DBPoint();
-                stream = pt->Process(const_cast<u32*>(stream), end);
-                obj->points.AddNodeTail(pt);
-            }
-
-            // Copy name from first child point
-            DBPoint* first = static_cast<DBPoint*>(obj->points.GetFirst());
-            if (first) {
-                const char* ptName = first->GetName();
-                if (ptName && ptName[0] != '\0') {
-                    obj->SetName(ptName, 0);
+                else {
+                    // Regular volume
+                    volumeList.AddNodeTail(obj);
                 }
+                break;
             }
+            case 3:
+            {
+                // DBSphere
+                if (stream + 9 > end) goto done;
+                DBSphere* obj = new DBSphere();
+                stream = obj->Process(const_cast<u32*>(stream), end);
+                if (stream + 1 > end) { delete obj; goto done; }
+                obj->radius = static_cast<s32>(*stream++);
+                sphereList.AddNodeTail(obj);
+                break;
+            }
+            case 4:
+            {
+                // DBLine
+                if (stream + 9 > end) goto done;
+                DBLine* obj = new DBLine();
+                stream = obj->Process(const_cast<u32*>(stream), end);
+                if (stream + 1 > end) { delete obj; goto done; }
 
-            pathList.AddNodeTail(obj);
-            break;
-        }
-        case 7: {
-            // DBMesh
-            if (stream + 9 > end) goto done;
-            DBMesh* obj = new DBMesh();
-            stream = obj->Process(const_cast<u32*>(stream), end);
-            if (stream + 1 > end) { delete obj; goto done; }
+                // Read vertex count
+                obj->vertexCount = *stream++;
 
-            // Read filename length and string
-            u32 fnLen = *stream++;
-            const char* fnStr = reinterpret_cast<const char*>(stream);
-            obj->SetFileName(fnStr);
+                // Read vertices as deltas from base position
+                s32 curX = obj->pos.x;
+                s32 curY = obj->pos.y;
+                s32 curZ = obj->pos.z;
 
-            // Advance past filename (PSX rounds DOWN to u32 boundary)
-            u32 fnWords = fnLen / 4;
-            stream += fnWords;
+                for (u32 i = 0; i < obj->vertexCount; i++) {
+                    if (stream + 4 > end) break;
+                    // Skip padding word before vertex
+                    stream++;
+                    s32 dx = static_cast<s32>(*stream++);
+                    s32 dy = static_cast<s32>(*stream++);
+                    s32 dz = static_cast<s32>(*stream++);
+                    curX += dx;
+                    curY += dy;
+                    curZ += dz;
+                    obj->AddVertex(curX, curY, curZ);
+                }
 
-            meshList.AddNodeTail(obj);
-            break;
-        }
-        default:
-            break;
+                lineList.AddNodeTail(obj);
+                break;
+            }
+            case 5:
+            {
+                // Reserved on PSX
+                break;
+            }
+            case 6:
+            {
+                // DBPath
+                if (stream + 9 > end) goto done;
+                DBPath* obj = new DBPath();
+                stream = obj->Process(const_cast<u32*>(stream), end);
+                if (stream + 1 > end) { delete obj; goto done; }
+
+                // Read child point count
+                obj->pointCount = *stream++;
+
+                // Parse child points
+                for (u32 i = 0; i < obj->pointCount; i++) {
+                    if (stream + 9 > end) break;
+                    DBPoint* pt = new DBPoint();
+                    stream = pt->Process(const_cast<u32*>(stream), end);
+                    obj->points.AddNodeTail(pt);
+                }
+
+                // Copy name from first child point
+                DBPoint* first = static_cast<DBPoint*>(obj->points.GetFirst());
+                if (first) {
+                    const char* ptName = first->GetName();
+                    if (ptName && ptName[0] != '\0') {
+                        obj->SetName(ptName, 0);
+                    }
+                }
+
+                pathList.AddNodeTail(obj);
+                break;
+            }
+            case 7:
+            {
+                // DBMesh
+                if (stream + 9 > end) goto done;
+                DBMesh* obj = new DBMesh();
+                stream = obj->Process(const_cast<u32*>(stream), end);
+                if (stream + 1 > end) { delete obj; goto done; }
+
+                // Read filename length and string
+                u32 fnLen = *stream++;
+                const char* fnStr = reinterpret_cast<const char*>(stream);
+                obj->SetFileName(fnStr);
+
+                // Advance past filename (PSX rounds DOWN to u32 boundary)
+                u32 fnWords = fnLen / 4;
+                stream += fnWords;
+
+                meshList.AddNodeTail(obj);
+                break;
+            }
+            default:
+                break;
         }
     }
 

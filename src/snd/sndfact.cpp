@@ -1,5 +1,3 @@
-// sndfact.cpp - CSoundFactory reversed from PSX SNDFACT.CPP
-// PSX source: C:\CHAN\GAME\SRC\SND\SNDFACT.CPP
 #include "snd/sndfact.h"
 #include "snd/basesnd.h"
 #include "snd/trnssnd.h"
@@ -15,7 +13,8 @@ s32 CSoundFactory::CreateObject(u32 typeId, CSound** outObj, u32 soundId) {
     *outObj = nullptr;
 
     switch (typeId) {
-        case 10060: {
+        case 10060:
+        {
             // PSX: CreateHumanoidSound (SNDFDB.CPP:632, 0x800AB9BC)
             // soundId: 0 = enemy, non-zero = player (affects dialog sounds)
             CHumanoidSound* obj = new CHumanoidSound();
@@ -91,7 +90,8 @@ s32 CSoundFactory::CreateObject(u32 typeId, CSound** outObj, u32 soundId) {
                 data.dialogAttack[1] = 145;
                 data.dialogAttack[2] = 146;
                 data.grunt = -1;
-            } else {
+            }
+            else {
                 // enemy dialog sounds
                 data.dialogHit[0] = 135;
                 data.dialogHit[1] = 136;
@@ -105,15 +105,14 @@ s32 CSoundFactory::CreateObject(u32 typeId, CSound** outObj, u32 soundId) {
             *outObj = obj;
             break;
         }
-        case 10070: {
+        case 10070:
+        {
             // PSX: CreateGenericTransientSound (SNDFDB.CPP)
             // Validates: soundId != 0xFFFF, soundId < 259, sample loaded
-            if (soundId == 0xFFFF)
-            {
+            if (soundId == 0xFFFF) {
                 return -5010;
             }
-            if (soundId >= 259)
-            {
+            if (soundId >= 259) {
                 return -1000;
             }
             CGenericTransientSound* obj = new CGenericTransientSound();
@@ -124,15 +123,14 @@ s32 CSoundFactory::CreateObject(u32 typeId, CSound** outObj, u32 soundId) {
             *outObj = obj;
             break;
         }
-        case 10080: {
+        case 10080:
+        {
             // PSX: CreateGenericPersistentSound (SNDFDB.CPP)
             // Validates: soundId < 45, soundId != 0xFF, sample loaded
-            if (soundId >= 45)
-            {
+            if (soundId >= 45) {
                 return -1000;
             }
-            if (soundId == 0xFF)
-            {
+            if (soundId == 0xFF) {
                 return -5010;
             }
             CGenericPersistentSound* obj = new CGenericPersistentSound();
@@ -146,8 +144,7 @@ s32 CSoundFactory::CreateObject(u32 typeId, CSound** outObj, u32 soundId) {
             return -150;
     }
 
-    if (!*outObj)
-    {
+    if (!*outObj) {
         return -200;
     }
 

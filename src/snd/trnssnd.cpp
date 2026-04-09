@@ -1,5 +1,3 @@
-// trnssnd.cpp - CGenericTransientSound reversed from PSX TRNSSND.CPP
-// PSX source: C:\CHAN\GAME\SRC\SND\TRNSSND.CPP
 #include "snd/trnssnd.h"
 #include "snd/sndmath.h"
 #include "snd/rsdworld.h"
@@ -78,8 +76,7 @@ u32 g_transData[512] = {
 // Simple PRNG returning value in [0, range)
 static u32 g_randomSeed = 0x12345678;
 static u32 rmRangedRandom(u32 range) {
-    if (range == 0)
-    {
+    if (range == 0) {
         return 0;
     }
     g_randomSeed ^= 0x1D872B41;

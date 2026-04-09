@@ -1,5 +1,3 @@
-// drctrsnd.cpp - CDirectorSound class reversed from PSX DRCTRSND.CPP
-// PSX source: C:\CHAN\GAME\SRC\SND\DRCTRSND.CPP
 #include "snd/drctrsnd.h"
 #include "snd/prstsnd.h"
 

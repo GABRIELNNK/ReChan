@@ -1,5 +1,3 @@
-// charmgr.cpp - CharacterManager reversed from PSX C:\CHAN\GAME\SRC\GEN\CHARMGR.CPP
-// PC port: .RR files loaded from disk (assets/RCHARS/) via standard file I/O.
 #include "common.h"
 #include "gen/charmgr.h"
 #include "gen/model.h"
@@ -36,7 +34,7 @@ static void P3DLoadTextures(const u8* data, u32 size) {
     while (cpos + 6 <= cend) {
         u16 chunkId = data[cpos] | (data[cpos + 1] << 8);
         u32 chunkSize = data[cpos + 2] | (data[cpos + 3] << 8) |
-                        (data[cpos + 4] << 16) | (data[cpos + 5] << 24);
+            (data[cpos + 4] << 16) | (data[cpos + 5] << 24);
         if (chunkSize < 6 || cpos + chunkSize > cend) break;
 
         if (chunkId == 0x6008) {
@@ -431,7 +429,8 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
     s32 slotIdx;
     if (type == 0) {
         slotIdx = 0;
-    } else {
+    }
+    else {
         slotIdx = -1;
         for (s32 i = 1; i < CHAR_MAX_SLOTS; i++) {
             if (slots[i].thingType == CharSlot::EMPTY_SENTINEL) {
@@ -469,7 +468,8 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
         cf->fileHandle->Read(skelBuf, (u32)skelSize);
         slot.dataBuffer = skelBuf;
         g_playerMeshType = 0;
-    } else {
+    }
+    else {
         // NPC: read extra buffer (resource rrIdx-1)
         s32 extraSize = rrSize(cf->rrHeader, rrIdx - 1);
         u8* extraBuf = (u8*)std::malloc(extraSize);
@@ -534,7 +534,8 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
 
                 LOG("[CharMgr] Created OriginalSTree with skeleton for type %u (hash 0x%08X, %u joints)",
                     type, nameHash, original->skeleton->numJoints);
-            } else {
+            }
+            else {
                 // Fallback: flat mesh without skeleton
                 pddiPrimBuffer* meshBuf = ParseBLKPrims(
                     (const u8*)slot.dataBuffer, (u32)bufSize);
@@ -796,11 +797,13 @@ void CharacterManager::LoadAnimationBatch(u32 type, s32 animEnum, CharMgrCallbac
         if (ta) {
             ta->ownedRawData = animBuf;
             animPtrs[handleIdx] = ta;
-        } else {
+        }
+        else {
             std::free(animBuf);
             animPtrs[handleIdx] = nullptr;
         }
-    } else {
+    }
+    else {
         animPtrs[handleIdx] = nullptr;
     }
 

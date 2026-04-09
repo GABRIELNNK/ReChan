@@ -1,8 +1,4 @@
-// xccolour.h - xcColour1555 reversed from PSX XCCOLOUR.H
-// PSX source: \CHAN\DEVSYS\PSX\XCLIB\INCLUDE\XCCOLOUR.H
-// 16-bit ABGR1555 color used by xclib primitives.
 #pragma once
-
 #include "core.h"
 
 // PSX 5-to-8 bit expansion table (XCCOLOUR.H)
@@ -35,13 +31,11 @@ struct xcColour1555 {
     }
 };
 
-// PSX: MenuColorStart(xcColour1555&) (HDMENU.CPP:112, 0x8005CB4C)
 // Initializes the color cycling for menu text pulsing.
 // PSX uses global state via $gp for start/end colors and deltas.
 // On PC: simplified — starts with a base color.
 void MenuColorStart(xcColour1555& col);
 
-// PSX: MenuColorNext(xcColour1555&) (HDMENU.CPP:143, 0x8005CD10)
 // Advances the color cycling by one step.
 // PSX: calls CalcNextColor then checks if cycle wrapped.
 void MenuColorNext(xcColour1555& col);

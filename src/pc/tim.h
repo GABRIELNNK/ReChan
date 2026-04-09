@@ -1,7 +1,4 @@
-// tim.h - PSX TIM file loader
-// Converts PSX TIM image files to RGBA32 for PC rendering.
 #pragma once
-
 #include "core.h"
 
 class tTexture;

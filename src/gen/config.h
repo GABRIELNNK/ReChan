@@ -3,13 +3,6 @@
 // The goal is to keep reversed PSX code faithful; any PC-specific
 // convenience features should be gated behind macros in this file.
 #pragma once
-// Emulate PSX gamepad input from keyboard+mouse.
-// Default key bindings map WASD/arrows/face keys to PSX pad buttons.
-// Disable this if using a real gamepad passthrough.
-// NOTE: Deprecated in favor of ActionInput system (src/pc/inputaction.h).
-// Kept for reference but no longer used by the game loop.
-#define PAD_KEYBOARD_EMULATION 0
-
 // Replace the OG PSX DebugCam (pad-only) with a PC-friendly camera:
 // WASD to move, LMB+drag to look, Shift for speed boost, Q/E for up/down.
 // When disabled, DebugCam uses the original PSX pad-button controls.

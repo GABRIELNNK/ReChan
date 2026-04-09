@@ -27,13 +27,11 @@ static bool xcReadFileInternal(const char* path, u8** outData, u32* outSize) {
     return true;
 }
 
-// PSX: xcReadFileLow__FPCcPPvPUl (XCFILE.CPP:76, 0x800911C0)
 bool xcReadFileLow(const char* path, u8** outData, u32* outSize) {
     MARKFUNCTION(0x800911C0);
     return xcReadFileInternal(path, outData, outSize);
 }
 
-// PSX: xcReadFileHigh__FPCcPPvPUl (XCFILE.CPP:105, 0x80091268)
 bool xcReadFileHigh(const char* path, u8** outData, u32* outSize) {
     MARKFUNCTION(0x80091268);
     return xcReadFileInternal(path, outData, outSize);

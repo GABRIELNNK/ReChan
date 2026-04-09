@@ -259,7 +259,7 @@ glShader::~glShader() {
 void glShader::CreateDefaultProgram() {
     u32 vs = CompileGLShader(GL_VERTEX_SHADER, kSimpleVert);
     u32 fs = CompileGLShader(GL_FRAGMENT_SHADER, kSimpleFrag);
-    if (!vs || !fs) 
+    if (!vs || !fs)
         return;
 
     program = glCreateProgram();
@@ -297,8 +297,8 @@ void glShader::PreRender() {
         // PSX GPU: output = min(255, (tex * color) >> 7)
         // Divide RGB by 128 (PSX neutral), alpha by 255
         glUniform4f(tintLoc,
-            diffuse.r / 128.0f, diffuse.g / 128.0f,
-            diffuse.b / 128.0f, diffuse.a / 255.0f);
+                    diffuse.r / 128.0f, diffuse.g / 128.0f,
+                    diffuse.b / 128.0f, diffuse.a / 255.0f);
     }
 }
 
@@ -470,7 +470,8 @@ bool glDisplay::IsMouseButtonDown(int button) {
 void glDisplay::GetMousePosition(double& x, double& y) {
     if (window) {
         glfwGetCursorPos(window, &x, &y);
-    } else {
+    }
+    else {
         x = 0;
         y = 0;
     }
@@ -527,7 +528,8 @@ void glDisplay::SetFullscreen(bool fullscreen) {
         glfwSetWindowMonitor(window, monitor, 0, 0,
                              vidMode->width, vidMode->height,
                              vidMode->refreshRate);
-    } else {
+    }
+    else {
         glfwSetWindowMonitor(window, nullptr,
                              windowedX, windowedY,
                              windowedW, windowedH, 0);
@@ -546,7 +548,8 @@ void glDisplay::SetResolution(int w, int h) {
         GLFWmonitor* monitor = glfwGetWindowMonitor(window);
         const GLFWvidmode* vidMode = glfwGetVideoMode(monitor);
         glfwSetWindowMonitor(window, monitor, 0, 0, w, h, vidMode->refreshRate);
-    } else {
+    }
+    else {
         glfwSetWindowSize(window, w, h);
         windowedW = w;
         windowedH = h;
@@ -597,10 +600,12 @@ void glDisplay::UpdateCursorClip() {
         if (glfwRawMouseMotionSupported()) {
             glfwSetInputMode(window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
         }
-    } else if (!cursorVisible) {
+    }
+    else if (!cursorVisible) {
         glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_HIDDEN);
         glfwSetInputMode(window, GLFW_RAW_MOUSE_MOTION, GLFW_FALSE);
-    } else {
+    }
+    else {
         glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
         glfwSetInputMode(window, GLFW_RAW_MOUSE_MOTION, GLFW_FALSE);
     }
@@ -757,7 +762,7 @@ void glContext::SetViewMatrix(const Mat4& m) { viewMatrix = m; }
 void glContext::SetWorldMatrix(const Mat4& m) { worldMatrix = m; }
 
 void glContext::SetCullMode(pddiCullMode mode) {
-    if (!stateDirty && mode == cachedCullMode) 
+    if (!stateDirty && mode == cachedCullMode)
         return;
 
     cachedCullMode = mode;
@@ -766,16 +771,16 @@ void glContext::SetCullMode(pddiCullMode mode) {
     glFrontFace(GL_CW);
 
     switch (mode) {
-        case PDDI_CULL_NONE:     
+        case PDDI_CULL_NONE:
             glDisable(GL_CULL_FACE);
             break;
-        case PDDI_CULL_NORMAL:  
-            glEnable(GL_CULL_FACE); 
-            glCullFace(GL_BACK); 
-            break;
-        case PDDI_CULL_INVERTED: 
+        case PDDI_CULL_NORMAL:
             glEnable(GL_CULL_FACE);
-            glCullFace(GL_FRONT); 
+            glCullFace(GL_BACK);
+            break;
+        case PDDI_CULL_INVERTED:
+            glEnable(GL_CULL_FACE);
+            glCullFace(GL_FRONT);
             break;
     }
 }
@@ -787,12 +792,12 @@ void glContext::EnableZBuffer(bool enable) {
     cachedZBuffer = enable;
     if (enable)
         glEnable(GL_DEPTH_TEST);
-    else       
+    else
         glDisable(GL_DEPTH_TEST);
 }
 
 void glContext::SetBlendMode(pddiBlendMode mode) {
-    if (!stateDirty && mode == cachedBlendMode) 
+    if (!stateDirty && mode == cachedBlendMode)
         return;
 
     cachedBlendMode = mode;

@@ -1,5 +1,3 @@
-// humanoid.cpp - Humanoid class implementation
-// Reversed from PSX C:\CHAN\GAME\SRC\AI\HUMANOID.CPP
 #include "ai/humanoid.h"
 #include "ai/player.h"
 #include "gen/common.h"
@@ -28,8 +26,8 @@ Humanoid::Humanoid(const LVector* initialPos, u16 type)
 
     attackJointIndex = -1;
     prevAttackJointIndex = -1;
-    collBboxMin = {175, 0, 768};
-    collBboxMax = {175, 0, 768};
+    collBboxMin = { 175, 0, 768 };
+    collBboxMax = { 175, 0, 768 };
     humanoidSound = nullptr;
     combatFlag = 0;
     turnRate = 2730;
@@ -144,9 +142,8 @@ void Humanoid::Think() {
 void Humanoid::Draw() {
     MARKFUNCTION(0x80063A88);
 
-    LVector drawPos = {};
-    LVector drawOrient = {};
-    GetRenderTransform(&drawPos, &drawOrient);
+    LVector drawPos = pos;
+    LVector drawOrient = orientation;
 
     if (model) {
         HumanoidModel* hm = static_cast<HumanoidModel*>(model);
@@ -390,23 +387,23 @@ void Humanoid::HandleCollisionSound(s32 hitType) {
         return;
     }
     switch (hitType) {
-    case 1:
-    case 8:
-        humanoidSound->PunchHit();
-        break;
-    case 2:
-    case 3:
-        humanoidSound->SuperPunch();
-        break;
-    case 4:
-        humanoidSound->KickHit();
-        break;
-    case 5:
-        humanoidSound->SuperKick();
-        break;
-    case 18:
-        humanoidSound->HitByFireBlast();
-        break;
+        case 1:
+        case 8:
+            humanoidSound->PunchHit();
+            break;
+        case 2:
+        case 3:
+            humanoidSound->SuperPunch();
+            break;
+        case 4:
+            humanoidSound->KickHit();
+            break;
+        case 5:
+            humanoidSound->SuperKick();
+            break;
+        case 18:
+            humanoidSound->HitByFireBlast();
+            break;
     }
 }
 
@@ -441,61 +438,63 @@ void Humanoid::SetActionState(u32 state, s32 param) {
     // Map state number to handler dispatch index
     // PSX uses a 74-entry jump table; here we map the known cases.
     switch (state) {
-    case AS_INACTIVE_IDLE:     stateDispatch = SD_STAND; break;
-    case AS_STAND:             stateDispatch = SD_STAND; break;
-    case AS_STAND_ANIM:        stateDispatch = SD_STAND; break;
-    case AS_DIVE_ROLL: {
-        stateDispatch = SD_DIVE_ROLL;
-        if (model) {
-            Model* m = static_cast<Model*>(model);
-            s32 animEnum = (field316 != 0) ? field316 : HUMANOID_ANIM_DIVE_ROLL;
-            // PSX uses model vtable SetAnim here (not direct ApplyAnimToModel).
-            m->SetAnim(animEnum, param, 0, 0);
-            AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
-            if (anim) {
-                anim->SetLoopType(ANIM_LOOP, 1);
+        case AS_INACTIVE_IDLE:     stateDispatch = SD_STAND; break;
+        case AS_STAND:             stateDispatch = SD_STAND; break;
+        case AS_STAND_ANIM:        stateDispatch = SD_STAND; break;
+        case AS_DIVE_ROLL:
+        {
+            stateDispatch = SD_DIVE_ROLL;
+            if (model) {
+                Model* m = static_cast<Model*>(model);
+                s32 animEnum = (field316 != 0) ? field316 : HUMANOID_ANIM_DIVE_ROLL;
+                // PSX uses model vtable SetAnim here (not direct ApplyAnimToModel).
+                m->SetAnim(animEnum, param, 0, 0);
+                AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+                if (anim) {
+                    anim->SetLoopType(ANIM_LOOP, 1);
+                }
             }
+            // PSX LABEL_65 path clears bits 4-6 on dive roll setup.
+            flags2 &= ~0x70;
+            break;
         }
-        // PSX LABEL_65 path clears bits 4-6 on dive roll setup.
-        flags2 &= ~0x70;
-        break;
-    }
-    case AS_PAUSE:             stateDispatch = SD_PAUSE; break;
-    case AS_JUMP:              stateDispatch = SD_JUMP; break;
-    case AS_RUN:
-        stateDispatch = SD_RUN;
-        if (model) {
-            Model* m = static_cast<Model*>(model);
-            m->SetAnim(HUMANOID_ANIM_RUN, param, 0, 0);
+        case AS_PAUSE:             stateDispatch = SD_PAUSE; break;
+        case AS_JUMP:              stateDispatch = SD_JUMP; break;
+        case AS_RUN:
+            stateDispatch = SD_RUN;
+            if (model) {
+                Model* m = static_cast<Model*>(model);
+                m->SetAnim(HUMANOID_ANIM_RUN, param, 0, 0);
+            }
+            break;
+        case AS_BACKFLIP:          stateDispatch = SD_BACKFLIP; break;
+        case AS_STRAFE:            stateDispatch = SD_STRAFE; break;
+        case AS_SLOPE_SLIDE:       stateDispatch = SD_STRAFE; break;
+        case AS_PUNCH_ATTACK:      stateDispatch = SD_THROW; break;
+        case AS_KICK_ATTACK:       stateDispatch = SD_THROW; break;
+        case AS_COMBAT_IDLE:       stateDispatch = SD_STAND; break;
+        case AS_THROW_PICKUP:      stateDispatch = SD_THROW; break;
+        case AS_STUNNED:
+        {
+            stateDispatch = SD_STUNNED;
+            if (humanoidSound) {
+                humanoidSound->BeginStun();
+            }
+            break;
         }
-        break;
-    case AS_BACKFLIP:          stateDispatch = SD_BACKFLIP; break;
-    case AS_STRAFE:            stateDispatch = SD_STRAFE; break;
-    case AS_SLOPE_SLIDE:       stateDispatch = SD_STRAFE; break;
-    case AS_PUNCH_ATTACK:      stateDispatch = SD_THROW; break;
-    case AS_KICK_ATTACK:       stateDispatch = SD_THROW; break;
-    case AS_COMBAT_IDLE:       stateDispatch = SD_STAND; break;
-    case AS_THROW_PICKUP:      stateDispatch = SD_THROW; break;
-    case AS_STUNNED: {
-        stateDispatch = SD_STUNNED;
-        if (humanoidSound) {
-            humanoidSound->BeginStun();
-        }
-        break;
-    }
-    case AS_FLYING_BACK_LAND:  stateDispatch = SD_FLYING_BACK; break;
-    case AS_BACK_GRAB_RECOVER: stateDispatch = SD_STAND; break;
-    case AS_GET_UP:            stateDispatch = SD_STAND; break;
-    case AS_FLYING_BACK_CHECK: stateDispatch = SD_FLYING_BACK; break;
-    case AS_SPIN_BACK_RECOVER: stateDispatch = SD_STAND; break;
-    case AS_DEAD:              stateDispatch = SD_DEAD; break;
-    case AS_HIT_EXPLOSION:     stateDispatch = SD_GOT_HIT_HIGH; break;
-    case AS_HIT_ENVIRONMENT:   stateDispatch = SD_GOT_HIT_HIGH; break;
-    default:
-        // Many states set up specific animations and dispatch
-        // to one of the above handlers. Default to _Stand for safety.
-        stateDispatch = SD_STAND;
-        break;
+        case AS_FLYING_BACK_LAND:  stateDispatch = SD_FLYING_BACK; break;
+        case AS_BACK_GRAB_RECOVER: stateDispatch = SD_STAND; break;
+        case AS_GET_UP:            stateDispatch = SD_STAND; break;
+        case AS_FLYING_BACK_CHECK: stateDispatch = SD_FLYING_BACK; break;
+        case AS_SPIN_BACK_RECOVER: stateDispatch = SD_STAND; break;
+        case AS_DEAD:              stateDispatch = SD_DEAD; break;
+        case AS_HIT_EXPLOSION:     stateDispatch = SD_GOT_HIT_HIGH; break;
+        case AS_HIT_ENVIRONMENT:   stateDispatch = SD_GOT_HIT_HIGH; break;
+        default:
+            // Many states set up specific animations and dispatch
+            // to one of the above handlers. Default to _Stand for safety.
+            stateDispatch = SD_STAND;
+            break;
     }
 
     stateTimer = 0;
@@ -510,25 +509,25 @@ void Humanoid::ProcessAction() {
     if (stateDispatch == SD_NONE) return;
 
     switch (stateDispatch) {
-    case SD_STAND:        _Stand(); break;
-    case SD_RUN:          _Run(); break;
-    case SD_JUMP:         _Jump(); break;
-    case SD_FALL:         _Fall(); break;
-    case SD_STRAFE:       _Straif(); break;
-    case SD_DIVE_ROLL:    _DiveRoll(); break;
-    case SD_BACKFLIP:     _Straif(); break;
-    case SD_PAUSE:        _Pause(); break;
-    case SD_GOT_HIT_HIGH: _GotHitHigh(); break;
-    case SD_GOT_HIT_MED:  _GotHitMed(); break;
-    case SD_GOT_HIT_LOW:  _GotHitLow(); break;
-    case SD_COLLAPSE:     _Collapse(); break;
-    case SD_DEAD:         _Dead(); break;
-    case SD_SPIN_BACK:    _SpinBack(); break;
-    case SD_FLYING_BACK:  _FlyingBack(); break;
-    case SD_STUNNED:      _Stunned(); break;
-    case SD_THROW:        _Throw(); break;
-    case SD_PICKUP:       _Pickup(); break;
-    default: break;
+        case SD_STAND:        _Stand(); break;
+        case SD_RUN:          _Run(); break;
+        case SD_JUMP:         _Jump(); break;
+        case SD_FALL:         _Fall(); break;
+        case SD_STRAFE:       _Straif(); break;
+        case SD_DIVE_ROLL:    _DiveRoll(); break;
+        case SD_BACKFLIP:     _Straif(); break;
+        case SD_PAUSE:        _Pause(); break;
+        case SD_GOT_HIT_HIGH: _GotHitHigh(); break;
+        case SD_GOT_HIT_MED:  _GotHitMed(); break;
+        case SD_GOT_HIT_LOW:  _GotHitLow(); break;
+        case SD_COLLAPSE:     _Collapse(); break;
+        case SD_DEAD:         _Dead(); break;
+        case SD_SPIN_BACK:    _SpinBack(); break;
+        case SD_FLYING_BACK:  _FlyingBack(); break;
+        case SD_STUNNED:      _Stunned(); break;
+        case SD_THROW:        _Throw(); break;
+        case SD_PICKUP:       _Pickup(); break;
+        default: break;
     }
 }
 
@@ -586,9 +585,11 @@ void Humanoid::FacePoint(const LVector& point, s32 immediate) {
     if (absDiff < (s32)turnRate) {
         // Close enough, snap to target
         orientation.y = targetAngle;
-    } else if (diff >= 0) {
+    }
+    else if (diff >= 0) {
         orientation.y += turnRate;
-    } else {
+    }
+    else {
         orientation.y -= turnRate;
     }
 }
@@ -701,9 +702,11 @@ void Humanoid::FaceAngleY(s32 angle, s32 immediate) {
 
     if (absDiff < (s32)turnRate) {
         orientation.y = angle;
-    } else if (diff < 0) {
+    }
+    else if (diff < 0) {
         orientation.y -= turnRate;
-    } else {
+    }
+    else {
         orientation.y += turnRate;
     }
 }
@@ -746,54 +749,56 @@ void Humanoid::_Stand() {
     dir.pad = 0;
 
     switch (cmd) {
-    case 1: // guard/face
-        FaceAngleY(faceAngle, 0);
-        return;
-    case 2: // kick -> run
-        SetActionState(AS_RUN, runSpeed);
-        return;
-    case 3: // punch -> jump
-        SetActionState(AS_JUMP, 0);
-        return;
-    case 4: // facing -> dive roll
-        SetActionState(AS_DIVE_ROLL, 0);
-        return;
-    case 5: // roll to stand -> backflip
-        SetActionState(AS_BACKFLIP, 0);
-        return;
-    case 6: // backflip -> pickup/throw or combat idle
-        if (field500 != 0 || field504 != 0) {
-            if (field500 != 0 && field316 != 0) {
-                SetActionState(AS_COMBAT_IDLE, 0);
-            } else {
-                SetActionState(AS_THROW_PICKUP, 0);
+        case 1: // guard/face
+            FaceAngleY(faceAngle, 0);
+            return;
+        case 2: // kick -> run
+            SetActionState(AS_RUN, runSpeed);
+            return;
+        case 3: // punch -> jump
+            SetActionState(AS_JUMP, 0);
+            return;
+        case 4: // facing -> dive roll
+            SetActionState(AS_DIVE_ROLL, 0);
+            return;
+        case 5: // roll to stand -> backflip
+            SetActionState(AS_BACKFLIP, 0);
+            return;
+        case 6: // backflip -> pickup/throw or combat idle
+            if (field500 != 0 || field504 != 0) {
+                if (field500 != 0 && field316 != 0) {
+                    SetActionState(AS_COMBAT_IDLE, 0);
+                }
+                else {
+                    SetActionState(AS_THROW_PICKUP, 0);
+                }
             }
-        } else {
+            else {
+                SetActionState(AS_COMBAT_IDLE, 0);
+            }
+            return;
+        case 7: // combat attack -> punch
+            SetActionState(AS_PUNCH_ATTACK, 0);
+            return;
+        case 8: // dodge -> combat idle
             SetActionState(AS_COMBAT_IDLE, 0);
-        }
-        return;
-    case 7: // combat attack -> punch
-        SetActionState(AS_PUNCH_ATTACK, 0);
-        return;
-    case 8: // dodge -> combat idle
-        SetActionState(AS_COMBAT_IDLE, 0);
-        return;
-    case 9: // face + stand
-        FaceAngleY(faceAngle, 0);
-        SetActionState(AS_STAND, 0);
-        return;
-    case 10: // run -> strafe
-        FaceAngleY(faceAngle, 0);
-        SetActionState(AS_STRAFE, 0);
-        return;
-    case 11: // hit explosion
-        SetActionState(AS_HIT_ENVIRONMENT, 0);
-        return;
-    case 12: // hit environment
-        SetActionState(AS_HIT_EXPLOSION, 0);
-        return;
-    default:
-        return;
+            return;
+        case 9: // face + stand
+            FaceAngleY(faceAngle, 0);
+            SetActionState(AS_STAND, 0);
+            return;
+        case 10: // run -> strafe
+            FaceAngleY(faceAngle, 0);
+            SetActionState(AS_STRAFE, 0);
+            return;
+        case 11: // hit explosion
+            SetActionState(AS_HIT_ENVIRONMENT, 0);
+            return;
+        case 12: // hit environment
+            SetActionState(AS_HIT_EXPLOSION, 0);
+            return;
+        default:
+            return;
     }
 }
 
@@ -849,7 +854,8 @@ void Humanoid::_DiveRoll() {
     if (frame >= DIVE_ROLL_JUMP_PAUSE_FRAME) {
         if ((cb >> 3) & 1) {
             SetActionState(AS_JUMP, 0);
-        } else if ((cb >> 4) & 1) {
+        }
+        else if ((cb >> 4) & 1) {
             SetActionState(AS_PAUSE, 0);
         }
     }
@@ -858,7 +864,8 @@ void Humanoid::_DiveRoll() {
         if ((cb >> 2) & 1) {
             SetActionState(AS_RUN, 0);
             m->SetAnim(HUMANOID_ANIM_RUN, 0, 0, 0);
-        } else if ((cb >> 5) & 1) {
+        }
+        else if ((cb >> 5) & 1) {
             SetActionState(AS_STRAFE, 0);
         }
     }
@@ -892,58 +899,60 @@ void Humanoid::_Taunt() {
     }
 
     switch (cmd) {
-    case 2:
-        SetActionState(AS_RUN, runSpeed);
-        return;
-    case 6:
-        SetActionState(AS_BACKFLIP, 0);
-        return;
-    case 7:
-    case 15:
-    case 16:
-        if (field500 != 0 || field504 != 0) {
-            s32 weaponField = 0;
-            if (field500 != 0) {
-                Humanoid* pickup = (Humanoid*)(intptr_t)field500;
-                weaponField = pickup->field316;
+        case 2:
+            SetActionState(AS_RUN, runSpeed);
+            return;
+        case 6:
+            SetActionState(AS_BACKFLIP, 0);
+            return;
+        case 7:
+        case 15:
+        case 16:
+            if (field500 != 0 || field504 != 0) {
+                s32 weaponField = 0;
+                if (field500 != 0) {
+                    Humanoid* pickup = (Humanoid*)(intptr_t)field500;
+                    weaponField = pickup->field316;
+                }
+                if (weaponField != 0) {
+                    SetActionState(AS_COMBAT_IDLE, 0);
+                }
+                else {
+                    SetActionState(AS_THROW_PICKUP, 0);
+                }
             }
-            if (weaponField != 0) {
+            else {
+                if (CheckForPickup() == 1) {
+                    return;
+                }
                 SetActionState(AS_COMBAT_IDLE, 0);
-            } else {
-                SetActionState(AS_THROW_PICKUP, 0);
             }
-        } else {
-            if (CheckForPickup() == 1) {
-                return;
-            }
+            return;
+        case 8:
+        case 9:
+        case 10:
+        case 11:
+        case 12:
+        case 13:
+        case 14:
+        case 20:
+            SetActionState(AS_PUNCH_ATTACK, 0);
+            return;
+        case 19:
             SetActionState(AS_COMBAT_IDLE, 0);
-        }
-        return;
-    case 8:
-    case 9:
-    case 10:
-    case 11:
-    case 12:
-    case 13:
-    case 14:
-    case 20:
-        SetActionState(AS_PUNCH_ATTACK, 0);
-        return;
-    case 19:
-        SetActionState(AS_COMBAT_IDLE, 0);
-        return;
-    case 21:
-        FaceAngleY(faceAngle, 0);
-        return;
-    case 30:
-        SetActionState(AS_HIT_EXPLOSION, 0);
-        return;
-    case 31:
-        SetActionState(AS_HIT_ENVIRONMENT, 0);
-        return;
-    default:
-        SetActionState(AS_STAND, 0);
-        return;
+            return;
+        case 21:
+            FaceAngleY(faceAngle, 0);
+            return;
+        case 30:
+            SetActionState(AS_HIT_EXPLOSION, 0);
+            return;
+        case 31:
+            SetActionState(AS_HIT_ENVIRONMENT, 0);
+            return;
+        default:
+            SetActionState(AS_STAND, 0);
+            return;
     }
 }
 
@@ -956,7 +965,8 @@ void Humanoid::_Pause() {
 
     if (field324 != 0) {
         field324--;
-    } else {
+    }
+    else {
         SetActionState(AS_STAND, 0);
     }
 }
@@ -989,14 +999,16 @@ void Humanoid::_Run() {
 
     // Multi-hit combat (bits 7,19,15,16,17,18) -> pickup/throw or combat idle
     if ((sd >> 7) & 1 || (sd >> 19) & 1 || (sd >> 15) & 1
-            || (sd >> 16) & 1 || (sd >> 17) & 1 || (sd >> 18) & 1) {
+        || (sd >> 16) & 1 || (sd >> 17) & 1 || (sd >> 18) & 1) {
         if (field500 != 0 || field504 != 0) {
             if (field500 != 0 && field316 != 0) {
                 SetActionState(AS_COMBAT_IDLE, 0);
-            } else {
+            }
+            else {
                 SetActionState(AS_THROW_PICKUP, 0);
             }
-        } else {
+        }
+        else {
             SetActionState(AS_COMBAT_IDLE, 0);
         }
         return;
@@ -1082,16 +1094,18 @@ void Humanoid::_Straif() {
 
     // Multi-hit combat (bits 7,19,15,16,17,18) -> pickup/throw or combat idle
     if ((sd >> 7) & 1 || (sd >> 19) & 1 || (sd >> 15) & 1
-            || (sd >> 16) & 1 || (sd >> 17) & 1 || (sd >> 18) & 1) {
+        || (sd >> 16) & 1 || (sd >> 17) & 1 || (sd >> 18) & 1) {
         if (field500 != 0 || field504 != 0) {
             if (field500 != 0 && field316 != 0) {
                 ReleaseTarget();
                 SetActionState(AS_COMBAT_IDLE, 0);
-            } else {
+            }
+            else {
                 ReleaseTarget();
                 SetActionState(AS_THROW_PICKUP, 0);
             }
-        } else {
+        }
+        else {
             ReleaseTarget();
             SetActionState(AS_COMBAT_IDLE, 0);
         }
@@ -1251,8 +1265,7 @@ void Humanoid::_Pickup() {
 }
 
 // PSX: LadderDismount__8Humanoid - not yet reversed
-void Humanoid::_LadderDismount() {
-}
+void Humanoid::_LadderDismount() {}
 
 // PSX: ClimbLadder__8Humanoid (HUMANOID.CPP:6448, 0x80069CF8)
 void Humanoid::_ClimbLadder() {
@@ -1330,7 +1343,8 @@ void Humanoid::_ClimbLadder() {
                 humanoidSound->Footstep(CSoundMaterial(2));
             }
         }
-    } else if (slideDown) {
+    }
+    else if (slideDown) {
         // begin slide sound
         if (humanoidSound) {
             humanoidSound->BeginSlideDownLadder();
@@ -1432,7 +1446,8 @@ void Humanoid::_Throw() {
                 // PSX: PlayDialog(84, 10) if this == thePlayer
                 field500 = 0;
                 flags2 &= ~0x0001;
-            } else {
+            }
+            else {
                 // PSX: release without direction
                 field500 = 0;
             }
@@ -1543,7 +1558,8 @@ void Humanoid::_Stunned() {
     if ((s16)field468 > 0) {
         // PSX: decrement stun timer by rate (field468 - comboCount)
         field468 = (u16)((u16)field468 - comboCount);
-    } else {
+    }
+    else {
         // Stun expired
         field468 = 0;
 
@@ -1661,7 +1677,8 @@ void Humanoid::_Collapse() {
             }
         }
         SetActionState(AS_GET_UP, 0);
-    } else {
+    }
+    else {
         stateTimer++;
     }
 }
@@ -1676,13 +1693,13 @@ void Humanoid::_Dead() {
     // Types 10, 12, 13, 15, 17 are boss types that don't signal player
     bool isBossType = false;
     switch (thingType) {
-    case AITypes::TT_GRONTAR:
-    case AITypes::TT_PAUL:
-    case AITypes::TT_OSCAR:
-    case AITypes::TT_DANTE:
-    case AITypes::TT_BUTCH:
-        isBossType = true;
-        break;
+        case AITypes::TT_GRONTAR:
+        case AITypes::TT_PAUL:
+        case AITypes::TT_OSCAR:
+        case AITypes::TT_DANTE:
+        case AITypes::TT_BUTCH:
+            isBossType = true;
+            break;
     }
 
     if (!isBossType) {
@@ -1695,7 +1712,8 @@ void Humanoid::_Dead() {
         if ((thinkCounter & 0x03) == 2) {
             if (flags & TF_BIT8) {
                 flags &= ~TF_BIT8;
-            } else {
+            }
+            else {
                 flags |= TF_BIT8;
             }
         }
@@ -1726,7 +1744,8 @@ cleanup:
                 Model* m = static_cast<Model*>(model);
                 m->modelFlags |= 0x20;
             }
-        } else {
+        }
+        else {
             // PSX: call Kill virtual to deactivate
             Kill();
         }

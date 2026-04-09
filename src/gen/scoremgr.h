@@ -1,10 +1,8 @@
-// scoremgr.h - ScoreManager class reversed from PSX SCOREMGR.CPP
-// PSX source: C:\CHAN\GAME\SRC\GEN\SCOREMGR.CPP
+#pragma once
+#include "gen/manager.h"
+
 // ScoreManager tracks fight/combo/style scores, collectibles, grades,
 // per-level stats, and the fighting chain bonus system.
-#pragma once
-
-#include "gen/manager.h"
 
 class Collectible;
 
@@ -39,10 +37,7 @@ struct CheckpointInfo {
     s32 field48;        // +48
     s32 field52;        // +52
 
-    // PSX: IsValid__14CheckpointInfo (SCOREMGR.CPP:910, 0x8004D72C)
     bool IsValid() const;
-
-    // PSX: SetValidState__14CheckpointInfoi (SCOREMGR.CPP:935, 0x8004D798)
     void SetValidState(s32 state);
 };
 
@@ -94,103 +89,38 @@ public:
     s32 fightingChainTimer;         // +496
     s32 drunkenMasterUnlocked;      // +500
 
-    // PSX: __12ScoreManager (SCOREMGR.CPP:241, 0x8004CC5C)
     ScoreManager();
-
-    // PSX: _._12ScoreManager (SCOREMGR.CPP:254, 0x8004CCA8)
     ~ScoreManager() override;
-
-    // PSX: InternalOpen__12ScoreManager (SCOREMGR.CPP:268, 0x8004CCD8)
     void InternalOpen() override;
-
-    // PSX: InternalClose__12ScoreManager (SCOREMGR.CPP:284, 0x8004CD64)
     void InternalClose() override;
-
-    // PSX: InternalReset__12ScoreManager (SCOREMGR.CPP:294, 0x8004CD84)
     void InternalReset() override;
-
-    // PSX: InitGameStats__12ScoreManager (SCOREMGR.CPP:303, 0x8004CD8C)
     void InitGameStats();
-
-    // PSX: InitLevelStats__12ScoreManager (SCOREMGR.CPP:326, 0x8004CDEC)
     void InitLevelStats();
-
-    // PSX: SetPar__12ScoreManager (SCOREMGR.CPP:364, 0x8004CEA0)
     void SetPar();
-
-    // PSX: OpenAllLevels__12ScoreManager (SCOREMGR.CPP:376, 0x8004CEE0)
     void OpenAllLevels();
-
-    // PSX: GiveAllDragons__12ScoreManager (SCOREMGR.CPP:392, 0x8004CF24)
     void GiveAllDragons();
-
-    // PSX: Step__12ScoreManager (SCOREMGR.CPP:418, 0x8004CF84)
     void Step();
-
-    // PSX: HandleLevelBegin__12ScoreManager (SCOREMGR.CPP:429, 0x8004CFA4)
     void HandleLevelBegin();
-
-    // PSX: HandleLevelEnd__12ScoreManager (SCOREMGR.CPP:442, 0x8004CFC4)
     void HandleLevelEnd();
-
-    // PSX: HandleLevelAbort__12ScoreManager (SCOREMGR.CPP:478, 0x8004D0D4)
     void HandleLevelAbort();
-
-    // PSX: GetLevelEndRating__12ScoreManager (SCOREMGR.CPP:491, 0x8004D0DC)
     s32 GetLevelEndRating();
-
-    // PSX: OpenPetal__12ScoreManagerUlUl (SCOREMGR.CPP:527, 0x8004D144)
     void OpenPetal(u32 level, u32 petal);
-
-    // PSX: HandleCheckpoint__12ScoreManager (SCOREMGR.CPP:542, 0x8004D184)
     void HandleCheckpoint();
-
-    // PSX: HandleCheckpointBegin__12ScoreManager (SCOREMGR.CPP:562, 0x8004D1DC)
     void HandleCheckpointBegin();
-
-    // PSX: Print__C12ScoreManager (SCOREMGR.CPP:584, 0x8004D234)
     void Print() const;
-
-    // PSX: RegisterCollectible__12ScoreManagerPC11Collectiblei (SCOREMGR.CPP:611, 0x8004D260)
     void RegisterCollectible(const Collectible* collectible, s32 type);
-
-    // PSX: RegisterGotCollectible__12ScoreManagerPC11Collectiblei (SCOREMGR.CPP:649, 0x8004D2E0)
     void RegisterGotCollectible(const Collectible* collectible, s32 type);
-
-    // PSX: AddFightPoints__12ScoreManagerl (SCOREMGR.CPP:693, 0x8004D388)
     void AddFightPoints(s32 points);
-
-    // PSX: AddComboPoints__12ScoreManagerl (SCOREMGR.CPP:698, 0x8004D39C)
     void AddComboPoints(s32 points);
-
-    // PSX: AddStylePoints__12ScoreManagerl (SCOREMGR.CPP:703, 0x8004D3B0)
     void AddStylePoints(s32 points);
-
-    // PSX: StepFighting__12ScoreManager (SCOREMGR.CPP:735, 0x8004D3C4)
     void StepFighting();
-
-    // PSX: BreakFightingChain__12ScoreManager (SCOREMGR.CPP:762, 0x8004D408)
     void BreakFightingChain();
-
-    // PSX: AddFightingPoints__12ScoreManagerl (SCOREMGR.CPP:780, 0x8004D45C)
     void AddFightingPoints(s32 points);
-
-    // PSX: HandleGameBegin__12ScoreManager (SCOREMGR.CPP:798, 0x8004D4C8)
     void HandleGameBegin();
-
-    // PSX: CalcGrade__12ScoreManager (SCOREMGR.CPP:809, 0x8004D518)
     u8 CalcGrade();
-
-    // PSX: CalcGradeXTakes__12ScoreManagerUc (SCOREMGR.CPP:839, 0x8004D5AC)
     s32 CalcGradeXTakes(u8 grade);
-
-    // PSX: CalcGDrags__12ScoreManageri (SCOREMGR.CPP:845, 0x8004D5C0)
     bool CalcGDrags(s32 collectCount);
-
-    // PSX: GetTotalGoldDragon__12ScoreManager (SCOREMGR.CPP:851, 0x8004D5CC)
     s32 GetTotalGoldDragon();
-
-    // PSX: IsDrunkenMasterSuitEnabled__12ScoreManager (SCOREMGR.CPP:883, 0x8004D69C)
     bool IsDrunkenMasterSuitEnabled();
 };
 

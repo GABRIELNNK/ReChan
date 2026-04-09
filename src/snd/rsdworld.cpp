@@ -1,6 +1,3 @@
-// rsdworld.cpp - rsdWorld SPU bridge reversed from PSX RSDUTIL.CPP
-// PSX source: C:\CHAN\GAME\SRC\SND\RSDUTIL.CPP
-// PC: bridges PSX SPU calls to AudioEngine (miniaudio)
 #include "snd/rsdworld.h"
 #include "snd/sound.h"
 #include "snd/sndmath.h"
@@ -11,18 +8,15 @@
 // PSX loads one bank at a time; rsd sample IDs (0-70) index directly
 // into the single active bank's 71-entry descriptor table.
 static bool RsdSampleToWax(u32 rsdSampleId, u32& outBank, u32& outSample) {
-    if (!g_sound || g_sound->activeSfxBank < 0)
-    {
+    if (!g_sound || g_sound->activeSfxBank < 0) {
         return false;
     }
 
     u32 bank = (u32)g_sound->activeSfxBank;
-    if (bank >= MAX_WAX_BANKS)
-    {
+    if (bank >= MAX_WAX_BANKS) {
         return false;
     }
-    if (rsdSampleId >= g_sound->GetBankSampleCount(bank))
-    {
+    if (rsdSampleId >= g_sound->GetBankSampleCount(bank)) {
         return false;
     }
 
@@ -37,14 +31,12 @@ static bool RsdSampleToWax(u32 rsdSampleId, u32& outBank, u32& outSample) {
 s32 rsdWorld::PlayTransientPositional(u32 sampleId, void* posPtr, u16 volume, s16 pitch, u16 pan, u32 flags) {
     MARKFUNCTION(0x80080234);
 
-    if (volume == 0)
-    {
+    if (volume == 0) {
         return 0;
     }
 
     u32 bank, sample;
-    if (!RsdSampleToWax(sampleId, bank, sample))
-    {
+    if (!RsdSampleToWax(sampleId, bank, sample)) {
         return 0;
     }
 
@@ -52,14 +44,11 @@ s32 rsdWorld::PlayTransientPositional(u32 sampleId, void* posPtr, u16 volume, s1
     f32 pitchF = PsxPitchToFloat(pitch);
 
     AudioSample s = g_sound->GetBankSample(bank, sample);
-    if (s == AUDIO_SAMPLE_INVALID)
-    {
+    if (s == AUDIO_SAMPLE_INVALID) {
         return 0;
     }
 
     AudioVoice v = AudioEngine::PlaySample(s, vol, 0.0f, false);
-    LOG("[rsdWorld] PlayPositional: sample=%u bank=%u idx=%u vol=%.3f pitch=%.3f voice=%u",
-        sampleId, bank, sample, vol, pitchF, v);
     if (v != AUDIO_VOICE_INVALID && pitchF != 1.0f) {
         AudioEngine::SetVoicePitch(v, pitchF);
     }
@@ -72,14 +61,12 @@ s32 rsdWorld::PlayTransientPositional(u32 sampleId, void* posPtr, u16 volume, s1
 s32 rsdWorld::PlayTransientNonPositional(u32 sampleId, u16 volL, u16 volR, s16 pitch, u16 pan) {
     MARKFUNCTION(0x80080334);
 
-    if (volL == 0 && volR == 0)
-    {
+    if (volL == 0 && volR == 0) {
         return 0;
     }
 
     u32 bank, sample;
-    if (!RsdSampleToWax(sampleId, bank, sample))
-    {
+    if (!RsdSampleToWax(sampleId, bank, sample)) {
         return 0;
     }
 
@@ -94,8 +81,7 @@ s32 rsdWorld::PlayTransientNonPositional(u32 sampleId, u16 volL, u16 volR, s16 p
     f32 pitchF = PsxPitchToFloat(pitch);
 
     AudioSample s = g_sound->GetBankSample(bank, sample);
-    if (s == AUDIO_SAMPLE_INVALID)
-    {
+    if (s == AUDIO_SAMPLE_INVALID) {
         return 0;
     }
 
@@ -116,14 +102,12 @@ rsdPersistent::rsdPersistent(u32 sampleId_, void* posPtr, u8 reverb, u16 volume_
     voiceHandle = nullptr;
 
     u32 bank, sample;
-    if (!RsdSampleToWax(sampleId_, bank, sample))
-    {
+    if (!RsdSampleToWax(sampleId_, bank, sample)) {
         return;
     }
 
     AudioSample s = g_sound->GetBankSample(bank, sample);
-    if (s == AUDIO_SAMPLE_INVALID)
-    {
+    if (s == AUDIO_SAMPLE_INVALID) {
         return;
     }
 
@@ -153,12 +137,10 @@ void rsdPersistent::End() {
 
 // PSX: ObjectExists__13rsdPersistentP13rsdPersistent
 bool rsdPersistent::ObjectExists(rsdPersistent* obj) {
-    if (!obj)
-    {
+    if (!obj) {
         return false;
     }
-    if (!obj->voiceHandle)
-    {
+    if (!obj->voiceHandle) {
         return false;
     }
     AudioVoice v = static_cast<AudioVoice>(reinterpret_cast<uintptr_t>(obj->voiceHandle));

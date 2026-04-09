@@ -1,9 +1,4 @@
-// gamemenu.h - gameMenu reversed from PSX GAMEMENU.CPP
-// PSX source: C:\CHAN\GAME\SRC\FE\GAMEMENU.CPP (Overlay 4)
-// gameMenu is the in-game pause menu (resume, options, quit).
-// Lives in PSX Overlay 4.
 #pragma once
-
 #include "fe/menumgr.h"
 
 class Game;
@@ -21,27 +16,13 @@ public:
     s16 pauseIndex = 0;             // +88
     s16 pausePad = 0;               // +90
 
-    // PSX: __8gameMenu (GAMEMENU.CPP, Overlay4 0x80010100)
     gameMenu();
-
-    // PSX: _._8gameMenu (GAMEMENU.CPP, Overlay4 0x80010200)
     ~gameMenu() override;
 
-    // PSX: SelfInit__8gameMenu (GAMEMENU.CPP, Overlay4 0x80010280)
     void SelfInit() override;
-
-    // PSX: SelfUpdate not overridden (vtable entry 8 = oxScreenManager::SelfUpdate no-op)
-
-    // PSX: HandleInputChange__8gameMenu (GAMEMENU.CPP, Overlay4 0x80010400)
     void HandleInputChange() override;
-
-    // PSX: ShowPauseMenu__8gameMenu (GAMEMENU.CPP, Overlay4 0x80010500)
     void ShowPauseMenu();
-
-    // PSX: ResumeGame__8gameMenu (GAMEMENU.CPP, Overlay4 0x80010600)
     void ResumeGame();
-
-    // PSX: ExitGame__8gameMenu (GAMEMENU.CPP, Overlay4 0x80010680)
     void ExitGame();
 };
 

@@ -1,7 +1,4 @@
-// player.h - Player class (the player character)
-// Reversed from PSX C:\CHAN\GAME\SRC\AI\PLAYER.CPP / PLAYER.HPP
 #pragma once
-
 #include "ai/humanoid.h"
 
 // Player flags (s32 playerFlags bitmask)
@@ -10,9 +7,6 @@ enum PlayerFlags : s32 {
 };
 
 // Player - the player character (Jackie Chan)
-// PSX: ~764 bytes. Extends Humanoid with combat combos, platforming states,
-// and player-specific action handlers.
-// Source: C:\CHAN\GAME\SRC\AI\PLAYER.CPP
 class Player : public Humanoid {
 public:
     // PSX +616 (s32): combat state
@@ -106,34 +100,17 @@ public:
     static Player* s_player;
 
 
-    // PSX: __6PlayerPC10tagLVector (PLAYER.CPP:1014)
     Player(const LVector* initialPos);
-
-    // PSX: _._6Player (PLAYER.CPP:1050)
     ~Player() override;
 
 
-    // PSX: Think__6Player (PLAYER.CPP:1155)
     void Think() override;
-
-    // PSX: Reset__6Player (PLAYER.CPP:1056)
     void Reset() override;
-
-    // PSX: Move__6Player (PLAYER.CPP:1408)
     void Move() override;
-
-    // PSX: CreateModel__6PlayerPCc (PLAYER.CPP:1111)
     void CreateModel(const char* name) override;
-
-    // PSX: SetActionState__6PlayerUll (PLAYER.CPP:1579)
     void SetActionState(u32 state, s32 param) override;
-
-    // PSX: ProcessAction dispatches SD_HARDFALL/SD_HARDLAND via function pointers
     void ProcessAction() override;
-
-    // PSX: GetViewSpot__6PlayerP10tagLVectorT1 (PLAYER.CPP:1460)
     void GetViewSpot(LVector* outPos, LVector* outTarget) override;
-
 
     void _Stand() override;
     void _Run() override;
@@ -161,59 +138,25 @@ public:
     virtual void _ClimbLadder();
     virtual void _TableRoll();
 
-
-    // PSX: DoJump__6Player (PLAYER.CPP:1424)
     void DoJump();
-
-    // PSX: DoJump__6Playerl (PLAYER.CPP:1437)
     void DoJump(s32 height);
-
-    // PSX: DoWallJump__6Player (PLAYER.CPP:3664)
     void DoWallJump();
-
-    // PSX: FallingPhysics__6Player (PLAYER.CPP:3187)
     void FallingPhysics();
-
-    // PSX: CheckForLanding__6Player (PLAYER.CPP:4366)
     void CheckForLanding();
-
-    // PSX: OnCheckpoint__6Player (PLAYER.CPP:4424)
     void OnCheckpoint();
-
-    // PSX: SetLivesLeft__6Playerl (PLAYER.CPP:4457)
     void SetLivesLeft(s32 lives);
 
     s32 GetLivesLeft() const { return livesLeft; }
 
-    // PSX: SignalEnemyGetUp__6Player (PLAYER.CPP:1382)
     void SignalEnemyGetUp();
-
-    // PSX: SignalEnemyDead__6PlayerP8Humanoid (PLAYER.CPP:4828)
     void SignalEnemyDead(Humanoid* enemy);
-
-    // PSX: EnterCombatCombo__6Player (PLAYER.CPP:4967)
-    // PSX: returns int (non-zero = success). Delegates to Humanoid::EnterCombatCombo.
     bool EnterCombatCombo();
-
-    // PSX: LoadCombatDialog__6Player (PLAYER.CPP:5000)
     void LoadCombatDialog();
-
-    // PSX: PlayCombatKnockDownDialog__6Player15DamageTypesTags (PLAYER.CPP:5094)
     void PlayCombatKnockDownDialog(s32 damageType);
-
-    // PSX: HandleHitShock__6Player15DamageTypesTags (PLAYER.CPP:5155)
     void HandleHitShock(s32 damageType);
-
-    // PSX: PlayCombatThrowDialog__6Player (PLAYER.HPP:496)
     void PlayCombatThrowDialog();
-
-    // PSX: PlayerSingleEncounterCheak__6Player (PLAYER.CPP:4660)
     bool PlayerSingleEncounterCheak();
-
-    // PSX: LoadPlayerTauntResponse__6PlayerP8Humanoid (PLAYER.CPP:4712)
     void LoadPlayerTauntResponse(Humanoid* target);
-
-    // PSX: PlayPlayerTauntResponse__6Player (PLAYER.CPP:4786)
     void PlayPlayerTauntResponse();
 
     // PC helpers for debug/iteration: direct animation control on player model.

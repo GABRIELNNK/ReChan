@@ -1,7 +1,4 @@
-// xcfont.h - xcFont reversed from PSX XCFONT.CPP
-// PSX source: C:\CHAN\GAME\SRC\FE\XCFONT.CPP
 #pragma once
-
 #include "core.h"
 #include "fe/oxscrmgr.h"
 
@@ -54,19 +51,10 @@ public:
     s32* texWidths = nullptr;
     s32* texHeights = nullptr;
 
-    // PSX: __6xcFont (XCFONT.CPP:92, 0x800915A0) - constructs from raw data
     xcFont(const u8* rawData);
-
-    // PSX: _._6xcFont (XCFONT.CPP:204, 0x800919BC)
     ~xcFont();
-
-    // PSX: ReloadData__6xcFontPv (XCFONT.CPP:268, 0x80091B20)
     void ReloadData(const u8* rawData);
-
-    // PSX: FindLetter__6xcFontCFUc (XCFONT.CPP:319, 0x80091C64)
     const xcSpriteLetter* FindLetter(u8 ch) const;
-
-    // PSX: FindLetter__6xcFontCFUs (XCFONT.CPP:254, 0x80091AC8)
     const xcSpriteLetter* FindLetter(u16 ch) const;
 
     // PC: Draw text at 512x240 overlay position with xcJustify flags
@@ -93,13 +81,8 @@ public:
     oxFontFile() = default;
     ~oxFontFile() override = default;
 
-    // PSX: FontInit__10oxFontFilePc (OXSCRMGR.CPP:284, 0x80040998)
     void FontInit(const char* path);
-
-    // PSX: ReloadFont__10oxFontFilePc (OXSCRMGR.CPP:317, 0x80040A8C)
     void ReloadFont(const char* path);
-
-    // PSX: FindFont__10oxFontFilePc (OXSCRMGR.CPP:355, 0x80040BA0)
     xcFont* FindFont(const char* name);
 
     const char** GetScreenNames() override { return nullptr; }

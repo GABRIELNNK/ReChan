@@ -467,10 +467,6 @@ s32 CHumanoidSound::ProcessSoundScript(u32 animId, u32 frame) {
     if (!humanoid) {
         return -100;
     }
-    static u32 sDebugCounter = 0;
-    if ((sDebugCounter++ % 300) == 0) {
-        LOG("[SndScript] animId=%u frame=%u type=%u", animId, frame, humanoid->thingType);
-    }
 
     u32* scriptHeader = (u32*)g_soundScriptData;
     u32* entries = scriptHeader + 1;
@@ -517,7 +513,6 @@ s32 CHumanoidSound::ProcessSoundScript(u32 animId, u32 frame) {
 
     for (u32 i = 0; i < numFrameEvents; i++) {
         if (scriptEventData[i * 2] == (u8)frame) {
-            LOG("[SndScript] FIRE event=%d at frame=%u for anim=%d", scriptEventData[i * 2 + 1], frame, scriptAnimId);
             MapSoundScriptEvent((SSHumanoid)scriptEventData[i * 2 + 1]);
             return 0;
         }

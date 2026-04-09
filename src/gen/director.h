@@ -1,11 +1,9 @@
-// director.h - Director class reversed from PSX DIRECTOR.CPP
-// PSX source: C:\CHAN\GAME\SRC\GEN\DIRECTOR.CPP
-// Director is the cutscene/NIS scripting manager.
-// Processes level scripts, controls camera/humanoid/door/ladder funcs.
 #pragma once
-
 #include "gen/manager.h"
 #include "gen/handler.h"
+
+// Director is the cutscene/NIS scripting manager.
+// Processes level scripts, controls camera/humanoid/door/ladder funcs.
 
 class CDirectorSound;
 class Thing;
@@ -224,107 +222,45 @@ public:
     uintptr_t texAnimB = 0;         // +204: tAnimKeyFrame* for face anim B
     uintptr_t flipbookB = 0;        // +208: tFlipbook* for face anim B
 
-    // PSX: __8Director (DIRECTOR.CPP:2658, 0x800CA1B8)
     Director();
-
-    // PSX: _._8Director (DIRECTOR.CPP:2681, 0x8003BE10)
     ~Director() override;
-
-    // PSX: InternalOpen__8Director (DIRECTOR.CPP:2704, 0x800CA2AC)
     void InternalOpen() override;
-
-    // PSX: InternalClose__8Director (DIRECTOR.CPP:2757, 0x8003C11C)
     void InternalClose() override;
-
-    // PSX: InternalReset__8Director (DIRECTOR.CPP:2736, 0x8003C04C)
     void InternalReset() override;
-
-    // PSX: LevelReset__8Director (DIRECTOR.CPP:2731, 0x8003C044)
     void LevelReset();
-
-    // PSX: SetScript__8Director (DIRECTOR.CPP:2765, 0x8003C234)
     void SetScript();
-
-    // PSX: SetCodeSnip__8DirectorPlP5Thing (DIRECTOR.CPP:2782, 0x8003C268)
     void SetCodeSnip(s32* snip, Thing* thing);
 
-    // PSX: Process__8Director (DIRECTOR.CPP:2806, 0x8003C298)
     // Main script interpreter - dispatches script opcodes.
     void Process();
-
-    // PSX: ProcessSoundScript__8Director (DIRECTOR.CPP:3576, 0x8003D5A4)
     void ProcessSoundScript();
 
-    // PSX: Timer__8Director (DIRECTOR.CPP:3611, 0x8003D634)
     // Returns 1 when done/reset, 0 when blocked.
     s32 TimerStep();
-
-    // PSX: Loop__8Director (DIRECTOR.CPP:3637, 0x8003D6CC)
     void Loop();
-
-    // PSX: SetDesiredWideScreen__8Director (DIRECTOR.CPP:3642, 0x8003D6D4)
     void SetDesiredWideScreen();
-
-    // PSX: ProcessEdison__8Director (DIRECTOR.CPP:3689, 0x8003D800)
     void ProcessEdison();
-
-    // PSX: ProcessModelFunc__8Director (DIRECTOR.CPP:3711, 0x8003D87C)
     void ProcessModelFunc();
-
-    // PSX: ProcessCameraFunc__8Director (DIRECTOR.CPP:3716, 0x8003D884)
     void ProcessCameraFunc();
-
-    // PSX: ProcessHudFunc__8Director (DIRECTOR.CPP:3845, 0x8003DC44)
     void ProcessHudFunc();
-
-    // PSX: ProcessHumanoidFunc__8Director (DIRECTOR.CPP:3894, 0x8003DD10)
     void ProcessHumanoidFunc();
-
-    // PSX: ProcessLadderFunc__8Director (DIRECTOR.CPP:4003, 0x8003E0D4)
     void ProcessLadderFunc();
-
-    // PSX: ProcessDoorFunc__8Director (DIRECTOR.CPP:4069, 0x8003E378)
     void ProcessDoorFunc();
-
-    // PSX: DetermineVictoryIdle__8Director (DIRECTOR.CPP:4170, 0x8003E71C)
     void DetermineVictoryIdle();
-
-    // PSX: DetermineLevelIntro__8Director (DIRECTOR.CPP:4260, 0x8003E864)
     void DetermineLevelIntro();
-
-    // PSX: DetermineDeath__8Director (DIRECTOR.CPP:4382, 0x8003EA4C)
     void DetermineDeath();
-
-    // PSX: WaitAnimationDone__8Director (DIRECTOR.CPP:4443, 0x8003EB14)
     // Returns 1 when done, 0 when still waiting.
     s32 WaitAnimationDoneStep();
-
-    // PSX: ProcessDynamicAnimFunc__8Director (DIRECTOR.CPP:4469, 0x8003EB88)
     void ProcessDynamicAnimFunc();
-
-    // PSX: HandleWideScreen__8Director (DIRECTOR.CPP:4539, 0x8003ECD4)
     void HandleWideScreen();
-
-    // PSX: DrawWideScreenPolys__8Director (DIRECTOR.CPP:4582, 0x8003ED90)
     void DrawWideScreenPolys();
-
-    // PSX: PurgeAnims__8Director (DIRECTOR.CPP:4662, 0x8003F0E4)
     void PurgeAnims();
-
-    // PSX: DoesLevelHaveExtraMem__8Directorl (DIRECTOR.CPP:4669, 0x8003F104)
     bool DoesLevelHaveExtraMem(s32 level);
-
-    // PSX: updateVramAnims__8Director (DIRECTOR.CPP:2597, 0x8003BB90)
     void updateVramAnims();
-
-    // PSX: cleanUpTexAnim__8Director (DIRECTOR.CPP:2611, 0x8003BBE0)
     void cleanUpTexAnim();
 };
 
-// PSX: runDirector (DIRECTOR.CPP:2570, 0x8003BB0C) - handler callback
 void runDirector(Handler* h);
-
-// PSX: DrawDirectorOverlays (DIRECTOR.CPP:2578, 0x8003BB34) - handler callback
 void DrawDirectorOverlays(Handler* h);
 
 // Global Director pointer

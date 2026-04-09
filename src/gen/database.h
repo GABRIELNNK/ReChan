@@ -1,7 +1,4 @@
-// database.h - WDB database types reversed from PSX DATABASE.HPP
-// Original: C:\CHAN\GAME\INC\GEN\DATABASE.HPP
 #pragma once
-
 #include "core.h"
 #include "p3d/lvector.h"
 #include "gen/manager.h"  // Manager -> ccNode, ccMinNode, ccMinList, ccList

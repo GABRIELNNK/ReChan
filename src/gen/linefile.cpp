@@ -1,5 +1,3 @@
-// linefile.cpp - LineFile reversed from PSX LINEFILE.CPP
-// PSX source: C:\CHAN\GAME\SRC\GEN\LINEFILE.CPP
 #include "gen/common.h"
 #include "xclib/xcfile.h"
 #include "gen/linefile.h"

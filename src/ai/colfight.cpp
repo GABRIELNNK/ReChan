@@ -1,5 +1,3 @@
-// colfight.cpp - FightingCollision system
-// Reversed from PSX C:\CHAN\GAME\SRC\AI\COLFIGHT.CPP
 #include "ai/colfight.h"
 #include "ai/humanoid.h"
 

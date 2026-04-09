@@ -1,5 +1,3 @@
-// colwall.cpp - Wall collision functions
-// Original: C:\CHAN\GAME\SRC\GEN\COLWALL.CPP
 #include "gen/colwall.h"
 #include "p3d/p3dmath.h"
 
@@ -11,8 +9,8 @@ s32 g_collisionLargeTol = 16;  // gp+2532 (0x10)
 // PSX: CheckWallCollision__C4WallRC10tagLVectorT1llliRlR10tagLVectorT5 (COLWALL.CPP:194) 0x80091EAC
 // Detect wall crossing between oldPos and newPos, compute intersection
 s32 Wall::CheckWallCollision(const LVector& oldPos, const LVector& newPos,
-    s32 radius, s32 height, s32 arg5, int checkHeight,
-    s32& outFrac, LVector& outNormal, LVector& outHitPoint) const {
+                             s32 radius, s32 height, s32 arg5, int checkHeight,
+                             s32& outFrac, LVector& outNormal, LVector& outHitPoint) const {
     MARKFUNCTION(0x80091EAC);
 
     // Signed distance of old position from wall plane
@@ -51,7 +49,8 @@ s32 Wall::CheckWallBounds(const LVector& pos, s32 radius, s32 height, s32 arg4, 
         wallMin = xBound1;
         wallMax = xBound2;
         normalComp = normalZ;
-    } else {
+    }
+    else {
         // Z-aligned wall
         coord = pos.z;
         wallMin = zBound1;
@@ -91,7 +90,7 @@ s32 Wall::CheckWallBounds(const LVector& pos, s32 radius, s32 height, s32 arg4, 
 // PSX: CheckWallIntersection__C4WallR10tagLVectorRC10tagLVectorllli (COLWALL.CPP:132) 0x80091C90
 // Test if position is on the positive side of wall plane and within bounds
 s32 Wall::CheckWallIntersection(LVector& hitPos, const LVector& moveDir,
-    s32 radius, s32 height, s32 arg5, int checkHeight) const {
+                                s32 radius, s32 height, s32 arg5, int checkHeight) const {
     MARKFUNCTION(0x80091C90);
 
     // Signed distance from wall plane
@@ -131,7 +130,8 @@ void Wall::Get(LVector& v0, LVector& v1, LVector& v2, LVector& v3) const {
         if (normalZ >= 0) {
             bound1 = xBound1;
             bound2 = xBound2;
-        } else {
+        }
+        else {
             bound1 = xBound2;
             bound2 = xBound1;
         }
@@ -154,12 +154,14 @@ void Wall::Get(LVector& v0, LVector& v1, LVector& v2, LVector& v3) const {
         v3.x = bound1;
         v3.y = fixmul16(bottomSlope, bound1) + bottomIntercept;
         v3.z = z1;
-    } else {
+    }
+    else {
         // Z-aligned wall — solve X from plane: x = -(normalZ*z + distance) / normalX
         if (normalX >= 0) {
             bound1 = zBound1;
             bound2 = zBound2;
-        } else {
+        }
+        else {
             bound1 = zBound2;
             bound2 = zBound1;
         }
@@ -195,7 +197,8 @@ bool Wall::IsCurb() const {
     if ((flags & 0xFFFF0000) == 0xFFFF0000) {
         bound1 = xBound1;
         bound2 = xBound2;
-    } else {
+    }
+    else {
         bound1 = zBound1;
         bound2 = zBound2;
     }

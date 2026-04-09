@@ -1,7 +1,4 @@
-// path.h - Path interpolation types reversed from PSX PATH.HPP
-// Original: C:\CHAN\GAME\INC\GEN\PATH.HPP
 #pragma once
-
 #include "core.h"
 #include "p3d/lvector.h"
 #include "gen/cclist.h"
@@ -87,7 +84,6 @@ struct SplinePath : public Path {
     void Reset();
 
     // Catmull-Rom coefficient computation
-    // PSX: CalcCMRCoefficiants__10SplinePathRlN31llll
     static void CalcCMRCoefficients(s32& a, s32& b, s32& c, s32& d,
-                                     s32 p0, s32 p1, s32 p2, s32 p3);
+                                    s32 p0, s32 p1, s32 p2, s32 p3);
 };

@@ -1,8 +1,4 @@
-// hdmenuitems.h - hdMenuItem subclasses reversed from PSX HDMENU.CPP / FEMNUMGR.CPP
-// PSX source: C:\CHAN\GAME\SRC\FE\HDMENU.CPP, C:\CHAN\GAME\SRC\FE\FEMNUMGR.CPP
-// Item types created by MenuMgr::ParseMenu from .DEF file keywords.
 #pragma once
-
 #include "fe/hdmenu.h"
 
 class MenuMgr;
@@ -18,14 +14,10 @@ public:
         hdMenu* gotoMenu;       // +28 (a1[7]): post-PostFlight: resolved target menu ptr
     };
 
-    // PSX: _10hdItemGotoP9xcTextObjPc (0x8005DD14)
     hdItemGoto(u8* text, const char* target);
     ~hdItemGoto() override;
 
-    // PSX: PostFlight__10hdItemGotoP7MenuMgr (0x8005DDA4)
     void PostFlight(MenuMgr* mgr) override;
-
-    // PSX: SelectItem__10hdItemGotoP7MenuMgr (0x8005DDF8)
     void SelectItem(MenuMgr* mgr) override;
 };
 
@@ -35,11 +27,9 @@ class hdItemButton : public hdMenuItem {
 public:
     u8* textObj = nullptr;      // +12 (a1[3]): xcTextObj prim
 
-    // PSX: _12hdItemButtonP9xcTextObjPc (0x8005E118)
     hdItemButton(u8* text, const char* name);
     ~hdItemButton() override = default;
 
-    // PSX: SelectItem__12hdItemButtonP7MenuMgr (0x8005E174)
     void SelectItem(MenuMgr* mgr) override;
 };
 
@@ -51,20 +41,12 @@ public:
     u8* valueTextObj = nullptr; // +32 (a1[8]): value xcTextObj (multi-frame)
     s32 enabled = 1;            // +28 (a1[7]): enabled flag
 
-    // PSX: _15hdItemSelectionP9xcOverlayPc (0x8005D778)
     hdItemSelection(xcOverlayData* overlay, const char* name, u8* rawData);
     ~hdItemSelection() override = default;
 
-    // PSX: IncItem__15hdItemSelection (0x8005D800)
     void IncItem() override;
-
-    // PSX: DecItem__15hdItemSelection (0x8005D8A8)
     void DecItem() override;
-
-    // PSX: SetValue__15hdItemSelectionUl (0x8005D954)
     void SetValue(u32 val) override;
-
-    // PSX: GetValue__15hdItemSelection (0x8005D97C)
     u32 GetValue() override;
 };
 
@@ -142,7 +124,6 @@ class hdDynItemSelection : public hdItemSelection {
 public:
     xcOverlayData* dynOverlay = nullptr; // +36 (a1[9])
 
-    // PSX: _18hdDynItemSelectionP9xcOverlayPc (0x8005DCD0)
     hdDynItemSelection(xcOverlayData* overlay, const char* name, u8* rawData);
     ~hdDynItemSelection() override = default;
 };
@@ -179,7 +160,6 @@ public:
     MenuMgr* menuMgr = nullptr;  // +52 (a1[13])
     u8* titleTextObj = nullptr;  // +56 (a1[14])
 
-    // PSX: _9hdDynMenuP7MenuMgrP9xcOverlayi (0x8005DF40)
     hdDynMenu(MenuMgr* mgr, xcOverlayData* ovl, s32 maxCount, u8* rawData);
     ~hdDynMenu() override = default;
 

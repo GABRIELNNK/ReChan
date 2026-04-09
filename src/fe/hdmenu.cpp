@@ -1,5 +1,3 @@
-// hdmenu.cpp - hdMenu and hdMenuItem reversed from PSX HDMENU.CPP
-// PSX source: C:\CHAN\GAME\SRC\FE\HDMENU.CPP
 #include "fe/hdmenu.h"
 #include "fe/menumgr.h"
 #include "xclib/xclib.h"

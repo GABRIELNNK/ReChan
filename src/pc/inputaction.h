@@ -1,5 +1,4 @@
 #pragma once
-
 #include "core.h"
 #include "p3d/keycode.h"
 
@@ -9,26 +8,26 @@ class PlatformInput;
 // These match the action IDs that PSX FindActionRequest returns.
 // RequestAction(id) does: commandBits |= (1 << id)
 enum GameAction : s32 {
-    GA_NONE             = 0,
-    GA_GUARD_RELEASE    = 1,
-    GA_MOVE             = 2,
-    GA_JUMP             = 3,
+    GA_NONE = 0,
+    GA_GUARD_RELEASE = 1,
+    GA_MOVE = 2,
+    GA_JUMP = 3,
     GA_JUMP_DIRECTIONAL = 4,
-    GA_DIVE_ROLL        = 5,
-    GA_STRAFE           = 6,
-    GA_GRAB             = 7,
-    GA_PUNCH            = 8,
-    GA_KICK             = 9,
-    GA_BACK_PUNCH       = 10,
-    GA_BACK_KICK        = 11,
-    GA_HEAVY_PUNCH      = 12,
-    GA_HEAVY_KICK       = 13,
-    GA_SPECIAL_GRAB     = 14,
-    GA_GRAB_FORWARD     = 15,
-    GA_GRAB_HELD        = 17,
-    GA_GRAB_FWD_HELD    = 18,
-    GA_COUNTER          = 20,
-    GA_AI_DIVE_ROLL     = 21,
+    GA_DIVE_ROLL = 5,
+    GA_STRAFE = 6,
+    GA_GRAB = 7,
+    GA_PUNCH = 8,
+    GA_KICK = 9,
+    GA_BACK_PUNCH = 10,
+    GA_BACK_KICK = 11,
+    GA_HEAVY_PUNCH = 12,
+    GA_HEAVY_KICK = 13,
+    GA_SPECIAL_GRAB = 14,
+    GA_GRAB_FORWARD = 15,
+    GA_GRAB_HELD = 17,
+    GA_GRAB_FWD_HELD = 18,
+    GA_COUNTER = 20,
+    GA_AI_DIVE_ROLL = 21,
 };
 
 // Input actions - abstract game inputs that can be bound to keyboard or gamepad.

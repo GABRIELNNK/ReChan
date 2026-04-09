@@ -1,5 +1,3 @@
-// director.cpp - Director class reversed from PSX DIRECTOR.CPP
-// PSX source: C:\CHAN\GAME\SRC\GEN\DIRECTOR.CPP
 #include "gen/director.h"
 #include "gen/ai.h"
 #include "ai/humanoid.h"
@@ -19,342 +17,576 @@
 #include "pc/tim.h"
 
 namespace {
+    // PSX globals used by DIRECTOR.CPP script control flow.
+    // Addresses from decomp notes:
+    // - directorTimeOut: gp+1068 (0x800DC960)
+    // - returnAddress:   gp+1056..1087 (0x800DFC84)
+    // - codeSnipThing:   gp+869 (stored in global, NOT in Director object)
+    static s32 directorTimeOut = 0;
+    static s32 returnAddressIndex = 0;
+    static s32 directorDialogCounter = -1;
+    static s32 directorDialogLimit = 180;
+    static s32* returnAddress[8] = {};
+    static Thing* g_codeSnipThing = nullptr; // PSX: gp[869]
+    static s32 g_dialogHandle = 0;          // PSX: gp[3496/4=874]
 
-// PSX globals used by DIRECTOR.CPP script control flow.
-// Addresses from decomp notes:
-// - directorTimeOut: gp+1068 (0x800DC960)
-// - returnAddress:   gp+1056..1087 (0x800DFC84)
-// - codeSnipThing:   gp+869 (stored in global, NOT in Director object)
-static s32 directorTimeOut = 0;
-static s32 returnAddressIndex = 0;
-static s32 directorDialogCounter = -1;
-static s32 directorDialogLimit = 180;
-static s32* returnAddress[8] = {};
-static Thing* g_codeSnipThing = nullptr; // PSX: gp[869]
-static s32 g_dialogHandle = 0;          // PSX: gp[3496/4=874]
+    static s32 start_generic[12] = { 9, 6, -1, 98, 102, 40, 103, 256, 100, 0, 5, 0 };
+    static s32 start_frantic[14] = { 9, 6, -1, 73, 74, 98, 102, 40, 103, 256, 100, 0, 5, 0 };
 
-static s32 start_generic[12] = { 9, 6, -1, 98, 102, 40, 103, 256, 100, 0, 5, 0 };
-static s32 start_frantic[14] = { 9, 6, -1, 73, 74, 98, 102, 40, 103, 256, 100, 0, 5, 0 };
+    static s32 gotopoint[7] = { 9, 64, 19, 84386293, 20, 8, 2 };
+    static s32 NISladder1[20] = {
+        9, 43, 45, 65, 66, 1, 5, 6, -1, 6, 30, 43, 46, 65, 67, 5, 84, 84386293, 88, 0
+    };
 
-static s32 gotopoint[7] = { 9, 64, 19, 84386293, 20, 8, 2 };
-static s32 NISladder1[20] = {
-    9, 43, 45, 65, 66, 1, 5, 6, -1, 6, 30, 43, 46, 65, 67, 5, 84, 84386293, 88, 0
-};
+    static s32 victory_poor[2] = { 15, 0 };
+    static s32 victory_ok[2] = { 15, 0 };
+    static s32 victory_good[2] = { 15, 0 };
+    static s32 victory_perfect[2] = { 15, 0 };
 
-static s32 victory_poor[2] = { 15, 0 };
-static s32 victory_ok[2] = { 15, 0 };
-static s32 victory_good[2] = { 15, 0 };
-static s32 victory_perfect[2] = { 15, 0 };
+    static s32 death[21] = {
+        9, 43, 45, 73, 74, 6, -1, 6, 30, 120, 6, 60, 98, 102, 120, 103, 256, 100, 0, 5, 0
+    };
+    static s32 death_vol[21] = {
+        9, 43, 45, 6, -1, 121, 120, 127, 6, -1, 73, 74, 98, 102, 120, 103, 256, 100, 0, 5, 0
+    };
+    static s32 death_fall_pavement[2] = { 115, 0 };
+    static s32 death_fall_water[2] = { 115, 0 };
+    static s32 death_generic[2] = { 115, 0 };
+    static s32 death_fall_goo[35] = {
+        14, 84386293, 69, 3, -2146597480,
+        14, 84386293, 69, 4,
+        9, 56, 62, 84386293, 5, 56, 58, 5,
+        6, -1, 6, 15,
+        56, 59, 5,
+        6, 30,
+        56, 63, 5,
+        20, 8, 2,
+        9, 116, 0
+    };
 
-static s32 death[21] = {
-    9, 43, 45, 73, 74, 6, -1, 6, 30, 120, 6, 60, 98, 102, 120, 103, 256, 100, 0, 5, 0
-};
-static s32 death_vol[21] = {
-    9, 43, 45, 6, -1, 121, 120, 127, 6, -1, 73, 74, 98, 102, 120, 103, 256, 100, 0, 5, 0
-};
-static s32 death_fall_pavement[2] = { 115, 0 };
-static s32 death_fall_water[2] = { 115, 0 };
-static s32 death_generic[2] = { 115, 0 };
-static s32 death_fall_goo[35] = {
-    14, 84386293, 69, 3, -2146597480,
-    14, 84386293, 69, 4,
-    9, 56, 62, 84386293, 5, 56, 58, 5,
-    6, -1, 6, 15,
-    56, 59, 5,
-    6, 30,
-    56, 63, 5,
-    20, 8, 2,
-    9, 116, 0
-};
+    static s32 levelEnd[7] = { 9, 73, 74, 126, 26, 9, 2 };
+    static s32 wait_subroutine[5] = { 6, -1, 6, 60, 4 };
 
-static s32 levelEnd[7] = { 9, 73, 74, 126, 26, 9, 2 };
-static s32 wait_subroutine[5] = { 6, -1, 6, 60, 4 };
+    // PSX script tables present in overlay globals.
+    static s32 defaultBeginScript[21] = {
+        9, 98, 100, 255, 5, 10, 30, 8, 2, 124, 25, -1, 4, 123, 25, -1, 4, 125, 25, -1, 4
+    };
 
-// PSX script tables present in overlay globals.
-static s32 defaultBeginScript[21] = {
-    9, 98, 100, 255, 5, 10, 30, 8, 2, 124, 25, -1, 4, 123, 25, -1, 4, 125, 25, -1, 4
-};
+    // Intro/victory scripts extracted from BOL_REL.BIN (boss overlay, Region B base 0x8001A758).
+    // PSX uses Call opcode (3) with raw PSX addresses for subroutine jumps.
+    // ScriptPtrFromWord resolves these via RegisterScriptRegion.
 
-// Intro/victory scripts are loaded from overlay data on PSX.
-// Placeholder stubs until overlay script extraction is done.
-static s32 intro_all_dante[1] = { 2 };
-static s32 intro_chef[1] = { 2 };
-static s32 intro_every_chef[1] = { 2 };
-static s32 intro_clown[1] = { 2 };
-static s32 intro_every_clown[1] = { 2 };
-static s32 intro_grontar[1] = { 2 };
-static s32 intro_every_grontar[1] = { 2 };
-static s32 intro_disco[1] = { 2 };
-static s32 intro_every_disco[1] = { 2 };
-static s32 victory_chef[1] = { 2 };
-static s32 victory_disco[1] = { 2 };
-static s32 victory_grontar[1] = { 2 };
-static s32 victory_clown[1] = { 2 };
+    static s32 intro_all_dante[4] = {
+        73, 77, -2147354060, 4
+    };
 
-struct DirectorScriptRegion {
-    u32 virtualBase = 0;
-    s32* hostBase = nullptr;
-    s32 wordCount = 0;
-};
+    static s32 intro_chef[94] = {
+        105, 113, 14, 84386293, 73, 14, 302774, 73, 15, 0,
+        359, 16, 0, 359, 43, 50, 360, 18, 15, 17,
+        359, 16, 17, 359, 1, 115, 0, 10, 117, 114,
+        3, -2147350268, 43, 52, 84, 84386293, 89, 90, -1130, 2039,
+        27285, 91, 359, 5, 84, 302774, 89, 90, -1130, 2039,
+        27285, 91, 359, 5, 6, -1, 106, -2147350844, 118, 37,
+        86943588, -1130, 2039, 27285, 17, 84386293, 43, 51, 14, 302774,
+        1, 84, 84386293, 88, 270, 5, 3, -2147350192, 22, 0,
+        359, 22, 17, 359, 73, 77, -2147354036, 15, 0, 357,
+        43, 50, 358, 4
+    };
 
-static constexpr s32 kMaxDirectorScriptRegions = 96;
-static DirectorScriptRegion g_directorScriptRegions[kMaxDirectorScriptRegions] = {};
-static s32 g_directorScriptRegionCount = 0;
+    static s32 intro_every_chef[10] = {
+        15, 0, 357, 43, 50, 358, 73, 77, -2147354036, 4
+    };
 
-template <size_t N>
-constexpr s32 ScriptArrayWordCount(const s32 (&)[N]) {
-    return static_cast<s32>(N);
-}
+    static s32 intro_clown[110] = {
+        105, 113, 14, 84386293, 73, 14, 4863710, 73, 15, 0,
+        363, 43, 50, 364, 16, 0, 363, 18, 15, 23,
+        363, 16, 23, 363, 15, 13, 363, 16, 13, 363,
+        1, 115, 0, 12, 117, 114, 3, -2147350340, 43, 52,
+        84, 84386293, 89, 90, 55374, 15, 51534, 91, 363, 5,
+        84, 4863710, 89, 90, 55374, 15, 51534, 91, 363, 5,
+        84, 344117, 89, 90, 55374, 15, 51534, 91, 363, 5,
+        106, -2147350728, 3, -2147350228, 17, 84386293, 43, 51, 14, 4863710,
+        1, 14, 344117, 1, 84, 84386293, 88, 315, 5, 3,
+        -2147350192, 22, 0, 363, 22, 13, 363, 22, 23, 363,
+        73, 77, -2147353612, 15, 0, 351, 43, 50, 352, 4
+    };
 
-static u32 ToVirtualAddress(const s32* ptr) {
-    return static_cast<u32>(reinterpret_cast<uintptr_t>(ptr));
-}
+    static s32 intro_every_clown[10] = {
+        15, 0, 351, 43, 50, 352, 73, 77, -2147353612, 4
+    };
 
-static void RegisterScriptRegion(u32 virtualBase, s32* hostBase, s32 wordCount) {
-    if (!virtualBase || !hostBase || wordCount <= 0) {
-        return;
+    static s32 intro_grontar[104] = {
+        105, 113, 14, 84386293, 73, 14, 76059849, 73, 15, 0,
+        365, 43, 50, 366, 16, 0, 365, 18, 15, 10,
+        365, 16, 10, 365, 1, 115, 0, 11, 117, 114,
+        3, -2147350268, 43, 52, 78, 84386293, 84, 84386293, 89, 90,
+        32102, -25470, 78168, 91, 365, 5, 78, 76059849, 84, 76059849,
+        89, 90, 32102, -25470, 78168, 91, 365, 5, 6, -1,
+        106, -2147350772, 118, 6, 45, 36, 48921494, 33931, -25378, 78657,
+        6, 96, 38, 245009797, 17, 84386293, 43, 51, 14, 76059849,
+        1, 84, 84386293, 88, 90, 5, 3, -2147350192, 22, 0,
+        365, 22, 10, 365, 73, 77, -2147353124, 15, 0, 355,
+        43, 50, 356, 4
+    };
+
+    static s32 intro_every_grontar[10] = {
+        15, 0, 355, 43, 50, 356, 73, 77, -2147353124, 4
+    };
+
+    static s32 intro_disco[28] = {
+        3, -2147350248, 15, 0, 361, 43, 50, 362, 16, 0,
+        361, 18, 15, 12, 361, 16, 12, 361, 1, 115,
+        0, 13, 117, 98, 99, 0, 5, 4
+    };
+
+    static s32 play_intro_disco[71] = {
+        14, 84386293, 1, 6, -1, 6, 2, 14, 84386293, 73,
+        3, -2147350268, 43, 52, 84, 84386293, 89, 90, 27299, 13825,
+        3591, 91, 361, 5, 84, 4917663, 89, 90, 27299, 13825,
+        3591, 91, 361, 5, 6, -1, 106, -2147350640, 118, 17,
+        84386293, 43, 51, 14, 4917663, 1, 84, 84386293, 88, 0,
+        5, 3, -2147350204, 3, -2147350192, 22, 0, 361, 22, 12,
+        361, 73, 77, -2147352548, 15, 0, 353, 43, 50, 354,
+        4
+    };
+
+    static s32 intro_every_disco[10] = {
+        15, 0, 353, 43, 50, 354, 73, 77, -2147352548, 4
+    };
+
+    static s32 victory_chef[80] = {
+        6, -1, 15, 17, 357, 16, 17, 357, 6, 60,
+        105, 42, 84386293, 16, 0, 357, 18, 115, 0, 59,
+        117, 6, 90, 43, 52, 14, 84386293, 1, 84, 84386293,
+        89, 90, 2670, 2048, 28201, 91, 357, 5, 14, 302774,
+        1, 84, 302774, 89, 90, 2670, 2048, 28201, 91, 357,
+        5, 3, -2147350248, 106, -2147350608, 118, 37, 244945277, 2670, 2048,
+        28201, 6, 159, 33, 302774, 6, 160, 36, 48921494, 2130,
+        2239, 28663, 17, 84386293, 3, -2147350120, 22, 0, 357, 4
+    };
+
+    static s32 victory_disco[108] = {
+        6, -1, 15, 12, 353, 16, 12, 353, 6, 60,
+        105, 16, 0, 353, 18, 115, 0, 64, 117, 39,
+        6, 90, 3, -2147350248, 14, 84386293, 1, 84, 84386293, 89,
+        90, 28060, 19150, 13000, 5, 43, 55, 28060, 22150, 6800,
+        28060, 22150, 13000, 37, 48403593, 28000, 18600, 13000, 37, 237806245,
+        28000, 18500, 13000, 37, 232925534, 28000, 18600, 23000, 6, 450,
+        43, 46, 43, 52, 14, 84386293, 1, 84, 84386293, 89,
+        90, 34184, 13816, 3608, 91, 353, 5, 14, 4917663, 1,
+        84, 4917663, 89, 90, 34184, 13816, 3608, 91, 353, 5,
+        3, -2147350248, 106, -2147350372, 118, 37, 48884857, 34184, 13816, 3608,
+        17, 84386293, 3, -2147350120, 22, 0, 353, 4
+    };
+
+    static s32 victory_grontar[76] = {
+        6, -1, 15, 10, 355, 16, 10, 355, 6, 60,
+        105, 16, 0, 355, 18, 115, 0, 58, 117, 6,
+        90, 43, 52, 14, 84386293, 1, 84, 84386293, 89, 90,
+        37118, -25467, 80136, 91, 355, 5, 14, 76059849, 1, 84,
+        76059849, 89, 90, 37118, -25467, 80136, 91, 355, 5, 6,
+        -1, 106, -2147350568, 3, -2147350228, 6, 228, 36, 48921494, 34829,
+        -25472, 80555, 17, 84386293, 3, -2147350120, 22, 0, 355, 14,
+        76059849, 1, 22, 10, 355, 4
+    };
+
+    static s32 victory_clown[79] = {
+        14, 344117, 73, 6, -1, 15, 13, 351, 16, 13,
+        351, 6, 60, 105, 16, 0, 351, 18, 115, 0,
+        63, 117, 81, 344117, 6, 90, 43, 52, 14, 84386293,
+        1, 84, 84386293, 89, 90, 55374, 15, 51534, 91, 351,
+        5, 14, 4863710, 1, 84, 4863710, 89, 90, 55374, 15,
+        51534, 91, 351, 5, 6, -1, 106, -2147350488, 3, -2147350228,
+        6, 130, 32, 4863710, 30, 17, 84386293, 3, -2147350120, 22,
+        0, 351, 14, 4863710, 1, 22, 13, 351, 4
+    };
+
+    // Sound scripts for boss NIS sequences (packed event data)
+    static s32 sndintrochef[18] = {
+        268447745, 268447752, 268447762, 268447770, 268542070, 268509340, 268542131,
+        268447916, 268542131, 268447924, 268542133, 268689606, 268447935, 268689604,
+        268480714, 268447954, 268447963, 0
+    };
+
+    static s32 sndintrogrontar[11] = {
+        268447751, 268447759, 268972062, 268447786, 268787755, 268447818, 268447833,
+        268542049, 268447854, 268509299, 0
+    };
+
+    static s32 sndintroclown[22] = {
+        268541973, 268476441, 268541981, 268480546, 268447783, 268447788, 268542009,
+        268447824, 268435570, 268435575, 268435587, 268435619, 268435636, 268542143,
+        268566724, 268542156, 268484817, 268484823, 268447965, 268570863, 268448002, 0
+    };
+
+    static s32 sndintrodisco[8] = {
+        268447745, 268447753, 268447764, 268447771, 268447891, 268447999, 268448199, 0
+    };
+
+    static s32 sndvicchef[10] = {
+        268447780, 268513322, 268447801, 268542038, 268542112, 268927137, 268447954,
+        268484838, 269070566, 0
+    };
+
+    static s32 sndvicgrontar[20] = {
+        268447787, 269058109, 268447810, 268447812, 268447832, 268447836, 269058146,
+        268447851, 269058193, 268542124, 268484835, 268787943, 268542188, 268484844,
+        268447983, 268542254, 268448058, 268448066, 268448074, 0
+    };
+
+    static s32 sndvicclown[29] = {
+        268447749, 268447758, 268447762, 268447769, 268447770, 268447793, 268447801,
+        268447809, 268447812, 268447826, 268447843, 268447846, 268447855, 268447860,
+        268447862, 268447877, 268447894, 268484761, 268447911, 268447927, 268484791,
+        268484794, 268447946, 268447977, 268447985, 269054206, 268448010, 268448011, 0
+    };
+
+    static s32 sndvicdisco[8] = {
+        268447933, 268447941, 268447951, 268497114, 268497124, 268542186, 268509435, 0
+    };
+
+    // Boss NIS helper scripts (subroutines called by intro/victory scripts)
+    static s32 boss_setup[18] = {
+        9, 20, 73, 74, 42, 84386293, 14, 84386293, 1, 14,
+        84386293, 73, 78, 84386293, 41, 6, -1, 4
+    };
+
+    static s32 boss_genericStartNIS[5] = {
+        3, -2147350340, 3, -2147350060, 4
+    };
+
+    static s32 boss_victory_widescreen[5] = {
+        3, -2147350060, 6, -1, 4
+    };
+
+    static s32 boss_dialog_and_delayed_widescreen[6] = {
+        118, 6, 1, 3, -2147350060, 4
+    };
+
+    static s32 boss_checkpoint[3] = {
+        28, 180140276, 4
+    };
+
+    static s32 boss_intro_end[18] = {
+        84, 84386293, 87, 93, 5, 14, 84386293, 1, 43, 44,
+        98, 99, 0, 5, 73, 75, 8, 4
+    };
+
+    static s32 boss_victory_done[15] = {
+        14, 84386293, 1, 105, 98, 100, 255, 99, 255, 5,
+        6, -1, 6, 1, 4
+    };
+
+    static s32 boss_widescreen_only[13] = {
+        98, 102, 40, 103, 256, 100, 255, 99, 255, 104,
+        2, 5, 4
+    };
+
+    struct DirectorScriptRegion {
+        u32 virtualBase = 0;
+        s32* hostBase = nullptr;
+        s32 wordCount = 0;
+    };
+
+    static constexpr s32 kMaxDirectorScriptRegions = 128;
+    static DirectorScriptRegion g_directorScriptRegions[kMaxDirectorScriptRegions] = {};
+    static s32 g_directorScriptRegionCount = 0;
+
+    template <size_t N>
+    constexpr s32 ScriptArrayWordCount(const s32(&)[N]) {
+        return static_cast<s32>(N);
     }
 
-    for (s32 i = 0; i < g_directorScriptRegionCount; i++) {
-        DirectorScriptRegion& region = g_directorScriptRegions[i];
-        if (region.virtualBase == virtualBase) {
-            region.hostBase = hostBase;
-            region.wordCount = wordCount;
+    static u32 ToVirtualAddress(const s32* ptr) {
+        return static_cast<u32>(reinterpret_cast<uintptr_t>(ptr));
+    }
+
+    static void RegisterScriptRegion(u32 virtualBase, s32* hostBase, s32 wordCount) {
+        if (!virtualBase || !hostBase || wordCount <= 0) {
             return;
         }
-    }
 
-    if (g_directorScriptRegionCount >= kMaxDirectorScriptRegions) {
-        return;
-    }
-
-    DirectorScriptRegion& next = g_directorScriptRegions[g_directorScriptRegionCount++];
-    next.virtualBase = virtualBase;
-    next.hostBase = hostBase;
-    next.wordCount = wordCount;
-}
-
-static s32* ResolveScriptAddress(u32 virtualAddress) {
-    for (s32 i = 0; i < g_directorScriptRegionCount; i++) {
-        const DirectorScriptRegion& region = g_directorScriptRegions[i];
-        if (virtualAddress < region.virtualBase) {
-            continue;
+        for (s32 i = 0; i < g_directorScriptRegionCount; i++) {
+            DirectorScriptRegion& region = g_directorScriptRegions[i];
+            if (region.virtualBase == virtualBase) {
+                region.hostBase = hostBase;
+                region.wordCount = wordCount;
+                return;
+            }
         }
 
-        const u32 byteOffset = virtualAddress - region.virtualBase;
-        if ((byteOffset & 3) != 0) {
-            continue;
+        if (g_directorScriptRegionCount >= kMaxDirectorScriptRegions) {
+            return;
         }
 
-        const s32 wordOffset = static_cast<s32>(byteOffset >> 2);
-        if (wordOffset < 0 || wordOffset >= region.wordCount) {
-            continue;
+        DirectorScriptRegion& next = g_directorScriptRegions[g_directorScriptRegionCount++];
+        next.virtualBase = virtualBase;
+        next.hostBase = hostBase;
+        next.wordCount = wordCount;
+    }
+
+    static s32* ResolveScriptAddress(u32 virtualAddress) {
+        for (s32 i = 0; i < g_directorScriptRegionCount; i++) {
+            const DirectorScriptRegion& region = g_directorScriptRegions[i];
+            if (virtualAddress < region.virtualBase) {
+                continue;
+            }
+
+            const u32 byteOffset = virtualAddress - region.virtualBase;
+            if ((byteOffset & 3) != 0) {
+                continue;
+            }
+
+            const s32 wordOffset = static_cast<s32>(byteOffset >> 2);
+            if (wordOffset < 0 || wordOffset >= region.wordCount) {
+                continue;
+            }
+
+            return region.hostBase + wordOffset;
         }
 
-        return region.hostBase + wordOffset;
-    }
-
-    return nullptr;
-}
-
-static void RegisterKnownDirectorScriptRegions() {
-    static bool initialized = false;
-    if (initialized) {
-        return;
-    }
-    initialized = true;
-
-    // PSX symbol bases from scripts/GAME_REL_symbols.txt.
-    RegisterScriptRegion(0x8001FA3Cu, intro_all_dante, ScriptArrayWordCount(intro_all_dante));
-    RegisterScriptRegion(0x8001FA54u, intro_chef, ScriptArrayWordCount(intro_chef));
-    RegisterScriptRegion(0x8001FBCCu, intro_every_chef, ScriptArrayWordCount(intro_every_chef));
-    RegisterScriptRegion(0x8001FBFCu, intro_clown, ScriptArrayWordCount(intro_clown));
-    RegisterScriptRegion(0x8001FDB4u, intro_every_clown, ScriptArrayWordCount(intro_every_clown));
-    RegisterScriptRegion(0x8001FDE4u, intro_grontar, ScriptArrayWordCount(intro_grontar));
-    RegisterScriptRegion(0x8001FF84u, intro_every_grontar, ScriptArrayWordCount(intro_every_grontar));
-    RegisterScriptRegion(0x8001FFACu, intro_disco, ScriptArrayWordCount(intro_disco));
-    RegisterScriptRegion(0x80020140u, intro_every_disco, ScriptArrayWordCount(intro_every_disco));
-
-    RegisterScriptRegion(0x80020168u, victory_chef, ScriptArrayWordCount(victory_chef));
-    RegisterScriptRegion(0x800202A8u, victory_disco, ScriptArrayWordCount(victory_disco));
-    RegisterScriptRegion(0x80020458u, victory_grontar, ScriptArrayWordCount(victory_grontar));
-    RegisterScriptRegion(0x80020588u, victory_clown, ScriptArrayWordCount(victory_clown));
-    RegisterScriptRegion(0x800D8208u, victory_poor, ScriptArrayWordCount(victory_poor));
-    RegisterScriptRegion(0x800D8278u, victory_ok, ScriptArrayWordCount(victory_ok));
-    RegisterScriptRegion(0x800D82E8u, victory_good, ScriptArrayWordCount(victory_good));
-    RegisterScriptRegion(0x800D8358u, victory_perfect, ScriptArrayWordCount(victory_perfect));
-
-    RegisterScriptRegion(0x800D7048u, start_generic, ScriptArrayWordCount(start_generic));
-    RegisterScriptRegion(0x800D70B0u, start_frantic, ScriptArrayWordCount(start_frantic));
-    RegisterScriptRegion(0x800D803Cu, gotopoint, ScriptArrayWordCount(gotopoint));
-    RegisterScriptRegion(0x800D8058u, NISladder1, ScriptArrayWordCount(NISladder1));
-    RegisterScriptRegion(0x800D83C8u, death, ScriptArrayWordCount(death));
-    RegisterScriptRegion(0x800D8454u, death_vol, ScriptArrayWordCount(death_vol));
-    RegisterScriptRegion(0x800D84E0u, death_fall_pavement, ScriptArrayWordCount(death_fall_pavement));
-    RegisterScriptRegion(0x800D855Cu, death_fall_water, ScriptArrayWordCount(death_fall_water));
-    RegisterScriptRegion(0x800D8598u, death_generic, ScriptArrayWordCount(death_generic));
-    RegisterScriptRegion(0x800D85C0u, death_fall_goo, ScriptArrayWordCount(death_fall_goo));
-    RegisterScriptRegion(0x800D86B0u, levelEnd, ScriptArrayWordCount(levelEnd));
-    RegisterScriptRegion(0x800D86CCu, wait_subroutine, ScriptArrayWordCount(wait_subroutine));
-    RegisterScriptRegion(0x800D86E0u, defaultBeginScript, ScriptArrayWordCount(defaultBeginScript));
-
-    // Host aliases for any scripts compiled into this binary.
-    RegisterScriptRegion(ToVirtualAddress(intro_all_dante), intro_all_dante, ScriptArrayWordCount(intro_all_dante));
-    RegisterScriptRegion(ToVirtualAddress(intro_chef), intro_chef, ScriptArrayWordCount(intro_chef));
-    RegisterScriptRegion(ToVirtualAddress(intro_every_chef), intro_every_chef, ScriptArrayWordCount(intro_every_chef));
-    RegisterScriptRegion(ToVirtualAddress(intro_clown), intro_clown, ScriptArrayWordCount(intro_clown));
-    RegisterScriptRegion(ToVirtualAddress(intro_every_clown), intro_every_clown, ScriptArrayWordCount(intro_every_clown));
-    RegisterScriptRegion(ToVirtualAddress(intro_grontar), intro_grontar, ScriptArrayWordCount(intro_grontar));
-    RegisterScriptRegion(ToVirtualAddress(intro_every_grontar), intro_every_grontar, ScriptArrayWordCount(intro_every_grontar));
-    RegisterScriptRegion(ToVirtualAddress(intro_disco), intro_disco, ScriptArrayWordCount(intro_disco));
-    RegisterScriptRegion(ToVirtualAddress(intro_every_disco), intro_every_disco, ScriptArrayWordCount(intro_every_disco));
-    RegisterScriptRegion(ToVirtualAddress(victory_chef), victory_chef, ScriptArrayWordCount(victory_chef));
-    RegisterScriptRegion(ToVirtualAddress(victory_disco), victory_disco, ScriptArrayWordCount(victory_disco));
-    RegisterScriptRegion(ToVirtualAddress(victory_grontar), victory_grontar, ScriptArrayWordCount(victory_grontar));
-    RegisterScriptRegion(ToVirtualAddress(victory_clown), victory_clown, ScriptArrayWordCount(victory_clown));
-    RegisterScriptRegion(ToVirtualAddress(victory_poor), victory_poor, ScriptArrayWordCount(victory_poor));
-    RegisterScriptRegion(ToVirtualAddress(victory_ok), victory_ok, ScriptArrayWordCount(victory_ok));
-    RegisterScriptRegion(ToVirtualAddress(victory_good), victory_good, ScriptArrayWordCount(victory_good));
-    RegisterScriptRegion(ToVirtualAddress(victory_perfect), victory_perfect, ScriptArrayWordCount(victory_perfect));
-    RegisterScriptRegion(ToVirtualAddress(start_generic), start_generic, ScriptArrayWordCount(start_generic));
-    RegisterScriptRegion(ToVirtualAddress(start_frantic), start_frantic, ScriptArrayWordCount(start_frantic));
-    RegisterScriptRegion(ToVirtualAddress(death_fall_pavement), death_fall_pavement, ScriptArrayWordCount(death_fall_pavement));
-    RegisterScriptRegion(ToVirtualAddress(death_fall_water), death_fall_water, ScriptArrayWordCount(death_fall_water));
-    RegisterScriptRegion(ToVirtualAddress(death_generic), death_generic, ScriptArrayWordCount(death_generic));
-    RegisterScriptRegion(ToVirtualAddress(death_fall_goo), death_fall_goo, ScriptArrayWordCount(death_fall_goo));
-    RegisterScriptRegion(ToVirtualAddress(gotopoint), gotopoint, ScriptArrayWordCount(gotopoint));
-    RegisterScriptRegion(ToVirtualAddress(NISladder1), NISladder1, ScriptArrayWordCount(NISladder1));
-    RegisterScriptRegion(ToVirtualAddress(death), death, ScriptArrayWordCount(death));
-    RegisterScriptRegion(ToVirtualAddress(death_vol), death_vol, ScriptArrayWordCount(death_vol));
-    RegisterScriptRegion(ToVirtualAddress(levelEnd), levelEnd, ScriptArrayWordCount(levelEnd));
-    RegisterScriptRegion(ToVirtualAddress(wait_subroutine), wait_subroutine, ScriptArrayWordCount(wait_subroutine));
-    RegisterScriptRegion(ToVirtualAddress(defaultBeginScript), defaultBeginScript, ScriptArrayWordCount(defaultBeginScript));
-}
-
-static s32 EstimateRuntimeScriptWords(const s32* script, s32 maxWords) {
-    if (!script || maxWords <= 0) {
-        return 0;
-    }
-
-    for (s32 i = 0; i < maxWords; i++) {
-        const DirectorOpcode op = static_cast<DirectorOpcode>(script[i]);
-        if (op == DirectorOpcode::End || op == DirectorOpcode::EndScript) {
-            return i + 1;
-        }
-    }
-
-    return maxWords;
-}
-
-static void RegisterRuntimeScriptRegion(s32* script) {
-    if (!script) {
-        return;
-    }
-
-    const s32 words = EstimateRuntimeScriptWords(script, 1024);
-    if (words <= 0) {
-        return;
-    }
-
-    RegisterScriptRegion(ToVirtualAddress(script), script, words);
-}
-
-static s32* ScriptPtrFromWord(s32 word) {
-    RegisterKnownDirectorScriptRegions();
-
-    const u32 raw = static_cast<u32>(word);
-    if (raw == 0) {
         return nullptr;
     }
 
-    s32* resolved = ResolveScriptAddress(raw);
-    if (resolved) {
-        return resolved;
+    static void RegisterKnownDirectorScriptRegions() {
+        static bool initialized = false;
+        if (initialized) {
+            return;
+        }
+        initialized = true;
+
+        // PSX symbol bases from scripts/GAME_REL_symbols.txt.
+        RegisterScriptRegion(0x8001FA3Cu, intro_all_dante, ScriptArrayWordCount(intro_all_dante));
+        RegisterScriptRegion(0x8001FA54u, intro_chef, ScriptArrayWordCount(intro_chef));
+        RegisterScriptRegion(0x8001FBCCu, intro_every_chef, ScriptArrayWordCount(intro_every_chef));
+        RegisterScriptRegion(0x8001FBFCu, intro_clown, ScriptArrayWordCount(intro_clown));
+        RegisterScriptRegion(0x8001FDB4u, intro_every_clown, ScriptArrayWordCount(intro_every_clown));
+        RegisterScriptRegion(0x8001FDE4u, intro_grontar, ScriptArrayWordCount(intro_grontar));
+        RegisterScriptRegion(0x8001FF84u, intro_every_grontar, ScriptArrayWordCount(intro_every_grontar));
+        RegisterScriptRegion(0x8001FFACu, intro_disco, ScriptArrayWordCount(intro_disco));
+        RegisterScriptRegion(0x80020024u, play_intro_disco, ScriptArrayWordCount(play_intro_disco));
+        RegisterScriptRegion(0x80020140u, intro_every_disco, ScriptArrayWordCount(intro_every_disco));
+
+        RegisterScriptRegion(0x80020168u, victory_chef, ScriptArrayWordCount(victory_chef));
+        RegisterScriptRegion(0x800202A8u, victory_disco, ScriptArrayWordCount(victory_disco));
+        RegisterScriptRegion(0x80020458u, victory_grontar, ScriptArrayWordCount(victory_grontar));
+        RegisterScriptRegion(0x80020588u, victory_clown, ScriptArrayWordCount(victory_clown));
+
+        // Sound scripts for boss NIS (from BOL overlay)
+        RegisterScriptRegion(0x800206C4u, sndintrochef, ScriptArrayWordCount(sndintrochef));
+        RegisterScriptRegion(0x8002070Cu, sndintrogrontar, ScriptArrayWordCount(sndintrogrontar));
+        RegisterScriptRegion(0x80020738u, sndintroclown, ScriptArrayWordCount(sndintroclown));
+        RegisterScriptRegion(0x80020790u, sndintrodisco, ScriptArrayWordCount(sndintrodisco));
+        RegisterScriptRegion(0x800207B0u, sndvicchef, ScriptArrayWordCount(sndvicchef));
+        RegisterScriptRegion(0x800207D8u, sndvicgrontar, ScriptArrayWordCount(sndvicgrontar));
+        RegisterScriptRegion(0x80020828u, sndvicclown, ScriptArrayWordCount(sndvicclown));
+        RegisterScriptRegion(0x8002089Cu, sndvicdisco, ScriptArrayWordCount(sndvicdisco));
+
+        // Boss NIS subroutine scripts (from BOL overlay)
+        RegisterScriptRegion(0x800208BCu, boss_setup, ScriptArrayWordCount(boss_setup));
+        RegisterScriptRegion(0x80020904u, boss_genericStartNIS, ScriptArrayWordCount(boss_genericStartNIS));
+        RegisterScriptRegion(0x80020918u, boss_victory_widescreen, ScriptArrayWordCount(boss_victory_widescreen));
+        RegisterScriptRegion(0x8002092Cu, boss_dialog_and_delayed_widescreen, ScriptArrayWordCount(boss_dialog_and_delayed_widescreen));
+        RegisterScriptRegion(0x80020944u, boss_checkpoint, ScriptArrayWordCount(boss_checkpoint));
+        RegisterScriptRegion(0x80020950u, boss_intro_end, ScriptArrayWordCount(boss_intro_end));
+        RegisterScriptRegion(0x80020998u, boss_victory_done, ScriptArrayWordCount(boss_victory_done));
+        RegisterScriptRegion(0x800209D4u, boss_widescreen_only, ScriptArrayWordCount(boss_widescreen_only));
+
+        RegisterScriptRegion(0x800D8208u, victory_poor, ScriptArrayWordCount(victory_poor));
+        RegisterScriptRegion(0x800D8278u, victory_ok, ScriptArrayWordCount(victory_ok));
+        RegisterScriptRegion(0x800D82E8u, victory_good, ScriptArrayWordCount(victory_good));
+        RegisterScriptRegion(0x800D8358u, victory_perfect, ScriptArrayWordCount(victory_perfect));
+
+        RegisterScriptRegion(0x800D7048u, start_generic, ScriptArrayWordCount(start_generic));
+        RegisterScriptRegion(0x800D70B0u, start_frantic, ScriptArrayWordCount(start_frantic));
+        RegisterScriptRegion(0x800D803Cu, gotopoint, ScriptArrayWordCount(gotopoint));
+        RegisterScriptRegion(0x800D8058u, NISladder1, ScriptArrayWordCount(NISladder1));
+        RegisterScriptRegion(0x800D83C8u, death, ScriptArrayWordCount(death));
+        RegisterScriptRegion(0x800D8454u, death_vol, ScriptArrayWordCount(death_vol));
+        RegisterScriptRegion(0x800D84E0u, death_fall_pavement, ScriptArrayWordCount(death_fall_pavement));
+        RegisterScriptRegion(0x800D855Cu, death_fall_water, ScriptArrayWordCount(death_fall_water));
+        RegisterScriptRegion(0x800D8598u, death_generic, ScriptArrayWordCount(death_generic));
+        RegisterScriptRegion(0x800D85C0u, death_fall_goo, ScriptArrayWordCount(death_fall_goo));
+        RegisterScriptRegion(0x800D86B0u, levelEnd, ScriptArrayWordCount(levelEnd));
+        RegisterScriptRegion(0x800D86CCu, wait_subroutine, ScriptArrayWordCount(wait_subroutine));
+        RegisterScriptRegion(0x800D86E0u, defaultBeginScript, ScriptArrayWordCount(defaultBeginScript));
+
+        // Host aliases for any scripts compiled into this binary.
+        RegisterScriptRegion(ToVirtualAddress(intro_all_dante), intro_all_dante, ScriptArrayWordCount(intro_all_dante));
+        RegisterScriptRegion(ToVirtualAddress(intro_chef), intro_chef, ScriptArrayWordCount(intro_chef));
+        RegisterScriptRegion(ToVirtualAddress(intro_every_chef), intro_every_chef, ScriptArrayWordCount(intro_every_chef));
+        RegisterScriptRegion(ToVirtualAddress(intro_clown), intro_clown, ScriptArrayWordCount(intro_clown));
+        RegisterScriptRegion(ToVirtualAddress(intro_every_clown), intro_every_clown, ScriptArrayWordCount(intro_every_clown));
+        RegisterScriptRegion(ToVirtualAddress(intro_grontar), intro_grontar, ScriptArrayWordCount(intro_grontar));
+        RegisterScriptRegion(ToVirtualAddress(intro_every_grontar), intro_every_grontar, ScriptArrayWordCount(intro_every_grontar));
+        RegisterScriptRegion(ToVirtualAddress(intro_disco), intro_disco, ScriptArrayWordCount(intro_disco));
+        RegisterScriptRegion(ToVirtualAddress(play_intro_disco), play_intro_disco, ScriptArrayWordCount(play_intro_disco));
+        RegisterScriptRegion(ToVirtualAddress(intro_every_disco), intro_every_disco, ScriptArrayWordCount(intro_every_disco));
+        RegisterScriptRegion(ToVirtualAddress(victory_chef), victory_chef, ScriptArrayWordCount(victory_chef));
+        RegisterScriptRegion(ToVirtualAddress(victory_disco), victory_disco, ScriptArrayWordCount(victory_disco));
+        RegisterScriptRegion(ToVirtualAddress(victory_grontar), victory_grontar, ScriptArrayWordCount(victory_grontar));
+        RegisterScriptRegion(ToVirtualAddress(victory_clown), victory_clown, ScriptArrayWordCount(victory_clown));
+        RegisterScriptRegion(ToVirtualAddress(victory_poor), victory_poor, ScriptArrayWordCount(victory_poor));
+        RegisterScriptRegion(ToVirtualAddress(victory_ok), victory_ok, ScriptArrayWordCount(victory_ok));
+        RegisterScriptRegion(ToVirtualAddress(victory_good), victory_good, ScriptArrayWordCount(victory_good));
+        RegisterScriptRegion(ToVirtualAddress(victory_perfect), victory_perfect, ScriptArrayWordCount(victory_perfect));
+        RegisterScriptRegion(ToVirtualAddress(start_generic), start_generic, ScriptArrayWordCount(start_generic));
+        RegisterScriptRegion(ToVirtualAddress(start_frantic), start_frantic, ScriptArrayWordCount(start_frantic));
+        RegisterScriptRegion(ToVirtualAddress(death_fall_pavement), death_fall_pavement, ScriptArrayWordCount(death_fall_pavement));
+        RegisterScriptRegion(ToVirtualAddress(death_fall_water), death_fall_water, ScriptArrayWordCount(death_fall_water));
+        RegisterScriptRegion(ToVirtualAddress(death_generic), death_generic, ScriptArrayWordCount(death_generic));
+        RegisterScriptRegion(ToVirtualAddress(death_fall_goo), death_fall_goo, ScriptArrayWordCount(death_fall_goo));
+        RegisterScriptRegion(ToVirtualAddress(gotopoint), gotopoint, ScriptArrayWordCount(gotopoint));
+        RegisterScriptRegion(ToVirtualAddress(NISladder1), NISladder1, ScriptArrayWordCount(NISladder1));
+        RegisterScriptRegion(ToVirtualAddress(death), death, ScriptArrayWordCount(death));
+        RegisterScriptRegion(ToVirtualAddress(death_vol), death_vol, ScriptArrayWordCount(death_vol));
+        RegisterScriptRegion(ToVirtualAddress(levelEnd), levelEnd, ScriptArrayWordCount(levelEnd));
+        RegisterScriptRegion(ToVirtualAddress(wait_subroutine), wait_subroutine, ScriptArrayWordCount(wait_subroutine));
+        RegisterScriptRegion(ToVirtualAddress(defaultBeginScript), defaultBeginScript, ScriptArrayWordCount(defaultBeginScript));
+
+        // Host aliases for new overlay scripts
+        RegisterScriptRegion(ToVirtualAddress(sndintrochef), sndintrochef, ScriptArrayWordCount(sndintrochef));
+        RegisterScriptRegion(ToVirtualAddress(sndintrogrontar), sndintrogrontar, ScriptArrayWordCount(sndintrogrontar));
+        RegisterScriptRegion(ToVirtualAddress(sndintroclown), sndintroclown, ScriptArrayWordCount(sndintroclown));
+        RegisterScriptRegion(ToVirtualAddress(sndintrodisco), sndintrodisco, ScriptArrayWordCount(sndintrodisco));
+        RegisterScriptRegion(ToVirtualAddress(sndvicchef), sndvicchef, ScriptArrayWordCount(sndvicchef));
+        RegisterScriptRegion(ToVirtualAddress(sndvicgrontar), sndvicgrontar, ScriptArrayWordCount(sndvicgrontar));
+        RegisterScriptRegion(ToVirtualAddress(sndvicclown), sndvicclown, ScriptArrayWordCount(sndvicclown));
+        RegisterScriptRegion(ToVirtualAddress(sndvicdisco), sndvicdisco, ScriptArrayWordCount(sndvicdisco));
+        RegisterScriptRegion(ToVirtualAddress(boss_setup), boss_setup, ScriptArrayWordCount(boss_setup));
+        RegisterScriptRegion(ToVirtualAddress(boss_genericStartNIS), boss_genericStartNIS, ScriptArrayWordCount(boss_genericStartNIS));
+        RegisterScriptRegion(ToVirtualAddress(boss_victory_widescreen), boss_victory_widescreen, ScriptArrayWordCount(boss_victory_widescreen));
+        RegisterScriptRegion(ToVirtualAddress(boss_dialog_and_delayed_widescreen), boss_dialog_and_delayed_widescreen, ScriptArrayWordCount(boss_dialog_and_delayed_widescreen));
+        RegisterScriptRegion(ToVirtualAddress(boss_checkpoint), boss_checkpoint, ScriptArrayWordCount(boss_checkpoint));
+        RegisterScriptRegion(ToVirtualAddress(boss_intro_end), boss_intro_end, ScriptArrayWordCount(boss_intro_end));
+        RegisterScriptRegion(ToVirtualAddress(boss_victory_done), boss_victory_done, ScriptArrayWordCount(boss_victory_done));
+        RegisterScriptRegion(ToVirtualAddress(boss_widescreen_only), boss_widescreen_only, ScriptArrayWordCount(boss_widescreen_only));
     }
 
-    if constexpr (sizeof(void*) == 4) {
-        return reinterpret_cast<s32*>(static_cast<uintptr_t>(raw));
+    static s32 EstimateRuntimeScriptWords(const s32* script, s32 maxWords) {
+        if (!script || maxWords <= 0) {
+            return 0;
+        }
+
+        for (s32 i = 0; i < maxWords; i++) {
+            const DirectorOpcode op = static_cast<DirectorOpcode>(script[i]);
+            if (op == DirectorOpcode::End || op == DirectorOpcode::EndScript) {
+                return i + 1;
+            }
+        }
+
+        return maxWords;
     }
 
-    return nullptr;
-}
+    static void RegisterRuntimeScriptRegion(s32* script) {
+        if (!script) {
+            return;
+        }
 
-static s32 GetDirectorFrameCounter() {
-    if (!g_time) {
-        return 0;
+        const s32 words = EstimateRuntimeScriptWords(script, 1024);
+        if (words <= 0) {
+            return;
+        }
+
+        RegisterScriptRegion(ToVirtualAddress(script), script, words);
     }
 
-    return static_cast<s32>(g_time->GetFrameCounter());
-}
+    static s32* ScriptPtrFromWord(s32 word) {
+        RegisterKnownDirectorScriptRegions();
 
-static void PushScriptReturnAddress(Director* director, s32* nextScript) {
-    if (!director || !nextScript) {
-        return;
-    }
+        const u32 raw = static_cast<u32>(word);
+        if (raw == 0) {
+            return nullptr;
+        }
 
-    if (returnAddressIndex >= 0 && returnAddressIndex < 8) {
-        returnAddress[returnAddressIndex] = director->scriptPtr;
-        returnAddressIndex++;
-    }
+        s32* resolved = ResolveScriptAddress(raw);
+        if (resolved) {
+            return resolved;
+        }
 
-    director->scriptPtr = nextScript;
-}
+        if constexpr (sizeof(void*) == 4) {
+            return reinterpret_cast<s32*>(static_cast<uintptr_t>(raw));
+        }
 
-static Thing* FindThingByScriptRef(u32 ref) {
-    if (!g_ai) {
         return nullptr;
     }
 
-    Thing* thing = g_ai->FindThing(ref);
-    if (thing) {
-        return thing;
+    static s32 GetDirectorFrameCounter() {
+        if (!g_time) {
+            return 0;
+        }
+
+        return static_cast<s32>(g_time->GetFrameCounter());
     }
 
-    for (ccMinNode* node = g_ai->thingList.head; node; node = node->next) {
-        Thing* candidate = static_cast<Thing*>(node);
-        if (candidate && candidate->nameCRC == ref) {
-            return candidate;
+    static void PushScriptReturnAddress(Director* director, s32* nextScript) {
+        if (!director || !nextScript) {
+            return;
+        }
+
+        if (returnAddressIndex >= 0 && returnAddressIndex < 8) {
+            returnAddress[returnAddressIndex] = director->scriptPtr;
+            returnAddressIndex++;
+        }
+
+        director->scriptPtr = nextScript;
+    }
+
+    static Thing* FindThingByScriptRef(u32 ref) {
+        if (!g_ai) {
+            return nullptr;
+        }
+
+        Thing* thing = g_ai->FindThing(ref);
+        if (thing) {
+            return thing;
+        }
+
+        for (ccMinNode* node = g_ai->thingList.head; node; node = node->next) {
+            Thing* candidate = static_cast<Thing*>(node);
+            if (candidate && candidate->nameCRC == ref) {
+                return candidate;
+            }
+        }
+
+        return nullptr;
+    }
+
+    static Humanoid* FindHumanoidByScriptRef(u32 ref) {
+        Thing* thing = FindThingByScriptRef(ref);
+        if (!thing) {
+            return nullptr;
+        }
+
+        return dynamic_cast<Humanoid*>(thing);
+    }
+
+    static Camera* GetGameCamera() {
+        if (!g_display) {
+            return nullptr;
+        }
+
+        return g_display->GetCamera();
+    }
+
+    // PSX: sets TF2_DIRECTOR_ACTIVE (0x200) on all humanoids during script processing.
+    // This prevents normal AI think/move for entities while the director runs.
+    static void SetDirectorFlagsOnHumanoids() {
+        if (!g_ai) return;
+        for (ccMinNode* n = g_ai->humanoidList.head; n; n = n->next) {
+            Thing* thing = static_cast<Thing*>(n);
+            thing->flags2 |= TF2_DIRECTOR_ACTIVE;
         }
     }
 
-    return nullptr;
-}
-
-static Humanoid* FindHumanoidByScriptRef(u32 ref) {
-    Thing* thing = FindThingByScriptRef(ref);
-    if (!thing) {
-        return nullptr;
+    // PSX: clears TF2_DIRECTOR_ACTIVE (0x200) on all humanoids when script ends.
+    static void ClearDirectorFlagsOnHumanoids() {
+        if (!g_ai) return;
+        for (ccMinNode* n = g_ai->humanoidList.head; n; n = n->next) {
+            Thing* thing = static_cast<Thing*>(n);
+            thing->flags2 &= ~TF2_DIRECTOR_ACTIVE;
+        }
     }
-
-    return dynamic_cast<Humanoid*>(thing);
-}
-
-static Camera* GetGameCamera() {
-    if (!g_display) {
-        return nullptr;
-    }
-
-    return g_display->GetCamera();
-}
-
-// PSX: sets TF2_DIRECTOR_ACTIVE (0x200) on all humanoids during script processing.
-// This prevents normal AI think/move for entities while the director runs.
-static void SetDirectorFlagsOnHumanoids() {
-    if (!g_ai) return;
-    for (ccMinNode* n = g_ai->humanoidList.head; n; n = n->next) {
-        Thing* thing = static_cast<Thing*>(n);
-        thing->flags2 |= TF2_DIRECTOR_ACTIVE;
-    }
-}
-
-// PSX: clears TF2_DIRECTOR_ACTIVE (0x200) on all humanoids when script ends.
-static void ClearDirectorFlagsOnHumanoids() {
-    if (!g_ai) return;
-    for (ccMinNode* n = g_ai->humanoidList.head; n; n = n->next) {
-        Thing* thing = static_cast<Thing*>(n);
-        thing->flags2 &= ~TF2_DIRECTOR_ACTIVE;
-    }
-}
 
 } // namespace
 
@@ -515,519 +747,539 @@ void Director::Process() {
         const DirectorOpcode opcode = static_cast<DirectorOpcode>(*scriptPtr);
 
         switch (opcode) {
-        case DirectorOpcode::End:
-            // PSX: clear director state, clear NIS flags, destroy directorSound
-            scriptPtr = nullptr;
-            scriptState = 0;
-            ClearDirectorFlagsOnHumanoids();
-            if (directorSound) {
-                delete directorSound;
-                directorSound = nullptr;
-            }
-            g_directorActive = 0;
-            return;
-
-        case DirectorOpcode::ResetTimeout:
-            directorTimeOut = 0;
-            scriptPtr += 1;
-            break;
-
-        case DirectorOpcode::EndScript:
-            // PSX: if scriptState==534 (from SetScript), mark level as visited
-            if (scriptState == 534 && g_game && g_game->GetWorld()) {
-                const s32 levelID = static_cast<s32>(g_game->GetWorld()->GetCurrentLevelIndex());
-                if (levelID >= 0 && levelID < 31) {
-                    visitedLevels |= (1 << levelID);
+            case DirectorOpcode::End:
+                // PSX: clear director state, clear NIS flags, destroy directorSound
+                scriptPtr = nullptr;
+                scriptState = 0;
+                ClearDirectorFlagsOnHumanoids();
+                if (directorSound) {
+                    delete directorSound;
+                    directorSound = nullptr;
                 }
-            }
-            scriptPtr = nullptr;
-            scriptState = 0;
-            // PSX: clear NIS flags on all humanoids
-            ClearDirectorFlagsOnHumanoids();
-            // PSX: destroy directorSound if present
-            if (directorSound) {
-                delete directorSound;
-                directorSound = nullptr;
-            }
-            g_directorActive = 0;
-            return;
+                g_directorActive = 0;
+                return;
 
-        case DirectorOpcode::Call:
-            if (returnAddressIndex >= 0 && returnAddressIndex < 8) {
-                returnAddress[returnAddressIndex] = scriptPtr + 2;
-                returnAddressIndex++;
-            }
-            scriptPtr = ScriptPtrFromWord(scriptPtr[1]);
-            break;
+            case DirectorOpcode::ResetTimeout:
+                directorTimeOut = 0;
+                scriptPtr += 1;
+                break;
 
-        case DirectorOpcode::Return:
-            if (returnAddressIndex > 0) {
-                returnAddressIndex--;
-                scriptPtr = returnAddress[returnAddressIndex];
-            } else {
-                scriptPtr = levelEnd;
-            }
-            break;
+            case DirectorOpcode::EndScript:
+                // PSX: if scriptState==534 (from SetScript), mark level as visited
+                if (scriptState == 534 && g_game && g_game->GetWorld()) {
+                    const s32 levelID = static_cast<s32>(g_game->GetWorld()->GetCurrentLevelIndex());
+                    if (levelID >= 0 && levelID < 31) {
+                        visitedLevels |= (1 << levelID);
+                    }
+                }
+                scriptPtr = nullptr;
+                scriptState = 0;
+                // PSX: clear NIS flags on all humanoids
+                ClearDirectorFlagsOnHumanoids();
+                // PSX: destroy directorSound if present
+                if (directorSound) {
+                    delete directorSound;
+                    directorSound = nullptr;
+                }
+                g_directorActive = 0;
+                return;
 
-        case DirectorOpcode::Timer: {
-            // PSX: Timer returns 1=done, 0=blocked
-            s32 done = TimerStep();
-            if (done) {
-                field68 = 0;
-            } else {
+            case DirectorOpcode::Call:
+                if (returnAddressIndex >= 0 && returnAddressIndex < 8) {
+                    returnAddress[returnAddressIndex] = scriptPtr + 2;
+                    returnAddressIndex++;
+                }
+                scriptPtr = ScriptPtrFromWord(scriptPtr[1]);
+                break;
+
+            case DirectorOpcode::Return:
+                if (returnAddressIndex > 0) {
+                    returnAddressIndex--;
+                    scriptPtr = returnAddress[returnAddressIndex];
+                }
+                else {
+                    scriptPtr = levelEnd;
+                }
+                break;
+
+            case DirectorOpcode::Timer:
+            {
+                // PSX: Timer returns 1=done, 0=blocked
+                s32 done = TimerStep();
+                if (done) {
+                    field68 = 0;
+                }
+                else {
+                    field68 = 1;
+                }
+                if (field68) {
+                    return;
+                }
+                break;
+            }
+
+            case DirectorOpcode::Loop:
+                Loop();
+                scriptPtr += 1;
+                break;
+
+            case DirectorOpcode::EnablePlayerInput:
+                enableInput = 1;
+                scriptPtr += 1;
+                break;
+
+            case DirectorOpcode::DisablePlayerInput:
+                enableInput = 0;
+                scriptPtr += 1;
+                break;
+
+            case DirectorOpcode::DetermineLevelIntro:
+                scriptPtr += 1;
+                DetermineLevelIntro();
+                break;
+
+            case DirectorOpcode::FaceThing:
+            {
+                const u32 thingRef = static_cast<u32>(scriptPtr[1]);
+                scriptPtr += 2;
+
+                Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
+                if (humanoid) {
+                    humanoid->FaceAngleY(humanoid->orientation.y, 0);
+                }
+                break;
+            }
+
+            case DirectorOpcode::SetHumanoidAction:
+            {
+                // PSX: reads thingRef, calls vtable+232 (SetActionState)
+                const u32 thingRef = static_cast<u32>(scriptPtr[1]);
+                scriptPtr += 2;
+                Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
+                if (humanoid) {
+                    humanoid->SetActionState(static_cast<u32>(*scriptPtr), 0);
+                }
+                scriptPtr += 1;
+                break;
+            }
+
+            case DirectorOpcode::DynamicAnimLoad:
+            case DirectorOpcode::DynamicAnimWaitLoaded:
+            case DirectorOpcode::DynamicAnimWaitCamera:
+            case DirectorOpcode::DynamicAnimUnload:
+                ProcessDynamicAnimFunc();
+                break;
+
+            case DirectorOpcode::WaitAnimationDone:
+            {
+                s32 done = WaitAnimationDoneStep();
+                if (done) {
+                    field68 = 0;
+                }
+                else {
+                    field68 = 1;
+                }
+                if (field68) {
+                    return;
+                }
+                break;
+            }
+
+            case DirectorOpcode::WaitForNisControl:
+            {
+                // PSX: reads thingRef, finds humanoid, checks if its behaviour
+                // is NisControl. If so, wait (block). If not, continue.
+                const u32 thingRef = static_cast<u32>(scriptPtr[1]);
+                Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
+                // PSX checks humanoid->behaviour->funcPtr == NisControl__9Behaviour
+                // For now, don't block - NIS behaviours not yet implemented
+                scriptPtr += 2;
+                break;
+            }
+
+            case DirectorOpcode::RestorePlayerControl:
+                // PSX: restores player to PlayerUserControl behaviour
+                // Sets behaviour flags back to normal input processing
+                scriptPtr += 1;
+                break;
+
+            case DirectorOpcode::PlayThingDynamicAnim:
+            {
+                // PSX: reads thingRef and animEnum, calls PlayDynamicAnim on model
+                const u32 thingRef = static_cast<u32>(scriptPtr[1]);
+                const s32 animEnum = scriptPtr[2];
+                scriptPtr += 3;
+                Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
+                if (humanoid && humanoid->model) {
+                    // PSX: PlayDynamicAnim__6SModeli(thing->model, animEnum)
+                    // TODO: SModel::PlayDynamicAnim not yet reversed
+                }
+                break;
+            }
+
+            case DirectorOpcode::SetupFaceTextureAnim:
+                // PSX: looks up "TChanFace~G" and "CChanFace~G" animations,
+                // creates flipbooks, sets callback to p3dFwdCycle
+                scriptPtr += 1;
+                break;
+
+            case DirectorOpcode::CleanupFaceTextureAnim:
+                scriptPtr += 1;
+                cleanUpTexAnim();
+                break;
+
+            case DirectorOpcode::QueueDetermineNextState:
+            {
+                // PSX: reads optional level ID param, sets g_selectedLevel if != -1
+                const s32 levelParam = scriptPtr[1];
+                scriptPtr += 2;
+                if (levelParam != -1) {
+                    extern s16 g_selectedLevel;
+                    g_selectedLevel = static_cast<s16>(levelParam);
+                }
+                if (g_game) {
+                    g_game->SetState(GameState::DetermineNextGameState);
+                }
+                break;
+            }
+
+            case DirectorOpcode::SetGameState:
+            {
+                const s32 gameState = scriptPtr[1];
+                scriptPtr += 2;
+                if (g_game && gameState >= 0 && gameState < static_cast<s32>(GameState::COUNT)) {
+                    g_game->SetState(static_cast<GameState>(gameState));
+                }
                 field68 = 1;
-            }
-            if (field68) {
                 return;
             }
-            break;
-        }
 
-        case DirectorOpcode::Loop:
-            Loop();
-            scriptPtr += 1;
-            break;
+            case DirectorOpcode::SetCheckpoint:
+                scriptPtr += 1;
+                if (Player::s_player) {
+                    Player::s_player->OnCheckpoint();
+                }
+                break;
 
-        case DirectorOpcode::EnablePlayerInput:
-            enableInput = 1;
-            scriptPtr += 1;
-            break;
-
-        case DirectorOpcode::DisablePlayerInput:
-            enableInput = 0;
-            scriptPtr += 1;
-            break;
-
-        case DirectorOpcode::DetermineLevelIntro:
-            scriptPtr += 1;
-            DetermineLevelIntro();
-            break;
-
-        case DirectorOpcode::FaceThing: {
-            const u32 thingRef = static_cast<u32>(scriptPtr[1]);
-            scriptPtr += 2;
-
-            Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
-            if (humanoid) {
-                humanoid->FaceAngleY(humanoid->orientation.y, 0);
+            case DirectorOpcode::SetCheckpointByUid:
+            {
+                // PSX: reads UID, calls setJackieCheckpoint(uid).
+                // If checkpoint set fails, calls OnCheckpoint as fallback.
+                scriptPtr += 2;
+                if (Player::s_player) {
+                    Player::s_player->OnCheckpoint();
+                }
+                break;
             }
-            break;
-        }
 
-        case DirectorOpcode::SetHumanoidAction: {
-            // PSX: reads thingRef, calls vtable+232 (SetActionState)
-            const u32 thingRef = static_cast<u32>(scriptPtr[1]);
-            scriptPtr += 2;
-            Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
-            if (humanoid) {
-                humanoid->SetActionState(static_cast<u32>(*scriptPtr), 0);
+            case DirectorOpcode::SetCheckpointData:
+                // PSX: dword_800D6F90 = scriptPtr[1] (checkpoint data value)
+                scriptPtr += 2;
+                break;
+
+            case DirectorOpcode::TriggerCheckpoint:
+                scriptPtr += 1;
+                if (Player::s_player) {
+                    Player::s_player->OnCheckpoint();
+                }
+                break;
+
+            case DirectorOpcode::ClearCheckpointValid:
+                // PSX: SetValidState__14CheckpointInfo(636, 0)
+                scriptPtr += 1;
+                break;
+
+            case DirectorOpcode::SpawnEffectFromMatrix:
+                scriptPtr += 4;
+                break;
+
+            case DirectorOpcode::SpawnEffectFromAttack:
+                scriptPtr += 2;
+                break;
+
+            case DirectorOpcode::SpawnEffectAtPosA:
+                scriptPtr += 4;
+                break;
+
+            case DirectorOpcode::SpawnEffectAtPosB:
+                scriptPtr += 4;
+                break;
+
+            case DirectorOpcode::SpawnEffectByUidAtPos:
+                scriptPtr += 5;
+                break;
+
+            case DirectorOpcode::SpawnFwEffectAtPos:
+                scriptPtr += 5;
+                break;
+
+            case DirectorOpcode::DestroyDestructible:
+            {
+                const u32 thingRef = static_cast<u32>(scriptPtr[1]);
+                scriptPtr += 2;
+
+                Thing* thing = FindThingByScriptRef(thingRef);
+                if (thing) {
+                    thing->Kill();
+                }
+                break;
             }
-            scriptPtr += 1;
-            break;
-        }
 
-        case DirectorOpcode::DynamicAnimLoad:
-        case DirectorOpcode::DynamicAnimWaitLoaded:
-        case DirectorOpcode::DynamicAnimWaitCamera:
-        case DirectorOpcode::DynamicAnimUnload:
-            ProcessDynamicAnimFunc();
-            break;
+            case DirectorOpcode::RemoveNisEffect:
+                scriptPtr += 1;
+                break;
 
-        case DirectorOpcode::WaitAnimationDone: {
-            s32 done = WaitAnimationDoneStep();
-            if (done) {
+            case DirectorOpcode::SetPlayerFlag:
+            {
+                // PSX: if scriptPtr[1] nonzero, set flag 4 on player; else clear it
+                const s32 val = scriptPtr[1];
+                scriptPtr += 2;
+                if (Player::s_player) {
+                    if (val)
+                        Player::s_player->flags |= 0x4u;
+                    else
+                        Player::s_player->flags &= ~0x4u;
+                }
+                break;
+            }
+
+            case DirectorOpcode::ClearGlobalEffectRef:
+                scriptPtr += 1;
+                break;
+
+            case DirectorOpcode::DropPickup:
+            {
+                // PSX: finds humanoid, calls DropPickup(humanoid, 1, 1)
+                const u32 thingRef = static_cast<u32>(scriptPtr[1]);
+                scriptPtr += 2;
+                Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
+                if (humanoid) {
+                    // PSX: DropPickup__8Humanoidii(humanoid, 1, 1)
+                    // TODO: Humanoid::DropPickup not yet reversed
+                }
+                break;
+            }
+
+            case DirectorOpcode::CameraFunc:
+                scriptPtr += 1;
+                ProcessCameraFunc();
+                break;
+
+            case DirectorOpcode::DoorFunc:
+                scriptPtr += 1;
+                ProcessDoorFunc();
+                break;
+
+            case DirectorOpcode::FacePointAndNisControl:
+                // PSX: face player toward NIS point, set homePos, set NisControl behaviour
+                scriptPtr += 1;
+                if (Player::s_player) {
+                    const LVector target = { nisPointX, nisPointY, nisPointZ };
+                    Player::s_player->FacePoint(target, 1);
+                    // PSX: also sets player homePos to nisPoint
+                    Player::s_player->homePos.x = nisPointX;
+                    Player::s_player->homePos.y = nisPointY;
+                    Player::s_player->homePos.z = nisPointZ;
+                    // PSX: sets behaviour to NisControl
+                    // TODO: behaviour system not yet reversed
+                }
+                break;
+
+            case DirectorOpcode::LadderFunc:
+                scriptPtr += 1;
+                ProcessLadderFunc();
+                break;
+
+            case DirectorOpcode::ModelFunc:
+                scriptPtr += 1;
+                ProcessModelFunc();
+                break;
+
+            case DirectorOpcode::HudFunc:
+                scriptPtr += 1;
+                ProcessHudFunc();
+                break;
+
+            case DirectorOpcode::SetThingFlag08:
+            {
+                const u32 thingRef = static_cast<u32>(scriptPtr[1]);
+                scriptPtr += 2;
+                Thing* thing = FindThingByScriptRef(thingRef);
+                if (thing) {
+                    thing->flags |= 0x8u;
+                }
+                break;
+            }
+
+            case DirectorOpcode::SetThingFlag28:
+            {
+                const u32 thingRef = static_cast<u32>(scriptPtr[1]);
+                scriptPtr += 2;
+                Thing* thing = FindThingByScriptRef(thingRef);
+                if (thing) {
+                    thing->flags |= 0x28u;
+                }
+                break;
+            }
+
+            case DirectorOpcode::ClearThingFlagsAndKill:
+            {
+                const u32 thingRef = static_cast<u32>(scriptPtr[1]);
+                scriptPtr += 2;
+                Thing* thing = FindThingByScriptRef(thingRef);
+                if (thing) {
+                    thing->flags &= ~0x28u;
+                    thing->Kill();
+                }
+                break;
+            }
+
+            case DirectorOpcode::KillThingType52:
+            case DirectorOpcode::KillThingType88:
+            {
+                const u32 thingRef = static_cast<u32>(scriptPtr[1]);
+                scriptPtr += 2;
+                Thing* thing = FindThingByScriptRef(thingRef);
+                if (thing) {
+                    thing->Kill();
+                }
+                break;
+            }
+
+            case DirectorOpcode::KillThingsIfCombat:
+                scriptPtr += 1;
+                if (g_ai && g_game && g_game->GetWorld() && g_game->GetWorld()->GetCurrentLevelIndex() > 5) {
+                    g_ai->KillThings(0);
+                }
+                break;
+
+            case DirectorOpcode::HumanoidFunc:
+                scriptPtr += 1;
+                ProcessHumanoidFunc();
+                break;
+
+            case DirectorOpcode::ResetCameraManager:
+                // PSX: calls cameraManager vtable func (InternalReset)
+                scriptPtr += 1;
+                break;
+
+            case DirectorOpcode::SetDesiredWideScreen:
+                SetDesiredWideScreen();
+                break;
+
+            case DirectorOpcode::ResetWideScreenDefaults:
+                // PSX: reset to defaults and hide HUD
+                wsBarTarget = 120;
+                wsBarStep = 256;
+                wsAlphaTarget = 255;
+                wsAlphaStep = 10;
+                wsMode = 2;
+                scriptPtr += 1;
+                // PSX: SetHUDVisible__3HUDii(0, 0, 0)
+                break;
+
+            case DirectorOpcode::SetSoundScript:
+                // PSX: creates CDirectorSound (type 10140) if not yet created
+                if (!directorSound) {
+                    directorSound = new CDirectorSound();
+                    directorSound->Initialize();
+                }
+                scriptPtr += 2;
+                scriptBase = ScriptPtrFromWord(scriptPtr[-1]);
+                RegisterRuntimeScriptRegion(scriptBase);
+                break;
+
+            case DirectorOpcode::EdisonFunc:
+                scriptPtr += 1;
+                ProcessEdison();
+                break;
+
+            case DirectorOpcode::SoundCdYield:
+                scriptPtr += 1;
+                rsEvent(12, 6, 0, 0);
+                break;
+
+            case DirectorOpcode::SoundCdAccess:
+                scriptPtr += 1;
+                rsEvent(13, 6, 0, 0);
+                break;
+
+            case DirectorOpcode::LoadDialogA:
+                // PSX: jcsLoadDialog(char, dialog, flags), stores handle
+                g_dialogHandle = 0;
+                directorDialogCounter = 0;
+                scriptPtr += 3;
+                break;
+
+            case DirectorOpcode::LoadDialogB:
+                // PSX: jcsLoadDialog(char, dialog, flags) with 4 params
+                g_dialogHandle = 0;
+                directorDialogCounter = 0;
+                scriptPtr += 4;
+                break;
+
+            case DirectorOpcode::WaitDialogPlayable:
+                // PSX: increments dialog counter, checks if dialog is playable
+                // If not playable and under limit, block. Otherwise continue.
+                directorDialogCounter++;
+                scriptPtr += 1;
+                // PSX would block here if dialog not ready.
+                // Without dialog system, just continue.
                 field68 = 0;
-            } else {
-                field68 = 1;
+                break;
+
+            case DirectorOpcode::PlayDialogNear:
+                // PSX: jcsPlayDialog(handle, playerPtr+28, 64)
+                scriptPtr += 1;
+                break;
+
+            case DirectorOpcode::PlayDialogFar:
+                // PSX: jcsPlayDialog(handle, playerPtr+28, 100)
+                scriptPtr += 1;
+                break;
+
+            case DirectorOpcode::PlayPriorityDialog:
+                // PSX: PlayDialogBasedOnPriority(player, 255, 1073742080)
+                scriptPtr += 1;
+                break;
+
+            case DirectorOpcode::SetDialogTimeout:
+                directorDialogLimit = scriptPtr[1];
+                scriptPtr += 2;
+                break;
+
+            case DirectorOpcode::SetNisPoint:
+            {
+                // PSX: reads point index, looks up WorldPoints, stores position
+                const s32 pointIdx = scriptPtr[1];
+                scriptPtr += 2;
+                // PSX: GetNISPoint__11WorldPointsUl(&WorldPointLists, pointIdx)
+                // TODO: WorldPoints lookup not yet reversed
+                // For now, nisPoint stays at whatever was last set
+                break;
             }
-            if (field68) {
-                return;
-            }
-            break;
-        }
 
-        case DirectorOpcode::WaitForNisControl: {
-            // PSX: reads thingRef, finds humanoid, checks if its behaviour
-            // is NisControl. If so, wait (block). If not, continue.
-            const u32 thingRef = static_cast<u32>(scriptPtr[1]);
-            Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
-            // PSX checks humanoid->behaviour->funcPtr == NisControl__9Behaviour
-            // For now, don't block - NIS behaviours not yet implemented
-            scriptPtr += 2;
-            break;
-        }
+            case DirectorOpcode::SetGotoCheckpoint:
+            case DirectorOpcode::SetFallbackCheckpoint:
+            case DirectorOpcode::SetBlockCheckpoint:
+                scriptPtr += 1;
+                break;
 
-        case DirectorOpcode::RestorePlayerControl:
-            // PSX: restores player to PlayerUserControl behaviour
-            // Sets behaviour flags back to normal input processing
-            scriptPtr += 1;
-            break;
+            case DirectorOpcode::DetermineVictory:
+                scriptPtr += 1;
+                DetermineVictoryIdle();
+                break;
 
-        case DirectorOpcode::PlayThingDynamicAnim: {
-            // PSX: reads thingRef and animEnum, calls PlayDynamicAnim on model
-            const u32 thingRef = static_cast<u32>(scriptPtr[1]);
-            const s32 animEnum = scriptPtr[2];
-            scriptPtr += 3;
-            Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
-            if (humanoid && humanoid->model) {
-                // PSX: PlayDynamicAnim__6SModeli(thing->model, animEnum)
-                // TODO: SModel::PlayDynamicAnim not yet reversed
-            }
-            break;
-        }
+            case DirectorOpcode::DetermineDeath:
+                scriptPtr += 1;
+                DetermineDeath();
+                break;
 
-        case DirectorOpcode::SetupFaceTextureAnim:
-            // PSX: looks up "TChanFace~G" and "CChanFace~G" animations,
-            // creates flipbooks, sets callback to p3dFwdCycle
-            scriptPtr += 1;
-            break;
-
-        case DirectorOpcode::CleanupFaceTextureAnim:
-            scriptPtr += 1;
-            cleanUpTexAnim();
-            break;
-
-        case DirectorOpcode::QueueDetermineNextState: {
-            // PSX: reads optional level ID param, sets g_selectedLevel if != -1
-            const s32 levelParam = scriptPtr[1];
-            scriptPtr += 2;
-            if (levelParam != -1) {
-                extern s16 g_selectedLevel;
-                g_selectedLevel = static_cast<s16>(levelParam);
-            }
-            if (g_game) {
-                g_game->SetState(GameState::DetermineNextGameState);
-            }
-            break;
-        }
-
-        case DirectorOpcode::SetGameState: {
-            const s32 gameState = scriptPtr[1];
-            scriptPtr += 2;
-            if (g_game && gameState >= 0 && gameState < static_cast<s32>(GameState::COUNT)) {
-                g_game->SetState(static_cast<GameState>(gameState));
-            }
-            field68 = 1;
-            return;
-        }
-
-        case DirectorOpcode::SetCheckpoint:
-            scriptPtr += 1;
-            if (Player::s_player) {
-                Player::s_player->OnCheckpoint();
-            }
-            break;
-
-        case DirectorOpcode::SetCheckpointByUid: {
-            // PSX: reads UID, calls setJackieCheckpoint(uid).
-            // If checkpoint set fails, calls OnCheckpoint as fallback.
-            scriptPtr += 2;
-            if (Player::s_player) {
-                Player::s_player->OnCheckpoint();
-            }
-            break;
-        }
-
-        case DirectorOpcode::SetCheckpointData:
-            // PSX: dword_800D6F90 = scriptPtr[1] (checkpoint data value)
-            scriptPtr += 2;
-            break;
-
-        case DirectorOpcode::TriggerCheckpoint:
-            scriptPtr += 1;
-            if (Player::s_player) {
-                Player::s_player->OnCheckpoint();
-            }
-            break;
-
-        case DirectorOpcode::ClearCheckpointValid:
-            // PSX: SetValidState__14CheckpointInfo(636, 0)
-            scriptPtr += 1;
-            break;
-
-        case DirectorOpcode::SpawnEffectFromMatrix:
-            scriptPtr += 4;
-            break;
-
-        case DirectorOpcode::SpawnEffectFromAttack:
-            scriptPtr += 2;
-            break;
-
-        case DirectorOpcode::SpawnEffectAtPosA:
-            scriptPtr += 4;
-            break;
-
-        case DirectorOpcode::SpawnEffectAtPosB:
-            scriptPtr += 4;
-            break;
-
-        case DirectorOpcode::SpawnEffectByUidAtPos:
-            scriptPtr += 5;
-            break;
-
-        case DirectorOpcode::SpawnFwEffectAtPos:
-            scriptPtr += 5;
-            break;
-
-        case DirectorOpcode::DestroyDestructible: {
-            const u32 thingRef = static_cast<u32>(scriptPtr[1]);
-            scriptPtr += 2;
-
-            Thing* thing = FindThingByScriptRef(thingRef);
-            if (thing) {
-                thing->Kill();
-            }
-            break;
-        }
-
-        case DirectorOpcode::RemoveNisEffect:
-            scriptPtr += 1;
-            break;
-
-        case DirectorOpcode::SetPlayerFlag: {
-            // PSX: if scriptPtr[1] nonzero, set flag 4 on player; else clear it
-            const s32 val = scriptPtr[1];
-            scriptPtr += 2;
-            if (Player::s_player) {
-                if (val)
-                    Player::s_player->flags |= 0x4u;
-                else
-                    Player::s_player->flags &= ~0x4u;
-            }
-            break;
-        }
-
-        case DirectorOpcode::ClearGlobalEffectRef:
-            scriptPtr += 1;
-            break;
-
-        case DirectorOpcode::DropPickup: {
-            // PSX: finds humanoid, calls DropPickup(humanoid, 1, 1)
-            const u32 thingRef = static_cast<u32>(scriptPtr[1]);
-            scriptPtr += 2;
-            Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
-            if (humanoid) {
-                // PSX: DropPickup__8Humanoidii(humanoid, 1, 1)
-                // TODO: Humanoid::DropPickup not yet reversed
-            }
-            break;
-        }
-
-        case DirectorOpcode::CameraFunc:
-            scriptPtr += 1;
-            ProcessCameraFunc();
-            break;
-
-        case DirectorOpcode::DoorFunc:
-            scriptPtr += 1;
-            ProcessDoorFunc();
-            break;
-
-        case DirectorOpcode::FacePointAndNisControl:
-            // PSX: face player toward NIS point, set homePos, set NisControl behaviour
-            scriptPtr += 1;
-            if (Player::s_player) {
-                const LVector target = { nisPointX, nisPointY, nisPointZ };
-                Player::s_player->FacePoint(target, 1);
-                // PSX: also sets player homePos to nisPoint
-                Player::s_player->homePos.x = nisPointX;
-                Player::s_player->homePos.y = nisPointY;
-                Player::s_player->homePos.z = nisPointZ;
-                // PSX: sets behaviour to NisControl
-                // TODO: behaviour system not yet reversed
-            }
-            break;
-
-        case DirectorOpcode::LadderFunc:
-            scriptPtr += 1;
-            ProcessLadderFunc();
-            break;
-
-        case DirectorOpcode::ModelFunc:
-            scriptPtr += 1;
-            ProcessModelFunc();
-            break;
-
-        case DirectorOpcode::HudFunc:
-            scriptPtr += 1;
-            ProcessHudFunc();
-            break;
-
-        case DirectorOpcode::SetThingFlag08: {
-            const u32 thingRef = static_cast<u32>(scriptPtr[1]);
-            scriptPtr += 2;
-            Thing* thing = FindThingByScriptRef(thingRef);
-            if (thing) {
-                thing->flags |= 0x8u;
-            }
-            break;
-        }
-
-        case DirectorOpcode::SetThingFlag28: {
-            const u32 thingRef = static_cast<u32>(scriptPtr[1]);
-            scriptPtr += 2;
-            Thing* thing = FindThingByScriptRef(thingRef);
-            if (thing) {
-                thing->flags |= 0x28u;
-            }
-            break;
-        }
-
-        case DirectorOpcode::ClearThingFlagsAndKill: {
-            const u32 thingRef = static_cast<u32>(scriptPtr[1]);
-            scriptPtr += 2;
-            Thing* thing = FindThingByScriptRef(thingRef);
-            if (thing) {
-                thing->flags &= ~0x28u;
-                thing->Kill();
-            }
-            break;
-        }
-
-        case DirectorOpcode::KillThingType52:
-        case DirectorOpcode::KillThingType88: {
-            const u32 thingRef = static_cast<u32>(scriptPtr[1]);
-            scriptPtr += 2;
-            Thing* thing = FindThingByScriptRef(thingRef);
-            if (thing) {
-                thing->Kill();
-            }
-            break;
-        }
-
-        case DirectorOpcode::KillThingsIfCombat:
-            scriptPtr += 1;
-            if (g_ai && g_game && g_game->GetWorld() && g_game->GetWorld()->GetCurrentLevelIndex() > 5) {
-                g_ai->KillThings(0);
-            }
-            break;
-
-        case DirectorOpcode::HumanoidFunc:
-            scriptPtr += 1;
-            ProcessHumanoidFunc();
-            break;
-
-        case DirectorOpcode::ResetCameraManager:
-            // PSX: calls cameraManager vtable func (InternalReset)
-            scriptPtr += 1;
-            break;
-
-        case DirectorOpcode::SetDesiredWideScreen:
-            SetDesiredWideScreen();
-            break;
-
-        case DirectorOpcode::ResetWideScreenDefaults:
-            // PSX: reset to defaults and hide HUD
-            wsBarTarget = 120;
-            wsBarStep = 256;
-            wsAlphaTarget = 255;
-            wsAlphaStep = 10;
-            wsMode = 2;
-            scriptPtr += 1;
-            // PSX: SetHUDVisible__3HUDii(0, 0, 0)
-            break;
-
-        case DirectorOpcode::SetSoundScript:
-            // PSX: creates CDirectorSound (type 10140) if not yet created
-            if (!directorSound) {
-                directorSound = new CDirectorSound();
-                directorSound->Initialize();
-            }
-            scriptPtr += 2;
-            scriptBase = ScriptPtrFromWord(scriptPtr[-1]);
-            RegisterRuntimeScriptRegion(scriptBase);
-            break;
-
-        case DirectorOpcode::EdisonFunc:
-            scriptPtr += 1;
-            ProcessEdison();
-            break;
-
-        case DirectorOpcode::SoundCdYield:
-            scriptPtr += 1;
-            rsEvent(12, 6, 0, 0);
-            break;
-
-        case DirectorOpcode::SoundCdAccess:
-            scriptPtr += 1;
-            rsEvent(13, 6, 0, 0);
-            break;
-
-        case DirectorOpcode::LoadDialogA:
-            // PSX: jcsLoadDialog(char, dialog, flags), stores handle
-            g_dialogHandle = 0;
-            directorDialogCounter = 0;
-            scriptPtr += 3;
-            break;
-
-        case DirectorOpcode::LoadDialogB:
-            // PSX: jcsLoadDialog(char, dialog, flags) with 4 params
-            g_dialogHandle = 0;
-            directorDialogCounter = 0;
-            scriptPtr += 4;
-            break;
-
-        case DirectorOpcode::WaitDialogPlayable:
-            // PSX: increments dialog counter, checks if dialog is playable
-            // If not playable and under limit, block. Otherwise continue.
-            directorDialogCounter++;
-            scriptPtr += 1;
-            // PSX would block here if dialog not ready.
-            // Without dialog system, just continue.
-            field68 = 0;
-            break;
-
-        case DirectorOpcode::PlayDialogNear:
-            // PSX: jcsPlayDialog(handle, playerPtr+28, 64)
-            scriptPtr += 1;
-            break;
-
-        case DirectorOpcode::PlayDialogFar:
-            // PSX: jcsPlayDialog(handle, playerPtr+28, 100)
-            scriptPtr += 1;
-            break;
-
-        case DirectorOpcode::PlayPriorityDialog:
-            // PSX: PlayDialogBasedOnPriority(player, 255, 1073742080)
-            scriptPtr += 1;
-            break;
-
-        case DirectorOpcode::SetDialogTimeout:
-            directorDialogLimit = scriptPtr[1];
-            scriptPtr += 2;
-            break;
-
-        case DirectorOpcode::SetNisPoint: {
-            // PSX: reads point index, looks up WorldPoints, stores position
-            const s32 pointIdx = scriptPtr[1];
-            scriptPtr += 2;
-            // PSX: GetNISPoint__11WorldPointsUl(&WorldPointLists, pointIdx)
-            // TODO: WorldPoints lookup not yet reversed
-            // For now, nisPoint stays at whatever was last set
-            break;
-        }
-
-        case DirectorOpcode::SetGotoCheckpoint:
-        case DirectorOpcode::SetFallbackCheckpoint:
-        case DirectorOpcode::SetBlockCheckpoint:
-            scriptPtr += 1;
-            break;
-
-        case DirectorOpcode::DetermineVictory:
-            scriptPtr += 1;
-            DetermineVictoryIdle();
-            break;
-
-        case DirectorOpcode::DetermineDeath:
-            scriptPtr += 1;
-            DetermineDeath();
-            break;
-
-        default:
-            // PSX: unknown opcodes are silently skipped (continue)
-            // PSX doesn't terminate on unknown opcodes.
-            scriptPtr += 1;
-            break;
+            default:
+                // PSX: unknown opcodes are silently skipped (continue)
+                // PSX doesn't terminate on unknown opcodes.
+                scriptPtr += 1;
+                break;
         }
     }
 
@@ -1120,41 +1372,42 @@ void Director::SetDesiredWideScreen() {
         scriptPtr += 1;
 
         switch (token) {
-        case DirectorWideScreenCmd::SetAlphaTarget:
-            wsAlphaTarget = *scriptPtr;
-            scriptPtr += 1;
-            break;
+            case DirectorWideScreenCmd::SetAlphaTarget:
+                wsAlphaTarget = *scriptPtr;
+                scriptPtr += 1;
+                break;
 
-        case DirectorWideScreenCmd::SetAlphaCurrent:
-            wsAlphaCurrent = *scriptPtr;
-            scriptPtr += 1;
-            break;
+            case DirectorWideScreenCmd::SetAlphaCurrent:
+                wsAlphaCurrent = *scriptPtr;
+                scriptPtr += 1;
+                break;
 
-        case DirectorWideScreenCmd::SetAlphaStep:
-            wsAlphaStep = *scriptPtr;
-            scriptPtr += 1;
-            break;
+            case DirectorWideScreenCmd::SetAlphaStep:
+                wsAlphaStep = *scriptPtr;
+                scriptPtr += 1;
+                break;
 
-        case DirectorWideScreenCmd::SetBarTarget:
-            wsBarTarget = *scriptPtr;
-            scriptPtr += 1;
-            break;
+            case DirectorWideScreenCmd::SetBarTarget:
+                wsBarTarget = *scriptPtr;
+                scriptPtr += 1;
+                break;
 
-        case DirectorWideScreenCmd::SetBarStep:
-            wsBarStep = *scriptPtr;
-            scriptPtr += 1;
-            break;
+            case DirectorWideScreenCmd::SetBarStep:
+                wsBarStep = *scriptPtr;
+                scriptPtr += 1;
+                break;
 
-        case DirectorWideScreenCmd::SetMode: {
-            s16* p = reinterpret_cast<s16*>(scriptPtr);
-            wsMode = static_cast<u16>(*p);
-            p += 2;
-            scriptPtr = reinterpret_cast<s32*>(p);
-            break;
-        }
+            case DirectorWideScreenCmd::SetMode:
+            {
+                s16* p = reinterpret_cast<s16*>(scriptPtr);
+                wsMode = static_cast<u16>(*p);
+                p += 2;
+                scriptPtr = reinterpret_cast<s32*>(p);
+                break;
+            }
 
-        default:
-            break;
+            default:
+                break;
         }
     }
 
@@ -1181,7 +1434,8 @@ void Director::ProcessEdison() {
 
         // PSX: PlayTransient__12CSoundDirectUsPC10tagLVectorUsUl(soundID, 0, 0, 0)
         CSoundDirect::PlayTransient(soundID, nullptr, 0, 0);
-    } else if (opcode == DirectorEdisonCmd::StopMusic) {
+    }
+    else if (opcode == DirectorEdisonCmd::StopMusic) {
         rsEvent(RS_STOP_MUSIC, 0, 0, 0);
     }
 }
@@ -1205,95 +1459,99 @@ void Director::ProcessCameraFunc() {
     Camera* camera = GetGameCamera();
 
     switch (op) {
-    case DirectorCameraCmd::EnableNisCamera:
-        break;
+        case DirectorCameraCmd::EnableNisCamera:
+            break;
 
-    case DirectorCameraCmd::ClearCameraFlag:
-        break;
+        case DirectorCameraCmd::ClearCameraFlag:
+            break;
 
-    case DirectorCameraCmd::SetCameraFlag:
-        break;
+        case DirectorCameraCmd::SetCameraFlag:
+            break;
 
-    case DirectorCameraCmd::CopyP3DFov:
-        if (camera) {
-            // PSX: reads fovA from the embedded tMatrixCamera, converts back
-            // to game "fov" units via rmDiv16i(fovA, 87162)
-            s32 fovA, fovB;
-            camera->GetP3DCamera()->GetFOV(&fovA, &fovB);
-            camera->SetFOV(rmDiv16i(fovA, 87162));
-        }
-        break;
+        case DirectorCameraCmd::CopyP3DFov:
+            if (camera) {
+                // PSX: reads fovA from the embedded tMatrixCamera, converts back
+                // to game "fov" units via rmDiv16i(fovA, 87162)
+                s32 fovA, fovB;
+                camera->GetP3DCamera()->GetFOV(&fovA, &fovB);
+                camera->SetFOV(rmDiv16i(fovA, 87162));
+            }
+            break;
 
-    case DirectorCameraCmd::ResetCameraFov:
-        if (camera) {
-            camera->SetCurFOV(10);
-        }
-        break;
+        case DirectorCameraCmd::ResetCameraFov:
+            if (camera) {
+                camera->SetCurFOV(10);
+            }
+            break;
 
-    case DirectorCameraCmd::SetCameraMode: {
-        const s32 mode = *scriptPtr;
-        scriptPtr += 1;
-        if (camera && mode >= 0 && mode <= 2) {
-            camera->SetMode(static_cast<CameraMode>(mode));
-        }
-        break;
-    }
-
-    case DirectorCameraCmd::LoadAsyncAnim:
-        scriptPtr += 1;
-        break;
-
-    case DirectorCameraCmd::DeleteAsyncAnim:
-        break;
-
-    case DirectorCameraCmd::PlayAsyncAnim:
-        break;
-
-    case DirectorCameraCmd::ShakeCamera: {
-        const s32 selector = *scriptPtr;
-        scriptPtr += 1;
-
-        if (selector == 0 || selector == 1 || selector == 2) {
+        case DirectorCameraCmd::SetCameraMode:
+        {
+            const s32 mode = *scriptPtr;
             scriptPtr += 1;
+            if (camera && mode >= 0 && mode <= 2) {
+                camera->SetMode(static_cast<CameraMode>(mode));
+            }
+            break;
         }
 
-        const s32 frames = *scriptPtr;
-        scriptPtr += 1;
+        case DirectorCameraCmd::LoadAsyncAnim:
+            scriptPtr += 1;
+            break;
 
-        if (camera) {
-            camera->ShakeCamera(frames);
+        case DirectorCameraCmd::DeleteAsyncAnim:
+            break;
+
+        case DirectorCameraCmd::PlayAsyncAnim:
+            break;
+
+        case DirectorCameraCmd::ShakeCamera:
+        {
+            const s32 selector = *scriptPtr;
+            scriptPtr += 1;
+
+            if (selector == 0 || selector == 1 || selector == 2) {
+                scriptPtr += 1;
+            }
+
+            const s32 frames = *scriptPtr;
+            scriptPtr += 1;
+
+            if (camera) {
+                camera->ShakeCamera(frames);
+            }
+            break;
         }
-        break;
-    }
 
-    case DirectorCameraCmd::LookAtNisPoint: {
-        scriptPtr += 1;
-        if (camera && Player::s_player) {
-            const LVector target = Player::s_player->homePos;
-            camera->LookAtTarget(&target);
-        }
-        break;
-    }
-
-    case DirectorCameraCmd::SetCameraAndLookAt: {
-        const LVector position = { scriptPtr[0], scriptPtr[1], scriptPtr[2] };
-        const LVector target = { scriptPtr[3], scriptPtr[4], scriptPtr[5] };
-        scriptPtr += 6;
-
-        if (Player::s_player) {
-            Player::s_player->pos = position;
-            Player::s_player->homePos = position;
+        case DirectorCameraCmd::LookAtNisPoint:
+        {
+            scriptPtr += 1;
+            if (camera && Player::s_player) {
+                const LVector target = Player::s_player->homePos;
+                camera->LookAtTarget(&target);
+            }
+            break;
         }
 
-        if (camera) {
-            camera->SetPosition(position.x, position.y, position.z);
-            camera->LookAtTarget(&target);
-        }
-        break;
-    }
+        case DirectorCameraCmd::SetCameraAndLookAt:
+        {
+            const LVector position = { scriptPtr[0], scriptPtr[1], scriptPtr[2] };
+            const LVector target = { scriptPtr[3], scriptPtr[4], scriptPtr[5] };
+            scriptPtr += 6;
 
-    default:
-        break;
+            if (Player::s_player) {
+                Player::s_player->pos = position;
+                Player::s_player->homePos = position;
+            }
+
+            if (camera) {
+                camera->SetPosition(position.x, position.y, position.z);
+                camera->LookAtTarget(&target);
+            }
+            break;
+        }
+
+        default:
+            break;
     }
 }
 
@@ -1309,17 +1567,17 @@ void Director::ProcessHudFunc() {
     scriptPtr += 1;
 
     switch (op) {
-    case DirectorHudCmd::HideHud:
-    case DirectorHudCmd::ShowHud:
-        break;
+        case DirectorHudCmd::HideHud:
+        case DirectorHudCmd::ShowHud:
+            break;
 
-    case DirectorHudCmd::DisplayTally:
-    case DirectorHudCmd::ShowBossHealth:
-        scriptPtr += 1;
-        break;
+        case DirectorHudCmd::DisplayTally:
+        case DirectorHudCmd::ShowBossHealth:
+            scriptPtr += 1;
+            break;
 
-    default:
-        break;
+        default:
+            break;
     }
 }
 
@@ -1350,80 +1608,82 @@ void Director::ProcessHumanoidFunc() {
         scriptPtr += 1;
 
         switch (op) {
-        case DirectorHumanoidCmd::EnterNis:
-            if (humanoid) {
-                humanoid->flags2 |= 0x30u;
-                humanoid->velocity = { 0, 0, 0 };
+            case DirectorHumanoidCmd::EnterNis:
+                if (humanoid) {
+                    humanoid->flags2 |= 0x30u;
+                    humanoid->velocity = { 0, 0, 0 };
+                }
+                break;
+
+            case DirectorHumanoidCmd::EnterNisMove:
+                if (humanoid) {
+                    humanoid->flags2 = (humanoid->flags2 & ~0x70u) | 0x10u;
+                    humanoid->velocity = { 0, 0, 0 };
+                }
+                break;
+
+            case DirectorHumanoidCmd::ExitNis:
+                if (humanoid) {
+                    humanoid->flags2 &= ~0x70u;
+                }
+                break;
+
+            case DirectorHumanoidCmd::FaceAngleDegrees:
+            {
+                const s32 deg = *scriptPtr;
+                scriptPtr += 1;
+                const s32 angle = (deg << 16) / 360;
+                if (humanoid) {
+                    humanoid->orientation.y = angle;
+                    humanoid->faceAngle = angle;
+                    humanoid->FaceAngleY(angle, 0);
+                }
+                break;
             }
-            break;
 
-        case DirectorHumanoidCmd::EnterNisMove:
-            if (humanoid) {
-                humanoid->flags2 = (humanoid->flags2 & ~0x70u) | 0x10u;
-                humanoid->velocity = { 0, 0, 0 };
+            case DirectorHumanoidCmd::StandFacingZero:
+                if (humanoid) {
+                    humanoid->flags2 &= ~0x70u;
+                    humanoid->orientation.y = 0;
+                    humanoid->faceAngle = 0;
+                    humanoid->FaceAngleY(0, 0);
+                    humanoid->flags |= 8u;
+                    humanoid->SetActionState(AS_STAND, 0);
+                }
+                break;
+
+            case DirectorHumanoidCmd::SetPosition:
+            {
+                const LVector position = { scriptPtr[0], scriptPtr[1], scriptPtr[2] };
+                scriptPtr += 3;
+                if (humanoid) {
+                    humanoid->pos = position;
+                    humanoid->homePos = position;
+                }
+                break;
             }
-            break;
 
-        case DirectorHumanoidCmd::ExitNis:
-            if (humanoid) {
-                humanoid->flags2 &= ~0x70u;
-            }
-            break;
+            case DirectorHumanoidCmd::PlayDynamicAnim:
+                scriptPtr += 1;
+                break;
 
-        case DirectorHumanoidCmd::FaceAngleDegrees: {
-            const s32 deg = *scriptPtr;
-            scriptPtr += 1;
-            const s32 angle = (deg << 16) / 360;
-            if (humanoid) {
-                humanoid->orientation.y = angle;
-                humanoid->faceAngle = angle;
-                humanoid->FaceAngleY(angle, 0);
-            }
-            break;
-        }
+            case DirectorHumanoidCmd::SetStandState:
+                if (humanoid) {
+                    humanoid->SetActionState(AS_STAND, 0);
+                }
+                break;
 
-        case DirectorHumanoidCmd::StandFacingZero:
-            if (humanoid) {
-                humanoid->flags2 &= ~0x70u;
-                humanoid->orientation.y = 0;
-                humanoid->faceAngle = 0;
-                humanoid->FaceAngleY(0, 0);
-                humanoid->flags |= 8u;
-                humanoid->SetActionState(AS_STAND, 0);
-            }
-            break;
+            case DirectorHumanoidCmd::SetPositionByCurrent:
+                if (humanoid) {
+                    LVector position = humanoid->pos;
+                    position.y -= 400;
+                    humanoid->pos = position;
+                    humanoid->homePos = position;
+                }
+                break;
 
-        case DirectorHumanoidCmd::SetPosition: {
-            const LVector position = { scriptPtr[0], scriptPtr[1], scriptPtr[2] };
-            scriptPtr += 3;
-            if (humanoid) {
-                humanoid->pos = position;
-                humanoid->homePos = position;
-            }
-            break;
-        }
-
-        case DirectorHumanoidCmd::PlayDynamicAnim:
-            scriptPtr += 1;
-            break;
-
-        case DirectorHumanoidCmd::SetStandState:
-            if (humanoid) {
-                humanoid->SetActionState(AS_STAND, 0);
-            }
-            break;
-
-        case DirectorHumanoidCmd::SetPositionByCurrent:
-            if (humanoid) {
-                LVector position = humanoid->pos;
-                position.y -= 400;
-                humanoid->pos = position;
-                humanoid->homePos = position;
-            }
-            break;
-
-        default:
-            break;
+            default:
+                break;
         }
     }
 
@@ -1448,45 +1708,47 @@ void Director::ProcessLadderFunc() {
         scriptPtr += 1;
 
         switch (op) {
-        case DirectorLadderCmd::FaceLadderPoint: {
-            const s32 axis = *scriptPtr;
-            scriptPtr += 1;
+            case DirectorLadderCmd::FaceLadderPoint:
+            {
+                const s32 axis = *scriptPtr;
+                scriptPtr += 1;
 
-            if (Player::s_player) {
-                LVector target = { nisPointX, nisPointY, nisPointZ };
-                if (axis == 1 && g_game && g_game->GetWorld() && g_game->GetWorld()->GetCurrentLevelIndex() == 3) {
-                    target.x += 1024;
-                } else {
-                    target.z += 1024;
+                if (Player::s_player) {
+                    LVector target = { nisPointX, nisPointY, nisPointZ };
+                    if (axis == 1 && g_game && g_game->GetWorld() && g_game->GetWorld()->GetCurrentLevelIndex() == 3) {
+                        target.x += 1024;
+                    }
+                    else {
+                        target.z += 1024;
+                    }
+                    Player::s_player->FacePoint(target, 1);
                 }
-                Player::s_player->FacePoint(target, 1);
+                break;
             }
-            break;
-        }
 
-        case DirectorLadderCmd::TeleportPlayer:
-            break;
+            case DirectorLadderCmd::TeleportPlayer:
+                break;
 
-        case DirectorLadderCmd::CameraLookAtHatch:
-            if (Player::s_player) {
-                Camera* camera = GetGameCamera();
-                if (camera) {
-                    LVector target = Player::s_player->homePos;
-                    target.y += 1536;
-                    target.z += 128;
-                    camera->LookAtTarget(&target);
+            case DirectorLadderCmd::CameraLookAtHatch:
+                if (Player::s_player) {
+                    Camera* camera = GetGameCamera();
+                    if (camera) {
+                        LVector target = Player::s_player->homePos;
+                        target.y += 1536;
+                        target.z += 128;
+                        camera->LookAtTarget(&target);
+                    }
                 }
-            }
-            break;
+                break;
 
-        case DirectorLadderCmd::CloseHatch:
-            break;
+            case DirectorLadderCmd::CloseHatch:
+                break;
 
-        case DirectorLadderCmd::ClearNis:
-            break;
+            case DirectorLadderCmd::ClearNis:
+                break;
 
-        default:
-            break;
+            default:
+                break;
         }
     }
 
@@ -1511,55 +1773,58 @@ void Director::ProcessDoorFunc() {
         scriptPtr += 1;
 
         switch (op) {
-        case DirectorDoorCmd::SetDoor:
-            scriptPtr += 1;
-            break;
+            case DirectorDoorCmd::SetDoor:
+                scriptPtr += 1;
+                break;
 
-        case DirectorDoorCmd::OpenDoor:
-            break;
+            case DirectorDoorCmd::OpenDoor:
+                break;
 
-        case DirectorDoorCmd::SetDoorState:
-            break;
+            case DirectorDoorCmd::SetDoorState:
+                break;
 
-        case DirectorDoorCmd::FaceDoorPoint: {
-            const u32 thingRef = static_cast<u32>(*scriptPtr);
-            scriptPtr += 1;
+            case DirectorDoorCmd::FaceDoorPoint:
+            {
+                const u32 thingRef = static_cast<u32>(*scriptPtr);
+                scriptPtr += 1;
 
-            Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
-            if (humanoid) {
-                const LVector target = { nisPointX, nisPointY, nisPointZ };
-                humanoid->FacePoint(target, 1);
+                Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
+                if (humanoid) {
+                    const LVector target = { nisPointX, nisPointY, nisPointZ };
+                    humanoid->FacePoint(target, 1);
+                }
+                break;
             }
-            break;
-        }
 
-        case DirectorDoorCmd::FaceDoorAngle: {
-            const u32 thingRef = static_cast<u32>(*scriptPtr);
-            scriptPtr += 1;
+            case DirectorDoorCmd::FaceDoorAngle:
+            {
+                const u32 thingRef = static_cast<u32>(*scriptPtr);
+                scriptPtr += 1;
 
-            Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
-            if (humanoid) {
-                humanoid->FaceAngleY(humanoid->orientation.y, 1);
+                Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
+                if (humanoid) {
+                    humanoid->FaceAngleY(humanoid->orientation.y, 1);
+                }
+                break;
             }
-            break;
-        }
 
-        case DirectorDoorCmd::AttachToDoor: {
-            const u32 thingRef = static_cast<u32>(*scriptPtr);
-            scriptPtr += 1;
+            case DirectorDoorCmd::AttachToDoor:
+            {
+                const u32 thingRef = static_cast<u32>(*scriptPtr);
+                scriptPtr += 1;
 
-            Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
-            if (humanoid) {
-                humanoid->SetActionState(AS_STAND, 0);
+                Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
+                if (humanoid) {
+                    humanoid->SetActionState(AS_STAND, 0);
+                }
+                break;
             }
-            break;
-        }
 
-        case DirectorDoorCmd::TeleportThroughDoor:
-            break;
+            case DirectorDoorCmd::TeleportThroughDoor:
+                break;
 
-        default:
-            break;
+            default:
+                break;
         }
     }
 
@@ -1574,36 +1839,41 @@ void Director::DetermineVictoryIdle() {
 
     if (victoryBossCRC == 4883877) {
         victoryScript = wait_subroutine;
-    } else if (victoryBossCRC == 4917663) {
+    }
+    else if (victoryBossCRC == 4917663) {
         victoryScript = victory_disco;
-    } else if (victoryBossCRC == 76059849) {
+    }
+    else if (victoryBossCRC == 76059849) {
         victoryScript = victory_grontar;
-    } else if (victoryBossCRC == 302774) {
+    }
+    else if (victoryBossCRC == 302774) {
         victoryScript = victory_chef;
-    } else if (victoryBossCRC == 4863710) {
+    }
+    else if (victoryBossCRC == 4863710) {
         victoryScript = victory_clown;
-    } else {
+    }
+    else {
         // PSX: rating = GetLevelEndRating__12ScoreManager(theScoreManager)
         s32 rating = 0;
         if (g_scoreManager) {
             rating = g_scoreManager->GetLevelEndRating();
         }
         switch (rating) {
-        case 0:
-            victoryScript = victory_poor;
-            break;
-        case 1:
-            victoryScript = victory_ok;
-            break;
-        case 2:
-            victoryScript = victory_good;
-            break;
-        case 3:
-            victoryScript = victory_perfect;
-            break;
-        default:
-            victoryScript = victory_poor;
-            break;
+            case 0:
+                victoryScript = victory_poor;
+                break;
+            case 1:
+                victoryScript = victory_ok;
+                break;
+            case 2:
+                victoryScript = victory_good;
+                break;
+            case 3:
+                victoryScript = victory_perfect;
+                break;
+            default:
+                victoryScript = victory_poor;
+                break;
         }
     }
 
@@ -1634,65 +1904,67 @@ void Director::DetermineLevelIntro() {
         directorTimeOut = 0;
 
         switch (levelID) {
-        case 8:
-            introScript = intro_all_dante;
-            break;
+            case 8:
+                introScript = intro_all_dante;
+                break;
 
-        case 11:
-            introScript = intro_every_chef;
-            break;
+            case 11:
+                introScript = intro_every_chef;
+                break;
 
-        case 12:
-            introScript = intro_every_grontar;
-            break;
+            case 12:
+                introScript = intro_every_grontar;
+                break;
 
-        case 13:
-            introScript = intro_every_clown;
-            break;
+            case 13:
+                introScript = intro_every_clown;
+                break;
 
-        case 14:
-            introScript = intro_every_disco;
-            break;
+            case 14:
+                introScript = intro_every_disco;
+                break;
 
-        default:
-            break;
+            default:
+                break;
         }
-    } else {
+    }
+    else {
         switch (levelID) {
-        case 1:
-            if (g_game && g_game->GetWorld() && g_game->GetWorld()->GetCurrentPetalIndex() == 0) {
-                introScript = start_frantic;
-            } else {
+            case 1:
+                if (g_game && g_game->GetWorld() && g_game->GetWorld()->GetCurrentPetalIndex() == 0) {
+                    introScript = start_frantic;
+                }
+                else {
+                    directorTimeOut = 0;
+                    introScript = start_generic;
+                }
+                break;
+
+            case 8:
+                directorTimeOut = 0;
+                introScript = intro_all_dante;
+                break;
+
+            case 11:
+                introScript = intro_chef;
+                break;
+
+            case 12:
+                introScript = intro_grontar;
+                break;
+
+            case 13:
+                introScript = intro_clown;
+                break;
+
+            case 14:
+                introScript = intro_disco;
+                break;
+
+            default:
                 directorTimeOut = 0;
                 introScript = start_generic;
-            }
-            break;
-
-        case 8:
-            directorTimeOut = 0;
-            introScript = intro_all_dante;
-            break;
-
-        case 11:
-            introScript = intro_chef;
-            break;
-
-        case 12:
-            introScript = intro_grontar;
-            break;
-
-        case 13:
-            introScript = intro_clown;
-            break;
-
-        case 14:
-            introScript = intro_disco;
-            break;
-
-        default:
-            directorTimeOut = 0;
-            introScript = start_generic;
-            break;
+                break;
         }
     }
 
@@ -1713,23 +1985,25 @@ void Director::DetermineDeath() {
 
         if (levelID < 2 || levelID >= 4) {
             deathScript = death_fall_pavement;
-        } else {
+        }
+        else {
             deathScript = death_fall_water;
         }
-    } else {
+    }
+    else {
         switch (deathType) {
-        case 1:
-            deathScript = death_fall_pavement;
-            break;
-        case 2:
-            deathScript = death_fall_water;
-            break;
-        case 4:
-            deathScript = death_fall_goo;
-            break;
-        default:
-            deathScript = death_generic;
-            break;
+            case 1:
+                deathScript = death_fall_pavement;
+                break;
+            case 2:
+                deathScript = death_fall_water;
+                break;
+            case 4:
+                deathScript = death_fall_goo;
+                break;
+            default:
+                deathScript = death_generic;
+                break;
         }
     }
 
@@ -1780,7 +2054,8 @@ void Director::ProcessDynamicAnimFunc() {
             (g_characterManager && (g_characterManager->GetAnimation(thingType, animEnum) != nullptr));
         if (hasAnim) {
             field68 = 0;
-        } else {
+        }
+        else {
             // PSX retries this opcode until the animation is available.
             scriptPtr = cmd;
             field68 = 1;
@@ -1803,7 +2078,8 @@ void Director::ProcessDynamicAnimFunc() {
         if (g_display && g_display->GetView().GetCamera()) {
             scriptPtr = cmd + 1;
             field68 = 0;
-        } else {
+        }
+        else {
             field68 = 1;
         }
         return;
@@ -1834,12 +2110,14 @@ void Director::HandleWideScreen() {
         const s32 barStep = wsBarStep;
         if (barStep == 256) {
             barCurrent = barDesired;
-        } else if (barCurrent >= barDesired) {
+        }
+        else if (barCurrent >= barDesired) {
             barCurrent -= barStep;
             if (barCurrent < barDesired) {
                 barCurrent = barDesired;
             }
-        } else {
+        }
+        else {
             barCurrent += barStep;
             if (barCurrent > barDesired) {
                 barCurrent = barDesired;
@@ -1857,7 +2135,8 @@ void Director::HandleWideScreen() {
                 if (alphaCurrent > alphaDesired) {
                     alphaCurrent = alphaDesired;
                 }
-            } else {
+            }
+            else {
                 alphaCurrent -= alphaStep;
                 if (alphaCurrent < alphaDesired) {
                     alphaCurrent = alphaDesired;
@@ -1897,7 +2176,8 @@ void Director::DrawWideScreenPolys() {
         // Bottom bar
         ScreenDraw::DrawColoredRect(0.0f, 1.0f - barFrac, 1.0f, barFrac,
                                     alpha, alpha, alpha, 255);
-    } else {
+    }
+    else {
         // Full opacity bars - PSX: mode 2 = black, other = white
         u8 c = (wsMode == 2) ? 0 : 255;
         // Top bar

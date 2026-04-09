@@ -1,8 +1,3 @@
-// display.h - Display manager reversed from PSX DISPLAY.CPP / PSXDISP.CPP
-// PSX source: C:\CHAN\GAME\SRC\GEN\DISPLAY.CPP, C:\CHAN\GAME\SRC\PSX\PSXDISP.CPP
-// Display : Manager - owns the global tView and frame counter.
-// Registers dispBeginFrameHandler (pri=62) and dispEndFrameHandler (pri=-62)
-// into the Game's handlerSet2 during InternalOpen.
 #pragma once
 #include "gen/manager.h"
 #include "gen/handler.h"

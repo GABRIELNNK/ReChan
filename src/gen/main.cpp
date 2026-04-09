@@ -1,4 +1,3 @@
-// main.cpp
 #include "common.h"
 #include "p3d/context.h"
 #include "p3d/input.h"
@@ -21,25 +20,26 @@ static f32 sSavedMasterVolume = 1.0f;
 
 static bool OnWndProc(const pddiWndMessage& msg) {
     switch (msg.event) {
-    case PDDI_WND_FOCUS:
-        if (msg.param1) {
-            // Regained focus
-            if (p3d::input)
-                p3d::input->SetEnabled(true);
-            if (AudioEngine::IsInitialized())
-                AudioEngine::SetMasterVolume(sSavedMasterVolume);
-        } else {
-            // Lost focus
-            if (p3d::input)
-                p3d::input->SetEnabled(false);
-            if (AudioEngine::IsInitialized()) {
-                sSavedMasterVolume = AudioEngine::GetMasterVolume();
-                AudioEngine::SetMasterVolume(0.0f);
+        case PDDI_WND_FOCUS:
+            if (msg.param1) {
+                // Regained focus
+                if (p3d::input)
+                    p3d::input->SetEnabled(true);
+                if (AudioEngine::IsInitialized())
+                    AudioEngine::SetMasterVolume(sSavedMasterVolume);
             }
-        }
-        break;
-    default:
-        break;
+            else {
+                // Lost focus
+                if (p3d::input)
+                    p3d::input->SetEnabled(false);
+                if (AudioEngine::IsInitialized()) {
+                    sSavedMasterVolume = AudioEngine::GetMasterVolume();
+                    AudioEngine::SetMasterVolume(0.0f);
+                }
+            }
+            break;
+        default:
+            break;
     }
     return false;
 }

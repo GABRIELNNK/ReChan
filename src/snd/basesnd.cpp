@@ -1,5 +1,3 @@
-// basesnd.cpp - CSound base class reversed from PSX BASESND.CPP
-// PSX source: C:\CHAN\GAME\SRC\SND\BASESND.CPP
 #include "snd/basesnd.h"
 #include "snd/sndfact.h"
 #include "snd/trnssnd.h"
@@ -14,8 +12,7 @@ CSound::CSound() {
     pad12 = 0;
 }
 
-CSound::~CSound() {
-}
+CSound::~CSound() {}
 
 // PSX: Initialize__6CSoundPC10tagLVector (BASESND.CPP:152, 0x800A1F48)
 s32 CSound::Initialize(void* pos) {
@@ -51,8 +48,7 @@ s32 CSound::PlayTransient(u16 soundId, u32 triggerFlags, u16 pan) {
 
     CSound* tmp = nullptr;
     s32 result = CSoundFactory::CreateObject(10070, &tmp, soundId);
-    if (result < 0)
-    {
+    if (result < 0) {
         return result;
     }
 
@@ -61,7 +57,8 @@ s32 CSound::PlayTransient(u16 soundId, u32 triggerFlags, u16 pan) {
     if (err >= 0) {
         if (triggerFlags & 0x08) {
             err = trans->Trigger(pan);
-        } else {
+        }
+        else {
             err = -1000;
             if (triggerFlags & 0x01) {
                 err = trans->TriggerDialogWorld(pan);
@@ -100,12 +97,10 @@ s32 CSound::PlayTransientStereo(u16 sndL, u16 sndR) {
         transR->Trigger(0);
     }
 
-    if (tmpL)
-    {
+    if (tmpL) {
         delete tmpL;
     }
-    if (tmpR)
-    {
+    if (tmpR) {
         delete tmpR;
     }
     return 0;
@@ -115,15 +110,13 @@ s32 CSound::PlayTransientStereo(u16 sndL, u16 sndR) {
 s32 CSound::BeginPersistent(u8 soundId, CGenericPersistentSound** outObj) {
     MARKFUNCTION(0x800A1FB8);
 
-    if (*outObj)
-    {
+    if (*outObj) {
         return -3000;
     }
 
     CSound* tmp = nullptr;
     s32 result = CSoundFactory::CreateObject(10080, &tmp, soundId);
-    if (result < 0)
-    {
+    if (result < 0) {
         return result;
     }
 
@@ -137,14 +130,13 @@ s32 CSound::BeginPersistent(u8 soundId, CGenericPersistentSound** outObj) {
 s32 CSound::EndPersistent(CGenericPersistentSound** obj) {
     MARKFUNCTION(0x800A2038);
 
-    if (!*obj)
-    {
+    if (!*obj) {
         return -3001;
     }
 
     // PSX: vtable[12]+8 = End virtual call
     (*obj)->End();
-    delete *obj;
+    delete* obj;
     *obj = nullptr;
     return 0;
 }

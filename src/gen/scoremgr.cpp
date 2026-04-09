@@ -1,5 +1,3 @@
-// scoremgr.cpp - ScoreManager class reversed from PSX SCOREMGR.CPP
-// PSX source: C:\CHAN\GAME\SRC\GEN\SCOREMGR.CPP
 #include "gen/scoremgr.h"
 #include "gen/game.h"
 #include "gen/world.h"
@@ -40,7 +38,8 @@ void CheckpointInfo::SetValidState(s32 state) {
             levelIndex = static_cast<s32>(g_game->GetWorld()->GetCurrentLevelIndex());
             petalIndex = static_cast<s32>(g_game->GetWorld()->GetCurrentPetalIndex());
         }
-    } else {
+    }
+    else {
         isValid = 0;
         levelIndex = -1;
         petalIndex = -1;
@@ -123,10 +122,12 @@ void ScoreManager::InitLevelStats() {
         const u32 petal = g_game->GetWorld()->GetCurrentPetalIndex();
         if (level < 7 && petal < 3) {
             currentGoldDragons = petalStats[level * 3 + petal].goldDragons;
-        } else {
+        }
+        else {
             currentGoldDragons = 0;
         }
-    } else {
+    }
+    else {
         currentGoldDragons = 0;
     }
 
@@ -272,15 +273,15 @@ s32 ScoreManager::GetLevelEndRating() {
     const u8 grade = CalcGrade();
 
     switch (grade) {
-    case 2:
-        return 1;
-    case 3:
-    case 4:
-        return 2;
-    case 5:
-        return 3;
-    default:
-        return 0;
+        case 2:
+            return 1;
+        case 3:
+        case 4:
+            return 2;
+        case 5:
+            return 3;
+        default:
+            return 0;
     }
 }
 
@@ -346,7 +347,8 @@ void ScoreManager::RegisterCollectible(const Collectible* collectible, s32 type)
             collectibleRegistry[collectibleCount] = static_cast<s32>(reinterpret_cast<uintptr_t>(collectible));
             collectibleCount++;
         }
-    } else if (type == 2) {
+    }
+    else if (type == 2) {
         // PSX returns currentGoldDragons for current level/petal.
         // Read-only query, no state change needed.
     }
@@ -366,7 +368,8 @@ void ScoreManager::RegisterGotCollectible(const Collectible* collectible, s32 ty
             }
         }
         currentCollectCount++;
-    } else if (type == 2) {
+    }
+    else if (type == 2) {
         if (g_game && g_game->GetWorld()) {
             const u32 level = g_game->GetWorld()->GetCurrentLevelIndex();
             const u32 petal = g_game->GetWorld()->GetCurrentPetalIndex();

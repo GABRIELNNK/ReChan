@@ -1,5 +1,3 @@
-// snddrct.cpp - CSoundDirect reversed from PSX SNDDRCT.CPP
-// PSX source: C:\CHAN\GAME\SRC\SND\SNDDRCT.CPP
 #include "snd/snddrct.h"
 #include "snd/sndfact.h"
 #include "snd/trnssnd.h"
@@ -12,8 +10,7 @@ s32 CSoundDirect::PlayTransient(u16 soundId, void* posPtr, u16 pan, u32 flags) {
 
     CSound* tmp = nullptr;
     s32 result = CSoundFactory::CreateObject(10070, &tmp, soundId);
-    if (result < 0)
-    {
+    if (result < 0) {
         return result;
     }
 
@@ -30,15 +27,13 @@ s32 CSoundDirect::PlayTransient(u16 soundId, void* posPtr, u16 pan, u32 flags) {
 s32 CSoundDirect::BeginPersistent(u8 persistId, CGenericPersistentSound** outObj, void* posPtr) {
     MARKFUNCTION(0x8008D650);
 
-    if (*outObj)
-    {
+    if (*outObj) {
         return -3000;
     }
 
     CSound* tmp = nullptr;
     s32 result = CSoundFactory::CreateObject(10080, &tmp, persistId);
-    if (result < 0)
-    {
+    if (result < 0) {
         return 0;
     }
 
@@ -52,14 +47,13 @@ s32 CSoundDirect::BeginPersistent(u8 persistId, CGenericPersistentSound** outObj
 s32 CSoundDirect::EndPersistent(CGenericPersistentSound** obj) {
     MARKFUNCTION(0x8008D6C4);
 
-    if (!*obj)
-    {
+    if (!*obj) {
         return -3001;
     }
 
     // PSX: vtable[12]+8 = End/destructor
     (*obj)->End();
-    delete *obj;
+    delete* obj;
     *obj = nullptr;
     return 0;
 }

@@ -1,5 +1,3 @@
-// gamemenu.cpp - gameMenu reversed from PSX GAMEMENU.CPP
-// PSX source: C:\CHAN\GAME\SRC\FE\GAMEMENU.CPP (Overlay 4)
 #include "fe/gamemenu.h"
 #include "gen/game.h"
 
@@ -7,7 +5,7 @@
 gameMenu* g_gameMenu = nullptr;
 
 // Hash constants for gameMenu
-static constexpr u32 HASH_PAUSE_MENU  = (u32)(-1033476366);  // 0xC26EF5F2
+static constexpr u32 HASH_PAUSE_MENU = (u32)(-1033476366);  // 0xC26EF5F2
 static constexpr u32 HASH_ITEM_RESUME_GAME = (u32)(-961823183);  // ResumeGame callback
 static constexpr u32 HASH_ITEM_SHOCK_TOGGLE = 810498402;  // SetControllerShock callback
 

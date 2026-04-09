@@ -1,4 +1,3 @@
-// world.cpp - Level world implementation
 #include "common.h"
 #include "gen/world.h"
 #include "gen/ai.h"
@@ -61,7 +60,8 @@ void PsxVRAM::DecodePage(u16 tpage, u16 cba, u8* out) const {
                 PsxToRGBA(color, out[idx], out[idx + 1], out[idx + 2], out[idx + 3]);
             }
         }
-    } else if (depth == 1) {
+    }
+    else if (depth == 1) {
         // 8-bit indexed: 256-color CLUT
         u16 clut[256];
         for (int i = 0; i < 256; i++)
@@ -79,7 +79,8 @@ void PsxVRAM::DecodePage(u16 tpage, u16 cba, u8* out) const {
                 PsxToRGBA(color, out[idx], out[idx + 1], out[idx + 2], out[idx + 3]);
             }
         }
-    } else {
+    }
+    else {
         // 15-bit direct color
         for (int y = 0; y < 256; y++) {
             for (int x = 0; x < 256; x++) {
@@ -112,9 +113,9 @@ void World::LoadTPGTextures(const u8* lcfData, u32 lcfSize) {
         if (pos + 16 > lcfSize) break;
         char magic[5] = {};
         memcpy(magic, lcfData + pos, 4);
-        u32 size   = (lcfData[pos+4]<<24) | (lcfData[pos+5]<<16) | (lcfData[pos+6]<<8) | lcfData[pos+7];
-        u32 offset = (lcfData[pos+8]<<24) | (lcfData[pos+9]<<16) | (lcfData[pos+10]<<8) | lcfData[pos+11];
-        u32 extraLen = (lcfData[pos+12]<<24) | (lcfData[pos+13]<<16) | (lcfData[pos+14]<<8) | lcfData[pos+15];
+        u32 size = (lcfData[pos + 4] << 24) | (lcfData[pos + 5] << 16) | (lcfData[pos + 6] << 8) | lcfData[pos + 7];
+        u32 offset = (lcfData[pos + 8] << 24) | (lcfData[pos + 9] << 16) | (lcfData[pos + 10] << 8) | lcfData[pos + 11];
+        u32 extraLen = (lcfData[pos + 12] << 24) | (lcfData[pos + 13] << 16) | (lcfData[pos + 14] << 8) | lcfData[pos + 15];
         pos += 16;
         if (extraLen > 0)
             pos += (extraLen + 3) & ~3;
@@ -240,7 +241,7 @@ void World::LoadLevelNames() {
         return;
 
     std::string content((std::istreambuf_iterator<char>(file)),
-                         std::istreambuf_iterator<char>());
+                        std::istreambuf_iterator<char>());
     file.close();
 
     levelCount = 0;
@@ -261,7 +262,8 @@ void World::LoadLevelNames() {
             memcpy(tmpLevNames[levIdx], token, len + 1);
             petalSeq = -1;
             ++levelCount;
-        } else {
+        }
+        else {
             // Petal line: <index> <soundByte> <name>
             ++petalSeq;
             tmpPetalIdx[levIdx][petalSeq] = atoi(token);
@@ -284,16 +286,16 @@ void World::LoadLevelNames() {
     }
 
     // Build levelNames
-    levelNames = new char*[levelCount + 1];
+    levelNames = new char* [levelCount + 1];
     levelNames[levelCount] = nullptr;
 
     // Build petalNames sub-arrays (null-initialized)
-    petalNames = new char**[levelCount + 1];
+    petalNames = new char** [levelCount + 1];
     petalNames[levelCount] = nullptr;
     for (s32 i = 0; i <= levelCount; i++) {
         if (i == levelCount) break;
         s32 pc = tmpPetalCounts[i];
-        petalNames[i] = new char*[pc + 1];
+        petalNames[i] = new char* [pc + 1];
         for (s32 j = 0; j <= pc; j++)
             petalNames[i][j] = nullptr;
     }
@@ -318,7 +320,7 @@ void World::LoadLevelNames() {
     }
 
     // Build petalSoundIDs (u8 arrays, sequential order)
-    petalSoundIDs = new u8*[levelCount];
+    petalSoundIDs = new u8 * [levelCount];
     for (s32 i = 0; i < levelCount; i++) {
         s32 pc = tmpPetalCounts[i];
         petalSoundIDs[i] = new u8[pc];
@@ -360,8 +362,8 @@ void World::LoadPermanent() {
 
     // PSX: AddThingNoTagList("Jackie", 0, {0,0,0}, {0,0,0}, "JACKIELOHIER", nullptr)
     if (g_ai) {
-        LVector zeroPos = {0, 0, 0};
-        SVector zeroOrient = {0, 0, 0};
+        LVector zeroPos = { 0, 0, 0 };
+        SVector zeroOrient = { 0, 0, 0 };
         g_ai->AddThingNoTagList("Jackie", 0, &zeroPos, &zeroOrient, "JACKIELOHIER", nullptr);
     }
 }
@@ -515,7 +517,8 @@ bool World::Load(const std::string& lcfPath) {
         if (e.offset + e.size > dataSize) {
             blkPtrs.push_back(nullptr);
             blkSizes.push_back(0);
-        } else {
+        }
+        else {
             blkPtrs.push_back(data + e.offset);
             blkSizes.push_back(e.size);
         }
@@ -531,7 +534,7 @@ bool World::Load(const std::string& lcfPath) {
         Block* b = blockMgr.GetBlock(i);
         if (!b) continue;
         if (i < 10) LOG("[World] Block %u: pos=(%d,%d,%d) dim=(%d,%d,%d) parsed=%d",
-                           i, b->posX, b->posY, b->posZ, b->dimX, b->dimY, b->dimZ, b->parsed);
+                        i, b->posX, b->posY, b->posZ, b->dimX, b->dimY, b->dimZ, b->parsed);
         s32 bMinX = b->posX + b->halfExtNegX, bMaxX = b->posX + b->halfExtPosX;
         s32 bMinY = b->posY + b->halfExtNegY, bMaxY = b->posY + b->halfExtPosY;
         s32 bMinZ = b->posZ + b->halfExtNegZ, bMaxZ = b->posZ + b->halfExtPosZ;
@@ -542,9 +545,9 @@ bool World::Load(const std::string& lcfPath) {
     levelMin = { minX, minY, minZ };
     levelMax = { maxX, maxY, maxZ };
     LOG("[World] Level AABB: min=(%d,%d,%d) max=(%d,%d,%d)",
-           minX, minY, minZ, maxX, maxY, maxZ);
+        minX, minY, minZ, maxX, maxY, maxZ);
     LOG("[World] Level size: (%d, %d, %d)",
-           maxX - minX, maxY - minY, maxZ - minZ);
+        maxX - minX, maxY - minY, maxZ - minZ);
 
     return blockMgr.GetNumBlocks() > 0;
 }
@@ -586,17 +589,17 @@ static u32 chanp3dClipCode(const Mat4& pm, s32 vx, s32 vy, s32 vz) {
     f32 fy = static_cast<f32>(vy);
     f32 fz = static_cast<f32>(vz);
     // Transform to homogeneous clip space
-    f32 cx = pm.m[0] * fx + pm.m[4] * fy + pm.m[8]  * fz + pm.m[12];
-    f32 cy = pm.m[1] * fx + pm.m[5] * fy + pm.m[9]  * fz + pm.m[13];
+    f32 cx = pm.m[0] * fx + pm.m[4] * fy + pm.m[8] * fz + pm.m[12];
+    f32 cy = pm.m[1] * fx + pm.m[5] * fy + pm.m[9] * fz + pm.m[13];
     f32 cz = pm.m[2] * fx + pm.m[6] * fy + pm.m[10] * fz + pm.m[14];
     f32 cw = pm.m[3] * fx + pm.m[7] * fy + pm.m[11] * fz + pm.m[15];
     u32 code = 0;
     if (cx < -cw) code |= 0x01; // left
-    if (cx >  cw) code |= 0x02; // right
+    if (cx > cw) code |= 0x02; // right
     if (cy < -cw) code |= 0x04; // bottom
-    if (cy >  cw) code |= 0x08; // top
+    if (cy > cw) code |= 0x08; // top
     if (cz < -cw) code |= 0x10; // near
-    if (cz >  cw) code |= 0x20; // far
+    if (cz > cw) code |= 0x20; // far
     return code;
 }
 

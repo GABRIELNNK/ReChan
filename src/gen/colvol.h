@@ -1,7 +1,4 @@
-// colvol.h - Collision volume types for entity collision shapes
-// Original: C:\CHAN\GAME\SRC\GEN\COLVOL.CPP
 #pragma once
-
 #include "core.h"
 
 // tagCollisionBox - axis-aligned bounding box (16 bytes)

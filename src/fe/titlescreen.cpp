@@ -1,7 +1,3 @@
-// titlescreen.cpp - TitleScreen reversed from PSX FEMNUMGR.CPP (Overlay 4)
-// PSX source: C:\CHAN\GAME\SRC\FE\FEMNUMGR.CPP
-// Rendering is handled by the base class oxScreenManager::Render -> xcSection::Draw.
-// SelfUpdate cycles RGBA on the "PRESS START" text object.
 #include "fe/titlescreen.h"
 #include "xclib/xclib.h"
 

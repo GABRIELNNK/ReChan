@@ -1,9 +1,4 @@
-// sound.h - Sound manager reversed from PSX SOUND.CPP
-// PSX source: C:\CHAN\GAME\SRC\SND\SOUND.CPP
-// Manages sound/music playback. On PSX this interfaces with SPU hardware.
-// PC: uses AudioEngine (miniaudio wrapper) for actual playback.
 #pragma once
-
 #include "gen/manager.h"
 #include "pc/audio.h"
 
@@ -44,22 +39,11 @@ public:
     AudioVoice musicVoice = AUDIO_VOICE_INVALID;
     bool musicPlaying = false;
 
-    // PSX: __5Sound (SOUND.CPP, 0x80059794)
     Sound();
-
-    // PSX: _._5Sound (SOUND.CPP, 0x800597E8)
     ~Sound() override;
-
-    // PSX: InternalOpen__5Sound (0x80059818)
     void InternalOpen() override;
-
-    // PSX: InternalClose__5Sound
     void InternalClose() override;
-
-    // PSX: SetupSound__5Sound (0x800598D8)
     void SetupSound();
-
-    // PSX: CleanupSound__5Sound (0x800599B0)
     void CleanupSound();
 
     // PC: play a specific sample from a WAX bank

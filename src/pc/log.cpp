@@ -1,5 +1,4 @@
 #include "log.h"
-
 #include <cstring>
 
 Log& Log::Get() {

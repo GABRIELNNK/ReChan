@@ -1,5 +1,3 @@
-// activezn.cpp - ActiveZone and SubZoneVolume implementation
-// Reversed from PSX C:\CHAN\GAME\SRC\AI\ACTIVEZN.CPP
 #include "ai/activezn.h"
 #include "ai/thing.h"
 #include "gen/database.h"

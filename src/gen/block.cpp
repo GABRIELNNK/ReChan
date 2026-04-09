@@ -1,5 +1,3 @@
-// block.cpp = Block class reversed from PSX BLOCK.CPP
-// Original: C:\CHAN\GAME\SRC\GEN\BLOCK.CPP
 #include "gen/block.h"
 #include "gen/database.h"
 #include "gen/geometry.h"
@@ -177,7 +175,8 @@ void Block::Init(const DBVolume* vol) {
             if (a->strValue) {
                 hasScript = 1;
                 scriptId = static_cast<u16>(static_cast<s8>(vol->scriptAxis));
-            } else {
+            }
+            else {
                 hasScript = 0;
                 scriptId = 0;
             }

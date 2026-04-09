@@ -1,5 +1,3 @@
-// ai.cpp - AI entity manager reversed from PSX AI.CPP
-// PSX source: C:\CHAN\GAME\SRC\AI\AI.CPP
 #include "gen/ai.h"
 #include "gen/game.h"
 #include "gen/database.h"
@@ -176,8 +174,7 @@ void AI::AddThingNoTagList(const char* name, u16 type,
 // PSX: HandleHumanoidHumanoidCollision__Fv (AI.CPP:951, 0x800554D0)
 // Iterates FightingCollision humanoid array, calls pairwise collision.
 // FightingCollision not yet reversed - stub.
-static void HandleHumanoidHumanoidCollision() {
-}
+static void HandleHumanoidHumanoidCollision() {}
 
 // PSX: MoveThings__2AI (AI.CPP:1268, 0x80055D10)
 // Full per-frame pipeline matching PSX exactly.
@@ -340,7 +337,8 @@ void AI::Populate() {
             }
             AddThingNoTagList(pt->GetName(), subType, &pt->pos,
                               (const SVector*)&pt->field40, modelName, pt);
-        } else {
+        }
+        else {
             // Player spawn point (type 6, subType 0)
             // PSX: player must already exist; Populate configures position/orientation.
             if (!Player::s_player) {

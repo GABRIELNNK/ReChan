@@ -1,5 +1,3 @@
-// femenumgr.cpp - feMenuMgr reversed from PSX FEMNUMGR.CPP (Overlay 4)
-// PSX source: C:\CHAN\GAME\SRC\FE\FEMNUMGR.CPP
 #include "fe/femenumgr.h"
 #include "fe/hdmenu.h"
 #include "xclib/xclib.h"
@@ -12,23 +10,23 @@
 feMenuMgr* g_feMenuMgr = nullptr;
 
 // Screen hashes (from decompiled constructor and SelfInit)
-static constexpr u32 HASH_MAIN_SCREEN    = 103520738;   // startScreenHashes[0]
-static constexpr u32 HASH_LEVEL_SCREEN   = 93891576;    // startScreenHashes[1]
-static constexpr u32 HASH_SOUND_MENU     = 102551593;   // Sound menu
+static constexpr u32 HASH_MAIN_SCREEN = 103520738;   // startScreenHashes[0]
+static constexpr u32 HASH_LEVEL_SCREEN = 93891576;    // startScreenHashes[1]
+static constexpr u32 HASH_SOUND_MENU = 102551593;   // Sound menu
 static constexpr u32 HASH_CONTROLLER_MENU = 141018276;  // Controller menu
-static constexpr u32 HASH_NEWGAME_MENU   = (u32)(-1289713843);  // New game confirm
-static constexpr u32 HASH_OPTIONS_MENU   = (u32)(-1066161287);  // Options menu
-static constexpr u32 HASH_MEMCARD_MENU   = 448275865;   // Memory card menu
+static constexpr u32 HASH_NEWGAME_MENU = (u32)(-1289713843);  // New game confirm
+static constexpr u32 HASH_OPTIONS_MENU = (u32)(-1066161287);  // Options menu
+static constexpr u32 HASH_MEMCARD_MENU = 448275865;   // Memory card menu
 
 // Menu item callback hashes
-static constexpr u32 HASH_ITEM_RESUME    = (u32)(-1778775893);
-static constexpr u32 HASH_ITEM_LOAD      = 1837767642;
-static constexpr u32 HASH_ITEM_SAVE      = (u32)(-558495447);
-static constexpr u32 HASH_ITEM_CREDITS   = (u32)(-372502450);
-static constexpr u32 HASH_ITEM_SHOCK     = 1143775739;
-static constexpr u32 HASH_ITEM_NEWGAME   = 100369;
+static constexpr u32 HASH_ITEM_RESUME = (u32)(-1778775893);
+static constexpr u32 HASH_ITEM_LOAD = 1837767642;
+static constexpr u32 HASH_ITEM_SAVE = (u32)(-558495447);
+static constexpr u32 HASH_ITEM_CREDITS = (u32)(-372502450);
+static constexpr u32 HASH_ITEM_SHOCK = 1143775739;
+static constexpr u32 HASH_ITEM_NEWGAME = 100369;
 static constexpr u32 HASH_ITEM_NEWGAME_RESUME = 2685;
-static constexpr u32 HASH_ITEM_CTRL_SEL  = (u32)(-1528003751);
+static constexpr u32 HASH_ITEM_CTRL_SEL = (u32)(-1528003751);
 
 // --- Static menu callbacks (called by hdMenu item selection) ---
 
@@ -347,7 +345,8 @@ void feMenuMgr::Deactivate() {
         if (state == 8) {
             // PSX: HandleVolumeExit__14FrontEndVolumeP8Humanoid(frontEndVolume, humanoid)
             // Returns to 3D hub from level select
-        } else {
+        }
+        else {
             // PSX: saves frontEndVolume position [29],[30],[31] into globals
             // gDestSelectReturnPos = frontEndVolume[29]
         }

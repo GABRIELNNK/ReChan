@@ -1,7 +1,4 @@
-// camera.h = Camera class reversed from PSX CAMERA.CPP
-// PSX Camera struct: 492 bytes, inherits DynamicThing (200 bytes base)
 #pragma once
-
 #include "core.h"
 #include "p3d/lvector.h"
 #include "gen/cammgr.h" // CameraAnchor
@@ -12,9 +9,9 @@ class AnimStructure;
 
 // Camera mode identifiers (PSX SetMode parameter)
 enum CameraMode : s32 {
-    CAM_MODE_DEFAULT  = 0, // _DebugCam = free-look via pad input
-    CAM_MODE_FOLLOW   = 1, // _FollowPath = spline follow + track target
-    CAM_MODE_RIGID    = 2, // _RigidCam = fixed offset from target
+    CAM_MODE_DEFAULT = 0, // _DebugCam = free-look via pad input
+    CAM_MODE_FOLLOW = 1, // _FollowPath = spline follow + track target
+    CAM_MODE_RIGID = 2, // _RigidCam = fixed offset from target
 };
 
 // EvalCubic = cubic Hermite interpolation (FXP.CPP:81)
@@ -30,29 +27,29 @@ public:
     Camera(const Camera&) = delete;
     Camera& operator=(const Camera&) = delete;
 
-    void Reset();                              // 0x80047C5C
-    void PurgeAnims();                         // 0x80047BE0
-    void UpdateAnim();                         // 0x80047A0C
+    void Reset();
+    void PurgeAnims();
+    void UpdateAnim();
 
-    void Think();                              // 0x80047F28
-    void Move();                               // 0x80047FD4
-    void Update();                             // 0x800482DC
-    void LookAtTarget(const LVector* target);  // 0x8004850C
+    void Think();
+    void Move();
+    void Update();
+    void LookAtTarget(const LVector* target);
 
-    void SetMode(CameraMode mode);             // 0x80049C44
+    void SetMode(CameraMode mode);
 
-    void SetFOV(s32 fov);                      // 0x8004A500 = sets desiredFOV
-    void SetCurFOV(s32 fov);                   // 0x8004A464 = sets curFOV + pushes to tCamera
-    void SetMovementTime(const LVector* t);    // 0x8004A400
-    void SetTrackingTime(const LVector* t);    // 0x8004A39C
-    void SetLookAtTarget(Thing* thing, u16 mode); // 0x80049DC0
-    void ShakeCamera(s32 frames);              // 0x80049DE4
+    void SetFOV(s32 fov);
+    void SetCurFOV(s32 fov);
+    void SetMovementTime(const LVector* t);
+    void SetTrackingTime(const LVector* t);
+    void SetLookAtTarget(Thing* thing, u16 mode);
+    void ShakeCamera(s32 frames);
 
     // Camera animation (used by Director for cutscene cameras)
-    void LoadAsyncAnim(s32 animEnum);          // 0x8004A054
-    void PlayAsyncAnim();                      // 0x8004A0F0
-    void DeleteAsyncAnim();                    // 0x8004A220
-    LVector GetCameraVector() const;           // 0x80049F88
+    void LoadAsyncAnim(s32 animEnum);
+    void PlayAsyncAnim();
+    void DeleteAsyncAnim();
+    LVector GetCameraVector() const;
 
     // Accessors
     tMatrixCamera* GetP3DCamera() { return &p3dCamera; }
@@ -64,14 +61,14 @@ public:
     s32 GetOrientY() const { return orientAngles.y; }  // +44
     s32 GetCamAngleY() const { return camAngleY; }     // +384
 
-    // PSX: theCamera+0x188 = cameraAnchor assigned by CameraManager::SetupPaths
+    // cameraAnchor assigned by CameraManager::SetupPaths
     void SetCameraAnchor(CameraAnchor* a) { cameraAnchor = a; }
 
     // Set all position fields at once (for initial placement)
     void SetPosition(s32 x, s32 y, s32 z) {
-        position = {x, y, z};
-        curPos = {x, y, z};
-        prevPosition = {x, y, z};
+        position = { x, y, z };
+        curPos = { x, y, z };
+        prevPosition = { x, y, z };
     }
 
 private:

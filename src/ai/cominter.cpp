@@ -1,15 +1,13 @@
-// cominter.cpp - Command interpreter
-// Reversed from PSX C:\CHAN\GAME\SRC\AI\COMINTER.CPP
 #include "ai/cominter.h"
 #include "gen/control.h"
 
 // Button index sentinels in commandList buttonPair field
 static constexpr s16 BTN_NONE = 16;
-static constexpr s16 BTN_ANY  = 17;
+static constexpr s16 BTN_ANY = 17;
 
 // Condition types
 static constexpr u32 COND_UNCONDITIONAL = (u32)-1;
-static constexpr u32 COND_ANALOG        = 15;
+static constexpr u32 COND_ANALOG = 15;
 
 static constexpr s32 DIR_MASK = 0xF;
 
@@ -80,13 +78,15 @@ s32 FindActionRequest(u32* state, u32 buttons, s32 direction, u16 padIndex) {
         if (btn1Mask && g_inputManager) {
             Button* btn = g_inputManager->GetButtonForBit(padIndex, (u8)(entry->buttonPair & 0xFF));
             holdTime1 = (u32)(u16)btn->duration;
-        } else {
+        }
+        else {
             holdTime1 = 0;
         }
         if (btn2Mask && g_inputManager) {
             Button* btn = g_inputManager->GetButtonForBit(padIndex, (u8)((entry->buttonPair >> 16) & 0xFF));
             holdTime2 = (u32)(u16)btn->duration;
-        } else {
+        }
+        else {
             holdTime2 = 0;
         }
 
@@ -98,7 +98,8 @@ s32 FindActionRequest(u32* state, u32 buttons, s32 direction, u16 padIndex) {
             s32 match;
             if (combinedMask) {
                 match = ((s32)buttons & combinedMask) == combinedMask;
-            } else {
+            }
+            else {
                 match = buttons == 0;
             }
 
@@ -116,10 +117,12 @@ s32 FindActionRequest(u32* state, u32 buttons, s32 direction, u16 padIndex) {
                 }
                 if (!direction) {
                     checkHold = true;
-                } else {
+                }
+                else {
                     continue;
                 }
-            } else {
+            }
+            else {
                 s32 dirMatch = 0;
                 if ((direction & DIR_MASK) != 0) {
                     dirMatch = match;
@@ -130,7 +133,8 @@ s32 FindActionRequest(u32* state, u32 buttons, s32 direction, u16 padIndex) {
                 action = entry->actionId;
                 continue;
             }
-        } else if (condition >= 0x10) {
+        }
+        else if (condition >= 0x10) {
             if (condition == COND_UNCONDITIONAL) {
                 if (threshold) {
                     s32 actionId = entry->actionId;
@@ -147,11 +151,13 @@ s32 FindActionRequest(u32* state, u32 buttons, s32 direction, u16 padIndex) {
                         }
                         continue;
                     }
-                } else {
+                }
+                else {
                     s32 match;
                     if (combinedMask) {
                         match = ((s32)buttons & combinedMask) == combinedMask;
-                    } else {
+                    }
+                    else {
                         match = buttons == 0;
                     }
                     if (!match) {
@@ -160,13 +166,15 @@ s32 FindActionRequest(u32* state, u32 buttons, s32 direction, u16 padIndex) {
                     action = entry->actionId;
                     continue;
                 }
-            } else {
+            }
+            else {
                 s32 dirMask = entry->condition & direction;
                 if (!threshold) {
                     s32 match;
                     if (combinedMask) {
                         match = ((s32)buttons & combinedMask) == combinedMask;
-                    } else {
+                    }
+                    else {
                         match = buttons == 0;
                     }
                     s32 dirMatch = 0;
@@ -185,18 +193,21 @@ s32 FindActionRequest(u32* state, u32 buttons, s32 direction, u16 padIndex) {
                 }
                 if (dirMask) {
                     checkHold = true;
-                } else {
+                }
+                else {
                     continue;
                 }
             }
-        } else {
+        }
+        else {
             if (condition) {
                 s32 dirMask = entry->condition & direction;
                 if (!threshold) {
                     s32 match;
                     if (combinedMask) {
                         match = ((s32)buttons & combinedMask) == combinedMask;
-                    } else {
+                    }
+                    else {
                         match = buttons == 0;
                     }
                     s32 dirMatch = 0;
@@ -215,15 +226,18 @@ s32 FindActionRequest(u32* state, u32 buttons, s32 direction, u16 padIndex) {
                 }
                 if (dirMask) {
                     checkHold = true;
-                } else {
+                }
+                else {
                     continue;
                 }
-            } else {
+            }
+            else {
                 if (!threshold) {
                     s32 match;
                     if (combinedMask) {
                         match = ((s32)buttons & combinedMask) == combinedMask;
-                    } else {
+                    }
+                    else {
                         match = buttons == 0;
                     }
                     if (direction) {
@@ -241,7 +255,8 @@ s32 FindActionRequest(u32* state, u32 buttons, s32 direction, u16 padIndex) {
                 }
                 if (!direction) {
                     checkHold = true;
-                } else {
+                }
+                else {
                     continue;
                 }
             }

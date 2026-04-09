@@ -1,4 +1,3 @@
-// geometry.cpp - BLK level geometry parser implementation
 #include "gen/geometry.h"
 #include "p3d/context.h"
 #include "pddi/pddi.h"
@@ -59,12 +58,12 @@ pddiPrimBuffer* ParseBLKPrims(const u8* pg, u32 pgSize) {
     if (pgSize < 108) return nullptr;
 
     u32 vertListOff = ReadU32LE(pg + 0x10) << 2;
-    u16 numVerts    = ReadU16LE(pg + 0x14);
-    u16 numPolys    = ReadU16LE(pg + 0x16);
+    u16 numVerts = ReadU16LE(pg + 0x14);
+    u16 numPolys = ReadU16LE(pg + 0x16);
     u32 primListOff = ReadU32LE(pg + 0x40) << 2;
     u32 polyDataOff = ReadU32LE(pg + 0x54) << 2;
-    u32 loopCtOff   = ReadU32LE(pg + 0x60) << 2;
-    s16 numLoops    = ReadS16LE(pg + 0x66);
+    u32 loopCtOff = ReadU32LE(pg + 0x60) << 2;
+    s16 numLoops = ReadS16LE(pg + 0x66);
 
     if (numVerts == 0 || numPolys == 0) return nullptr;
     if (numLoops < 1) numLoops = 1;
@@ -94,7 +93,7 @@ pddiPrimBuffer* ParseBLKPrims(const u8* pg, u32 pgSize) {
     }
     // Fallback: single loop with all verts/polys
     if (loops.empty()) {
-        loops.push_back({numVerts, numPolys, 0});
+        loops.push_back({ numVerts, numPolys, 0 });
     }
 
     // Vertex: pos3 + color3 + uv2 + tpage + cba = 10 floats (40 bytes)
@@ -142,7 +141,7 @@ pddiPrimBuffer* ParseBLKPrims(const u8* pg, u32 pgSize) {
             // Read RGB from byte offset, PSX 128-scale
             auto readRGB = [&](int byteOff) {
                 if (byteOff + 3 > (int)pktSize) return std::make_tuple(0.5f, 0.5f, 0.5f);
-                f32 r = std::min(1.0f, pkt[byteOff]     / 128.0f);
+                f32 r = std::min(1.0f, pkt[byteOff] / 128.0f);
                 f32 g = std::min(1.0f, pkt[byteOff + 1] / 128.0f);
                 f32 b = std::min(1.0f, pkt[byteOff + 2] / 128.0f);
                 return std::make_tuple(r, g, b);
@@ -162,14 +161,14 @@ pddiPrimBuffer* ParseBLKPrims(const u8* pg, u32 pgSize) {
                 f32 tp = static_cast<f32>(ReadU16LE(pkt + 26));
                 f32 cb = static_cast<f32>(ReadU16LE(pkt + 14));
 
-                auto [r0,g0,b0] = readRGB(4);
-                auto [r1,g1,b1] = readRGB(16);
-                auto [r2,g2,b2] = readRGB(28);
-                auto [r3,g3,b3] = readRGB(40);
-                v0.r=r0; v0.g=g0; v0.b=b0;
-                v1.r=r1; v1.g=g1; v1.b=b1;
-                v2.r=r2; v2.g=g2; v2.b=b2;
-                v3.r=r3; v3.g=g3; v3.b=b3;
+                auto [r0, g0, b0] = readRGB(4);
+                auto [r1, g1, b1] = readRGB(16);
+                auto [r2, g2, b2] = readRGB(28);
+                auto [r3, g3, b3] = readRGB(40);
+                v0.r = r0; v0.g = g0; v0.b = b0;
+                v1.r = r1; v1.g = g1; v1.b = b1;
+                v2.r = r2; v2.g = g2; v2.b = b2;
+                v3.r = r3; v3.g = g3; v3.b = b3;
 
                 v0.u = pkt[12]; v0.v = pkt[13]; v0.tpage = tp; v0.cba = cb;
                 v1.u = pkt[24]; v1.v = pkt[25]; v1.tpage = tp; v1.cba = cb;
@@ -179,39 +178,42 @@ pddiPrimBuffer* ParseBLKPrims(const u8* pg, u32 pgSize) {
                 u16 base = static_cast<u16>(vertBuf.size());
                 vertBuf.push_back(v0); vertBuf.push_back(v1);
                 vertBuf.push_back(v2); vertBuf.push_back(v3);
-                idxBuf.push_back(base); idxBuf.push_back(base+1); idxBuf.push_back(base+2);
-                idxBuf.push_back(base+1); idxBuf.push_back(base+3); idxBuf.push_back(base+2);
+                idxBuf.push_back(base); idxBuf.push_back(base + 1); idxBuf.push_back(base + 2);
+                idxBuf.push_back(base + 1); idxBuf.push_back(base + 3); idxBuf.push_back(base + 2);
 
-            } else if (cmdBase == 0x38 || cmdBase == 0x28) {
+            }
+            else if (cmdBase == 0x38 || cmdBase == 0x28) {
                 // POLY_G4 / POLY_F4: untextured quad (36 bytes)
                 // Colors at +4, +12, +20, +28 (2-word groups: RGB + XY)
                 Vert v0 = readVert(vi0), v1 = readVert(vi1);
                 Vert v2 = readVert(vi2), v3 = readVert(vi3);
 
                 if (cmdBase == 0x38) {
-                    auto [r0,g0,b0] = readRGB(4);
-                    auto [r1,g1,b1] = readRGB(12);
-                    auto [r2,g2,b2] = readRGB(20);
-                    auto [r3,g3,b3] = readRGB(28);
-                    v0.r=r0; v0.g=g0; v0.b=b0;
-                    v1.r=r1; v1.g=g1; v1.b=b1;
-                    v2.r=r2; v2.g=g2; v2.b=b2;
-                    v3.r=r3; v3.g=g3; v3.b=b3;
-                } else {
-                    auto [r0,g0,b0] = readRGB(4);
-                    v0.r=r0; v0.g=g0; v0.b=b0;
-                    v1.r=r0; v1.g=g0; v1.b=b0;
-                    v2.r=r0; v2.g=g0; v2.b=b0;
-                    v3.r=r0; v3.g=g0; v3.b=b0;
+                    auto [r0, g0, b0] = readRGB(4);
+                    auto [r1, g1, b1] = readRGB(12);
+                    auto [r2, g2, b2] = readRGB(20);
+                    auto [r3, g3, b3] = readRGB(28);
+                    v0.r = r0; v0.g = g0; v0.b = b0;
+                    v1.r = r1; v1.g = g1; v1.b = b1;
+                    v2.r = r2; v2.g = g2; v2.b = b2;
+                    v3.r = r3; v3.g = g3; v3.b = b3;
+                }
+                else {
+                    auto [r0, g0, b0] = readRGB(4);
+                    v0.r = r0; v0.g = g0; v0.b = b0;
+                    v1.r = r0; v1.g = g0; v1.b = b0;
+                    v2.r = r0; v2.g = g0; v2.b = b0;
+                    v3.r = r0; v3.g = g0; v3.b = b0;
                 }
 
                 u16 base = static_cast<u16>(vertBuf.size());
                 vertBuf.push_back(v0); vertBuf.push_back(v1);
                 vertBuf.push_back(v2); vertBuf.push_back(v3);
-                idxBuf.push_back(base); idxBuf.push_back(base+1); idxBuf.push_back(base+2);
-                idxBuf.push_back(base+1); idxBuf.push_back(base+3); idxBuf.push_back(base+2);
+                idxBuf.push_back(base); idxBuf.push_back(base + 1); idxBuf.push_back(base + 2);
+                idxBuf.push_back(base + 1); idxBuf.push_back(base + 3); idxBuf.push_back(base + 2);
 
-            } else if (cmdBase == 0x34 || cmdBase == 0x24) {
+            }
+            else if (cmdBase == 0x34 || cmdBase == 0x24) {
                 // POLY_GT3 / POLY_FT3: textured tri (40 bytes)
                 // Colors at +4, +16, +28; UVs at +12, +24, +36
                 // CBA at +14, TPAGE at +26
@@ -222,12 +224,12 @@ pddiPrimBuffer* ParseBLKPrims(const u8* pg, u32 pgSize) {
                 f32 tp = static_cast<f32>(ReadU16LE(pkt + 26));
                 f32 cb = static_cast<f32>(ReadU16LE(pkt + 14));
 
-                auto [r0,g0,b0] = readRGB(4);
-                auto [r1,g1,b1] = readRGB(16);
-                auto [r2,g2,b2] = readRGB(28);
-                v0.r=r0; v0.g=g0; v0.b=b0;
-                v1.r=r1; v1.g=g1; v1.b=b1;
-                v2.r=r2; v2.g=g2; v2.b=b2;
+                auto [r0, g0, b0] = readRGB(4);
+                auto [r1, g1, b1] = readRGB(16);
+                auto [r2, g2, b2] = readRGB(28);
+                v0.r = r0; v0.g = g0; v0.b = b0;
+                v1.r = r1; v1.g = g1; v1.b = b1;
+                v2.r = r2; v2.g = g2; v2.b = b2;
 
                 v0.u = pkt[12]; v0.v = pkt[13]; v0.tpage = tp; v0.cba = cb;
                 v1.u = pkt[24]; v1.v = pkt[25]; v1.tpage = tp; v1.cba = cb;
@@ -235,30 +237,32 @@ pddiPrimBuffer* ParseBLKPrims(const u8* pg, u32 pgSize) {
 
                 u16 base = static_cast<u16>(vertBuf.size());
                 vertBuf.push_back(v0); vertBuf.push_back(v1); vertBuf.push_back(v2);
-                idxBuf.push_back(base); idxBuf.push_back(base+1); idxBuf.push_back(base+2);
+                idxBuf.push_back(base); idxBuf.push_back(base + 1); idxBuf.push_back(base + 2);
 
-            } else if (cmdBase == 0x30 || cmdBase == 0x20) {
+            }
+            else if (cmdBase == 0x30 || cmdBase == 0x20) {
                 // POLY_G3 / POLY_F3: untextured tri (28 bytes)
                 // G3 colors at +4, +12, +20; F3 flat from +4
                 Vert v0 = readVert(vi0), v1 = readVert(vi1), v2 = readVert(vi2);
 
                 if (cmdBase == 0x30) {
-                    auto [r0,g0,b0] = readRGB(4);
-                    auto [r1,g1,b1] = readRGB(12);
-                    auto [r2,g2,b2] = readRGB(20);
-                    v0.r=r0; v0.g=g0; v0.b=b0;
-                    v1.r=r1; v1.g=g1; v1.b=b1;
-                    v2.r=r2; v2.g=g2; v2.b=b2;
-                } else {
-                    auto [r0,g0,b0] = readRGB(4);
-                    v0.r=r0; v0.g=g0; v0.b=b0;
-                    v1.r=r0; v1.g=g0; v1.b=b0;
-                    v2.r=r0; v2.g=g0; v2.b=b0;
+                    auto [r0, g0, b0] = readRGB(4);
+                    auto [r1, g1, b1] = readRGB(12);
+                    auto [r2, g2, b2] = readRGB(20);
+                    v0.r = r0; v0.g = g0; v0.b = b0;
+                    v1.r = r1; v1.g = g1; v1.b = b1;
+                    v2.r = r2; v2.g = g2; v2.b = b2;
+                }
+                else {
+                    auto [r0, g0, b0] = readRGB(4);
+                    v0.r = r0; v0.g = g0; v0.b = b0;
+                    v1.r = r0; v1.g = g0; v1.b = b0;
+                    v2.r = r0; v2.g = g0; v2.b = b0;
                 }
 
                 u16 base = static_cast<u16>(vertBuf.size());
                 vertBuf.push_back(v0); vertBuf.push_back(v1); vertBuf.push_back(v2);
-                idxBuf.push_back(base); idxBuf.push_back(base+1); idxBuf.push_back(base+2);
+                idxBuf.push_back(base); idxBuf.push_back(base + 1); idxBuf.push_back(base + 2);
             }
 
             primCursor += pktSize;

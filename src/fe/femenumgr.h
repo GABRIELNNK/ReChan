@@ -1,9 +1,4 @@
-// femenumgr.h - feMenuMgr reversed from PSX FEMENUMGR.CPP (Overlay 4)
-// PSX source: C:\CHAN\GAME\SRC\FE\FEMNUMGR.CPP
-// feMenuMgr is the main frontend menu system - title, options, level select,
-// save/load, credits. Lives in PSX Overlay 4 (front-end overlay).
 #pragma once
-
 #include "fe/menumgr.h"
 
 class Game;
@@ -30,70 +25,27 @@ public:
     FrontEndVolume* frontEndVolume = nullptr;  // +92
     Humanoid* humanoid = nullptr;   // +96
 
-    // PSX: __9feMenuMgr (FEMNUMGR.CPP, Overlay4 0x80010EB4)
     feMenuMgr();
-
-    // PSX: _._9feMenuMgr (FEMNUMGR.CPP, Overlay4 0x80010F04)
     ~feMenuMgr() override;
 
-    // --- oxScreenManager overrides ---
-
-    // PSX: SelfInit__9feMenuMgr (FEMNUMGR.CPP, Overlay4 0x8001103C)
     void SelfInit() override;
-
-    // PSX: GotoStartScreen__9feMenuMgr (FEMNUMGR.CPP, Overlay4 0x800115BC)
     void GotoStartScreen() override;
-
-    // --- MenuMgr overrides ---
-
-    // PSX: Deactivate__9feMenuMgr (FEMNUMGR.CPP, Overlay4 0x80011540)
     void Deactivate() override;
-
-    // PSX: HandleInputChange__9feMenuMgr (FEMNUMGR.CPP, Overlay4 0x80010F2C)
     void HandleInputChange() override;
-
-    // PSX: QueryInput__9feMenuMgrb (FEMNUMGR.CPP, Overlay4 0x80011774)
     void QueryInput(bool processInput) override;
-
-    // PSX: InputPadUp__9feMenuMgr (FEMNUMGR.CPP, Overlay4 0x80010B40)
     void InputPadUp() override;
-
-    // PSX: InputPadDown__9feMenuMgr (FEMNUMGR.CPP, Overlay4 0x80010BC0)
     void InputPadDown() override;
-
-    // PSX: InputPadLeft__9feMenuMgr (FEMNUMGR.CPP, Overlay4 0x80010C40)
     void InputPadLeft() override;
-
-    // PSX: InputPadRight__9feMenuMgr (FEMNUMGR.CPP, Overlay4 0x80010CA4)
     void InputPadRight() override;
-
-    // PSX: InputItemPush__9feMenuMgr (FEMNUMGR.CPP, Overlay4 0x80010A7C)
     void InputItemPush() override;
-
-    // PSX: PushMenu__9feMenuMgrP6hdMenu (FEMNUMGR.CPP, Overlay4 0x80010D08)
     void PushMenu(hdMenu* menu) override;
-
-    // PSX: PopMenu__9feMenuMgr (FEMNUMGR.CPP, Overlay4 0x80010E30)
     void PopMenu() override;
-
-    // --- feMenuMgr-specific functions ---
-
-    // PSX: ShowNewGameMenu__9feMenuMgr (FEMNUMGR.CPP, Overlay4 0x800115F0)
     void ShowNewGameMenu();
-
-    // PSX: ShowLevel__9feMenuMgrP14FrontEndVolumeP8Humanoid (Overlay4 0x80011218)
     void ShowLevel(FrontEndVolume* vol, Humanoid* hum);
-
-    // PSX: InitLevelMenu__9feMenuMgr (FEMNUMGR.CPP, Overlay4 0x80011260)
     void InitLevelMenu();
-
-    // PSX: OpenDoors__9feMenuMgr (FEMNUMGR.CPP, Overlay4 0x80011680)
     void OpenDoors();
-
-    // PSX: PushLoadSaveMenu__9feMenuMgri (FEMNUMGR.CPP, Overlay4 0x80011618)
     void PushLoadSaveMenu(s32 mode);
 
-    // PSX: LevelValid__9feMenuMgril (FEMNUMGR.CPP, Overlay4 0x80011188)
     s32 LevelValid(s32 levelID, s32 subLevel);
 };
 

@@ -1,5 +1,3 @@
-// thing.h - Thing and DynamicThing base classes
-// Reversed from PSX C:\CHAN\GAME\INC\AI\THING.HPP / C:\CHAN\GAME\SRC\AI\THING.CPP
 #pragma once
 
 #include "core.h"
@@ -17,7 +15,6 @@ static constexpr u16 BLOCK_UNASSIGNED = 0x1000;
 
 // PSX AI:: scope enums (namespace renamed to avoid class AI conflict)
 namespace AITypes {
-
     // ThingTypes - entity type IDs dispatched by AI::AddThingNoTagList
     // PSX: enum AI::ThingTypes (used for CharacterManager, etc.)
     // Values match PSX AddThingNoTagList dispatch at 0x80054404
@@ -34,10 +31,10 @@ namespace AITypes {
         TT_THUG7 = 7,
         TT_THUG8 = 8,
         TT_GRONTAR = 10,   // Grontar class (616 bytes)
-        TT_PAUL = 12,   // Paul class (616 bytes)
-        TT_OSCAR = 13,   // Oscar class (616 bytes)
-        TT_DANTE = 15,   // Dante class (684 bytes)
-        TT_BUTCH = 17,   // Butch class (620 bytes)
+        TT_PAUL = 12,      // Paul class (616 bytes)
+        TT_OSCAR = 13,     // Oscar class (616 bytes)
+        TT_DANTE = 15,     // Dante class (684 bytes)
+        TT_BUTCH = 17,     // Butch class (620 bytes)
         TT_HUMANOID_LAST = 28,
         // Collectible (Pickup class, goes to pickupList)
         TT_COLLECTIBLE = 101,
@@ -81,8 +78,7 @@ namespace AITypes {
         TT_LIGHTSPHERE2 = 65534,
         TT_MESHANALYSIS = 65535,
     };
-
-} // namespace AITypes
+}
 
 // Thing flags (u32 flags bitmask)
 enum ThingFlags : u32 {
@@ -109,9 +105,6 @@ enum ThingFlags2 : u32 {
 };
 
 // Thing - base class for all game entities
-// PSX: 96 bytes. Inherits ccNode (intrusive list node with name).
-// Every entity (player, enemies, objects, obstacles) derives from Thing.
-// Source: C:\CHAN\GAME\SRC\AI\THING.CPP
 class Thing : public ccNode {
 public:
     // PSX +24 (u16): entity type from AI::ThingTypes
@@ -157,106 +150,42 @@ public:
     // PSX +92 (u32): secondary flags (see ThingFlags2 enum)
     u32 flags2 = 0;
 
-#if INTERPOLATED_RENDERING
-    LVector renderPrevPos = {};
-    LVector renderPrevOrientation = {};
-    LVector renderCurrPos = {};
-    LVector renderCurrOrientation = {};
-    u32 renderSnapshotTick = 0;
-    bool renderSnapshotInit = false;
-#endif
-
     // Global Thing counter - PSX: gp+3868
     static u16 s_nextUniqueID;
 
-
-    // PSX: __5ThingPC10tagLVectorUs (THING.CPP:428)
     Thing(const LVector* initialPos, u16 type);
-
-    // PSX: _._5Thing (THING.CPP:458)
     ~Thing() override;
 
-
-    // PSX: Think__5Thing (THING.CPP:478) - calls UpdatePosition()
     virtual void Think();
-
-    // PSX: Draw__5Thing (THING.CPP:487) - renders model at pos/orientation
     virtual void Draw();
-
-    // PC: helper for smooth render-only interpolation.
-    void GetRenderTransform(LVector* outPos, LVector* outOrientation);
-
-    // PSX: Reset__5Thing (THING.CPP:502) - reset to initial state
     virtual void Reset();
-
-    // PSX: UpdatePosition__5Thing (THING.HPP:440) - base is empty
     virtual void UpdatePosition();
-
-    // PSX: Activate__5Thing (THING.CPP:521) - activate in block's entity list
     virtual void Activate();
-
-    // PSX: Deactivate__5Thing (THING.CPP:546) - deactivate
     virtual void Deactivate();
-
-    // PSX: Move__5Thing (THING.CPP:835) - base does nothing
     virtual void Move();
-
-    // PSX: CreateModel__5ThingPCc (THING.CPP:585) - load/create the 3D model
     virtual void CreateModel(const char* name);
-
-    // PSX: DeleteModel__5Thing (THING.CPP:689) - destroy the model
     virtual void DeleteModel();
-
-    // PSX: HandleCollision__5ThingP5Thingle (THING.CPP:713) - base does nothing
     virtual void HandleCollision(Thing* other, s32 damage);
-
-    // PSX: AnalyzeMesh__5ThingP6DBRoot (THING.CPP:1224) - parse WDB mesh info
     virtual void AnalyzeMesh(DBRoot* root);
-
-    // PSX: GetViewSpot__5ThingP10tagLVectorT1 (THING.CPP:1210) - camera target point
     virtual void GetViewSpot(LVector* outPos, LVector* outTarget);
-
-    // PSX: Kill__5Thing (THING.HPP:518)
     virtual void Kill();
-
-    // PSX: GetSoundPosPtr__5Thing (THING.HPP:516) - returns &pos
     virtual LVector* GetSoundPosPtr();
-
-    // PSX: GetInitialPos__5Thing (THING.HPP:512) - returns &pos
     virtual const LVector* GetInitialPos();
 
 
-    // PSX: AddPassenger__5ThingP12DynamicThing (THING.CPP:1079)
     void AddPassenger(class DynamicThing* passenger);
-
-    // PSX: RemPassenger__5ThingP6Ticket (THING.CPP:1104)
     void RemPassenger(Ticket* ticket);
-
-    // PSX: RemAllPassengers__5Thing (THING.CPP:1144)
     void RemAllPassengers();
-
-    // PSX: GetThingHandle__5Thing (THING.CPP:1170)
     u32 GetThingHandle();
-
-    // PSX: ClearFloorHeight__5Thing (THING.CPP:765)
     void ClearFloorHeight();
-
-    // PSX: SetFloorHeight__5Thingl (THING.CPP:777)
     void SetFloorHeight(s32 height);
 
-    // PSX: GetObjectToWorldSpaceVector__5Thing (THING.CPP:1352)
     void GetObjectToWorldSpaceVector(const SVector& in, SVector& out);
-
-    // PSX: DistanceFromPointXZ__C5ThingRC10tagLVector (THING.CPP:1180, 0x800625C0)
     s32 DistanceFromPointXZ(const LVector& point) const;
-
-    // PSX: DistanceFromPoint__C5ThingRC10tagLVector (THING.CPP:1189, 0x800625F4)
     s32 DistanceFromPoint(const LVector& point) const;
 };
 
 // DynamicThing - Thing with physics (velocity, gravity, forces)
-// PSX: extends Thing, ~200 bytes total.
-// Source: C:\CHAN\GAME\SRC\AI\THING.CPP
 class DynamicThing : public Thing {
 public:
     // PSX +96 (s32): hit points (initialized to 100)
@@ -289,53 +218,25 @@ public:
     // PSX +196 (s32): max fall speed divisor (10)
     s32 maxFallDivisor = 10;
 
-
-    // PSX: __12DynamicThingPC10tagLVectorUs (THING.CPP:840)
     DynamicThing(const LVector* initialPos, u16 type);
-
-    // PSX: _._12DynamicThing (THING.CPP:851)
     ~DynamicThing() override;
-
-
-    // PSX: Reset__12DynamicThing (THING.CPP:865)
     void Reset() override;
-
-    // PSX: Move__12DynamicThing (THING.CPP:891)
     void Move() override;
-
-    // PSX: UpdatePosition__12DynamicThing (THING.CPP:1280)
     void UpdatePosition() override;
-
-
-    // PSX: AddForce__12DynamicThinglPC9_RMVECT16 (THING.CPP:753)
     void AddForce(s32 magnitude, const SVector* direction);
-
-    // PSX: Land__12DynamicThing (THING.CPP:794)
     void Land();
-
-    // PSX: DisembarkObstacle__12DynamicThingRC10tagLVector (THING.CPP:810)
     void DisembarkObstacle(const LVector& newPos);
-
-    // PSX: Disembark__12DynamicThing (THING.CPP:1126)
     void Disembark();
-
-    // PSX: GetTicketIssuer__12DynamicThing (THING.CPP:1162)
     Thing* GetTicketIssuer();
-
-    // PSX: HandleLand__12DynamicThingl (THING.CPP:1360)
     virtual void HandleLand(s32 height);
 };
 
 // Ticket - embark/passenger link between a Thing and a DynamicThing
-// PSX: 32 bytes. Inherits ccNode, stored in Thing's subNode list.
-// Source: C:\CHAN\GAME\SRC\AI\THING.CPP:1312
 struct Ticket : public ccNode {
     Thing* issuer = nullptr;           // PSX +24: the Thing being stood on
     DynamicThing* passenger = nullptr; // PSX +28: the DynamicThing standing on it
 
-    // PSX: __6TicketP5ThingP12DynamicThing (THING.CPP:1312)
     Ticket(Thing* iss, DynamicThing* pass);
-    // PSX: _._6Ticket (THING.CPP:1318)
     ~Ticket() override;
 };
 

@@ -1,10 +1,8 @@
-// handler.h - Handler and HandlerSet reversed from PSX HNDLRSET.HPP
-// PSX source: C:\CHAN\GAME\INC\GEN\HNDLRSET.HPP
+#pragma once
+#include "gen/cclist.h"
+
 // Handler = callback node with function pointer, linked into HandlerSet lists.
 // Game::ProcessHandlers iterates these each frame (Think handlers, then Draw handlers).
-#pragma once
-
-#include "gen/cclist.h"
 
 // Handler - callback node (36 bytes on PSX)
 // PSX layout: +0 ccNode(24), +24 funcPtr, +28 userData, +32 ownerList
@@ -18,12 +16,10 @@ struct Handler : public ccNode {
 
     Handler() = default;
 
-    // PSX: _._7Handler (HNDLRSET.HPP, vtable[2])
     ~Handler() override {
         RemoveFromList();
     }
 
-    // PSX: RemoveFromList__7Handler (HNDLRSET.HPP:72, 0x8002CDE8)
     void RemoveFromList() {
         MARKFUNCTION(0x8002CDE8);
         if (ownerList) {
@@ -41,19 +37,18 @@ struct HandlerSet : public ccNode {
 
     HandlerSet() = default;
 
-    // PSX: _._10HandlerSet (vtable[2])
     ~HandlerSet() override {
         PurgeHandlers();
     }
 
-    // PSX: PurgeHandlers__10HandlerSet (0x8002CBB8)
     void PurgeHandlers() {
         MARKFUNCTION(0x8002CBB8);
         while (Handler* h = (Handler*)handlerList.head) {
             if (h->ownerList) {
                 h->ownerList->RemNode(h);
                 h->ownerList = nullptr;
-            } else {
+            }
+            else {
                 handlerList.RemNode(h);
             }
             delete h;

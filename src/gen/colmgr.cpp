@@ -1,5 +1,3 @@
-// colmgr.cpp - Collision Manager functions
-// Original: C:\CHAN\GAME\SRC\GEN\COLMGR.CPP
 #include "gen/colmgr.h"
 #include "gen/colsect.h"
 #include "gen/colwall.h"
@@ -69,9 +67,9 @@ static void CorrectCollision(
 
     // Project remaining distance onto wall normal, minus 2 for epsilon
     s32 projDist = (s32)((normalX * (s64)(homePos.x - outPos.x)) >> 16)
-                 + (s32)((normalY * (s64)(homePos.y - outPos.y)) >> 16)
-                 + (s32)((normalZ * (s64)(homePos.z - outPos.z)) >> 16)
-                 - 2;
+        + (s32)((normalY * (s64)(homePos.y - outPos.y)) >> 16)
+        + (s32)((normalZ * (s64)(homePos.z - outPos.z)) >> 16)
+        - 2;
 
     // Push homePos back along normal by projected distance
     outHomePos.x = homePos.x - (s32)((normalX * (s64)projDist) >> 16);
@@ -130,8 +128,8 @@ void HTW_FillWallArray(s32 radius, s32 height, s32 checkHeight) {
         searchMaxZ = secMaxZ;
     }
 
-    LVector searchMin = {searchMinX, searchMinY, searchMinZ};
-    LVector searchMax = {searchMaxX, searchMaxY, searchMaxZ};
+    LVector searchMin = { searchMinX, searchMinY, searchMinZ };
+    LVector searchMax = { searchMaxX, searchMaxY, searchMaxZ };
 
     s32 count = CollisionSector::FillWorldWallArray(searchMin, searchMax, g_wallPtrArray, 64);
     if (count > 64) count = 64;
@@ -155,14 +153,14 @@ s32 HTW_HandleWallCollisions(DynamicThing* thing, s32 radius, s32 height, s32 ch
     s32 iter = 0;
     thing->flags &= ~(u32)0x8000;
 
-    LVector posVec = {HTW_PosX, HTW_PosY, HTW_PosZ};
-    LVector homePosVec = {HTW_HomePosX, HTW_HomePosY, HTW_HomePosZ};
+    LVector posVec = { HTW_PosX, HTW_PosY, HTW_PosZ };
+    LVector homePosVec = { HTW_HomePosX, HTW_HomePosY, HTW_HomePosZ };
 
     do {
         if (!CollisionSector::CheckArrayWallCollision(
-                g_wallPtrArray, g_filledWallCount,
-                posVec, homePosVec,
-                radius, height, checkHeight, checkFlag)) {
+            g_wallPtrArray, g_filledWallCount,
+            posVec, homePosVec,
+            radius, height, checkHeight, checkFlag)) {
             break;
         }
 
@@ -185,8 +183,8 @@ s32 HTW_HandleWallCollisions(DynamicThing* thing, s32 radius, s32 height, s32 ch
         HTW_HomePosZ = correctedHomePos.z;
 
         // Refresh local vectors for next iteration
-        posVec = {HTW_PosX, HTW_PosY, HTW_PosZ};
-        homePosVec = {HTW_HomePosX, HTW_HomePosY, HTW_HomePosZ};
+        posVec = { HTW_PosX, HTW_PosY, HTW_PosZ };
+        homePosVec = { HTW_HomePosX, HTW_HomePosY, HTW_HomePosZ };
     } while (++iter < g_maxWallIterations);
 
     return wallHit;
@@ -229,17 +227,17 @@ void HTW_HandleHandFootCollisions(DynamicThing* thing) {
 
     // Check wall collision for the attack limb (zero radius/height)
     if (!CollisionSector::CheckArrayWallCollision(
-            g_wallPtrArray, g_filledWallCount,
-            prevPos, curPos,
-            0, 0, 0, 0)) {
+        g_wallPtrArray, g_filledWallCount,
+        prevPos, curPos,
+        0, 0, 0, 0)) {
         return;
     }
 
     // Check if wall normal points toward the entity (dot < 0)
     s32 dot = fixmul16(g_wallCollisionInfo.wallNormal.x,
                        g_wallCollisionInfo.hitPoint.x - HTW_HomePosX)
-            + fixmul16(g_wallCollisionInfo.wallNormal.z,
-                       g_wallCollisionInfo.hitPoint.z - HTW_HomePosZ);
+        + fixmul16(g_wallCollisionInfo.wallNormal.z,
+                   g_wallCollisionInfo.hitPoint.z - HTW_HomePosZ);
 
     if (dot >= 0) {
         return;
@@ -249,8 +247,8 @@ void HTW_HandleHandFootCollisions(DynamicThing* thing) {
     // scaled by half the remaining collision fraction
     s32 projMove = fixmul16(g_wallCollisionInfo.wallNormal.x,
                             curPos.x - prevPos.x)
-                 + fixmul16(g_wallCollisionInfo.wallNormal.z,
-                            curPos.z - prevPos.z);
+        + fixmul16(g_wallCollisionInfo.wallNormal.z,
+                   curPos.z - prevPos.z);
 
     s32 halfComplement = fixmul16(0x10000 - g_wallCollisionInfo.collisionRatio, 0x8000);
     s32 pushAmt = fixmul16(halfComplement, projMove);
@@ -293,12 +291,12 @@ void HandleThingWall(DynamicThing* thing, s32 radius, s32 height, s32 checkHeigh
     }
 
     // Wall intersection test using HTW globals
-    LVector moveDir = {HTW_HomePosX, HTW_PosY + 2, HTW_HomePosZ};
+    LVector moveDir = { HTW_HomePosX, HTW_PosY + 2, HTW_HomePosZ };
     LVector hitOutput = {};
     if (CollisionSector::CheckArrayWallIntersection(
-            g_wallPtrArray, g_filledWallCount,
-            hitOutput, moveDir,
-            radius, height, checkHeight, checkFlag)) {
+        g_wallPtrArray, g_filledWallCount,
+        hitOutput, moveDir,
+        radius, height, checkHeight, checkFlag)) {
         HTW_HomePosX = hitOutput.x;
         HTW_HomePosZ = hitOutput.z;
     }
@@ -324,7 +322,8 @@ void HandleThingWall(DynamicThing* thing, s32 radius, s32 height, s32 checkHeigh
         if (isCombat && !alreadyTarget) {
             if (g_combatTarget1 == nullptr) {
                 g_combatTarget1 = thing;
-            } else if (g_combatTarget2 == nullptr) {
+            }
+            else if (g_combatTarget2 == nullptr) {
                 g_combatTarget2 = thing;
             }
 
@@ -492,7 +491,8 @@ void HandleThingFloor(DynamicThing* thing, s32 radius, s32 yMinOffset, s32 check
                 bestFloorH = boneFloorH;
             }
         }
-    } else {
+    }
+    else {
         // Non-humanoid path: use global player's bone matrix for floor query
         // Then do camera look-ahead edge detection
         Player* player = Player::s_player;
@@ -543,12 +543,14 @@ void HandleThingFloor(DynamicThing* thing, s32 radius, s32 yMinOffset, s32 check
 
             if (lookFloorH + g_camEdgeThreshold >= floorHNew) {
                 g_camEdgeCounter = 0;
-            } else {
+            }
+            else {
                 g_camEdgeCounter++;
             }
             if (g_camEdgeMaxCount >= g_camEdgeCounter) {
                 thing->flags &= ~0x40000;
-            } else {
+            }
+            else {
                 thing->flags |= 0x40000;
             }
         }
@@ -558,7 +560,7 @@ void HandleThingFloor(DynamicThing* thing, s32 radius, s32 yMinOffset, s32 check
     s32 slopeCorr = 0;
     if (floorHOld > (s32)0x80000001) {
         s32 slopeDot = (s32)(((s64)floorNormOld.z * (s64)dispZ) >> 16)
-                     + (s32)(((s64)floorNormOld.x * (s64)dispX) >> 16);
+            + (s32)(((s64)floorNormOld.x * (s64)dispX) >> 16);
         if (floorNormOld.y != 0) {
             slopeCorr = rmDiv16i(slopeDot, floorNormOld.y) + 2;
         }
@@ -566,7 +568,7 @@ void HandleThingFloor(DynamicThing* thing, s32 radius, s32 yMinOffset, s32 check
     s32 slopeCorr2 = 0;
     if (floorHNew > (s32)0x80000001) {
         s32 slopeDot = (s32)(((s64)floorNormNew.z * (s64)dispZ) >> 16)
-                     + (s32)(((s64)floorNormNew.x * (s64)dispX) >> 16);
+            + (s32)(((s64)floorNormNew.x * (s64)dispX) >> 16);
         if (floorNormNew.y != 0) {
             slopeCorr2 = rmDiv16i(slopeDot, floorNormNew.y) + 2;
         }
@@ -704,7 +706,8 @@ void HandleThingEnvironmentCollisions(ccList& thingList) {
             if (thing->thingType >= 301 && thing->thingType < 329) {
                 // yMinOffset = ((Pickup*)thing)->GetCollisionYMin();
             }
-        } else {
+        }
+        else {
             // Humanoid path
             Humanoid* hum = (Humanoid*)thing;
             s32 state = hum->actionState;
@@ -727,7 +730,8 @@ void HandleThingEnvironmentCollisions(ccList& thingList) {
         if (ticketIssuer) {
             // Standing on an obstacle - just land, skip floor check
             thing->Land();
-        } else {
+        }
+        else {
             HandleThingFloor(thing, radius, yMinOffset, ckHeight);
         }
 

@@ -1,6 +1,3 @@
-// skeleton.cpp - game-side skeleton loading utilities
-// ParseP3DStreamFull: extracts textures + skeleton from P3D stream
-// BuildPerJointMeshes: builds pddiPrimBuffer from tPrimGeom + skeleton
 #include "common.h"
 #include "gen/skeleton.h"
 #include "gen/model.h"
@@ -19,9 +16,9 @@ static s16 ReadS16(const u8* p) { return (s16)(p[0] | (p[1] << 8)); }
 
 // P3D chunk IDs
 static constexpr u16 CHUNK_P3D_CONTAINER = 0xFF04;
-static constexpr u16 CHUNK_P3D_TEXTURE   = 0x6008;
-static constexpr u16 CHUNK_STREE         = 0x6120;
-static constexpr u16 CHUNK_MAPPED_STREE  = 0x6122;
+static constexpr u16 CHUNK_P3D_TEXTURE = 0x6008;
+static constexpr u16 CHUNK_STREE = 0x6120;
+static constexpr u16 CHUNK_MAPPED_STREE = 0x6122;
 
 STreeData* ParseP3DStreamFull(const u8* data, u32 size) {
     if (!data || size < 6) {
@@ -68,11 +65,13 @@ STreeData* ParseP3DStreamFull(const u8* data, u32 size) {
                     world->UploadToVRAM(rx, ry, rw, rh, data + tp);
                 }
             }
-        } else if (chunkId == CHUNK_MAPPED_STREE) {
+        }
+        else if (chunkId == CHUNK_MAPPED_STREE) {
             if (!skeleton) {
                 skeleton = ParseSTreeChunk(data + cpos + 6, chunkSize - 6, true);
             }
-        } else if (chunkId == CHUNK_STREE) {
+        }
+        else if (chunkId == CHUNK_STREE) {
             if (!skeleton) {
                 skeleton = ParseSTreeChunk(data + cpos + 6, chunkSize - 6, false);
             }
@@ -171,7 +170,8 @@ void ApplyAnimFrame0(STreeData* skeleton, const u8* rawAnimData, u32 rawAnimSize
             joint.rotationX = (s16)vx;
             joint.rotationY = (s16)vy;
             joint.rotationZ = (s16)vz;
-        } else if (keyType == 5) {
+        }
+        else if (keyType == 5) {
             // tJoint3DOFangle: read first keyframe value (packed u32)
             u32 numKeys = ReadU32(ch + 8);
             if (numKeys == 0) {
@@ -187,7 +187,8 @@ void ApplyAnimFrame0(STreeData* skeleton, const u8* rawAnimData, u32 rawAnimSize
             joint.rotationX = (s16)((packed << 5) & 0xFFFF);
             joint.rotationY = (s16)((packed >> 6) & 0xFFE0);
             joint.rotationZ = (s16)((packed >> 16) & 0xFFC0);
-        } else if (keyType == 3) {
+        }
+        else if (keyType == 3) {
             // tJoint1DOFangle: +8=numKeys, +12=keyTimesOff(u8), +16=dofIndex,
             // +20=keyValuesOff(s16). Evaluate at frame 0.
             u32 numKeys = ReadU32(ch + 8);
@@ -223,12 +224,15 @@ void ApplyAnimFrame0(STreeData* skeleton, const u8* rawAnimData, u32 rawAnimSize
             s16 val = ReadS16(rawAnimData + keyValsByteOff + bracket * 2);
             if (dofIndex == 0) {
                 joint.rotationX = val;
-            } else if (dofIndex == 1) {
+            }
+            else if (dofIndex == 1) {
                 joint.rotationY = val;
-            } else {
+            }
+            else {
                 joint.rotationZ = val;
             }
-        } else {
+        }
+        else {
             LOG("[Anim] Rot channel %d: unknown type %u", i, keyType);
         }
     }
@@ -259,7 +263,8 @@ void ApplyAnimFrame0(STreeData* skeleton, const u8* rawAnimData, u32 rawAnimSize
             joint.translationX = (s32)ReadU32(ch + 8);
             joint.translationY = (s32)ReadU32(ch + 12);
             joint.translationZ = (s32)ReadU32(ch + 16);
-        } else if (keyType == 8) {
+        }
+        else if (keyType == 8) {
             // tJoint3DOFlpPSX: read first keyframe (3 x s16)
             u32 numKeys = ReadU32(ch + 8);
             if (numKeys == 0) {
@@ -273,7 +278,8 @@ void ApplyAnimFrame0(STreeData* skeleton, const u8* rawAnimData, u32 rawAnimSize
             joint.translationX = ReadS16(rawAnimData + valByteOff + 0);
             joint.translationY = ReadS16(rawAnimData + valByteOff + 2);
             joint.translationZ = ReadS16(rawAnimData + valByteOff + 4);
-        } else {
+        }
+        else {
             LOG("[Anim] Trans channel %d: unknown type %u", i, keyType);
         }
     }
@@ -299,12 +305,12 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
 
     // Parse tPrimGeom header
     u32 vertListOff = ReadU32(primGeomData + 0x10) << 2;
-    u16 numVerts    = ReadU16(primGeomData + 0x14);
-    u16 numPolys    = ReadU16(primGeomData + 0x16);
+    u16 numVerts = ReadU16(primGeomData + 0x14);
+    u16 numPolys = ReadU16(primGeomData + 0x16);
     u32 primListOff = ReadU32(primGeomData + 0x40) << 2;
     u32 polyDataOff = ReadU32(primGeomData + 0x54) << 2;
-    u32 loopCtOff   = ReadU32(primGeomData + 0x60) << 2;
-    s16 numLoops    = ReadS16(primGeomData + 0x66);
+    u32 loopCtOff = ReadU32(primGeomData + 0x60) << 2;
+    s16 numLoops = ReadS16(primGeomData + 0x66);
 
     if (numVerts == 0 || numPolys == 0) {
         return;
@@ -340,7 +346,7 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
         }
     }
     if (loops.empty()) {
-        loops.push_back({numVerts, numPolys, 0, 0});
+        loops.push_back({ numVerts, numPolys, 0, 0 });
     }
 
     // Build vertex-to-joint map: primGeomStartIdx/primGeomCount are vertex ranges
@@ -398,7 +404,7 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
 
             auto readRGB = [&](int off) {
                 if (off + 3 > (int)pktSize) return std::make_tuple(0.5f, 0.5f, 0.5f);
-                f32 r = std::min(1.0f, pkt[off]     / 128.0f);
+                f32 r = std::min(1.0f, pkt[off] / 128.0f);
                 f32 g = std::min(1.0f, pkt[off + 1] / 128.0f);
                 f32 b = std::min(1.0f, pkt[off + 2] / 128.0f);
                 return std::make_tuple(r, g, b);
@@ -410,79 +416,84 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
                 SkinVertex v2 = makeSkinVert(vi2), v3 = makeSkinVert(vi3);
                 f32 tp = (f32)ReadU16(pkt + 26);
                 f32 cb = (f32)ReadU16(pkt + 14);
-                auto [r0,g0,b0] = readRGB(4);
-                auto [r1,g1,b1] = readRGB(16);
-                auto [r2,g2,b2] = readRGB(28);
-                auto [r3,g3,b3] = readRGB(40);
-                v0.r=r0; v0.g=g0; v0.b=b0; v1.r=r1; v1.g=g1; v1.b=b1;
-                v2.r=r2; v2.g=g2; v2.b=b2; v3.r=r3; v3.g=g3; v3.b=b3;
-                v0.u=pkt[12]; v0.v=pkt[13]; v0.tpage=tp; v0.cba=cb;
-                v1.u=pkt[24]; v1.v=pkt[25]; v1.tpage=tp; v1.cba=cb;
-                v2.u=pkt[36]; v2.v=pkt[37]; v2.tpage=tp; v2.cba=cb;
-                v3.u=pkt[48]; v3.v=pkt[49]; v3.tpage=tp; v3.cba=cb;
+                auto [r0, g0, b0] = readRGB(4);
+                auto [r1, g1, b1] = readRGB(16);
+                auto [r2, g2, b2] = readRGB(28);
+                auto [r3, g3, b3] = readRGB(40);
+                v0.r = r0; v0.g = g0; v0.b = b0; v1.r = r1; v1.g = g1; v1.b = b1;
+                v2.r = r2; v2.g = g2; v2.b = b2; v3.r = r3; v3.g = g3; v3.b = b3;
+                v0.u = pkt[12]; v0.v = pkt[13]; v0.tpage = tp; v0.cba = cb;
+                v1.u = pkt[24]; v1.v = pkt[25]; v1.tpage = tp; v1.cba = cb;
+                v2.u = pkt[36]; v2.v = pkt[37]; v2.tpage = tp; v2.cba = cb;
+                v3.u = pkt[48]; v3.v = pkt[49]; v3.tpage = tp; v3.cba = cb;
                 u16 base = (u16)skinVerts.size();
                 skinVerts.push_back(v0); skinVerts.push_back(v1);
                 skinVerts.push_back(v2); skinVerts.push_back(v3);
-                allIndices.push_back(base); allIndices.push_back(base+1); allIndices.push_back(base+2);
-                allIndices.push_back(base+1); allIndices.push_back(base+3); allIndices.push_back(base+2);
+                allIndices.push_back(base); allIndices.push_back(base + 1); allIndices.push_back(base + 2);
+                allIndices.push_back(base + 1); allIndices.push_back(base + 3); allIndices.push_back(base + 2);
 
-            } else if (cmdBase == 0x34 || cmdBase == 0x24) {
+            }
+            else if (cmdBase == 0x34 || cmdBase == 0x24) {
                 if (pktSize < 40) { primCursor += pktSize; continue; }
                 SkinVertex v0 = makeSkinVert(vi0), v1 = makeSkinVert(vi1), v2 = makeSkinVert(vi2);
                 f32 tp = (f32)ReadU16(pkt + 26);
                 f32 cb = (f32)ReadU16(pkt + 14);
-                auto [r0,g0,b0] = readRGB(4);
-                auto [r1,g1,b1] = readRGB(16);
-                auto [r2,g2,b2] = readRGB(28);
-                v0.r=r0; v0.g=g0; v0.b=b0;
-                v1.r=r1; v1.g=g1; v1.b=b1;
-                v2.r=r2; v2.g=g2; v2.b=b2;
-                v0.u=pkt[12]; v0.v=pkt[13]; v0.tpage=tp; v0.cba=cb;
-                v1.u=pkt[24]; v1.v=pkt[25]; v1.tpage=tp; v1.cba=cb;
-                v2.u=pkt[36]; v2.v=pkt[37]; v2.tpage=tp; v2.cba=cb;
+                auto [r0, g0, b0] = readRGB(4);
+                auto [r1, g1, b1] = readRGB(16);
+                auto [r2, g2, b2] = readRGB(28);
+                v0.r = r0; v0.g = g0; v0.b = b0;
+                v1.r = r1; v1.g = g1; v1.b = b1;
+                v2.r = r2; v2.g = g2; v2.b = b2;
+                v0.u = pkt[12]; v0.v = pkt[13]; v0.tpage = tp; v0.cba = cb;
+                v1.u = pkt[24]; v1.v = pkt[25]; v1.tpage = tp; v1.cba = cb;
+                v2.u = pkt[36]; v2.v = pkt[37]; v2.tpage = tp; v2.cba = cb;
                 u16 base = (u16)skinVerts.size();
                 skinVerts.push_back(v0); skinVerts.push_back(v1); skinVerts.push_back(v2);
-                allIndices.push_back(base); allIndices.push_back(base+1); allIndices.push_back(base+2);
+                allIndices.push_back(base); allIndices.push_back(base + 1); allIndices.push_back(base + 2);
 
-            } else if (cmdBase == 0x38 || cmdBase == 0x28) {
+            }
+            else if (cmdBase == 0x38 || cmdBase == 0x28) {
                 SkinVertex v0 = makeSkinVert(vi0), v1 = makeSkinVert(vi1);
                 SkinVertex v2 = makeSkinVert(vi2), v3 = makeSkinVert(vi3);
                 if (cmdBase == 0x38) {
-                    auto [r0,g0,b0] = readRGB(4);
-                    auto [r1,g1,b1] = readRGB(12);
-                    auto [r2,g2,b2] = readRGB(20);
-                    auto [r3,g3,b3] = readRGB(28);
-                    v0.r=r0; v0.g=g0; v0.b=b0; v1.r=r1; v1.g=g1; v1.b=b1;
-                    v2.r=r2; v2.g=g2; v2.b=b2; v3.r=r3; v3.g=g3; v3.b=b3;
-                } else {
-                    auto [r0,g0,b0] = readRGB(4);
-                    v0.r=r0; v0.g=g0; v0.b=b0; v1.r=r0; v1.g=g0; v1.b=b0;
-                    v2.r=r0; v2.g=g0; v2.b=b0; v3.r=r0; v3.g=g0; v3.b=b0;
+                    auto [r0, g0, b0] = readRGB(4);
+                    auto [r1, g1, b1] = readRGB(12);
+                    auto [r2, g2, b2] = readRGB(20);
+                    auto [r3, g3, b3] = readRGB(28);
+                    v0.r = r0; v0.g = g0; v0.b = b0; v1.r = r1; v1.g = g1; v1.b = b1;
+                    v2.r = r2; v2.g = g2; v2.b = b2; v3.r = r3; v3.g = g3; v3.b = b3;
+                }
+                else {
+                    auto [r0, g0, b0] = readRGB(4);
+                    v0.r = r0; v0.g = g0; v0.b = b0; v1.r = r0; v1.g = g0; v1.b = b0;
+                    v2.r = r0; v2.g = g0; v2.b = b0; v3.r = r0; v3.g = g0; v3.b = b0;
                 }
                 u16 base = (u16)skinVerts.size();
                 skinVerts.push_back(v0); skinVerts.push_back(v1);
                 skinVerts.push_back(v2); skinVerts.push_back(v3);
-                allIndices.push_back(base); allIndices.push_back(base+1); allIndices.push_back(base+2);
-                allIndices.push_back(base+1); allIndices.push_back(base+3); allIndices.push_back(base+2);
+                allIndices.push_back(base); allIndices.push_back(base + 1); allIndices.push_back(base + 2);
+                allIndices.push_back(base + 1); allIndices.push_back(base + 3); allIndices.push_back(base + 2);
 
-            } else if (cmdBase == 0x30 || cmdBase == 0x20) {
+            }
+            else if (cmdBase == 0x30 || cmdBase == 0x20) {
                 SkinVertex v0 = makeSkinVert(vi0), v1 = makeSkinVert(vi1), v2 = makeSkinVert(vi2);
                 if (cmdBase == 0x30) {
-                    auto [r0,g0,b0] = readRGB(4);
-                    auto [r1,g1,b1] = readRGB(12);
-                    auto [r2,g2,b2] = readRGB(20);
-                    v0.r=r0; v0.g=g0; v0.b=b0;
-                    v1.r=r1; v1.g=g1; v1.b=b1;
-                    v2.r=r2; v2.g=g2; v2.b=b2;
-                } else {
-                    auto [r0,g0,b0] = readRGB(4);
-                    v0.r=r0; v0.g=g0; v0.b=b0;
-                    v1.r=r0; v1.g=g0; v1.b=b0;
-                    v2.r=r0; v2.g=g0; v2.b=b0;
+                    auto [r0, g0, b0] = readRGB(4);
+                    auto [r1, g1, b1] = readRGB(12);
+                    auto [r2, g2, b2] = readRGB(20);
+                    v0.r = r0; v0.g = g0; v0.b = b0;
+                    v1.r = r1; v1.g = g1; v1.b = b1;
+                    v2.r = r2; v2.g = g2; v2.b = b2;
+                }
+                else {
+                    auto [r0, g0, b0] = readRGB(4);
+                    v0.r = r0; v0.g = g0; v0.b = b0;
+                    v1.r = r0; v1.g = g0; v1.b = b0;
+                    v2.r = r0; v2.g = g0; v2.b = b0;
                 }
                 u16 base = (u16)skinVerts.size();
                 skinVerts.push_back(v0); skinVerts.push_back(v1); skinVerts.push_back(v2);
-                allIndices.push_back(base); allIndices.push_back(base+1); allIndices.push_back(base+2);
+                allIndices.push_back(base); allIndices.push_back(base + 1); allIndices.push_back(base + 2);
             }
 
             primCursor += pktSize;

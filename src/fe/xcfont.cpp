@@ -1,19 +1,3 @@
-// xcfont.cpp - xcFont reversed from PSX XCFONT.CPP
-// PSX source: C:\CHAN\GAME\SRC\FE\XCFONT.CPP
-// Font construction from raw .1 file data (PHO blocks).
-// Raw data format per font:
-//   [0]: "PHO\0" magic
-//   [4]: u32 totalBlockSize
-//   [8]: u32 nameSize
-//   [12]: char name[nameSize]
-//   [12+nameSize]: metric data:
-//     +0: u8 lineHeight
-//     +4: u32 imageCount
-//     +8: image RECT/pixel data (repeat imageCount)
-//     ...: u32 paletteCount
-//     ...: palette entries (36 bytes each: clutX, clutY, 16 x u16 colors)
-//     ...: u32 glyphCounts[imageCount * paletteCount]
-//     ...: xciSpriteLetter[totalGlyphs] (8 bytes each)
 #include "fe/xcfont.h"
 #include "gen/common.h"
 #include "xclib/xclib.h"
@@ -31,8 +15,6 @@ static inline u32 psxColorToRGBA(u16 c) {
     u32 b = ((c >> 10) & 0x1F) << 3;
     return (255u << 24) | (b << 16) | (g << 8) | r;
 }
-
-// ---- xcFont ----
 
 // PSX: __6xcFontPv (XCFONT.CPP:92, 0x800915A0)
 // Constructs xcFont from raw PHO data.
@@ -107,7 +89,7 @@ xcFont::xcFont(const u8* rawData) {
 
     // PC: create decoded textures (one per image+palette combo)
     numTextures = (s32)totalEntries;
-    textures = new tTexture*[numTextures];
+    textures = new tTexture * [numTextures];
     texWidths = new s32[numTextures];
     texHeights = new s32[numTextures];
     for (s32 t = 0; t < numTextures; t++) {
@@ -204,7 +186,8 @@ xcFont::xcFont(const u8* rawData) {
     const xcSpriteLetter* spaceLetter = FindLetter((u8)' ');
     if (spaceLetter) {
         spaceWidth = spaceLetter->w;
-    } else {
+    }
+    else {
         spaceWidth = 4; // PSX default when space not found
     }
 
@@ -212,7 +195,7 @@ xcFont::xcFont(const u8* rawData) {
     delete[] palettes;
 
     LOG("[xcFont] Constructed: %d glyphs, lineHeight=%d, spaceWidth=%d",
-           numSprites, lineHeight, spaceWidth);
+        numSprites, lineHeight, spaceWidth);
 }
 
 // PSX: _._6xcFont (XCFONT.CPP:204, 0x800919BC)
@@ -422,7 +405,7 @@ s32 xcFont::MeasureText(const char* text) const {
 // rectH is in scanlines
 // paletteData: 16 x u16 PSX colors (32 bytes)
 tTexture* xcFont::DecodeImageWithPalette(const u8* pixelData,
-    s32 rectW, s32 rectH, const u8* paletteData, s32* outW, s32* outH) {
+                                         s32 rectW, s32 rectH, const u8* paletteData, s32* outW, s32* outH) {
 
     // 4bpp: each 16-bit VRAM word = 4 pixels
     s32 pixelWidth = rectW * 4;
@@ -438,10 +421,10 @@ tTexture* xcFont::DecodeImageWithPalette(const u8* pixelData,
         palette[i] = psxColorToRGBA(c);
     }
     LOG("[xcFont] palette: %04X %04X %04X %04X %04X %04X %04X %04X",
-        *(const u16*)(paletteData+0), *(const u16*)(paletteData+2),
-        *(const u16*)(paletteData+4), *(const u16*)(paletteData+6),
-        *(const u16*)(paletteData+8), *(const u16*)(paletteData+10),
-        *(const u16*)(paletteData+12), *(const u16*)(paletteData+14));
+        *(const u16*)(paletteData + 0), *(const u16*)(paletteData + 2),
+        *(const u16*)(paletteData + 4), *(const u16*)(paletteData + 6),
+        *(const u16*)(paletteData + 8), *(const u16*)(paletteData + 10),
+        *(const u16*)(paletteData + 12), *(const u16*)(paletteData + 14));
     LOG("[xcFont] RGBA: %08X %08X %08X %08X %08X %08X %08X %08X",
         palette[0], palette[1], palette[2], palette[3],
         palette[4], palette[5], palette[6], palette[7]);
@@ -468,8 +451,6 @@ tTexture* xcFont::DecodeImageWithPalette(const u8* pixelData,
     delete[] rgba;
     return tex;
 }
-
-// ---- oxFontFile methods ----
 
 // PSX: FontInit__10oxFontFilePc (OXSCRMGR.CPP:284, 0x80040998)
 // PSX: creates sectionMan, loads font file, finds font inventory,

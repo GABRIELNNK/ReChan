@@ -1,5 +1,3 @@
-// display.cpp - Display manager reversed from PSX DISPLAY.CPP / PSXDISP.CPP
-// PSX source: C:\CHAN\GAME\SRC\GEN\DISPLAY.CPP, C:\CHAN\GAME\SRC\PSX\PSXDISP.CPP
 #include "gen/display.h"
 #include "gen/camera.h"
 #include "p3d/context.h"

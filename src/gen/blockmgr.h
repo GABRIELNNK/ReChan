@@ -7,35 +7,31 @@
 #include <vector>
 
 // BlockManager = manages level block loading, draw lists, demand loading
-// Reversed from PSX struct layout (BLKMGR.CPP)
 class BlockManager : public Manager {
 public:
     BlockManager();
     ~BlockManager() override;
 
-    // _LoadBlocksFunc (BLKMGR.CPP:207) = allocate block pool from WDB database
-    void LoadBlocksFunc(const std::vector<DBVolume*>& volumes);   // 0x8005010C
+    // allocate block pool from WDB database
+    void LoadBlocksFunc(const std::vector<DBVolume*>& volumes);
 
-    // InternalOpen (BLKMGR.CPP:258) = set up draw/load callback nodes
-    void InternalOpen() override;                                          // 0x800502BC
+    // set up draw/load callback nodes
+    void InternalOpen() override;
 
-    // InternalClose (BLKMGR.CPP:280)
-    void InternalClose() override;                                         // 0x80050384
+    void InternalClose() override;
 
-    // LoadBlocks (BLKMGR.CPP:695) = load and parse block data from stream
+    // load and parse block data from stream
     void LoadBlocks(u32 blockNum,
                     const u8* const* blkDataPtrs,
                     const u32* blkSizes,
-                    u32 blkCount);                                // 0x80050A98
+                    u32 blkCount);
 
-    // GetBlock (BLKMGR.CPP:1374) = get block by index
-    Block* GetBlock(u32 index);                                   // 0x800518C4
+    // get block by index
+    Block* GetBlock(u32 index);
+    bool IsValidBlockNumber(u32 index) const;
 
-    // IsValidBlockNumber (BLKMGR.CPP:769)
-    bool IsValidBlockNumber(u32 index) const;                     // 0x80050C70
-
-    // GetBlockNumber (BLKMGR.CPP:749) = find block containing position
-    u16 GetBlockNumber(const LVector& pos) const;                 // 0x80050C04
+    // find block containing position
+    u16 GetBlockNumber(const LVector& pos) const;
 
     u32 GetNumBlocks() const { return totalBlocks; }
 

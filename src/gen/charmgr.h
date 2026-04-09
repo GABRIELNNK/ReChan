@@ -1,11 +1,10 @@
-// charmgr.h - CharacterManager reversed from PSX C:\CHAN\GAME\SRC\GEN\CHARMGR.CPP
-// Manages character slot loading, model lifecycle, and animation handles.
-// PC port: .RR files loaded from disk (assets/RCHARS/) via standard file I/O.
 #pragma once
-
 #include "core.h"
 #include "gen/manager.h"
 #include "ai/thing.h"
+
+// Manages character slot loading, model lifecycle, and animation handles.
+// PC port: .RR files loaded from disk (assets/RCHARS/) via standard file I/O.
 
 // Forward declarations
 class CharacterManager;
@@ -33,7 +32,6 @@ struct CharMgrCallback {
     s32 done = 0;       // PSX +0: set to 1 when callback fires
 
     virtual ~CharMgrCallback();
-    // PSX: Callback__14CharMgrCallback (CHARMGR.HPP:82)
     virtual void Callback();
 };
 
@@ -66,20 +64,13 @@ struct CharFile {
     s32 refCount = 0;                 // PSX +24: reference count
     u32 thingType = 0;               // PSX +28: AI::ThingTypes
 
-    // PSX: __8CharFileUs (CHARMGR.CPP:2682)
     CharFile(u32 type);
-    // PSX: _._8CharFile (CHARMGR.CPP:2751)
     ~CharFile();
 
-    // PSX: AddRef__8CharFile (CHARMGR.CPP)
     void AddRef();
-    // PSX: DeleteRef__8CharFile (CHARMGR.CPP:2805)
     void DeleteRef();
-    // PSX: Find__8CharFileUs (CHARMGR.CPP:2831) - static
     static CharFile* Find(u32 type);
-    // PSX: FindAnim__8CharFileUl (CHARMGR.CPP:2861)
     s32 FindAnim(u32 hash);
-    // PSX: EnableCache__8CharFilei (CHARMGR.CPP:2893)
     void EnableCache(s32 enable);
 
     // PC helper: read a resource from the .RR file into a new buffer
@@ -93,17 +84,15 @@ struct AnimCallback : public CharMgrCallback {
     s32 remainingCount = 0;           // PSX +16
     CharMgrCallback* userCallback = nullptr; // PSX +20
 
-    // PSX: __12AnimCallbackUsil14CharMgrCallback (CHARMGR.CPP:2935)
     AnimCallback(u32 type, s32 animEnum, u32 hash, CharMgrCallback* cb);
     ~AnimCallback() override;
-    // PSX: Callback__12AnimCallback (CHARMGR.CPP:2963)
+
     void Callback() override;
 };
 
 // PSX: CharacterManager (~3004 bytes)
 // Singleton manager for character slots, model loading, animation handles.
 // Global: gp+796
-// Source: C:\CHAN\GAME\SRC\GEN\CHARMGR.CPP
 static constexpr s32 CHAR_MAX_SLOTS = 4;
 static constexpr s32 CHAR_MAX_ANIMS = 255;
 
@@ -115,53 +104,33 @@ public:
     void* freeListHead = nullptr;          // PSX +2744: free list into animPtrs
     u8 animRefCounts[CHAR_MAX_ANIMS] = {}; // PSX +2748: ref counts (bit 7 = cached)
 
-    // PSX: __16CharacterManager (CHARMGR.CPP:334)
     CharacterManager();
-    // PSX: _._16CharacterManager (CHARMGR.CPP:388)
     ~CharacterManager() override;
 
-    // PSX: OpenCharacter__16CharacterManagerUs (CHARMGR.CPP:425)
     void OpenCharacter(u32 type);
-    // PSX: CloseCharacter__16CharacterManagerUs (CHARMGR.CPP:467)
     void CloseCharacter(u32 type);
 
-    // PSX: LoadCharacter__16CharacterManagerUsP14CharMgrCallback (CHARMGR.CPP:496)
     void LoadCharacter(u32 type, CharMgrCallback* callback = nullptr);
-    // PSX: UnloadCharacter__16CharacterManagerUs (CHARMGR.CPP:693)
     void UnloadCharacter(u32 type);
-    // PSX: ReloadCharacter__16CharacterManagerUslP14CharMgrCallback (CHARMGR.CPP:792)
     void ReloadCharacter(u32 type, s32 meshType, CharMgrCallback* callback = nullptr);
-
-    // PSX: LoadCharTexture__16CharacterManagerUs (CHARMGR.CPP:931)
     void LoadCharTexture(u32 type);
 
-    // PSX: IsCharacterLoaded__16CharacterManagerUs (CHARMGR.CPP:1010)
     bool IsCharacterLoaded(u32 type);
-    // PSX: GetNumberCharactersLoaded__16CharacterManager (CHARMGR.CPP:1038)
     s32 GetNumberCharactersLoaded();
-
-    // PSX: EnableCache__16CharacterManagerUsi (CHARMGR.CPP:1073)
     void EnableCache(u32 type, s32 enable);
 
-    // PSX: LoadAnimation overloads (CHARMGR.CPP:1309, 1383, 1448)
     void LoadAnimation(u32 type, u32 hash, CharMgrCallback* callback = nullptr);
     void LoadAnimation(u32 type, s32 animEnum, u32 hash, CharMgrCallback* callback = nullptr);
     void LoadAnimationBatch(u32 type, s32 animEnum, CharMgrCallback* callback = nullptr);
 
-    // PSX: UnloadAnimation overloads (CHARMGR.CPP:1740, 1813, 1838)
     void UnloadAnimation(u32 type, u32 hash);
     void UnloadAnimation(u32 type, s32 animEnum, u32 hash);
     void UnloadAnimationBatch(u32 type, s32 animEnum);
 
-    // PSX: GetAnimation__16CharacterManagerUsQ2_2AI9AnimEnums (CHARMGR.CPP:1968)
     void* GetAnimation(u32 type, s32 animEnum);
-    // PSX: LookUpAnimation__16CharacterManagerUsPCc (CHARMGR.CPP:2023)
     s32 LookUpAnimation(u32 type, const char* name);
-
-    // PSX: PurgeLevel__16CharacterManager (CHARMGR.CPP:2054)
     void PurgeLevel();
 
-    // PSX: InternalReset/Open/Close (empty stubs)
     void InternalReset() override;
     void InternalOpen() override;
     void InternalClose() override;
@@ -176,13 +145,8 @@ private:
 // Global singleton (PSX: gp+796)
 extern CharacterManager* g_characterManager;
 
-// PSX: FreeAnimMemory (CHARMGR.CPP:201)
 void FreeAnimMemory(void* ptr);
-
-// PSX: GetCompositeAnimationNameHash (CHARMGR.CPP:267)
 u32 GetCompositeAnimationNameHash(const char* name);
-
-// PSX: GetPlayerMeshType (CHARMGR.CPP:301)
 s32* GetPlayerMeshType();
 
 // Global CharFile list head (PSX: gp+800)

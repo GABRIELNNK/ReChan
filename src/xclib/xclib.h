@@ -1,43 +1,31 @@
-// xclib.h - xclib .1 file parser and cell image decoder
-// Reversed from PSX XCSOS.CPP, XCINV.CPP, XCCIMAGE.CPP, XCFILE.CPP, EXPAND.CPP
+#pragma once
+#include "core.h"
+
 // Parses xclib .1 files (TITLE.1, FE.1, etc.) into inventories of images,
 // strings, screens, and overlays. Cell images are decoded from LZSS-compressed
 // indexed color data to RGBA32 for GL rendering.
-#pragma once
-
-#include "core.h"
 
 class tTexture;
 class xcFont;
 
-// SQU LZSS Decompression (EXPAND.CPP:67)
 // PSX: SquExpandData(u8* dst, const u8* src)
 // Returns bytes written. Dst must be large enough (max 8192).
 s32 SquExpandData(u8* dst, const u8* src);
 
-// xcReadFileLow / xcReadFileHigh (XCFILE.CPP)
-
-// PSX: xcReadFileLow__FPCcPPvPUl (XCFILE.CPP:76, 0x800911C0)
 // Reads file into allocated buffer.
 bool xcReadFileLow(const char* path, u8** outData, u32* outSize);
 
-// PSX: xcReadFileHigh__FPCcPPvPUl (XCFILE.CPP:105, 0x80091268)
 // Same as xcReadFileLow on PC (PSX uses different allocator for "high" memory).
 bool xcReadFileHigh(const char* path, u8** outData, u32* outSize);
 
-// xcHash (XCHASH.CPP:11)
 
 // PSX: djb2 variant hash
 u32 xcHash(const char* str);
-
-//xcInventoryItem (XCINV.CPP)
 
 struct xcInventoryItem {
     u32 hash;       // xcHash of item name
     u32 dataOffset; // relative offset from file start (before fix-up)
 };
-
-// xcInventory (XCINV.CPP)
 
 // On-disk format: [tag:4][dataSize:4][itemCount:4][items:8*N][referenced data]
 struct xcInventory {
@@ -52,14 +40,11 @@ struct xcInventory {
 
     void FixDataPointers(u8* base);
 
-    // PSX: Sort__11xcInventory (XCINV.CPP:27, 0x80091370)
     // Sorts items by hash using shaker sort for binary search.
     void Sort();
 
     const xcInventoryItem* FindItem(u32 hash) const;
 };
-
-// xcCellImage (XCCIMAGE.CPP:132)
 
 // Decoded cell image with RGBA pixel data for GL rendering.
 // On PSX this is 32 bytes with VRAM upload; on PC we decode to RGBA and create a GL texture.
@@ -101,12 +86,10 @@ struct xcCellHeader {
     // CLUT data follows at +32, then frame data
 };
 
-// xcPrimObj (XCDO.CPP)
-
 // PSX: xcPrimObj type field (byte +0)
 enum xcPrimType : u8 {
     XC_PRIM_SPRITE = 9,
-    XC_PRIM_TEXT   = 10,
+    XC_PRIM_TEXT = 10,
     XC_PRIM_POLYF4 = 16,
     XC_PRIM_POLYG4 = 17,
 };
@@ -114,13 +97,13 @@ enum xcPrimType : u8 {
 // PSX: justification flags in xcPrimHeader::flags (byte +1)
 // Used by xcFontDC::PushJustTrans and xcImageDC::FindJust
 enum xcJustify : u8 {
-    XC_JUST_LEFT    = 0,
-    XC_JUST_RIGHT   = 0x02,  // (flags & 2) - right-align
-    XC_JUST_CENTER  = 0x03,  // (flags & 3) == 3 - center
-    XC_JUST_BOTTOM  = 0x08,  // (flags & 8) - bottom-align
+    XC_JUST_LEFT = 0,
+    XC_JUST_RIGHT = 0x02,  // (flags & 2) - right-align
+    XC_JUST_CENTER = 0x03,  // (flags & 3) == 3 - center
+    XC_JUST_BOTTOM = 0x08,  // (flags & 8) - bottom-align
     XC_JUST_VCENTER = 0x0C,  // (flags & 0xC) == 0xC - vertical center
-    XC_JUST_HMASK   = 0x03,
-    XC_JUST_VMASK   = 0x0C,
+    XC_JUST_HMASK = 0x03,
+    XC_JUST_VMASK = 0x0C,
 };
 
 // PSX: xcPrimObj base header (4 bytes), followed by type-specific data.
@@ -231,8 +214,6 @@ struct xcPolyG4Prim {
     }
 };
 
-// xcOverlayData (XCSOS.CPP:55)
-
 // Item entry within an xcOverlayData - references a prim object.
 struct xcOverlayItem {
     u32 hash;
@@ -240,7 +221,6 @@ struct xcOverlayItem {
 };
 
 // Raw overlay data within .1 file (cast from rawData + offset).
-// PSX: xcOverlay (XCSOS.CPP)
 struct xcOverlayData {
     u32 visibility;
     u32 primCount;
@@ -259,10 +239,7 @@ struct xcOverlayData {
     u8* GetSprite(u32 hash, u8* rawData) const;
 };
 
-// xcScreenData (XCSOS.CPP:250)
-
 // Raw screen data within .1 file (cast from rawData + offset).
-// PSX: xcScreen (XCSOS.CPP)
 struct xcScreenData {
     u32 overlayCount;
     // u32 overlayRefs[overlayCount] follows at +4
@@ -270,8 +247,6 @@ struct xcScreenData {
     u32* GetOverlayRefs() { return reinterpret_cast<u32*>(this + 1); }
     const u32* GetOverlayRefs() const { return reinterpret_cast<const u32*>(this + 1); }
 };
-
-// xcSection (XCSOS.CPP:295)
 
 // Parsed xclib .1 file. Contains inventories referencing cell images,
 // strings, screens, and overlays within the loaded file data.
@@ -302,7 +277,6 @@ struct xcSection {
     xcSection() = default;
     ~xcSection();
 
-    // PSX: Init__9xcSectionPUcP12xcSectionManUl (XCSOS.CPP:295, 0x8005EBD8)
     bool Init(u8* data, u32 size, xcSectionMan* man);
 
     // Get a decoded cell image by index
@@ -311,16 +285,9 @@ struct xcSection {
     // Get a decoded cell image by hash name
     xcCellImage* FindCell(u32 hash) const;
 
-    // PSX: FixScreenAndOverlayandDO__9xcSection (XCSOS.CPP:545, 0x8005F0B0)
     void FixScreenAndOverlayandDO();
-
-    // PSX: Draw__9xcSection (XCSOS.CPP:355, 0x8005ED04)
     void Draw();
-
-    // PSX: GotoScreen__9xcSectionP8xcScreen (XCSOS.CPP:332, 0x8005EC40)
     void GotoScreen(xcScreenData* scr);
-
-    // PSX: UnloadOverlays__9xcSection (XCSOS.CPP:346, 0x8005EC8C)
     void UnloadOverlays();
 
     // Find raw overlay data by hash
@@ -352,8 +319,6 @@ private:
     void DrawPrimObj(u8* primData);
 };
 
-//xcSectionMan
-
 // PSX: xcSectionMan (8 bytes)
 // PSX layout:
 //   +0: fonts (xcInventory*) - fonts inventory (sorted by hash)
@@ -368,25 +333,12 @@ struct xcSectionMan {
     xcFont** fontObjects = nullptr;
     s32 numFontObjects = 0;
 
-    // PSX: __12xcSectionMan (XCSOS.CPP:572, 0x8005F180)
     xcSectionMan() { MARKFUNCTION(0x8005F180); }
     ~xcSectionMan();
-
-    // PSX: LoadSection__12xcSectionManPCcUl (XCSOS.CPP:609)
     bool LoadSection(const char* filename);
-
-    // PSX: FreeSection__12xcSectionMan (XCSOS.CPP:598, 0x8005F1EC)
     void FreeSection();
-
-    // PSX: LoadFonts__12xcSectionManP11xcInventory (XCSOS.CPP:676, 0x8005F3B4)
     void LoadFonts(xcInventory* fontInv, u8* fileBase);
-
-    // PSX: DeleteFonts__12xcSectionMan (XCSOS.CPP:653, 0x8005F300)
     void DeleteFonts();
-
-    // PSX: FindFont__12xcSectionManUl (XCSOS.CPP:580, 0x8005F190)
     xcFont* FindFont(u32 hash);
-
-    // PSX: FindFont__12xcSectionManPCc (XCSOS.CPP:591, 0x8005F1B8)
     xcFont* FindFont(const char* name);
 };

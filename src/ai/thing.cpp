@@ -1,5 +1,3 @@
-// thing.cpp - Thing and DynamicThing implementations
-// Reversed from PSX C:\CHAN\GAME\SRC\AI\THING.CPP
 #include "gen/common.h"
 #include "ai/thing.h"
 #include "gen/blockmgr.h"
@@ -33,7 +31,8 @@ static s32 LerpAngle16(s32 a, s32 b, f32 alpha) {
 
     if (delta > 32767) {
         delta -= 65536;
-    } else if (delta < -32768) {
+    }
+    else if (delta < -32768) {
         delta += 65536;
     }
 
@@ -125,64 +124,13 @@ void Thing::Think() {
     UpdatePosition();
 }
 
-void Thing::GetRenderTransform(LVector* outPos, LVector* outOrientation) {
-    if (!outPos || !outOrientation) {
-        return;
-    }
-
-#if INTERPOLATED_RENDERING
-    if (!g_time) {
-        *outPos = pos;
-        *outOrientation = orientation;
-        return;
-    }
-
-    const u32 tick = g_time->GetFrameCounter();
-    if (!renderSnapshotInit) {
-        renderPrevPos = pos;
-        renderPrevOrientation = orientation;
-        renderCurrPos = pos;
-        renderCurrOrientation = orientation;
-        renderSnapshotTick = tick;
-        renderSnapshotInit = true;
-    } else if (tick != renderSnapshotTick) {
-        if (IsRenderTeleport(renderCurrPos, pos)) {
-            renderPrevPos = pos;
-            renderPrevOrientation = orientation;
-            renderCurrPos = pos;
-            renderCurrOrientation = orientation;
-        } else {
-            renderPrevPos = renderCurrPos;
-            renderPrevOrientation = renderCurrOrientation;
-            renderCurrPos = pos;
-            renderCurrOrientation = orientation;
-        }
-        renderSnapshotTick = tick;
-    }
-
-    const f32 alpha = Clamp(g_time->renderAlpha, 0.0f, 1.0f);
-
-    outPos->x = LerpS32(renderPrevPos.x, renderCurrPos.x, alpha);
-    outPos->y = LerpS32(renderPrevPos.y, renderCurrPos.y, alpha);
-    outPos->z = LerpS32(renderPrevPos.z, renderCurrPos.z, alpha);
-
-    outOrientation->x = LerpAngle16(renderPrevOrientation.x, renderCurrOrientation.x, alpha);
-    outOrientation->y = LerpAngle16(renderPrevOrientation.y, renderCurrOrientation.y, alpha);
-    outOrientation->z = LerpAngle16(renderPrevOrientation.z, renderCurrOrientation.z, alpha);
-#else
-    *outPos = pos;
-    *outOrientation = orientation;
-#endif
-}
-
 // PSX: Draw__5Thing (THING.CPP:487)
 // Sets model position/orientation from Thing fields, then calls model->Show
 void Thing::Draw() {
     MARKFUNCTION(0x800616EC);
 
-    LVector drawPos = {};
-    LVector drawOrient = {};
-    GetRenderTransform(&drawPos, &drawOrient);
+    LVector drawPos = pos;
+    LVector drawOrient = orientation;
 
     if (model) {
         // PSX: copies pos/orientation to model, then calls Show

@@ -34,18 +34,11 @@ struct Behaviour {
     // PSX +272 (u32): previous controller mask cache.
     u32 previousButtons = 0;
 
-    // PSX: _9BehaviourP8HumanoidUll (BEHAVIOU.CPP)
     Behaviour(Humanoid* ownerHumanoid, u32 handlerType, s32 aiParam);
-
-    // PSX: SetAIHandler__9BehaviourUl (BEHAVIOU.CPP)
     void SetAIHandler(u32 handlerType);
-
-    // PSX: Process__9Behaviour (BEHAVIOU.CPP)
     virtual void Process();
-
     virtual ~Behaviour() = default;
 
 private:
-    // PSX: PlayerUserControl__9Behaviour (BEHAVIOU.CPP)
     static void PlayerUserControl(Behaviour* behaviour);
 };

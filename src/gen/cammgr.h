@@ -1,12 +1,11 @@
-// cammgr.h
-// Manages camera rail paths loaded from the WDB database.
-// CameraManager loads paths, CameraAnchor owns them, Camera references the anchor.
 #pragma once
-
 #include "core.h"
 #include "p3d/lvector.h"
 #include "gen/manager.h"  // Manager -> ccNode, ccMinNode, ccMinList
 #include "gen/database.h"    // DBPath, DBPoint, DBRoot
+
+// Manages camera rail paths loaded from the WDB database.
+// CameraManager loads paths, CameraAnchor owns them, Camera references the anchor.
 
 // DBCameraPathNode (0x8004B480)
 // PSX struct: 64 bytes. Each node is a point along a camera rail.
@@ -64,32 +63,27 @@ struct DBCameraPath : public ccMinNode {
     s32 pathID = 0;
 
     // PSX +28,+32,+36: bounding box minimum
-    LVector bboxMin = {0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF};
+    LVector bboxMin = { 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF };
     // PSX +40,+44,+48: bounding box maximum
-    LVector bboxMax = {(s32)0x80000000, (s32)0x80000000, (s32)0x80000000};
+    LVector bboxMax = { (s32)0x80000000, (s32)0x80000000, (s32)0x80000000 };
 
     DBCameraPath();
     ~DBCameraPath() override;
 
     // Add a source node (camera position) from DB point data
-    // PSX: AddSourceNode__12DBCameraPathP7DBPoint (0x8004AC40)
     void AddSourceNode(DBPoint* point);
 
     // Add target positions to existing nodes from DB point data
-    // PSX: AddTargetNode__12DBCameraPathP7DBPointi (0x8004ADD0)
     void AddTargetNode(DBPoint* point, s32 reverseOrder);
 
     // Expand bounding box by 'margin' in all directions
-    // PSX: FinalizeBoundaries__12DBCameraPathl (0x8004AED0)
     void FinalizeBoundaries(s32 margin);
 
     // Test if position is inside the bounding box
-    // PSX: InRange__12DBCameraPathG10tagLVector (0x8004AF1C)
     s32 InRange(LVector pos);
 
     // Find the two closest nodes to a position
     // Returns squared distance to closest node (-1 if none found)
-    // PSX: FindClosestNodes (0x8004AFB0)
     s32 FindClosestNodes(LVector pos,
                          DBCameraPathNode** outNodeA,
                          DBCameraPathNode** outNodeB);
@@ -111,11 +105,9 @@ struct CameraAnchor : public ccNode {
     ~CameraAnchor() override;
 
     // Add a source camera path from a DB path entry (type 155 = 0x9B)
-    // PSX: AddCameraSourcePath (0x8004A870)
     void AddCameraSourcePath(DBPath* path);
 
     // Add target nodes to an existing source path (type 156 = 0x9C)
-    // PSX: AddCameraTargetPath (0x8004A968)
     void AddCameraTargetPath(DBPath* path);
 
     // Find source path by its pathID
@@ -124,27 +116,23 @@ struct CameraAnchor : public ccNode {
 
     // Find the two closest path nodes to a world position
     // Returns squared distance (-1 if none found)
-    // PSX: FindClosestNodes (0x8004AA6C)
     s32 FindClosestNodes(LVector pos,
                          DBCameraPathNode** outNodeA,
                          DBCameraPathNode** outNodeB);
 };
 
-// CameraManager (0x8004A548)
-// PSX struct: extends Manager. Loads camera paths from Database.
-// Stored as global: gp+3548 (g_cameraManager)
+// Loads camera paths from Database.
 class CameraManager : public Manager {
 public:
     CameraManager();
     ~CameraManager() override;
 
     // Load camera paths from the Database and set up the CameraAnchor.
-    // PSX: InternalOpen (0x8004A5F4) - creates a callback node that calls SetupPaths.
+    // Creates a callback node that calls SetupPaths.
     // On PC we call SetupPaths directly since we don't have the async callback system.
     void InternalOpen() override;
 
     // Iterate all DB paths, create DBCameraPath entries, assign to CameraAnchor.
-    // PSX: SetupPaths (0x8004A668)
     void SetupPaths();
 
     // The camera anchor for this level

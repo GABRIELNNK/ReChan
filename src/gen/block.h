@@ -1,7 +1,4 @@
-// block.h = Block class reversed from PSX BLOCK.CPP
-// Original: C:\CHAN\GAME\SRC\GEN\BLOCK.CPP
 #pragma once
-
 #include "core.h"
 #include "p3d/lvector.h"
 
@@ -10,8 +7,6 @@ struct DBVolume;
 struct DBAttrib;
 struct CollisionSector;
 
-// Block = reversed from PSX Block class (104 bytes on PSX)
-// Source: C:\CHAN\GAME\SRC\GEN\BLOCK.CPP
 struct Block {
     // +0: parsed flag (1 if data has prims, 0 otherwise)
     u32 parsed;
@@ -72,8 +67,8 @@ struct Block {
     Block();
     ~Block();
 
-    void Init(const DBVolume* vol);                            // 0x80052BB0
-    void SetDimension(const LVector* a, const LVector* b);     // 0x80052EA0
+    void Init(const DBVolume* vol);                             // 0x80052BB0
+    void SetDimension(const LVector* a, const LVector* b);      // 0x80052EA0
     void Parse(u32 size, const u8* blkData);                    // 0x80052F80
     void Unload();                                              // 0x80052FF0
     bool PointInBlock(const LVector* pt) const;                 // 0x80053024

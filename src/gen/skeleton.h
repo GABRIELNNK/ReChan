@@ -1,4 +1,3 @@
-// skeleton.h - game-side skeleton utilities
 #pragma once
 #include "p3d/skeleton.h"
 

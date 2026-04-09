@@ -1,5 +1,3 @@
-// levelmgr.cpp - LevelManager reversed from PSX LEVELMGR.CPP
-// PSX source: C:\CHAN\GAME\SRC\GEN\LEVELMGR.CPP
 #include "common.h"
 #include "gen/levelmgr.h"
 #include "gen/charmgr.h"

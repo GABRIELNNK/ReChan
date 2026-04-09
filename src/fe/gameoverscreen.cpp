@@ -1,10 +1,6 @@
-// gameoverscreen.cpp - GameOverScreen reversed from PSX FEMNUMGR.CPP (Overlay 4)
-// PSX source: C:\CHAN\GAME\SRC\FE\FEMNUMGR.CPP
-// Same pattern as TitleScreen but with different overlay/prim hashes.
 #include "fe/gameoverscreen.h"
 #include "xclib/xclib.h"
 
-// PSX: __14GameOverScreen (Overlay4 0x80011A28, FEMNUMGR.CPP:758)
 GameOverScreen::GameOverScreen() {
     MARKFUNCTION(0x80011A28);
     MenuColorStart(menuColor);

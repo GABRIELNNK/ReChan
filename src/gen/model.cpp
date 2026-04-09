@@ -1,5 +1,3 @@
-// model.cpp - Model class hierarchy implementation
-// Reversed from PSX MODEL.CPP / MHUMAN.CPP
 #include "gen/model.h"
 #include "gen/animmat.h"
 #include "gen/animstruct.h"
@@ -49,7 +47,7 @@ DrawableSTree::~DrawableSTree() {
 
 // PSX: Display dispatches through vtable to OriginalSTree::Draw -> tPrimGeom::Display
 // PC: draws the skeleton mesh (per-joint transforms baked in) or flat fallback
-void DrawableSTree::Display(u32 /*flags*/) { 
+void DrawableSTree::Display(u32 /*flags*/) {
     if (!original)
         return;
 
@@ -90,7 +88,8 @@ void DrawableSTree::Display(u32 /*flags*/) {
     STreeData* fallbackSkel = original->skeleton;
     if (fallbackSkel && fallbackSkel->joints && fallbackSkel->joints[0].meshBuffer) {
         p3d::context->DrawPrimBuffer(fallbackSkel->joints[0].meshBuffer);
-    } else if (original->meshBuffer) {
+    }
+    else if (original->meshBuffer) {
         p3d::context->DrawPrimBuffer(original->meshBuffer);
     }
 }
@@ -155,8 +154,7 @@ void Model::DeleteDrawable() {
 
 // PSX: SetAnim__5Modelllil (MODEL.CPP:1907)
 // Base implementation is a no-op. Overridden by HumanoidModel/PlayerModel.
-void Model::SetAnim(s32 /*animEnum*/, s32 /*loopType*/, s32 /*flag*/, s32 /*extra*/) {
-}
+void Model::SetAnim(s32 /*animEnum*/, s32 /*loopType*/, s32 /*flag*/, s32 /*extra*/) {}
 
 // PSX: Model animation boundary handlers (MODEL.CPP:1916-2009)
 // Base implementations are trampolines to AnimStructure methods.
@@ -378,8 +376,7 @@ PlayerModel::PlayerModel() {
     // Same as HumanoidModel on PSX
 }
 
-PlayerModel::~PlayerModel() {
-}
+PlayerModel::~PlayerModel() {}
 
 // PSX: SetAnim__11PlayerModelllil (MPLAYER.CPP:293, 0x80077B20)
 // Routes player-specific animation enums to correct loop types.
@@ -403,17 +400,20 @@ void PlayerModel::SetAnim(s32 animEnum, s32 a3, s32 force, s32 extra) {
         // PSX: anim 1 + 22 redirect to 22 with Loop
         animEnum = 22;
         loopType = ANIM_LOOP;
-    } else if (animEnum == 2 || animEnum == 31 || animEnum == 41 ||
-               animEnum == 47 || animEnum == 48 || animEnum == 189 ||
-               animEnum == 206 || animEnum == 220 || animEnum == 231 ||
-               animEnum == 244 || animEnum == 254 || animEnum == 261) {
+    }
+    else if (animEnum == 2 || animEnum == 31 || animEnum == 41 ||
+             animEnum == 47 || animEnum == 48 || animEnum == 189 ||
+             animEnum == 206 || animEnum == 220 || animEnum == 231 ||
+             animEnum == 244 || animEnum == 254 || animEnum == 261) {
         // PSX: these anims use Loop (v11=0)
         loopType = ANIM_LOOP;
-    } else if (animEnum == 3 || animEnum == 17 || animEnum == 21 ||
-               animEnum == 152 || animEnum == 295) {
+    }
+    else if (animEnum == 3 || animEnum == 17 || animEnum == 21 ||
+             animEnum == 152 || animEnum == 295) {
         // PSX: RunToLast, no blend data
         loopType = ANIM_RUN_TO_LAST;
-    } else if (animEnum == 24) {
+    }
+    else if (animEnum == 24) {
         // PSX: strafe - plays DiveRoll sound if frame < 29
         if (backPtr && backPtr->thingType < 29) {
             Humanoid* owner = static_cast<Humanoid*>(backPtr);
@@ -422,19 +422,23 @@ void PlayerModel::SetAnim(s32 animEnum, s32 a3, s32 force, s32 extra) {
             }
         }
         loopType = ANIM_RUN_TO_LAST;
-    } else if (animEnum >= 27 && animEnum <= 30) {
+    }
+    else if (animEnum >= 27 && animEnum <= 30) {
         // PSX: 27 gets blend data, 28 goes to LABEL_58, 29-30 are RunToLast
         if (animEnum == 27) {
             setBlendData = true;
-        } else if (animEnum == 28) {
+        }
+        else if (animEnum == 28) {
             HumanoidModel::SetAnim(animEnum, a3, force, extra);
             return;
         }
         loopType = ANIM_RUN_TO_LAST;
-    } else if (animEnum >= 32 && animEnum <= 36) {
+    }
+    else if (animEnum >= 32 && animEnum <= 36) {
         // PSX: RunToLast, no blend data
         loopType = ANIM_RUN_TO_LAST;
-    } else if (animEnum == 42) {
+    }
+    else if (animEnum == 42) {
         // PSX: plays HitWorldStructure sound if frame < 29
         if (backPtr && backPtr->thingType < 29) {
             Humanoid* owner = static_cast<Humanoid*>(backPtr);
@@ -444,11 +448,13 @@ void PlayerModel::SetAnim(s32 animEnum, s32 a3, s32 force, s32 extra) {
         }
         setBlendData = true;
         loopType = ANIM_RUN_TO_LAST;
-    } else if (animEnum == 46) {
+    }
+    else if (animEnum == 46) {
         // PSX: RunToLast with blend data (turn animation)
         setBlendData = true;
         loopType = ANIM_RUN_TO_LAST;
-    } else {
+    }
+    else {
         // Fallback to HumanoidModel::SetAnim
         HumanoidModel::SetAnim(animEnum, a3, force, extra);
         handled = false;
@@ -465,7 +471,8 @@ void PlayerModel::SetAnim(s32 animEnum, s32 a3, s32 force, s32 extra) {
                 as->humanoidCB.offsetLo = 0;
                 as->humanoidCB.offsetHi = 61;
                 as->humanoidCB.funcPtr = reinterpret_cast<void*>(static_cast<intptr_t>(8));
-            } else {
+            }
+            else {
                 as->humanoidCB.offsetLo = 0;
                 as->humanoidCB.offsetHi = 0;
                 as->humanoidCB.funcPtr = nullptr;

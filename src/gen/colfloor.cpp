@@ -1,5 +1,3 @@
-// colfloor.cpp - Floor collision functions
-// Original: C:\CHAN\GAME\SRC\GEN\COLFLOOR.CPP
 #include "gen/colfloor.h"
 #include "gen/colline.h"
 #include "p3d/p3dmath.h"
@@ -75,7 +73,8 @@ bool Floor::Get(LVector& v0, LVector& v1, LVector& v2, LVector& v3) const {
         ok3 = ok2;
         v2.x = v3.x;
         v2.z = v3.z;
-    } else {
+    }
+    else {
         ok0 = Intersection(bound[0], bound[1], 0, v0.x, v0.z);
         ok1 = Intersection(bound[1], bound[2], 0, v1.x, v1.z);
         ok2 = Intersection(bound[2], bound[3], 0, v2.x, v2.z);
@@ -130,8 +129,8 @@ bool Floor::GetRailingCorrection(LVector& correction, const LVector& pos) const 
 // PSX: LedgePrototype__C5FloorRC10tagLVectorT1llR9_RMVECT16R10tagLVector (COLFLOOR.CPP:244) 0x80092B24
 // Detect crossing a ledge edge between startPos and endPos
 bool Floor::LedgePrototype(const LVector& startPos, const LVector& endPos,
-    s32 height, s32 maxFallHeight,
-    LVector& outNormal, LVector& outCorrectionPos) const {
+                           s32 height, s32 maxFallHeight,
+                           LVector& outNormal, LVector& outCorrectionPos) const {
     MARKFUNCTION(0x80092B24);
 
     if ((flags & 0x0001) == 0) {

@@ -1,6 +1,8 @@
-// model.h - Model class hierarchy reversed from PSX MODEL.CPP / MHUMAN.CPP
-// PSX source: C:\CHAN\GAME\SRC\GEN\MODEL.CPP
-//
+#pragma once
+#include "core.h"
+#include "p3d/p3dmath.h"
+#include "gen/cclist.h"
+
 // Original hierarchy (data containers stored in LevelManager):
 //   OriginalBasic -> OriginalTree -> OriginalSTree / OriginalGeo / OriginalETree
 //
@@ -10,11 +12,6 @@
 //
 // Drawable wrappers:
 //   DrawableTree -> DrawableSTree / DrawableGeo
-#pragma once
-
-#include "core.h"
-#include "p3d/p3dmath.h"
-#include "gen/cclist.h"
 
 class pddiPrimBuffer;
 class Thing;
@@ -167,24 +164,13 @@ public:
     u16 shadowAngle = 0;
     u16 pad86 = 0;
 
-    // PSX: _5Model (MODEL.CPP:671)
     Model();
-    // PSX: _._5Model (MODEL.CPP:697)
     ~Model() override;
-
-    // PSX: Reset__5Model (MODEL.CPP:777)
     void Reset();
-
-    // PSX: Show__5Model (virtual, overridden by SModel/GModel)
     virtual void Show(u32 flags);
 
-    // PSX: Animate__5Model (virtual)
     virtual void Animate();
-
-    // PSX: ApplyAnimToModel__5Model (virtual)
     virtual void ApplyAnimToModel(s32 thingType, s32 animEnum, s32 p3, s32 p4, s32 p5);
-
-    // PSX: SetAnim__5Modelllil (virtual, overridden by HumanoidModel/PlayerModel)
     virtual void SetAnim(s32 animEnum, s32 loopType, s32 flag, s32 extra);
 
     // PSX: animation boundary handlers dispatched via vtable from ExecuteHandler.
@@ -220,20 +206,12 @@ public:
     SModel();
     ~SModel() override;
 
-    // PSX: Show__6SModelUl (MODEL.CPP:1454)
     // PC: sets world matrix and draws the pddiPrimBuffer
     void Show(u32 flags) override;
 
-    // PSX: Animate__6SModel (MODEL.CPP:1416)
     void Animate() override;
-
-    // PSX: ApplyAnimToModel__6SModellllll (MODEL.CPP:1098)
     void ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 p4, s32 p5) override;
-
-    // PSX: SetOriginalSTree__6SModelP13OriginalSTreeP10tAnimation (MODEL.CPP:1026)
     void SetOriginalSTree(OriginalSTree* original);
-
-    // PSX: InitSemiTransMode__6SModel (MODEL.CPP:1045)
     void InitSemiTransMode();
 };
 
@@ -265,31 +243,21 @@ public:
     HumanoidModel();
     ~HumanoidModel() override;
 
-    // PSX: Animate__13HumanoidModel (MHUMAN.CPP:207, 0x8006E418)
     void Animate() override;
-
-    // PSX: SetAnim__13HumanoidModelllil (MHUMAN.CPP:166)
     void SetAnim(s32 animEnum, s32 a3, s32 force, s32 extra) override;
 
-    // PSX: _Loop__13HumanoidModelP13AnimStructure (MHUMAN.CPP:196)
     // Only loops when mode == 0 (normal animation playback).
     void HandleLoop(AnimStructure* anim) override;
 };
 
 // PlayerModel - player-specific model (136 bytes, same as HumanoidModel)
-// PSX: _11PlayerModel
 class PlayerModel : public HumanoidModel {
 public:
     PlayerModel();
     ~PlayerModel() override;
 
-    // PSX: SetAnim__11PlayerModelllil (MPLAYER.CPP:293)
     void SetAnim(s32 animEnum, s32 a3, s32 force, s32 extra) override;
-
-    // PSX: _Loop__11PlayerModelP13AnimStructure (MPLAYER.CPP:573)
     void HandleLoop(AnimStructure* anim) override;
-    // PSX: _RunToLast__11PlayerModelP13AnimStructure (MPLAYER.CPP:374)
     void HandleRunToLast(AnimStructure* anim) override;
-    // PSX: _IncFrame__11PlayerModelP13AnimStructure (MPLAYER.CPP:578)
     void HandleIncFrame(AnimStructure* anim) override;
 };

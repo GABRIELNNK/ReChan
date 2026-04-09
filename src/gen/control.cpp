@@ -1,12 +1,6 @@
-// control.cpp = from C:\CHAN\GAME\SRC\GEN\CONTROL.CPP
-// InputManager / Control / Button implementations
 #include "gen/control.h"
 #include "config.h"
 #include "p3d/keycode.h"
-
-#if PAD_KEYBOARD_EMULATION
-#include "p3d/input.h"    // PlatformInput (PC keyboard/mouse)
-#endif
 
 // Global singleton (PSX: 0x800DD69C)
 InputManager* g_inputManager = nullptr;
@@ -69,13 +63,15 @@ void Button::Input(s32 bit) {
 
     if (rawInput) {
         duration++;
-    } else {
+    }
+    else {
         duration = 0;
     }
 
     if (mode == BUTTON_MODE_ONESHOT || mode == BUTTON_MODE_REPEAT) {
         state = (rawInput && !prevInput) ? 1 : 0;
-    } else {
+    }
+    else {
         state = rawInput ? 1 : 0;
     }
 }
@@ -277,71 +273,6 @@ void InputManager::InternalReset() {
     controlValFlags[0] = controlValFlags[1] = 0;
 }
 
-
-// PC keyboard -> PSX pad emulation (behind config macro)
-
-#if PAD_KEYBOARD_EMULATION
-
-// Keyboard binding: maps a PC key code to a PSX pad button bit
-struct KeyPadBinding {
-    int keyCode;
-    u32 padBit;
-};
-
-// Default keyboard -> PSX pad bindings
-// Movement:     WASD + Arrow Keys -> D-pad Up/Left/Down/Right
-// Face buttons: I/J/K/L + V/Z/X/C + Space/Ctrl -> Triangle/Square/Cross/Circle
-// Shoulders:    U/O -> L1/R1,  Y/P -> L2/R2
-// Start/Select: Enter/Escape and Backspace/Tab
-// Stick clicks: N/M -> L3/R3
-static const KeyPadBinding s_keyBindings[] = {
-    // D-pad
-    { KEY_W,           PsxPad::Up       },
-    { KEY_A,           PsxPad::Left     },
-    { KEY_S,           PsxPad::Down     },
-    { KEY_D,           PsxPad::Right    },
-    { KEY_UP,          PsxPad::Up    },
-    { KEY_LEFT,        PsxPad::Left  },
-    { KEY_DOWN,        PsxPad::Down  },
-    { KEY_RIGHT,       PsxPad::Right },
-    // Face buttons
-    { KEY_I,           PsxPad::Triangle },
-    { KEY_K,           PsxPad::Cross    },
-    { KEY_J,           PsxPad::Square   },
-    { KEY_L,           PsxPad::Circle   },
-    { KEY_SPACE,       PsxPad::Cross },
-    // Shoulders
-    { KEY_U,           PsxPad::L1       },
-    { KEY_O,           PsxPad::R1       },
-    { KEY_Y,           PsxPad::L2       },
-    { KEY_P,           PsxPad::R2       },
-    // Start / Select
-    { KEY_ENTER,       PsxPad::Start  },
-    { KEY_ESCAPE,      PsxPad::Start  },
-    { KEY_BACKSPACE,   PsxPad::Select },
-    { KEY_TAB,         PsxPad::Select },
-    // Stick clicks
-    { KEY_N,           PsxPad::L3       },
-    { KEY_M,           PsxPad::R3       },
-};
-
-static constexpr int s_numKeyBindings = sizeof(s_keyBindings) / sizeof(s_keyBindings[0]);
-
-void InputManager::UpdateFromKeyboard(PlatformInput* platform, u16 padIndex) {
-    if (!platform) return;
-
-    u32 buttons = 0;
-    for (int i = 0; i < s_numKeyBindings; ++i) {
-        if (platform->IsKeyDown(s_keyBindings[i].keyCode)) {
-            buttons |= s_keyBindings[i].padBit;
-        }
-    }
-
-    ServiceInput(buttons, padIndex);
-}
-
-#endif // PAD_KEYBOARD_EMULATION
-
 // PSX: gp+144 - shock enabled flag (0 on PC, no DualShock)
 static s32 g_shockEnabled = 0;
 
@@ -351,16 +282,13 @@ s32 PadGetState(s32 /*port*/) {
 }
 
 // PSX: SetActuator (CONTROL.CPP:250, 0x8002D540) - PC no-op
-void SetActuator(u8 /*motor*/, u8 /*speed*/, u32 /*duration*/) {
-}
+void SetActuator(u8 /*motor*/, u8 /*speed*/, u32 /*duration*/) {}
 
 // PSX: ClearActuator (CONTROL.CPP:242, 0x8002D52C) - PC no-op
-void ClearActuator() {
-}
+void ClearActuator() {}
 
 // PSX: UpdateActuator (CONTROL.CPP:262, 0x8002D564) - PC no-op
-void UpdateActuator(s32 /*param*/) {
-}
+void UpdateActuator(s32 /*param*/) {}
 
 // PSX: Shock (CONTROL.CPP, 0x8002D6C0)
 void Shock(ShockEnum type) {
@@ -375,30 +303,30 @@ void Shock(ShockEnum type) {
     u8 speed;
     u32 duration;
     switch (type) {
-    case SHOCK_0:  motor = 0; speed = 128; duration = 15; break;
-    case SHOCK_1:  motor = 0; speed =  96; duration = 15; break;
-    case SHOCK_2:  motor = 0; speed =  96; duration = 15; break;
-    case SHOCK_3:  motor = 0; speed = 128; duration = 15; break;
-    case SHOCK_4:  motor = 0; speed = 128; duration = 15; break;
-    case SHOCK_5:  motor = 0; speed = 128; duration = 15; break;
-    case SHOCK_6:  motor = 0; speed = 188; duration = 15; break;
-    case SHOCK_7:  motor = 0; speed = 128; duration = 15; break;
-    case SHOCK_8:  motor = 0; speed = 255; duration = 15; break;
-    case SHOCK_9:  motor = 0; speed = 255; duration = 15; break;
-    case SHOCK_10: motor = 0; speed = 128; duration = 15; break;
-    case SHOCK_11: motor = 0; speed = 128; duration = 15; break;
-    case SHOCK_12: motor = 0; speed = 188; duration = 15; break;
-    case SHOCK_13: motor = 0; speed = 128; duration = 10; break;
-    case SHOCK_14: motor = 0; speed =  96; duration = 15; break;
-    case SHOCK_15: motor = 0; speed = 255; duration = 15; break;
-    case SHOCK_16: motor = 0; speed = 255; duration = 20; break;
-    case SHOCK_17: motor = 0; speed = 255; duration = 20; break;
-    case SHOCK_CLEAR:
-        ClearActuator();
-        UpdateActuator(0);
-        return;
-    default:
-        motor = 1; speed = 0; duration = 15; break;
+        case SHOCK_0:  motor = 0; speed = 128; duration = 15; break;
+        case SHOCK_1:  motor = 0; speed = 96; duration = 15; break;
+        case SHOCK_2:  motor = 0; speed = 96; duration = 15; break;
+        case SHOCK_3:  motor = 0; speed = 128; duration = 15; break;
+        case SHOCK_4:  motor = 0; speed = 128; duration = 15; break;
+        case SHOCK_5:  motor = 0; speed = 128; duration = 15; break;
+        case SHOCK_6:  motor = 0; speed = 188; duration = 15; break;
+        case SHOCK_7:  motor = 0; speed = 128; duration = 15; break;
+        case SHOCK_8:  motor = 0; speed = 255; duration = 15; break;
+        case SHOCK_9:  motor = 0; speed = 255; duration = 15; break;
+        case SHOCK_10: motor = 0; speed = 128; duration = 15; break;
+        case SHOCK_11: motor = 0; speed = 128; duration = 15; break;
+        case SHOCK_12: motor = 0; speed = 188; duration = 15; break;
+        case SHOCK_13: motor = 0; speed = 128; duration = 10; break;
+        case SHOCK_14: motor = 0; speed = 96; duration = 15; break;
+        case SHOCK_15: motor = 0; speed = 255; duration = 15; break;
+        case SHOCK_16: motor = 0; speed = 255; duration = 20; break;
+        case SHOCK_17: motor = 0; speed = 255; duration = 20; break;
+        case SHOCK_CLEAR:
+            ClearActuator();
+            UpdateActuator(0);
+            return;
+        default:
+            motor = 1; speed = 0; duration = 15; break;
     }
     SetActuator(motor, speed, duration);
     UpdateActuator(0);

@@ -1,5 +1,3 @@
-// xccolour.cpp - xcColour1555 color cycling reversed from PSX HDMENU.CPP
-// PSX source: C:\CHAN\GAME\SRC\FE\HDMENU.CPP
 #include "xclib/xccolour.h"
 
 // PSX: the menu color cycling globals are stored via $gp.
@@ -78,7 +76,8 @@ void MenuColorNext(xcColour1555& col) {
     if (g_menuColorStartR < g_menuColorEndR) {
         if (curR >= (u8)g_menuColorEndR)
             MenuColorStart(col);
-    } else {
+    }
+    else {
         if (curR <= (u8)g_menuColorEndR)
             MenuColorStart(col);
     }

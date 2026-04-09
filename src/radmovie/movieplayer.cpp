@@ -1,7 +1,3 @@
-// movieplayer.cpp - PSX STR movie playback for PC
-// Implements full MDEC video decode and XA ADPCM audio decode from raw CD sectors.
-// Reference: "The PlayStation 1 Video (STR) Format" v1.20 by Michael Sabin (MIT license)
-// PSX: MoviePlayer class (348 bytes, constructor 0x80014338)
 #include "gen/common.h"
 #include "radmovie/movieplayer.h"
 #include "pc/audio.h"
@@ -13,7 +9,7 @@
 #include "xclib/xcfile.h"
 #include <algorithm>
 
-// Constants
+// Reference: "The PlayStation 1 Video (STR) Format" v1.20 by Michael Sabin (MIT license)
 
 // Fixed-point IDCT cosine matrix (values * 65536)
 // Matches jpsxdec PSX_DEFAULT_COSINE_MATRIX

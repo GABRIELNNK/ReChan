@@ -1,8 +1,4 @@
-// movieplayer.h - PSX STR movie playback for PC
-// Decodes raw 2352-byte CD sectors containing interleaved video (MDEC) and audio (XA ADPCM).
-// PSX: MoviePlayer class (348 bytes, 0x80014338 constructor)
 #pragma once
-
 #include "core.h"
 
 class tTexture;

@@ -1,5 +1,3 @@
-// loadanim.cpp - PSX VBlankLogo loading bar
-// PSX source: C:\CHAN\GAME\SRC\FE\LOADANIM.CPP
 #include "gen/common.h"
 #include "fe/loadanim.h"
 #include "gen/display.h"
@@ -42,7 +40,7 @@ static void DrawLoadingScreen(u8 fill) {
 
     if (fill == 0)
         return;
-    if (fill > 100) 
+    if (fill > 100)
         fill = 100;
 
     f32 nx = kBarLeftX / DEFAULT_SCREEN_WIDTH;
@@ -58,7 +56,8 @@ static void DrawLoadingScreen(u8 fill) {
         s_pulseR++;
         if (s_pulseR >= 28)
             s_pulseDir = 0;
-    } else {
+    }
+    else {
         s_pulseR--;
         if (s_pulseR < 5)
             s_pulseDir = 1;
@@ -113,10 +112,11 @@ void FillMeter(u8 target) {
 
         // PSX: target increments by +1 each call until it reaches the requested value
         if (s_logo.targetFill < target) {
-			s_logo.currentFill++;
+            s_logo.currentFill++;
             s_logo.targetFill++;
-        } else {
-			s_logo.currentFill--;
+        }
+        else {
+            s_logo.currentFill--;
             s_logo.targetFill--;
         }
 

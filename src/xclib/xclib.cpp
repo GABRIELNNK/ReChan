@@ -1,11 +1,3 @@
-// xclib.cpp - xclib .1 file parser and cell image decoder
-// Reversed from PSX source files:
-//   XCSOS.CPP  - xcSection, xcInventory, xcSectionMan
-//   XCINV.CPP  - xcInventory item lookup and fix-up
-//   XCCIMAGE.CPP - xcCellImage construction and VRAM upload
-//   EXPAND.CPP - SquExpandData LZSS decompressor
-//   XCHASH.CPP - xcHash DJB2 hash
-//   XCFILE.CPP - xcReadFileLow file loading
 #include "gen/common.h"
 #include "xclib/xclib.h"
 #include "xclib/xcfile.h"

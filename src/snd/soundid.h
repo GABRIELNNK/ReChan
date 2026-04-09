@@ -1,10 +1,8 @@
-// soundid.h - Sound ID enum extracted from PSX g_transData (0x800DAACC)
-// PSX source: C:\CHAN\GAME\SRC\SND\TRNSSND.CPP / FESND.CPP
+#pragma once
+#include "core.h"
+
 // 256 transient sound entries. Each maps to an rsd sample + volume/pitch params.
 // The rsd sample (0-70) indexes the currently active WAX bank's descriptor table.
-#pragma once
-
-#include "core.h"
 
 // Transient sound IDs - used with CSound::PlayTransient / PlayTransientStereo.
 // IDs 0-216: gameplay sounds (hit, env, footstep, etc.)

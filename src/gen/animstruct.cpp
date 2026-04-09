@@ -1,5 +1,3 @@
-// animstruct.cpp - AnimStructure reversed from PSX MODEL.CPP:2335
-// PSX source: C:\CHAN\GAME\SRC\GEN\MODEL.CPP
 #include "gen/animstruct.h"
 #include "gen/model.h"
 #include "gen/time.h"
@@ -164,7 +162,8 @@ void AnimStructure::ExecuteHandler(s32 doFlip) {
     s32 elapsed;
     if (speed == FIX16_ONE) {
         elapsed = (tick - prevTick) << 16;
-    } else {
+    }
+    else {
         elapsed = (s32)((((s64)(tick - prevTick)) << 16) * (s64)speed >> 16);
     }
 
@@ -172,7 +171,8 @@ void AnimStructure::ExecuteHandler(s32 doFlip) {
     if (loopTypeField == 1) {
         // Reverse: subtract
         currentFrame = currentFrame - elapsed;
-    } else if (loopTypeField != 5) {
+    }
+    else if (loopTypeField != 5) {
         // Normal/other: add
         currentFrame = currentFrame + elapsed;
     }
@@ -196,7 +196,8 @@ void AnimStructure::ExecuteHandler(s32 doFlip) {
                 case 7: model->HandleRunToLastBlend(this); break;
                 default: break;
             }
-        } else {
+        }
+        else {
             // Fallback: no model (camera anims, etc.) - direct AnimStructure handlers
             switch (loopTypeField) {
                 case 0: Loop(); break;
@@ -274,7 +275,8 @@ void AnimStructure::RunToLast() {
 void AnimStructure::IncFrame() {
     if (endFrame >= currentFrame) {
         currentFrame = prevFrame + FIX16_ONE;
-    } else {
+    }
+    else {
         s32 denom = endFrame + FIX16_ONE;
         loopCount++;
         if (denom != 0) {
@@ -327,7 +329,7 @@ void AnimStructure::ProcessHumanoidCB() {
     if (cb.offsetHi <= 0) {
         uintptr_t fnValue = reinterpret_cast<uintptr_t>(cb.funcPtr);
         if (fnValue > 0xFFFF) {
-            using CallbackFn = s32 (*)(uintptr_t);
+            using CallbackFn = s32(*)(uintptr_t);
             CallbackFn fn = reinterpret_cast<CallbackFn>(cb.funcPtr);
             fn(adjusted);
         }
@@ -342,14 +344,14 @@ void AnimStructure::ProcessHumanoidCB() {
     }
 
     switch (cb.offsetHi) {
-    case 61:
-        humanoid->_DoStand();
-        return;
-    case 62:
-        humanoid->_DoRun();
-        return;
-    default:
-        return;
+        case 61:
+            humanoid->_DoStand();
+            return;
+        case 62:
+            humanoid->_DoRun();
+            return;
+        default:
+            return;
     }
 }
 

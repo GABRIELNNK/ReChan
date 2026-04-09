@@ -26,160 +26,159 @@ static s32 sAnimSelectedLoopType = ANIM_LOOP;
 
 static const char* GameStateName(GameState s) {
     switch (s) {
-    case GameState::Null: return "Null";
-    case GameState::Intro: return "Intro";
-    case GameState::Title: return "Title";
-    case GameState::TitleLoop: return "TitleLoop";
-    case GameState::Init: return "Init";
-    case GameState::OpenFE: return "OpenFE";
-    case GameState::FE: return "FE";
-    case GameState::PrePlay: return "PrePlay";
-    case GameState::Play: return "Play";
-    case GameState::EndLevel: return "EndLevel";
-    case GameState::EndLevelLoop: return "EndLevelLoop";
-    case GameState::EndLevelExit: return "EndLevelExit";
-    case GameState::PlayMovieCredits: return "PlayMovieCredits";
-    case GameState::DbgMenu: return "DbgMenu";
-    case GameState::Menu: return "Menu";
-    case GameState::Error: return "Error";
-    case GameState::ErrorLoop: return "ErrorLoop";
-    case GameState::ErrorExit: return "ErrorExit";
-    case GameState::LocationMenu: return "LocationMenu";
-    case GameState::OpenLocationMenu: return "OpenLocationMenu";
-    case GameState::QueueLevelLoad: return "QueueLevelLoad";
-    case GameState::QueuePetalLoad: return "QueuePetalLoad";
-    case GameState::QueueLevelPetalLoad: return "QueueLevelPetalLoad";
-    case GameState::DetermineNextGameState: return "DetermineNextGameState";
-    case GameState::DetermineGameOverState: return "DetermineGameOverState";
-    case GameState::EndGame: return "EndGame";
-    case GameState::EndGameLoop: return "EndGameLoop";
-    case GameState::End: return "End";
-    default: return "Unknown";
+        case GameState::Null: return "Null";
+        case GameState::Intro: return "Intro";
+        case GameState::Title: return "Title";
+        case GameState::TitleLoop: return "TitleLoop";
+        case GameState::Init: return "Init";
+        case GameState::OpenFE: return "OpenFE";
+        case GameState::FE: return "FE";
+        case GameState::PrePlay: return "PrePlay";
+        case GameState::Play: return "Play";
+        case GameState::EndLevel: return "EndLevel";
+        case GameState::EndLevelLoop: return "EndLevelLoop";
+        case GameState::EndLevelExit: return "EndLevelExit";
+        case GameState::PlayMovieCredits: return "PlayMovieCredits";
+        case GameState::DbgMenu: return "DbgMenu";
+        case GameState::Menu: return "Menu";
+        case GameState::Error: return "Error";
+        case GameState::ErrorLoop: return "ErrorLoop";
+        case GameState::ErrorExit: return "ErrorExit";
+        case GameState::LocationMenu: return "LocationMenu";
+        case GameState::OpenLocationMenu: return "OpenLocationMenu";
+        case GameState::QueueLevelLoad: return "QueueLevelLoad";
+        case GameState::QueuePetalLoad: return "QueuePetalLoad";
+        case GameState::QueueLevelPetalLoad: return "QueueLevelPetalLoad";
+        case GameState::DetermineNextGameState: return "DetermineNextGameState";
+        case GameState::DetermineGameOverState: return "DetermineGameOverState";
+        case GameState::EndGame: return "EndGame";
+        case GameState::EndGameLoop: return "EndGameLoop";
+        case GameState::End: return "End";
+        default: return "Unknown";
     }
 }
 
 static const char* ActionStateName(s32 s) {
     switch (s) {
-    case AS_INACTIVE_IDLE: return "InactiveIdle";
-    case AS_STAND: return "Stand";
-    case AS_STAND_ANIM: return "StandAnim";
-    case AS_WALL_JUMP_TAUNT: return "WallJumpTaunt";
-    case AS_DIVE_ROLL: return "DiveRoll";
-    case AS_PAUSE: return "Pause/RunJump";
-    case AS_JUMP: return "Jump";
-    case AS_LEDGE_LATCH: return "LedgeLatch";
-    case AS_RUN: return "Run";
-    case AS_BACKFLIP: return "Backflip";
-    case AS_STRAFE: return "Strafe";
-    case AS_FALL: return "Fall";
-    case AS_HARDFALL: return "HardFall";
-    case AS_HARDLAND: return "HardLand";
-    case AS_FLIP: return "Flip";
-    case AS_FLIP_VARIANT: return "FlipVariant";
-    case AS_POLE_IDLE: return "PoleIdle";
-    case AS_PUSH_OBJECT: return "PushObject";
-    case AS_SLOPE_SLIDE: return "SlopeSlide";
-    case AS_TABLE_ROLL: return "TableRoll";
-    case AS_POLE_SWING: return "PoleSwing";
-    case AS_LEDGE_PULLUP: return "LedgePullup";
-    case AS_PUNCH_ATTACK: return "PunchAttack";
-    case AS_KICK_ATTACK: return "KickAttack";
-    case AS_COMBAT_IDLE: return "CombatIdle";
-    case AS_PICKUP: return "Pickup";
-    case AS_THROW_PICKUP: return "ThrowPickup";
-    case AS_FLYING_BACK_LAND: return "FlyingBackLand";
-    case AS_BACK_GRAB_RECOVER: return "BackGrabRecover";
-    case AS_GET_UP: return "GetUp";
-    case AS_FLYING_BACK_CHECK: return "FlyingBackCheck";
-    case AS_SPIN_BACK_RECOVER: return "SpinBackRecover";
-    case AS_DEAD: return "Dead";
-    case AS_HIT_EXPLOSION: return "HitExplosion";
-    case AS_HIT_ENVIRONMENT: return "HitEnvironment";
-    default: return "Unknown";
+        case AS_INACTIVE_IDLE: return "InactiveIdle";
+        case AS_STAND: return "Stand";
+        case AS_STAND_ANIM: return "StandAnim";
+        case AS_WALL_JUMP_TAUNT: return "WallJumpTaunt";
+        case AS_DIVE_ROLL: return "DiveRoll";
+        case AS_PAUSE: return "Pause/RunJump";
+        case AS_JUMP: return "Jump";
+        case AS_LEDGE_LATCH: return "LedgeLatch";
+        case AS_RUN: return "Run";
+        case AS_BACKFLIP: return "Backflip";
+        case AS_STRAFE: return "Strafe";
+        case AS_FALL: return "Fall";
+        case AS_HARDFALL: return "HardFall";
+        case AS_HARDLAND: return "HardLand";
+        case AS_FLIP: return "Flip";
+        case AS_FLIP_VARIANT: return "FlipVariant";
+        case AS_POLE_IDLE: return "PoleIdle";
+        case AS_PUSH_OBJECT: return "PushObject";
+        case AS_SLOPE_SLIDE: return "SlopeSlide";
+        case AS_TABLE_ROLL: return "TableRoll";
+        case AS_POLE_SWING: return "PoleSwing";
+        case AS_LEDGE_PULLUP: return "LedgePullup";
+        case AS_PUNCH_ATTACK: return "PunchAttack";
+        case AS_KICK_ATTACK: return "KickAttack";
+        case AS_COMBAT_IDLE: return "CombatIdle";
+        case AS_PICKUP: return "Pickup";
+        case AS_THROW_PICKUP: return "ThrowPickup";
+        case AS_FLYING_BACK_LAND: return "FlyingBackLand";
+        case AS_BACK_GRAB_RECOVER: return "BackGrabRecover";
+        case AS_GET_UP: return "GetUp";
+        case AS_FLYING_BACK_CHECK: return "FlyingBackCheck";
+        case AS_SPIN_BACK_RECOVER: return "SpinBackRecover";
+        case AS_DEAD: return "Dead";
+        case AS_HIT_EXPLOSION: return "HitExplosion";
+        case AS_HIT_ENVIRONMENT: return "HitEnvironment";
+        default: return "Unknown";
     }
 }
 
 static const char* StateDispatchName(u16 d) {
     switch (d) {
-    case SD_NONE: return "None";
-    case SD_STAND: return "Stand";
-    case SD_DIVE_ROLL: return "DiveRoll";
-    case SD_PAUSE: return "Pause";
-    case SD_RUN: return "Run";
-    case SD_BACKFLIP: return "Backflip";
-    case SD_STRAFE: return "Strafe";
-    case SD_JUMP: return "Jump";
-    case SD_FALL: return "Fall";
-    case SD_GOT_HIT_HIGH: return "GotHitHigh";
-    case SD_GOT_HIT_MED: return "GotHitMed";
-    case SD_GOT_HIT_LOW: return "GotHitLow";
-    case SD_WALLJUMP: return "WallJump";
-    case SD_COLLAPSE: return "Collapse";
-    case SD_DEAD: return "Dead";
-    case SD_SPIN_BACK: return "SpinBack";
-    case SD_FLYING_BACK: return "FlyingBack";
-    case SD_STUNNED: return "Stunned";
-    case SD_THROW: return "Throw";
-    case SD_PICKUP: return "Pickup";
-    case SD_GET_UP: return "GetUp";
-    case SD_POLE_IDLE: return "PoleIdle";
-    case SD_POLE_SWING: return "PoleSwing";
-    case SD_SLOPE_SLIDE: return "SlopeSlide";
-    case SD_DEAD_PLAYER: return "DeadPlayer";
-    case SD_HARDFALL: return "HardFall";
-    case SD_HARDLAND: return "HardLand";
-    case SD_FLIP: return "Flip";
-    case SD_INACTIVE_IDLE: return "InactiveIdle";
-    case SD_PUSH_OBJECT: return "PushObject";
-    case SD_TABLE_ROLL: return "TableRoll";
-    case SD_LEDGE_LATCH: return "LedgeLatch";
-    case SD_LEDGE_PULLUP: return "LedgePullup";
-    case SD_DO_STAND: return "DoStand";
-    default: return "Unknown";
+        case SD_NONE: return "None";
+        case SD_STAND: return "Stand";
+        case SD_DIVE_ROLL: return "DiveRoll";
+        case SD_PAUSE: return "Pause";
+        case SD_RUN: return "Run";
+        case SD_BACKFLIP: return "Backflip";
+        case SD_STRAFE: return "Strafe";
+        case SD_JUMP: return "Jump";
+        case SD_FALL: return "Fall";
+        case SD_GOT_HIT_HIGH: return "GotHitHigh";
+        case SD_GOT_HIT_MED: return "GotHitMed";
+        case SD_GOT_HIT_LOW: return "GotHitLow";
+        case SD_WALLJUMP: return "WallJump";
+        case SD_COLLAPSE: return "Collapse";
+        case SD_DEAD: return "Dead";
+        case SD_SPIN_BACK: return "SpinBack";
+        case SD_FLYING_BACK: return "FlyingBack";
+        case SD_STUNNED: return "Stunned";
+        case SD_THROW: return "Throw";
+        case SD_PICKUP: return "Pickup";
+        case SD_GET_UP: return "GetUp";
+        case SD_POLE_IDLE: return "PoleIdle";
+        case SD_POLE_SWING: return "PoleSwing";
+        case SD_SLOPE_SLIDE: return "SlopeSlide";
+        case SD_DEAD_PLAYER: return "DeadPlayer";
+        case SD_HARDFALL: return "HardFall";
+        case SD_HARDLAND: return "HardLand";
+        case SD_FLIP: return "Flip";
+        case SD_INACTIVE_IDLE: return "InactiveIdle";
+        case SD_PUSH_OBJECT: return "PushObject";
+        case SD_TABLE_ROLL: return "TableRoll";
+        case SD_LEDGE_LATCH: return "LedgeLatch";
+        case SD_LEDGE_PULLUP: return "LedgePullup";
+        case SD_DO_STAND: return "DoStand";
+        default: return "Unknown";
     }
 }
 
 static const char* AnimLoadStateName(s32 s) {
     switch (s) {
-    case 0: return "Stopped";
-    case 1: return "Playing";
-    case 2: return "Paused";
-    default: return "Unknown";
+        case 0: return "Stopped";
+        case 1: return "Playing";
+        case 2: return "Paused";
+        default: return "Unknown";
     }
 }
 
 static const char* AnimLoopTypeName(s32 t) {
     switch (t) {
-    case ANIM_LOOP: return "Loop";
-    case ANIM_LOOP_REVERSE: return "LoopReverse";
-    case ANIM_RUN_TO_LAST: return "RunToLast";
-    case ANIM_HOLD_FIRST: return "HoldFirst";
-    case ANIM_HOLD_LAST: return "HoldLast";
-    case ANIM_BLEND: return "Blend";
-    case ANIM_DEC_FRAME: return "DecFrame";
-    case ANIM_BLEND2: return "Blend2";
-    case ANIM_STOP: return "Stop";
-    default: return "Unknown";
+        case ANIM_LOOP: return "Loop";
+        case ANIM_LOOP_REVERSE: return "LoopReverse";
+        case ANIM_RUN_TO_LAST: return "RunToLast";
+        case ANIM_HOLD_FIRST: return "HoldFirst";
+        case ANIM_HOLD_LAST: return "HoldLast";
+        case ANIM_BLEND: return "Blend";
+        case ANIM_DEC_FRAME: return "DecFrame";
+        case ANIM_BLEND2: return "Blend2";
+        case ANIM_STOP: return "Stop";
+        default: return "Unknown";
     }
 }
 
 static const char* CameraModeName(CameraMode m) {
     switch (m) {
-    case CAM_MODE_DEFAULT: return "Debug";
-    case CAM_MODE_FOLLOW: return "Follow";
-    case CAM_MODE_RIGID: return "Rigid";
-    default: return "Unknown";
+        case CAM_MODE_DEFAULT: return "Debug";
+        case CAM_MODE_FOLLOW: return "Follow";
+        case CAM_MODE_RIGID: return "Rigid";
+        default: return "Unknown";
     }
 }
 
 static void LVectorText(const char* label, const LVector& v) {
     ImGui::Text("%s: %d, %d, %d (%.2f, %.2f, %.2f)",
-        label, v.x, v.y, v.z,
-        v.x / 4096.0f, v.y / 4096.0f, v.z / 4096.0f);
+                label, v.x, v.y, v.z,
+                v.x / 4096.0f, v.y / 4096.0f, v.z / 4096.0f);
 }
 
-void DebugUI::Init() {
-}
+void DebugUI::Init() {}
 
 void DebugUI::Draw() {
     if (ImGui::BeginMainMenuBar()) {
@@ -267,10 +266,12 @@ void DebugUI::Draw() {
                     ImGui::Text("Raw Frame: %d / %d", anim->currentFrame, anim->endFrame);
                     ImGui::Text("Speed: %.3f (raw: %d)", anim->speed / 65536.0f, anim->speed);
                     ImGui::Text("Ticks prev/cur: %d / %d", anim->prevTick, anim->currentTick);
-                } else {
+                }
+                else {
                     ImGui::Text("AnimStructure: null");
                 }
-            } else {
+            }
+            else {
                 ImGui::Text("No player");
             }
         }
@@ -423,15 +424,17 @@ void DebugUI::Draw() {
 
                     if (anim->endFrame > anim->startFrame) {
                         f32 progress = (f32)(anim->currentFrame - anim->startFrame) /
-                                       (f32)(anim->endFrame - anim->startFrame);
+                            (f32)(anim->endFrame - anim->startFrame);
                         if (progress < 0.0f) progress = 0.0f;
                         if (progress > 1.0f) progress = 1.0f;
                         ImGui::ProgressBar(progress, ImVec2(-1, 0), "");
                     }
-                } else {
+                }
+                else {
                     ImGui::Text("No AnimStructure");
                 }
-            } else {
+            }
+            else {
                 ImGui::Text("No player model");
             }
         }
@@ -446,7 +449,8 @@ void DebugUI::Draw() {
                     AudioEngine::SetMasterVolume(master);
                 }
                 ImGui::Text("Music Playing: %s", AudioEngine::IsMusicPlaying() ? "yes" : "no");
-            } else {
+            }
+            else {
                 ImGui::Text("Audio not initialized");
             }
             if (g_sound) {

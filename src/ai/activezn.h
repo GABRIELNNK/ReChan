@@ -15,13 +15,9 @@ class SubZoneVolume : public ccNode {
 public:
     SimpleBox box;  // +24
 
-    // PSX: _13SubZoneVolumeP8DBVolume (ACTIVEZN.CPP:170)
     SubZoneVolume(DBVolume* vol);
-
-    // PSX: _._13SubZoneVolume (ACTIVEZN.CPP:176)
     ~SubZoneVolume() override = default;
 
-    // PSX: IsInSubZoneVolume__13SubZoneVolumeP5Thing (ACTIVEZN.CPP:183)
     bool IsInSubZoneVolume(class Thing* thing) const;
 };
 
@@ -50,24 +46,13 @@ public:
     Humanoid* members[3] = {};  // +88
     s32 specialFlag = 0;    // +100
 
-    // PSX: _10ActiveZoneP8DBVolumeUl (ACTIVEZN.CPP:143)
     ActiveZone(DBVolume* vol);
-
-    // PSX: __10ActiveZone (ACTIVEZN.CPP:380)
     ~ActiveZone() override;
 
-    // PSX: AddLinearPath__10ActiveZoneR10LinearPath (ACTIVEZN.CPP:505)
     void AddLinearPath(LinearPath* path);
 
-    // PSX: AddSubZoneVolume__10ActiveZoneR13SubZoneVolume (ACTIVEZN.CPP:512)
     void AddSubZoneVolume(SubZoneVolume* szv);
-
-    // PSX: AddHumanoidToOverlordMembers__10ActiveZoneP8Humanoid (ACTIVEZN.CPP:390)
     void AddHumanoidToOverlordMembers(Humanoid* h);
-
-    // PSX: RemoveHumanoidFromOverlordMembers__10ActiveZoneP8Humanoid (ACTIVEZN.CPP:417)
     void RemoveHumanoidFromOverlordMembers(Humanoid* h);
-
-    // PSX: IsInActiveZone__10ActiveZoneP5Thing (ACTIVEZN.CPP:680)
     bool IsInActiveZone(class Thing* thing) const;
 };

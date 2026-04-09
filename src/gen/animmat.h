@@ -1,7 +1,4 @@
-// animmat.h - AnimationMatrices reversed from PSX ANIMMAT.CPP
-// PSX source: C:\CHAN\GAME\SRC\GEN\ANIMMAT.CPP
 #pragma once
-
 #include "core.h"
 
 // AnimationMatrices - per-humanoid joint matrix buffers (660 bytes on PSX)
@@ -22,29 +19,18 @@ struct AnimationMatrices {
     // +340..+659: second matrix set (10 x 32-byte matrices)
     s32 matricesB[10][8] = {};
 
-    // PSX: _17AnimationMatrices (ANIMMAT.CPP:550)
     AnimationMatrices();
-
-    // PSX: SetHumanoid__17AnimationMatricesP8Humanoid (ANIMMAT.CPP:577)
     void SetHumanoid(void* owner);
-
-    // PSX: GetHumanoid__17AnimationMatrices (ANIMMAT.CPP:587)
     void* GetHumanoid() const;
-
-    // PSX: Copy__C17AnimationMatrices (ANIMMAT.CPP:597)
     s32 Copy() const;
-
-    // PSX: Swap__17AnimationMatrices (ANIMMAT.CPP:831)
     s32 Swap();
 
-    // PSX: GetMatrix__C17AnimationMatricesUl (ANIMMAT.CPP:849)
     s32* GetMatrix(u32 joint);
     const s32* GetMatrix(u32 joint) const;
 
     static s32* GetMatrix(AnimationMatrices* am, u32 joint);
     static const s32* GetMatrix(const AnimationMatrices* am, u32 joint);
 
-    // PSX: GetAttack__C17AnimationMatricesUlR10tagLVectorT2 (ANIMMAT.CPP:878, 0x80078EB8)
     // Returns prev/cur frame bone translations for attack collision sweep
     s32 GetAttack(u32 joint, LVector& outPrev, LVector& outCur) const;
 };

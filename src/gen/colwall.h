@@ -1,7 +1,4 @@
-// colwall.h - Wall struct for collision wall segments
-// Original: C:\CHAN\GAME\SRC\GEN\COLWALL.CPP
 #pragma once
-
 #include "core.h"
 #include "p3d/lvector.h"
 
@@ -25,22 +22,13 @@ struct Wall {
     s32 xBound2;           // +48: X endpoint 2 (for X-aligned walls)
     s32 zBound2;           // +52: Z endpoint 2 (for Z-aligned walls)
 
-    // PSX: CheckWallCollision__C4WallRC10tagLVectorT1llliRlR10tagLVectorT5 (COLWALL.CPP:194) 0x80091EAC
     s32 CheckWallCollision(const LVector& oldPos, const LVector& newPos,
-        s32 radius, s32 height, s32 arg5, int checkHeight,
-        s32& outFrac, LVector& outNormal, LVector& outHitPoint) const;
-
-    // PSX: CheckWallBounds__C4WallRC10tagLVectorllli (COLWALL.CPP:312) 0x80092250
+                           s32 radius, s32 height, s32 arg5, int checkHeight,
+                           s32& outFrac, LVector& outNormal, LVector& outHitPoint) const;
     s32 CheckWallBounds(const LVector& pos, s32 radius, s32 height, s32 arg4, int checkHeight) const;
-
-    // PSX: CheckWallIntersection__C4WallR10tagLVectorRC10tagLVectorllli (COLWALL.CPP:132) 0x80091C90
     s32 CheckWallIntersection(LVector& hitPos, const LVector& moveDir,
-        s32 radius, s32 height, s32 arg5, int checkHeight) const;
-
-    // PSX: Get__C4WallR10tagLVectorN31 (COLWALL.CPP:348) 0x800923D8
+                              s32 radius, s32 height, s32 arg5, int checkHeight) const;
     void Get(LVector& v0, LVector& v1, LVector& v2, LVector& v3) const;
-
-    // PSX: IsCurb__C4Wall (COLWALL.CPP:269) 0x80092144
     bool IsCurb() const;
 };
 

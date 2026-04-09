@@ -369,7 +369,8 @@ static s32 MenuDraw(MenuMgr* menuMgr) {
     s32 result;
     if (menuMgr) {
         result = menuMgr->Invoke();
-    } else {
+    }
+    else {
         result = 1;
     }
     // PSX: Display::BeginFrame, MenuRender, Display::EndFrame
@@ -555,7 +556,8 @@ bool Game::gsTitleLoopState(Game* game) {
                 if (!g_oxFontFile) g_oxFontFile = new oxFontFile();
                 g_oxFontFile->ReloadFont("XC/FONTS.1");
                 gsTitleState(game);
-            } else {
+            }
+            else {
                 rsEvent(RS_UNLOAD_LEVEL, 0, 0, 0);
                 game->field136 = 1;
                 if (game->titleScreen) {
@@ -598,7 +600,8 @@ bool Game::gsTitleLoopState(Game* game) {
         rsEvent(RS_STOP_MUSIC, 0, 0, 0);
         FadeBegin();
         game->titleFadeType = 1;
-    } else {
+    }
+    else {
         game->titleIdleTimer++;
     }
 
@@ -654,7 +657,8 @@ bool Game::gsOpenFEState(Game* game) {
             g_time->frameCounter = 0;
         }
         game->SetState(GameState::QueueLevelLoad);
-    } else {
+    }
+    else {
         // No level selected - show FE menu
         game->SetState(GameState::FE);
     }
@@ -689,7 +693,8 @@ bool Game::gsPrePlayState(Game* game) {
             g_feMenuMgr->ShowNewGameMenu();
             g_feMenuMgr->OpenDoors();
         }
-    } else {
+    }
+    else {
         if (g_gameMenu) {
             g_gameMenu->ShowPauseMenu();
         }
@@ -770,7 +775,8 @@ bool Game::gsPlayState(Game* game) {
 
         if (cam->GetMode() == CAM_MODE_DEFAULT) {
             cam->SetMode(CAM_MODE_FOLLOW);
-        } else {
+        }
+        else {
             cam->SetMode(CAM_MODE_DEFAULT);
         }
     }
@@ -1039,10 +1045,12 @@ bool Game::gsQueueLevelPetalLoad(Game* game) {
     if (world->GetCurrentLevelIndex() != world->GetTargetLevelIndex()) {
         game->SetState(GameState::QueueLevelLoad);
         world->ResetLevel();
-    } else if (world->GetCurrentPetalIndex() != world->GetTargetPetalIndex()) {
+    }
+    else if (world->GetCurrentPetalIndex() != world->GetTargetPetalIndex()) {
         game->SetState(GameState::QueuePetalLoad);
         world->ResetLevel();
-    } else {
+    }
+    else {
         game->SetState(GameState::QueuePetalLoad);
     }
 
@@ -1066,10 +1074,12 @@ bool Game::gsDetermineNextGameState(Game* game) {
         if (lives <= 0) {
             Player::s_player->SetLivesLeft(Player::kMaxLives);
             game->SetState(GameState::EndGame);
-        } else {
+        }
+        else {
             game->SetState(GameState::QueuePetalLoad);
         }
-    } else {
+    }
+    else {
         game->SetState(GameState::QueuePetalLoad);
     }
 
@@ -1363,7 +1373,8 @@ s32 Game::FadeUpdate() {
     s32 newVal = (s32)s_fadeCounter + (s32)s_fadeStep;
     if (newVal < 255) {
         s_fadeCounter = (u8)newVal;
-    } else {
+    }
+    else {
         s_fadeCounter = 255;
     }
     return (s_fadeCounter < 255) ? 1 : 0;

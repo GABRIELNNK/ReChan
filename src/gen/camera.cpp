@@ -1,5 +1,3 @@
-// camera.cpp - Camera class reversed from PSX CAMERA.CPP
-// Original: C:\CHAN\GAME\SRC\GEN\CAMERA.CPP
 #include "common.h"
 #include "gen/camera.h"
 #include "gen/control.h"
@@ -53,7 +51,8 @@ bool EvalCubic(s32* curValue, s32* accel, s32 target, s32 velocity, s32 time) {
     bool crossed;
     if (v8 >= target) {
         crossed = (*curValue < target);
-    } else {
+    }
+    else {
         crossed = (target < *curValue);
     }
 
@@ -104,7 +103,7 @@ void Camera::Reset() {
     velocityMag.z = 1966;
 
     // Default movement/tracking times in Reset are {6,6,6}.
-    LVector defaultTime = {6, 6, 6};
+    LVector defaultTime = { 6, 6, 6 };
     SetMovementTime(&defaultTime);
     SetTrackingTime(&defaultTime);
 
@@ -358,7 +357,8 @@ void Camera::LookAtTarget(const LVector* target) {
     if (quadrantYZ < 2) {
         camAngleZ = 0x8000;
         camAngleX = camAngleX + 0x4000;
-    } else {
+    }
+    else {
         camAngleZ = 0;
         camAngleX = 0x4000 - camAngleX;
     }
@@ -378,7 +378,8 @@ void Camera::LookAtTarget(const LVector* target) {
         s32 dzFixed = (s32)((s64)dz << 16);
         camAngleY = rmATan216((f32)dxFixed, (f32)dzFixed) + 0x4000;
         orientY = camAngleY + 0x8000;
-    } else if (xzQuad < 2) {
+    }
+    else if (xzQuad < 2) {
         if (quadrantXZ == 0) {
             s32 dxFixed = (s32)(-65536LL * dx);
             s32 dzFixed = (s32)((s64)dz << 16);
@@ -386,7 +387,8 @@ void Camera::LookAtTarget(const LVector* target) {
             camAngleY = a + 0x4000;
             orientY = a - 0x4000;
         }
-    } else if (xzQuad < 4) {
+    }
+    else if (xzQuad < 4) {
         s32 dzFixed = (s32)(-65536LL * dz);
         s32 dxFixed = (s32)(-65536LL * dx);
         camAngleY = rmATan216((f32)dzFixed, (f32)dxFixed) + 0x8000;
@@ -406,24 +408,27 @@ void Camera::SetMode(CameraMode mode) {
 
     currentMode = mode;
     switch (mode) {
-        case CAM_MODE_DEFAULT: {
+        case CAM_MODE_DEFAULT:
+        {
             modeFunc = &Camera::DebugCam;
             flags &= ~0x02u; // clear look-at flag
-            LVector mt = {6, 6, 6};
+            LVector mt = { 6, 6, 6 };
             SetMovementTime(&mt);
             break;
         }
-        case CAM_MODE_FOLLOW: {
+        case CAM_MODE_FOLLOW:
+        {
             modeFunc = &Camera::FollowPath;
             flags |= 0x02u;  // enable look-at
-            LVector mt = {8, 10, 8};
+            LVector mt = { 8, 10, 8 };
             SetMovementTime(&mt);
             break;
         }
-        case CAM_MODE_RIGID: {
+        case CAM_MODE_RIGID:
+        {
             modeFunc = &Camera::RigidCam;
             flags |= 0x02u;
-            LVector mt = {6, 6, 6};
+            LVector mt = { 6, 6, 6 };
             SetMovementTime(&mt);
             break;
         }
@@ -641,7 +646,7 @@ void Camera::FollowPath() {
             cameraAnchor, targetWorldPos.x, targetWorldPos.y, targetWorldPos.z);
         return;
     }
-    
+
     if (!nodeB)
         nodeB = nodeA;
     // Read node positions
@@ -679,13 +684,13 @@ void Camera::FollowPath() {
     s32 oneMinusT = FIX16_ONE - t;
 
     // Interpolate node attributes (16.16 lerp)
-    s32 fovInterp     = (s32)(((s64)nodeA->fov * oneMinusT + (s64)nodeB->fov * t) >> 16);
-    s32 angleYInterp  = (s32)(((s64)nodeA->camAngleY * oneMinusT + (s64)nodeB->camAngleY * t) >> 16);
-    s32 angleXInterp  = (s32)(((s64)nodeA->camAngleX * oneMinusT + (s64)nodeB->camAngleX * t) >> 16);
-    s32 angleZInterp  = (s32)(((s64)nodeA->camAngleZ * oneMinusT + (s64)nodeB->camAngleZ * t) >> 16);
-    s32 zoomInterp    = (s32)(((s64)nodeA->zoom * oneMinusT + (s64)nodeB->zoom * t) >> 16);
-    s32 speedInterp   = (s32)(((s64)nodeA->speed * oneMinusT + (s64)nodeB->speed * t) >> 16);
-    s32 flagsInterp   = (s32)(((s64)(u8)nodeA->flags * oneMinusT + (s64)(u8)nodeB->flags * t) >> 16);
+    s32 fovInterp = (s32)(((s64)nodeA->fov * oneMinusT + (s64)nodeB->fov * t) >> 16);
+    s32 angleYInterp = (s32)(((s64)nodeA->camAngleY * oneMinusT + (s64)nodeB->camAngleY * t) >> 16);
+    s32 angleXInterp = (s32)(((s64)nodeA->camAngleX * oneMinusT + (s64)nodeB->camAngleX * t) >> 16);
+    s32 angleZInterp = (s32)(((s64)nodeA->camAngleZ * oneMinusT + (s64)nodeB->camAngleZ * t) >> 16);
+    s32 zoomInterp = (s32)(((s64)nodeA->zoom * oneMinusT + (s64)nodeB->zoom * t) >> 16);
+    s32 speedInterp = (s32)(((s64)nodeA->speed * oneMinusT + (s64)nodeB->speed * t) >> 16);
+    s32 flagsInterp = (s32)(((s64)(u8)nodeA->flags * oneMinusT + (s64)(u8)nodeB->flags * t) >> 16);
 
     // Interpolate param offset vectors
     s32 offsetX = (s32)(((s64)nodeA->param0 * oneMinusT + (s64)nodeB->param0 * t) >> 16);
@@ -792,10 +797,10 @@ void Camera::FollowPath() {
         SetCurFOV(desiredFOV);
 
         // Zero all interpolation state (snap to position)
-        movementVel = {0, 0, 0};
-        movementAccel = {0, 0, 0};
-        trackingVel = {0, 0, 0};
-        trackingAccel = {0, 0, 0};
+        movementVel = { 0, 0, 0 };
+        movementAccel = { 0, 0, 0 };
+        trackingVel = { 0, 0, 0 };
+        trackingAccel = { 0, 0, 0 };
 
         lookAtMode = 0;
     }
@@ -819,7 +824,8 @@ void Camera::RigidCam() {
     if (followAngle != 0) {
         if (deltaToZero > 0x8000) {
             deltaToZero += -65535;
-        } else if (deltaToZero < -32768) {
+        }
+        else if (deltaToZero < -32768) {
             deltaToZero += 0xFFFF;
         }
 
@@ -828,7 +834,8 @@ void Camera::RigidCam() {
             if (-deltaToZero < SPIN_RATE) {
                 followAngle = 0;
             }
-        } else {
+        }
+        else {
             followAngle = (s16)(followAngle + SPIN_RATE);
             if (deltaToZero < SPIN_RATE) {
                 followAngle = 0;
@@ -1019,7 +1026,8 @@ LVector Camera::GetCameraVector() const {
         result.x = (s32)(-ctw.m[2] * 4096.0f);
         result.y = (s32)(ctw.m[6] * 4096.0f);
         result.z = (s32)(-ctw.m[10] * 4096.0f);
-    } else {
+    }
+    else {
         // PSX: p3dBuildRotMatrixZYX, extract row 2 (m[2][0..2]) from Q12 MATRIX
         // Row 2 in column-major = m[2], m[6], m[10]
         Mat4 matrix;

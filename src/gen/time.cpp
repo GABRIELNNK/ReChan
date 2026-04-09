@@ -1,7 +1,4 @@
-// time.cpp - Time manager reversed from PSX TIME.CPP
-// PSX source: C:\CHAN\GAME\SRC\GEN\TIME.CPP
 #include "gen/time.h"
-
 #include <cmath>
 #include <chrono>
 #include <thread>
@@ -81,7 +78,8 @@ void Time::WaitForFrameEnd(f64 frameStart) const {
                 variance = 0.0;
             }
             sleepEstimate = sleepMean + std::sqrt(variance);
-        } else {
+        }
+        else {
             std::this_thread::yield();
         }
     }

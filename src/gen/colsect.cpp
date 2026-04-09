@@ -1,5 +1,3 @@
-// colsect.cpp - CollisionSector functions
-// Original: C:\CHAN\GAME\SRC\GEN\COLSECT.CPP
 #include "gen/colsect.h"
 #include "gen/colwall.h"
 #include "gen/colfloor.h"
@@ -71,7 +69,7 @@ s32 CollisionSector::GetWorldFloorHeight(const LVector& pos, s32 radius) {
     LVector ceilingNormal;
 
     GetWorldFloorAndCeilingHeight(floorHeight, ceilingHeight,
-        floorNormal, ceilingNormal, pos, radius);
+                                  floorNormal, ceilingNormal, pos, radius);
 
     return floorHeight;
 }
@@ -104,8 +102,8 @@ void CollisionSector::GetWorldFloorAndCeilingHeight(
     s32 localHasRailing;
     LVector localRailCorrection;
     GetArrayFloorAndCeilingHeight(g_floorPtrScratch, count,
-        outFloorH, outCeilingH, outFloorNormal, outCeilingNormal,
-        &localHasRailing, &localRailCorrection, &pos, radius);
+                                  outFloorH, outCeilingH, outFloorNormal, outCeilingNormal,
+                                  &localHasRailing, &localRailCorrection, &pos, radius);
 }
 
 // PSX: (COLSECT.CPP:1207) 0x80041980
@@ -324,15 +322,15 @@ bool CollisionSector::LedgePrototype(
             LVector outWallNormal = {};
             LVector outHitPoint = {};
             if (g_wallPtrScratch[wallIdx]->CheckWallCollision(
-                    wallStart,
-                    wallEnd,
-                    0,
-                    0,
-                    0,
-                    0,
-                    outFrac,
-                    outWallNormal,
-                    outHitPoint)) {
+                wallStart,
+                wallEnd,
+                0,
+                0,
+                0,
+                0,
+                outFrac,
+                outWallNormal,
+                outHitPoint)) {
                 blocked = true;
                 break;
             }
@@ -435,7 +433,8 @@ s32 CollisionSector::CheckArrayWallCollision(
         s32 coord;
         if ((wall->flags & 0xFFFF0000) == 0xFFFF0000) {
             coord = outHitPoint.x;
-        } else {
+        }
+        else {
             coord = outHitPoint.z;
         }
 

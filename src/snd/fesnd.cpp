@@ -1,5 +1,3 @@
-// fesnd.cpp - CFrontEndSound reversed from PSX FESND.CPP
-// PSX source: C:\CHAN\GAME\SRC\SND\FESND.CPP
 #include "snd/fesnd.h"
 #include "snd/rsevent.h"
 
@@ -19,8 +17,7 @@ CFrontEndSound::CFrontEndSound() {
     fadeState = 0;          // +28
 }
 
-CFrontEndSound::~CFrontEndSound() {
-}
+CFrontEndSound::~CFrontEndSound() {}
 
 // PSX: ProcessSoundEvent__14CFrontEndSound (FESND.CPP:18, 0x800534C8)
 // Dispatch logic:
@@ -170,13 +167,15 @@ void CFrontEndSound::HandleCursorEvent(s32 event) {
 
     if (event == 2) {
         jcsFadeInEngine(2);
-    } else {
+    }
+    else {
         jcsFadeOutEngine(2);
     }
 
     if (event == 3) {
         fadeState = 1;
-    } else {
+    }
+    else {
         fadeState = 0;
     }
 }

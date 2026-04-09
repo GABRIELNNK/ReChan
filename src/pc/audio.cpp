@@ -1,5 +1,3 @@
-// audio.cpp - AudioEngine implementation (wraps miniaudio)
-// This is the ONLY file besides miniaudio_impl.cpp that includes miniaudio.h
 #include "gen/common.h"
 #include "pc/audio.h"
 #include "miniaudio.h"
@@ -87,7 +85,8 @@ static void audioCallback(ma_device* device, void* output, const void* /*input*/
                     if (voice.loop) {
                         voice.positionF = 0.0;
                         pos = 0;
-                    } else {
+                    }
+                    else {
                         voice.active = false;
                         break;
                     }
@@ -98,7 +97,8 @@ static void audioCallback(ma_device* device, void* output, const void* /*input*/
                     f32 s = smp.data[pos] / 32768.0f;
                     sampleL = s;
                     sampleR = s;
-                } else {
+                }
+                else {
                     sampleL = smp.data[pos * 2] / 32768.0f;
                     sampleR = smp.data[pos * 2 + 1] / 32768.0f;
                 }
@@ -128,7 +128,8 @@ static void audioCallback(ma_device* device, void* output, const void* /*input*/
                     if (g_musicLoop) {
                         ma_decoder_seek_to_pcm_frame(&g_musicDecoder, 0);
                         continue;
-                    } else {
+                    }
+                    else {
                         g_musicActive = false;
                         break;
                     }

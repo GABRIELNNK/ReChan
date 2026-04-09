@@ -1,5 +1,3 @@
-// colline.cpp - Line collision functions
-// Original: C:\CHAN\GAME\SRC\GEN\COLLINE.CPP
 #include "gen/colline.h"
 #include "p3d/p3dmath.h"
 
@@ -32,7 +30,8 @@ bool Intersection(const Line& A, const Line& B, s32 unused, s32& outX, s32& outZ
         // z from line B: z = -(B.a * x + B.c) / B.b
         s32 num = fixmul16(B.a, outX) + B.c;
         outZ = -rmDiv16i(num, B.b);
-    } else {
+    }
+    else {
         // |B.a| > |B.b| — solve via B.a dominance
         if (B.a == 0) return false;
 

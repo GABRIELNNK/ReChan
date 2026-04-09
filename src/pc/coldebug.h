@@ -1,6 +1,5 @@
-// coldebug.h - Debug visualization for collision data
-// Development helper (not PSX code)
 #pragma once
+// Development helper (not PSX code)
 
 #include "core.h"
 #include "p3d/lvector.h"
@@ -8,7 +7,6 @@
 class BlockManager;
 
 namespace CollisionDebug {
-
     // Toggle collision debug drawing (press key to toggle)
     extern bool enabled;
 
@@ -16,4 +14,4 @@ namespace CollisionDebug {
     // Call after world rendering, before EndRender
     void Draw(BlockManager* blockMgr);
 
-} // namespace CollisionDebug
+}

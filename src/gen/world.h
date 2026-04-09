@@ -1,6 +1,4 @@
-// world.h - Level world: loads BLK blocks from an LCF stream
 #pragma once
-
 #include "core.h"
 #include "gen/manager.h"
 #include "gen/block.h"
@@ -75,7 +73,6 @@ public:
     void RefreshVRAMTexture();
     u32 GetVRAMHandle() const { return vramHandle; }
 
-    // PSX: LevelIDToIndex__5Worldi (WORLD.CPP:1889, 0x80046D88)
     // Converts a level ID (e.g. 7=hub) to its index in the level list.
     s32 LevelIDToIndex(s32 levelID) const {
         for (s32 i = 0; i < levelCount; i++) {
@@ -85,7 +82,6 @@ public:
         return 0;
     }
 
-    // PSX: GetCurLevelPetals__5World (WORLD.CPP:1871, 0x80046D3C)
     // Returns the number of petals for the current level.
     s32 GetCurLevelPetals() const {
         if (levelList && currentLevelIndex < (u32)levelCount)
@@ -93,7 +89,6 @@ public:
         return 1;
     }
 
-    // PSX: GetCurLevelID__5World (WORLD.CPP:1863, 0x80046D14)
     // Returns the level ID for the current level index.
     s32 GetCurLevelID() const {
         if (levelList && currentLevelIndex < (u32)levelCount)

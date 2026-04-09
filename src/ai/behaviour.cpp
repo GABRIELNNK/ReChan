@@ -1,5 +1,3 @@
-// behaviour.cpp - AI Behaviour base class
-// Reversed from PSX C:\CHAN\GAME\SRC\AI\BEHAVIOU.CPP
 #include "ai/behaviour.h"
 #include "ai/cominter.h"
 #include "ai/humanoid.h"
@@ -12,7 +10,7 @@
 
 // PSX binary angle constants
 static constexpr s32 ANGLE_FULL_ROTATION = 0xFFFF;
-static constexpr s32 ANGLE_QUARTER_TURN  = 0x4000;
+static constexpr s32 ANGLE_QUARTER_TURN = 0x4000;
 
 // Direction classification thresholds (PSX angle ranges)
 // angleDiff = ownerAngle - targetAngle, wrapped to [0, 0xFFFF]
@@ -22,16 +20,16 @@ static constexpr s32 ANGLE_QUARTER_TURN  = 0x4000;
 // Forward: angleDiff outside all ranges, near 0 degrees (input aligned with facing)
 static constexpr u32 DIR_BEHIND_START = 25487;
 static constexpr u32 DIR_BEHIND_RANGE = 0x38E2;
-static constexpr u32 DIR_LEFT_START   = 8193;
-static constexpr u32 DIR_LEFT_RANGE   = 0x3FFF;
-static constexpr u32 DIR_RIGHT_START  = 40961;
-static constexpr u32 DIR_RIGHT_RANGE  = 0x3FFF;
+static constexpr u32 DIR_LEFT_START = 8193;
+static constexpr u32 DIR_LEFT_RANGE = 0x3FFF;
+static constexpr u32 DIR_RIGHT_START = 40961;
+static constexpr u32 DIR_RIGHT_RANGE = 0x3FFF;
 
 // Direction codes (bitmask values matching PSX commandList conditions)
-static constexpr s32 DIR_FORWARD  = 1;  // angleDiff near 0 - pushing same direction as facing
+static constexpr s32 DIR_FORWARD = 1;  // angleDiff near 0 - pushing same direction as facing
 static constexpr s32 DIR_BACKWARD = 2;  // angleDiff near 180 - pushing opposite to facing
-static constexpr s32 DIR_RIGHT    = 4;  // angleDiff near 270 - pushing to character's right
-static constexpr s32 DIR_LEFT     = 8;  // angleDiff near 90 - pushing to character's left
+static constexpr s32 DIR_RIGHT = 4;  // angleDiff near 270 - pushing to character's right
+static constexpr s32 DIR_LEFT = 8;  // angleDiff near 90 - pushing to character's left
 
 // Fixed-point 127 << 16
 static constexpr s32 STICK_MAX_FP = 0x7F0000;
@@ -146,15 +144,14 @@ void Behaviour::PlayerUserControl(Behaviour* self) {
         s32 range = (s32)(((s64)(maxAxis << 16) * (s64)rmDiv16i(g_maxAttackRange << 16, STICK_MAX_FP)) >> 16) >> 16;
         if (range) {
             owner->attackRange = range;
-        } else {
+        }
+        else {
             owner->attackRange = 0;
         }
     }
 
     // Resolve combat action from ActionInput state + direction
     s32 actionReq = g_actionInput->ResolveGameAction(direction);
-
-    LOG("PlayerUserControl: moveX=%d moveY=%d dir=%d actionReq=%d faceAngle=%d", analogX, analogY, direction, actionReq, owner->faceAngle);
 
     // Set faceAngle for movement/direction-based actions
     if ((u32)(actionReq - 2) < 3

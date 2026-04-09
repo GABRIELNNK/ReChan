@@ -1,7 +1,4 @@
-// audio.h - AudioEngine abstraction (PC-only)
-// Wraps miniaudio completely. Game code must never include miniaudio directly.
 #pragma once
-
 #include "core.h"
 
 // Opaque handle types

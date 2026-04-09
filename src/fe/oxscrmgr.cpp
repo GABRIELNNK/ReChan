@@ -1,5 +1,3 @@
-// oxscrmgr.cpp - oxScreenManager reversed from PSX OXSCRMGR.CPP
-// PSX source: C:\CHAN\GAME\SRC\FE\OXSCRMGR.CPP
 #include "fe/oxscrmgr.h"
 #include "xclib/xclib.h"
 #include "p3d/view.h"
@@ -14,7 +12,8 @@ oxScreenManager::~oxScreenManager() {
     if (inited == 0 && sectionMan) {
         // We own the sectionMan; its destructor frees the section
         delete sectionMan;
-    } else if (inited == 1) {
+    }
+    else if (inited == 1) {
         // Shared sectionMan: we own the section we created, but not the sectionMan
         delete section;
     }
@@ -46,7 +45,8 @@ void oxScreenManager::Init(const char* name, oxScreenManager* parentMgr) {
             // PSX: restore original section
             sectionMan->section = savedSection;
         }
-    } else {
+    }
+    else {
         // PSX: create new xcSectionMan, LoadSection(name, flags=1)
         inited = 0;
         sectionMan = new xcSectionMan();
@@ -134,7 +134,8 @@ void oxScreenManager::ScreenOperation() {
     if (screenOp == 1) {
         if (screenStackDepth > 0)
             screenStackDepth = 0;
-    } else if (screenOp == 3) {
+    }
+    else if (screenOp == 3) {
         screenStackDepth--;
     }
 
@@ -153,7 +154,8 @@ void oxScreenManager::ScreenOperation() {
                 screenStack[screenStackDepth++] = FindScreen((u32)screenOpArg);
             }
         }
-    } else {
+    }
+    else {
         // POP: go to screen referenced by stack entry
         // PSX: FindScreen__9xcSectionUl(section, *(stack_entry + 12))
         // Simplified for PC: go to first screen as fallback

@@ -1,45 +1,20 @@
-// colmgr.h - Collision Manager free functions
-// Original: C:\CHAN\GAME\SRC\GEN\COLMGR.CPP
 #pragma once
-
 #include "core.h"
 
 struct Wall;
 struct ccList;
 class DynamicThing;
 
-// PSX: ExtendRange__FRllT0 (COLMGR.CPP:195) 0x800A7B80
 void ExtendRange(s32& rangeMin, s32 value, s32& rangeMax);
-
-// PSX: HTW_FillWallArray__Flll (COLMGR.CPP:240) 0x800A7BBC
 void HTW_FillWallArray(s32 radius, s32 height, s32 checkHeight);
-
-// PSX: HTW_HandleWallCollisions__FP12DynamicThinglll (COLMGR.CPP:319) 0x800A7E38
 s32 HTW_HandleWallCollisions(DynamicThing* thing, s32 radius, s32 height, s32 checkHeight);
-
-// PSX: HTW_HandleHandFootCollisions__FP12DynamicThing (COLMGR.CPP:409) 0x800A7FAC
 void HTW_HandleHandFootCollisions(DynamicThing* thing);
-
-// PSX: HandleThingWall__FP12DynamicThinglll (COLMGR.CPP:510) 0x800A8290
 void HandleThingWall(DynamicThing* thing, s32 radius, s32 height, s32 checkHeight);
-
-// PSX: HandleThingFloor__FP12DynamicThinglll (COLMGR.CPP:795) 0x800A8614
-// PSX params: (thing, searchRadius, yMinOffset, checkHeight)
 void HandleThingFloor(DynamicThing* thing, s32 radius, s32 yMinOffset, s32 checkHeight);
-
-// PSX: ClearThingFloorHeights__FR6ccList (COLMGR.CPP:1352) 0x800A9284
 void ClearThingFloorHeights(ccList& list);
-
-// PSX: HandleThingEnvironmentCollisions__FR6ccList (COLMGR.CPP:1395) 0x800A92C4
 void HandleThingEnvironmentCollisions(ccList& thingList);
-
-// PSX: HandleHumanoidObstacleCollisions__FR6ccList (COLMGR.CPP:1667) 0x800A96EC
 void HandleHumanoidObstacleCollisions(ccList& obstacleList);
-
-// PSX: HandlePickupObstacleCollisions__FR6ccList (COLMGR.CPP:1699) 0x800A9740
 void HandlePickupObstacleCollisions(ccList& obstacleList);
-
-// PSX: HandleHumanoidPickupCollisions__FR6ccListT0 (COLMGR.CPP:1732) 0x800A9794
 void HandleHumanoidPickupCollisions(ccList& humanoidList, ccList& pickupList);
 
 // COLMGR globals (PSX: gp-relative)

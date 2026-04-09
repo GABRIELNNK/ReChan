@@ -1,35 +1,30 @@
-// control.h
-// PSX InputManager / Control / Button classes
-// Singleton on PSX at 0x800DD69C (gp+3408)
 #pragma once
-
 #include "core.h"
 #include "config.h"
 #include "gen/manager.h"
 
 class PlatformInput; // PC platform input (keyboard/mouse via GLFW)
 
-
 // PSX game-side pad bits after ReadSonyPads byte-swap + NOT processing.
 // These are the bit positions in Control::rawButtons and GetControlVal() output.
 
 namespace PsxPad {
-    static constexpr u32 Select   = 0x0100;
-    static constexpr u32 L3       = 0x0200;
-    static constexpr u32 R3       = 0x0400;
-    static constexpr u32 Start    = 0x0800;
-    static constexpr u32 Up       = 0x1000;
-    static constexpr u32 Right    = 0x2000;
-    static constexpr u32 Down     = 0x4000;
-    static constexpr u32 Left     = 0x8000;
-    static constexpr u32 L2       = 0x0001;
-    static constexpr u32 R2       = 0x0002;
-    static constexpr u32 L1       = 0x0004;
-    static constexpr u32 R1       = 0x0008;
+    static constexpr u32 Select = 0x0100;
+    static constexpr u32 L3 = 0x0200;
+    static constexpr u32 R3 = 0x0400;
+    static constexpr u32 Start = 0x0800;
+    static constexpr u32 Up = 0x1000;
+    static constexpr u32 Right = 0x2000;
+    static constexpr u32 Down = 0x4000;
+    static constexpr u32 Left = 0x8000;
+    static constexpr u32 L2 = 0x0001;
+    static constexpr u32 R2 = 0x0002;
+    static constexpr u32 L1 = 0x0004;
+    static constexpr u32 R1 = 0x0008;
     static constexpr u32 Triangle = 0x0010;
-    static constexpr u32 Circle   = 0x0020;
-    static constexpr u32 Cross    = 0x0040;
-    static constexpr u32 Square   = 0x0080;
+    static constexpr u32 Circle = 0x0020;
+    static constexpr u32 Cross = 0x0040;
+    static constexpr u32 Square = 0x0080;
 }
 
 // PSX control mode tables used by gameplay and menu systems.
@@ -50,21 +45,20 @@ enum ButtonMode : s16 {
 };
 
 struct Button {
-    s32 rawInput  = 0;    // current raw input (0 or 1)
+    s32 rawInput = 0;    // current raw input (0 or 1)
     s32 prevInput = 0;    // previous frame raw input
     s32 state = 0;        // current reported state
     s16 duration = 0;     // PSX +12: frames held (set by RawHandler, read by FindActionRequest)
     ButtonMode mode = BUTTON_MODE_DEFAULT;
 
-    void Input(s32 bit);                // 0x8002D8C4 = process raw bit
-    s32  GetState() const;              // 0x8002D898 = return state by mode
-    void SetMode(s16 m);                // 0x8002D9E8 = set button mode
+    void Input(s32 bit);
+    s32  GetState() const;
+    void SetMode(s16 m);
 };
 
 
 // Control = one controller port (PSX: 728 bytes, 2 per InputManager)
 // PSX offsets relative to Control base (InputManager+28 for controls[0])
-
 struct Control {
     // +28: flags (bit 0 = connected, bit 1 = updated this frame)
     s32 flags = 0;
@@ -86,7 +80,7 @@ struct Control {
     Button buttons[16] = {};
 
     // +708: logical->physical button map (16 entries)
-    u8 controlMap[16] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15};
+    u8 controlMap[16] = { 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15 };
 
     // +48: pointer to 16-entry button mode table (s16 each)
     const s16* modeMap = nullptr;
@@ -103,39 +97,27 @@ struct Control {
 
 // InputManager = game-level input system (PSX: ~1492 bytes)
 // Singleton on PSX at 0x800DD69C
-
 class InputManager : public Manager {
 public:
-    InputManager();                                         // 0x8002DF74
-    ~InputManager() override;                               // 0x8002E048
+    InputManager();
+    ~InputManager() override;
 
-    // --- Per-frame pipeline (called from game loop) ---
-    // PSX: ReadSonyPads() -> ServiceInput(buttons,0) -> ServiceInput(buttons>>16,1) -> Step()
-    void ServiceInput(u32 buttons, u16 padIndex);           // 0x8002E0D4
-    void Step();                                            // 0x8002E6E8
+    void ServiceInput(u32 buttons, u16 padIndex);
+    void Step();
 
-    // --- Button query ---
     // Returns processed button bitmask for pad port (via Control::GetMask)
-    u32  GetControlVal(u16 padIndex);                       // 0x8002E5BC
-
+    u32  GetControlVal(u16 padIndex);
     // Direct raw button access (DebugCam reads InputManager+60 = controls[0].rawButtons)
     u32  GetRawButtons(u16 padIndex) const;
-
     // Analog sticks
     void GetAnalog(u16 padIndex, u8& lx, u8& ly, u8& rx, u8& ry) const;
 
-    // --- Configuration ---
-    void SetControlMapArray(s16 padIndex, const u8* map);   // 0x8002E2F0
-    void SetControlModeArray(s16 padIndex, const s16* modeMap); // 0x8002E33C
-    const u8* PlayerMapArray() const;                        // 0x8002E73C
-    const u8* DefaultMapArray() const;                       // 0x8002E460
-    void SetPlayerConfig(u8 config);                         // 0x8002E3F0
-    void InternalReset() override;                        // 0x8002E550
-
-#if PAD_KEYBOARD_EMULATION
-    // PC: read keyboard state from PlatformInput => PSX button bits => ServiceInput
-    void UpdateFromKeyboard(PlatformInput* platform, u16 padIndex = 0);
-#endif
+    void SetControlMapArray(s16 padIndex, const u8* map);
+    void SetControlModeArray(s16 padIndex, const s16* modeMap);
+    const u8* PlayerMapArray() const;
+    const u8* DefaultMapArray() const;
+    void SetPlayerConfig(u8 config);
+    void InternalReset() override;
 
     // Direct access for game code that needs Control struct
     Control controls[2];
@@ -178,16 +160,9 @@ enum ShockEnum : s32 {
     SHOCK_CLEAR = 18,
 };
 
-// PSX: Shock (CONTROL.CPP, 0x8002D6C0)
 void Shock(ShockEnum type);
-
-// PSX: SetActuator (CONTROL.CPP:250, 0x8002D540) - PC no-op
 void SetActuator(u8 motor, u8 speed, u32 duration);
-
-// PSX: ClearActuator (CONTROL.CPP:242, 0x8002D52C) - PC no-op
 void ClearActuator();
-
-// PSX: UpdateActuator (CONTROL.CPP:262, 0x8002D564) - PC no-op
 void UpdateActuator(s32 param);
 
 // PSX: PadGetState (Sony lib) - PC stub
