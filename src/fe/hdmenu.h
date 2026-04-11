@@ -59,10 +59,12 @@ public:
     virtual void InputNextItem();
     virtual void InputPrevItem();
 
-    void Update();
+    virtual void Update();
 
     void SetID(const char* id);
     void SetCallback(u32 id, hdMenuItemCallback cb);
 
     virtual void DynSetup();
+    virtual s32 CanAbortNow() { MARKFUNCTION(0); return 1; }
+    virtual void Cleanup() { MARKFUNCTION(0); }
 };

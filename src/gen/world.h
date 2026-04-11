@@ -6,6 +6,12 @@
 #include <vector>
 #include <string>
 
+class hdMenuItem;
+
+// PSX globals used by front-end destination selection return flow.
+extern LVector g_destSelectReturnPos;
+extern bool g_destSelectReturnPosValid;
+
 // PSX VRAM simulation (1024x512 16-bit words), heap-allocated
 struct PsxVRAM {
     u16* data; // [y * 1024 + x], 1024x512
@@ -72,6 +78,20 @@ public:
     void UploadToVRAM(s16 x, s16 y, s16 w, s16 h, const u8* raw);
     void RefreshVRAMTexture();
     u32 GetVRAMHandle() const { return vramHandle; }
+
+    // PSX: PackLevelName (WORLD.CPP:757, 0x8004521C)
+    static u32 PackLevelName(u32 levelIndex, u32 petalIndex) {
+        return (levelIndex << 16) | (petalIndex + 1);
+    }
+
+    // PSX: UnpackLevelName (WORLD.CPP:763, 0x8004522C)
+    static void UnpackLevelName(u32 packed, u32& outLevel, u32& outPetal) {
+        outLevel = packed >> 16;
+        outPetal = (packed & 0xFFFF) - 1;
+    }
+
+    // PSX: LevelMenuExecute (WORLD.CPP:868, 0x80045634)
+    static s32 LevelMenuExecute(hdMenuItem* item);
 
     // Converts a level ID (e.g. 7=hub) to its index in the level list.
     s32 LevelIDToIndex(s32 levelID) const {

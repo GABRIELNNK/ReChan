@@ -110,6 +110,7 @@ void hdMenu::Update() {
 void hdMenu::SetID(const char* id) {
     MARKFUNCTION(0x8005D2CC);
     menuID = xcHash(id);
+    screenID = menuID;
 }
 
 // PSX: SetCallback__6hdMenuUlPFP10hdMenuItem_i (0x8005CEE8)
@@ -143,6 +144,10 @@ void hdMenu::DynSetup() {
 // PSX: SetColour__10hdMenuItemR12xcColour1555b (0x8005DEA0)
 void hdMenuItem::SetColour(xcColour1555& col, bool flag) {
     MARKFUNCTION(0x8005DEA0);
-    // PSX: reads textObj at *(this+12), writes RGBA bytes at textObj+40
-    // Base class stub - subclasses override for specific text objects
+    u8* textObj = static_cast<u8*>(data);
+    if (!textObj) return;
+    textObj[40] = col.GetRed8();
+    textObj[41] = col.GetGreen8();
+    textObj[42] = col.GetBlue8();
+    textObj[43] = col.GetAlpha8();
 }

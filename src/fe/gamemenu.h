@@ -20,6 +20,10 @@ public:
     ~gameMenu() override;
 
     void SelfInit() override;
+    void GotoStartScreen() override;
+    void InputItemPush() override;
+    void PushMenu(hdMenu* menu) override;
+    void PopMenu() override;
     void HandleInputChange() override;
     void ShowPauseMenu();
     void ResumeGame();

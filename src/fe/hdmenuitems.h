@@ -44,6 +44,7 @@ public:
     hdItemSelection(xcOverlayData* overlay, const char* name, u8* rawData);
     ~hdItemSelection() override = default;
 
+    void SetColour(xcColour1555& col, bool flag) override;
     void IncItem() override;
     void DecItem() override;
     void SetValue(u32 val) override;
@@ -76,6 +77,7 @@ public:
     hdSndItemSelection(xcOverlayData* overlay, const char* name, u8* rawData, s32 steps, u32 maxVal);
     ~hdSndItemSelection() override = default;
 
+    void SetColour(xcColour1555& col, bool flag) override { hdItemSelection::SetColour(col, flag); }
     void IncItem() override;
     void DecItem() override;
     void SetValue(u32 val) override;

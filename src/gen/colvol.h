@@ -27,3 +27,8 @@ struct tagCollisionCylinder {
 struct tagCollisionSphere {
     s32 radius;   // +0
 };
+
+struct DBVolume;
+
+void FillCollisionBox(tagCollisionBox& box, const DBVolume& vol);
+void SetCollisionBoxExtent(tagCollisionBox& box);

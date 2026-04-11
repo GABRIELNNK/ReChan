@@ -1,4 +1,5 @@
 #include "fe/oxscrmgr.h"
+#include "fe/oxscreen.h"
 #include "xclib/xclib.h"
 #include "p3d/view.h"
 #include "xclib/xcfile.h"
@@ -77,8 +78,13 @@ void oxScreenManager::Update() {
         ScreenOperation();
 
     // PSX: if stack has entries, call current screen's UpdateScreen
-    // For PC: the screen stack is not fully implemented yet (no oxScreen objects)
-    // The base class Update calls SelfUpdate
+    s32 depth = screenStackDepth;
+    if (depth > 0) {
+        oxScreen* scr = reinterpret_cast<oxScreen*>(screenStack[depth - 1]);
+        if (scr) {
+            scr->UpdateScreen(this);
+        }
+    }
 
     // PSX: virtual SelfUpdate()
     SelfUpdate();
@@ -136,7 +142,9 @@ void oxScreenManager::ScreenOperation() {
             screenStackDepth = 0;
     }
     else if (screenOp == 3) {
-        screenStackDepth--;
+        if (screenStackDepth > 0) {
+            screenStackDepth--;
+        }
     }
 
     if (screenOp == 1 || screenOp == 2) {
@@ -149,21 +157,27 @@ void oxScreenManager::ScreenOperation() {
                     section->rawData + item->dataOffset);
                 section->GotoScreen(scr);
             }
-            // PSX: push FindScreen result onto stack
-            if (screenOp == 2 && screenStackDepth < 4) {
+            // PSX: push FindScreen result onto stack (for BOTH goto and push)
+            if (screenStackDepth < 4) {
                 screenStack[screenStackDepth++] = FindScreen((u32)screenOpArg);
             }
         }
     }
     else {
-        // POP: go to screen referenced by stack entry
-        // PSX: FindScreen__9xcSectionUl(section, *(stack_entry + 12))
-        // Simplified for PC: go to first screen as fallback
-        if (section && section->screens && section->screens->itemCount > 0) {
-            const xcInventoryItem* items = section->screens->GetItems();
-            xcScreenData* scr = reinterpret_cast<xcScreenData*>(
-                section->rawData + items[0].dataOffset);
-            section->GotoScreen(scr);
+        // POP: go to screen referenced by previous stack entry.
+        // PSX reads id/hash from the stacked screen/menu object and resolves that screen.
+        if (section && section->screens && screenStackDepth > 0) {
+            uintptr_t stackEntry = screenStack[screenStackDepth - 1];
+            if (stackEntry) {
+                oxScreen* stacked = reinterpret_cast<oxScreen*>(stackEntry);
+                u32 hash = GetScreenHash(stacked->screenID);
+                const xcInventoryItem* item = section->screens->FindItem(hash);
+                if (item) {
+                    xcScreenData* scr = reinterpret_cast<xcScreenData*>(
+                        section->rawData + item->dataOffset);
+                    section->GotoScreen(scr);
+                }
+            }
         }
     }
 

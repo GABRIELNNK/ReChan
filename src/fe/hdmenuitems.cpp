@@ -11,6 +11,7 @@ static constexpr u32 HASH_VALUE_TEXT = (u32)(-922957088); // "value" multi-frame
 // PSX: _10hdItemGotoP9xcTextObjPc (0x8005DD14)
 hdItemGoto::hdItemGoto(u8* text, const char* target) {
     MARKFUNCTION(0x8005DD14);
+    data = text;
     textObj = text;
     if (target)
         gotoHash = xcHash(target);
@@ -41,6 +42,7 @@ void hdItemGoto::SelectItem(MenuMgr* mgr) {
 // PSX: _12hdItemButtonP9xcTextObjPc (0x8005E118)
 hdItemButton::hdItemButton(u8* text, const char* name) {
     MARKFUNCTION(0x8005E118);
+    data = text;
     textObj = text;
     itemID = xcHash(name);
 }
@@ -65,8 +67,21 @@ hdItemSelection::hdItemSelection(xcOverlayData* overlay, const char* name, u8* r
         labelTextObj = overlay->GetTextObj(HASH_LABEL_TEXT, rawData);
         valueTextObj = overlay->GetTextObj(HASH_VALUE_TEXT, rawData);
     }
+    data = labelTextObj;
     itemID = xcHash(name);
     enabled = 1;
+}
+
+// PSX: SetColour__15hdItemSelectionR12xcColour1555b (0x8005D990)
+void hdItemSelection::SetColour(xcColour1555& col, bool flag) {
+    MARKFUNCTION(0x8005D990);
+    if (valueTextObj) {
+        valueTextObj[40] = col.GetRed8();
+        valueTextObj[41] = col.GetGreen8();
+        valueTextObj[42] = col.GetBlue8();
+        valueTextObj[43] = col.GetAlpha8();
+    }
+    hdMenuItem::SetColour(col, flag);
 }
 
 // PSX: IncItem__15hdItemSelection (0x8005D800)
@@ -143,6 +158,16 @@ hdSndItemSelection::hdSndItemSelection(xcOverlayData* overlay, const char* name,
         stepSize = 1;
     currentStep = 0;
     currentValue = 0;
+
+    if (valueTextObj && valueTextObj[44] > 0) {
+        u8 numStrings = valueTextObj[44];
+        u32* strings = reinterpret_cast<u32*>(valueTextObj + 56);
+        for (u8 i = 0; i < numStrings; i++) {
+            strings[i] = xcRegisterRuntimeString(displayStr);
+        }
+    }
+
+    UpdateShown();
 }
 
 // PSX: IncItem__18hdSndItemSelection (0x8005DC14)

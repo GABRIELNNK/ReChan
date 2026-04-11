@@ -5,6 +5,7 @@
 #include "gen/cclist.h"
 #include "ai/thing.h"
 #include "ai/humanoid.h"
+#include "ai/obstacle.h"
 #include "ai/player.h"
 #include "p3d/p3dmath.h"
 #include "gen/model.h"
@@ -761,9 +762,7 @@ void HandleHumanoidObstacleCollisions(ccList& humanoidList) {
         ccMinNode* next = node->next;
         DynamicThing* thing = (DynamicThing*)node;
         if (thing->flags & TF_MODEL_CREATED) {
-            // PSX: Obstacle::HandleHumanoidObstacleCollision((Humanoid*)thing)
-            // (OBSTACLE.CPP:1301, 0x8007C178) - iterates global obstacle list
-            // against this humanoid. Requires Obstacle class - not yet reversed.
+            Obstacle::HandleHumanoidObstacleCollision((Humanoid*)thing);
         }
         node = next;
     }

@@ -22,6 +22,13 @@ bool xcReadFileHigh(const char* path, u8** outData, u32* outSize);
 // PSX: djb2 variant hash
 u32 xcHash(const char* str);
 
+// Registers a runtime-owned string and returns a token that can be stored
+// in xcTextPrim string slots.
+u32 xcRegisterRuntimeString(const char* str);
+
+// Resolves a runtime string token. Returns nullptr if token is unknown.
+const char* xcResolveRuntimeString(u32 token);
+
 struct xcInventoryItem {
     u32 hash;       // xcHash of item name
     u32 dataOffset; // relative offset from file start (before fix-up)

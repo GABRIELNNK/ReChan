@@ -4,11 +4,13 @@
 #include "gen/charmgr.h"
 #include "gen/blockmgr.h"
 #include "gen/colmgr.h"
+#include "pc/log.h"
 #include "gen/camera.h"
 #include "gen/path.h"
 #include "p3d/p3dmath.h"
 #include "ai/player.h"
 #include "ai/humanoid.h"
+#include "ai/fevolume.h"
 #include "ai/activezn.h"
 
 AI* g_ai = nullptr;
@@ -127,8 +129,13 @@ void AI::AddThingNoTagList(const char* name, u16 type,
         // Type 201 = Platform (goes to moveList)
         // Types 402-472 = Interactive objects (go to moveList)
         else if (type == AITypes::TT_PLATFORM || type >= 402) {
-            // These classes not yet reversed - skip creation
             targetList = &moveList;
+            // Type 469 = FrontEndVolume (hub level door triggers)
+            if (type == AITypes::TT_BOSS) {
+                FrontEndVolume* vol = new FrontEndVolume(pos, type);
+                thing = vol;
+                LOG("[AI] FrontEndVolume created: name=%s pos=(%d,%d,%d)", name ? name : "null", pos->x, pos->y, pos->z);
+            }
         }
     }
 
@@ -162,8 +169,13 @@ void AI::AddThingNoTagList(const char* name, u16 type,
 
     // PSX LABEL_162: CreateModel(modelName) then Reset()
     // PSX: if (!type || GetBlockNumber(pos) != 4096) CreateModel(modelName);
-    if (!type || (g_blockManager && g_blockManager->GetBlockNumber(*pos) != 4096)) {
+    if (!type || !g_blockManager || g_blockManager->GetBlockNumber(*pos) != 4096) {
         thing->CreateModel(modelName);
+    }
+
+    if (type == AITypes::TT_BOSS) {
+        LOG("[AI] FrontEndVolume post-create: flags=0x%08X field76=%p collRadius=%d",
+            thing->flags, thing->field76, thing->collisionRadius);
     }
 
     thing->Reset();
@@ -389,12 +401,18 @@ void AI::Populate() {
     }
 
     // PSX: iterate volumes list
+    s32 volCount = 0;
     for (DBVolume* vol = g_database->GetFirstVolume(); vol; vol = static_cast<DBVolume*>(vol->next)) {
+        LOG("[AI::Populate] volume: type=%u subType=%u name=%s pos=(%d,%d,%d)",
+            vol->type, vol->subType, vol->GetName() ? vol->GetName() : "null",
+            vol->pos.x, vol->pos.y, vol->pos.z);
+        volCount++;
         if (vol->type != 6)
             continue;
         AddThingNoTagList(vol->GetName(), vol->subType, &vol->pos,
                           nullptr, nullptr, vol);
     }
+    LOG("[AI::Populate] total volumes: %d", volCount);
 }
 
 // PSX: UnPopulate__2AIs (AI.CPP:1906, 0x800567CC)

@@ -594,6 +594,45 @@ void Humanoid::FacePoint(const LVector& point, s32 immediate) {
     }
 }
 
+// PSX: FaceThingDesired__8HumanoidP5Thing (HUMANOID.CPP:2333)
+bool Humanoid::FaceThingDesired(Thing* target) {
+    MARKFUNCTION(0x80064D7C);
+    if (!target) {
+        return orientation.y == faceAngle;
+    }
+    return FacePointDesired(target->pos);
+}
+
+// PSX: FacePointDesired__8HumanoidRC10tagLVector (HUMANOID.CPP:2352)
+// Computes desired facing angle only (faceAngle), without changing orientation.
+bool Humanoid::FacePointDesired(const LVector& point) {
+    MARKFUNCTION(0x80064DB4);
+
+    s32 dx = point.x - pos.x;
+    s32 dz = point.z - pos.z;
+
+    s32 desired = 0;
+    u32 quadrant = (u32)dx >> 31;
+    if (dz < 0) {
+        quadrant += 2;
+    }
+
+    if (quadrant == 1) {
+        desired = (s32)rmATan216((f32)-dx, (f32)dz) + 0xC000;
+    }
+    else if (quadrant >= 2) {
+        if (quadrant < 4) {
+            desired = (s32)rmATan216((f32)-dz, (f32)-dx) + 0x8000;
+        }
+    }
+    else {
+        desired = (s32)rmATan216((f32)-dx, (f32)dz) - 0x4000;
+    }
+
+    faceAngle = desired;
+    return orientation.y == faceAngle;
+}
+
 // PSX: SetIdleAnimation__8Humanoidli (HUMANOID.CPP:2717, 0x800654C4)
 // Plays idle animation via model->SetAnim. If no weapon, plays anim 22.
 // If weapon, plays weapon idle with optional transition.

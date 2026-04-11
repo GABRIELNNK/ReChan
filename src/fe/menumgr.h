@@ -38,8 +38,6 @@ public:
     // Reads menu items from the current LineFile position into the given hdMenu.
     void ParseMenu(LineFile& lf, hdMenu* menu);
 
-    virtual void Activate();
-    virtual void Deactivate();
     virtual void InputPadUp();
     virtual void InputPadDown();
     virtual void InputPadRight();
@@ -47,11 +45,12 @@ public:
     virtual void InputItemPush();
     virtual void InputItemPop();
     virtual void PushMenu(hdMenu* menu);
-    virtual void PopMenu();
-    virtual void QueryInput(bool processInput);
-    virtual void HandleInputChange();
-
     virtual s32 Invoke();
+    virtual void Activate();
+    virtual void Deactivate();
+    virtual void QueryInput(bool processInput);
+    virtual void PopMenu();
+    virtual void HandleInputChange();
 
     void PostFlightDef();
 

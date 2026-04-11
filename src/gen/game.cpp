@@ -36,6 +36,7 @@
 #include "p3d/texture.h"
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
+#include "pc/settings.h"
 
 // Global game pointer
 Game* g_game = nullptr;
@@ -122,6 +123,8 @@ Game::~Game() {
         mgr->Close();
         delete mgr;
     }
+
+    Close();
     g_game = nullptr;
 }
 
@@ -148,6 +151,7 @@ void Game::InternalOpen() {
     World* world = new World();
     world->SetName("World", 0);
     managerList.AddNodePri(world);
+    g_blockManager = world->GetBlockManager();
 
     // 6. EnvironmentManager (140) - environment effects (TODO)
 
@@ -218,6 +222,8 @@ void Game::InternalOpen() {
         Manager* mgr = static_cast<Manager*>(n);
         mgr->Open();
     }
+
+    g_settings.Load(SETTINGS_PATH);
 
     LOG("[Game] InternalOpen: managers created");
 }
@@ -374,8 +380,12 @@ static s32 MenuDraw(MenuMgr* menuMgr) {
         result = 1;
     }
     // PSX: Display::BeginFrame, MenuRender, Display::EndFrame
+    MenuMgr* renderMgr = menuMgr;
+    if (result == 8 || result == 4) {
+        renderMgr = nullptr;
+    }
     g_display->BeginFrame();
-    MenuRender(menuMgr);
+    MenuRender(renderMgr);
     g_display->EndFrame();
     return result;
 }
@@ -398,8 +408,6 @@ bool Game::Step() {
     if (g_actionInput) {
         g_actionInput->Update(p3d::input);
     }
-
-
 
     if (stateFunc)
         return stateFunc(this);
@@ -567,6 +575,7 @@ bool Game::gsTitleLoopState(Game* game) {
                 FreeXconFSImage();
                 LoadXconFE();
                 game->PlayMovie("prolog.str", 1, 0);
+                g_frontEndSound->ProcessSoundEvent(FE_SND_MENU_ACCEPT);
                 LOG("[Game] TitleLoop: fade complete -> OpenFE");
                 game->titleFadeType = 0;
                 game->SetState(GameState::OpenFE);
@@ -591,7 +600,7 @@ bool Game::gsTitleLoopState(Game* game) {
         return true;
     }
 
-    if (g_actionInput && g_actionInput->JustPressed(ACTION_START)) {
+    if (g_actionInput && (g_actionInput->JustPressed(ACTION_START) || g_actionInput->JustPressed(ACTION_MENU_CONFIRM))) {
         // PSX: ProcessSoundEvent(gp[72], 8)
         if (g_frontEndSound) {
             g_frontEndSound->ProcessSoundEvent(FE_SND_MENU_OPEN);
@@ -846,6 +855,10 @@ bool Game::gsMenuState(Game* game) {
     // PSX: level 7 (boss): menuMgr = gp[48] (feMenuMgr)
     // PSX: else: menuMgr = gp[52] (gameMenu)
     MenuMgr* menuMgr = g_gameMenu;
+    World* world = game ? game->GetWorld() : nullptr;
+    if (world && world->GetCurLevelID() == 7) {
+        menuMgr = g_feMenuMgr;
+    }
 
     // PSX: result = MenuDraw(menuMgr)
     s32 result = MenuDraw(menuMgr);
@@ -1020,6 +1033,16 @@ bool Game::gsQueuePetalLoad(Game* game) {
 
     // PSX: LoadPetal(world, targetPetalIndex)
     world->LoadPetal(world->GetTargetPetalIndex());
+
+    // PSX: Camera setup via ExecuteLoadCallbacks after petal load
+    g_display->GetCamera()->Reset();
+    if (g_cameraManager) {
+        g_cameraManager->SetupPaths();
+        g_display->GetCamera()->SetCameraAnchor(g_cameraManager->GetAnchor());
+    }
+    if (Player::s_player) {
+        g_display->GetCamera()->SetLookAtTarget(Player::s_player, 1);
+    }
 
     // PSX: SetState(PrePlay=7)
     game->SetState(GameState::PrePlay);

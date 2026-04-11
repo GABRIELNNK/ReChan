@@ -237,6 +237,9 @@ void Block::Parse(u32 size, const u8* blkData) {
         slot->Load((u32*)colData);
         collision = slot;
     }
+    else {
+        LOG("[Block] WARNING: No free collision sector for block %u (all 12 slots used)", blockNum);
+    }
 
     LOG("[Block] Parse block %u: size=%u parsed=%u colOffset=%u walls=%u floors=%u bounds=(%d,%d,%d)-(%d,%d,%d)",
         blockNum, size, parsed, colOffset,

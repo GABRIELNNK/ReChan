@@ -116,6 +116,7 @@ public:
     void SetControlModeArray(s16 padIndex, const s16* modeMap);
     const u8* PlayerMapArray() const;
     const u8* DefaultMapArray() const;
+    u8 GetPlayerConfig() const;
     void SetPlayerConfig(u8 config);
     void InternalReset() override;
 
@@ -161,6 +162,9 @@ enum ShockEnum : s32 {
 };
 
 void Shock(ShockEnum type);
+void SetShock(s32 enabled);
+s32 GetShock();
+s32 IsDualShock();
 void SetActuator(u8 motor, u8 speed, u32 duration);
 void ClearActuator();
 void UpdateActuator(s32 param);

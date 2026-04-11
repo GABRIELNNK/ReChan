@@ -5,6 +5,12 @@
 // PSX: gp+544 - global sound enabled flag (0 = enabled, nonzero = disabled)
 static s32 g_soundDisabled = 0;
 
+// PSX: gp+572 - pause flag
+static s32 g_pauseFlag = 0;
+
+// PSX: gp+732 - mute flag
+static s32 g_muteFlag = 0;
+
 // PSX: Sound location to music file mapping (gp-relative at 0x800ED6CC)
 // Event 4 (RS_SET_LOCATION) with param1 sets the "current sound location"
 // which determines which music track plays when RS_LEVEL_BEGIN fires.
@@ -97,11 +103,13 @@ s32 jcsHandleControlEvent(s32 event, s32 param1, s32 param2, s32 param3) {
 
         case RS_LEVEL_BEGIN: // 5 - start music for current location
         {
-            LOG("[rsEvent] LevelBegin - start music (location=%d)", g_currentSoundLocation);
+            LOG("[rsEvent] LevelBegin - start music (location=%d, musicVol=%.2f)", g_currentSoundLocation, g_sound->musicVolume);
+            g_pauseFlag = 0;
+            g_muteFlag = 0;
             if (g_currentSoundLocation >= 0 && g_currentSoundLocation < MUSIC_TABLE_COUNT) {
                 const char* path = s_musicTable[g_currentSoundLocation];
                 if (path) {
-                    g_sound->PlayMusicTrack(path, 0.7f);
+                    g_sound->PlayMusicTrack(path, g_sound->musicVolume);
                 }
             }
             break;
@@ -109,25 +117,43 @@ s32 jcsHandleControlEvent(s32 event, s32 param1, s32 param2, s32 param3) {
 
         case RS_STOP_MUSIC: // 6 - fade/stop music
             LOG("[rsEvent] StopMusic");
-            g_sound->StopMusic();
+            g_pauseFlag = 0;
+            jcsFadeOutEngine(14);
             break;
 
         case RS_FADE_OUT: // 7 - fade out
-        case RS_FADE_OUT_2: // 8 - fade out alternate
             LOG("[rsEvent] FadeOut(%d)", param1);
-            g_sound->StopMusic();
+            jcsFadeOutEngine((u32)param1);
+            break;
+
+        case RS_FADE_OUT_2: // 8 - fade in
+            LOG("[rsEvent] FadeIn(%d)", param1);
+            if (!g_muteFlag) {
+                jcsFadeInEngine((u32)param1);
+            }
             break;
 
         case RS_PAUSE: // 9
             LOG("[rsEvent] Pause");
+            g_pauseFlag = 1;
             break;
 
         case RS_MUTE: // 10
             LOG("[rsEvent] Mute");
+            if (!g_muteFlag) {
+                jcsFadeOutEngine(14);
+                g_muteFlag = 1;
+            }
             break;
 
         case RS_UNMUTE: // 11
             LOG("[rsEvent] Unmute");
+            if (g_muteFlag) {
+                if (!g_pauseFlag) {
+                    jcsFadeInEngine(14);
+                }
+                g_muteFlag = 0;
+            }
             break;
 
         case RS_CD_YIELD: // 12
@@ -136,18 +162,40 @@ s32 jcsHandleControlEvent(s32 event, s32 param1, s32 param2, s32 param3) {
         case RS_CD_ACCESS: // 13
             break;
 
-        case RS_SET_SFX_VOL: // 16
+        case RS_SET_MUSIC_VOL: // 16
         {
-            f32 vol = (f32)param1 * 0.8f / 100.0f;
-            LOG("[rsEvent] SetSFXVol(%d -> %.2f)", param1, vol);
+            // PSX: 80 * param / 100 -> SPU vol (0-100 range out of 127)
+            // PC: scale 0-125 slider to 0.0-0.80 float
+            f32 vol = (f32)param1 * 0.8f / 125.0f;
+            LOG("[rsEvent] SetMusicVol(%d -> %.2f)", param1, vol);
+            g_sound->SetMusicVolume(vol);
             break;
         }
 
-        case RS_SET_MUSIC_VOL: // 18
+        case RS_SET_EFFECTS_VOL_AUX: // 17
         {
-            f32 vol = (f32)param1 * 0.8f / 100.0f;
-            LOG("[rsEvent] SetMusicVol(%d -> %.2f)", param1, vol);
-            g_sound->SetMusicVolume(vol);
+            // PSX: no case handler - falls through to default (no-op)
+            LOG("[rsEvent] SetEffectsVolAux(%d)", param1);
+            break;
+        }
+
+        case RS_SET_EFFECTS_VOL: // 18
+        {
+            // PSX: stores raw value as effects vol
+            // PC: scale 0-125 slider to 0.0-1.0 float
+            f32 vol = (f32)param1 / 125.0f;
+            LOG("[rsEvent] SetEffectsVol(%d -> %.2f)", param1, vol);
+            g_sound->SetEffectsVolume(vol);
+            break;
+        }
+
+        case RS_SET_DIALOG_VOL: // 19
+        {
+            // PSX: 83 * param / 100 -> SPU vol
+            // PC: scale 0-125 slider to 0.0-0.83 float
+            f32 vol = (f32)param1 * 0.83f / 125.0f;
+            LOG("[rsEvent] SetDialogVol(%d -> %.2f)", param1, vol);
+            g_sound->SetDialogVolume(vol);
             break;
         }
 
@@ -161,11 +209,14 @@ s32 jcsHandleControlEvent(s32 event, s32 param1, s32 param2, s32 param3) {
 
         case 22: // jcsFadeOutEngine(-1) - fade out all
             LOG("[rsEvent] FadeOutAll");
-            g_sound->StopMusic();
+            jcsFadeOutEngine(0xFFFFFFFF);
             break;
 
         case 23: // jcsFadeInEngine(-1) - fade in all
             LOG("[rsEvent] FadeInAll");
+            if (!g_muteFlag) {
+                jcsFadeInEngine(0xFFFFFFFF);
+            }
             break;
 
         default:
@@ -191,9 +242,8 @@ void jcsFadeInEngine(u32 flags) {
 
     // PSX: bit 1 -> rsdMusicPlayer::FadeIn
     if (flags & 0x02) {
-        // Music is already playing; just ensure volume is restored
-        // PSX: calls FadeIn on the music player object at gp+736
         LOG("[jcsFadeInEngine] FadeIn music (flags=0x%X)", flags);
+        g_sound->UnmuteMusic();
     }
 
     // PSX: bit 2 -> rsdAmbiance::FadeIn (1500ms)
@@ -227,7 +277,7 @@ void jcsFadeOutEngine(u32 flags) {
     // PSX: bit 1 -> rsdMusicPlayer::FadeOut(0)
     if (flags & 0x02) {
         LOG("[jcsFadeOutEngine] FadeOut music (flags=0x%X)", flags);
-        g_sound->StopMusic();
+        g_sound->MuteMusic();
     }
 
     // PSX: bit 2 -> rsdAmbiance::FadeOut(1500)

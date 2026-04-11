@@ -38,6 +38,8 @@ public:
     AudioSample musicSample = AUDIO_SAMPLE_INVALID;
     AudioVoice musicVoice = AUDIO_VOICE_INVALID;
     bool musicPlaying = false;
+    bool musicMuted = false;
+    f32 musicVolume = 0.64f;  // default: 100 * 0.8 / 125
 
     Sound();
     ~Sound() override;
@@ -51,10 +53,18 @@ public:
     u32 GetBankSampleCount(u32 bankIndex) const;
     AudioSample GetBankSample(u32 bankIndex, u32 sampleIndex) const;
 
+    // PC: volume multipliers (0.0-1.0), applied when playing
+    f32 effectsVolume = 1.0f;
+    f32 dialogVolume = 1.0f;
+
     // PC: music control
     bool PlayMusicTrack(const char* fagPath, f32 volume = 1.0f);
     void StopMusic();
     void SetMusicVolume(f32 volume);
+    void SetEffectsVolume(f32 volume);
+    void SetDialogVolume(f32 volume);
+    void MuteMusic();
+    void UnmuteMusic();
 };
 
 // PSX: gp-relative global, defined in sound.cpp

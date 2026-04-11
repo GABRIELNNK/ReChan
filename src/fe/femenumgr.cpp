@@ -1,34 +1,204 @@
 #include "fe/femenumgr.h"
 #include "fe/hdmenu.h"
+#include "fe/hdmenuitems.h"
 #include "xclib/xclib.h"
 #include "gen/game.h"
+#include "gen/world.h"
 #include "gen/scoremgr.h"
 #include "gen/control.h"
+#include "ai/fevolume.h"
 #include "pc/inputaction.h"
+#include "pc/settings.h"
+#include "pc/log.h"
+#include "snd/fesnd.h"
+#include "snd/rsevent.h"
+#include "snd/sound.h"
 
 // Global feMenuMgr pointer
 feMenuMgr* g_feMenuMgr = nullptr;
 
+// Slider maxValue is 65535 (PSX SPU range), but flags/settings use 0-125.
+static constexpr u32 SLIDER_MAX = 65535;
+static constexpr u32 FLAG_MAX = 125;
+
+static u32 SliderToFlag(u32 sliderVal) {
+    return sliderVal * FLAG_MAX / SLIDER_MAX;
+}
+
+static u32 FlagToSlider(u32 flagVal) {
+    return flagVal * SLIDER_MAX / FLAG_MAX;
+}
+
 // Screen hashes (from decompiled constructor and SelfInit)
-static constexpr u32 HASH_MAIN_SCREEN = 103520738;   // startScreenHashes[0]
-static constexpr u32 HASH_LEVEL_SCREEN = 93891576;    // startScreenHashes[1]
-static constexpr u32 HASH_SOUND_MENU = 102551593;   // Sound menu
-static constexpr u32 HASH_CONTROLLER_MENU = 141018276;  // Controller menu
-static constexpr u32 HASH_NEWGAME_MENU = (u32)(-1289713843);  // New game confirm
-static constexpr u32 HASH_OPTIONS_MENU = (u32)(-1066161287);  // Options menu
-static constexpr u32 HASH_MEMCARD_MENU = 448275865;   // Memory card menu
+static constexpr u32 HASH_MAIN_SCREEN = 0x062B99E2;      // startScreenHashes[0]
+static constexpr u32 HASH_LEVEL_SCREEN = 0x0598ABF8;     // startScreenHashes[1]
+static constexpr u32 HASH_SOUND_MENU = 0x061CD029;       // Sound menu
+static constexpr u32 HASH_CONTROLLER_MENU = 0x0867C4A4;  // Controller menu
+static constexpr u32 HASH_NEWGAME_MENU = 0xB320874D;     // New game confirm
+static constexpr u32 HASH_OPTIONS_MENU = 0xC073AB79;     // Options menu
+static constexpr u32 HASH_MEMCARD_MENU = 0x1AB82599;     // Memory card menu
+
+struct FeSoundMenuState {
+    u16 musicVol = 0;
+    u16 dialogVol = 0;
+    u16 effectsVol = 0;
+    u16 pad = 0;
+    u32 stereoEnabled = 1;
+};
+
+struct FeControlState {
+    u8 playerConfig = 0;
+    u8 pad[3] = {};
+    s32 shockEnabled = 0;
+};
+
+static FeSoundMenuState g_feSoundState;
+static FeControlState g_feControlState;
+
+static void SaveSoundMenuState(FeSoundMenuState& state) {
+    if (!g_sound) {
+        return;
+    }
+    state.musicVol = (u16)g_sound->flag0;
+    state.dialogVol = (u16)g_sound->flag1;
+    state.effectsVol = (u16)g_sound->flag2;
+    state.stereoEnabled = g_sound->activeFlag;
+}
+
+static void RestoreSoundMenuState(const FeSoundMenuState& state) {
+    if (!g_sound) {
+        return;
+    }
+
+    g_sound->flag1 = (s16)state.dialogVol;
+    rsEvent(RS_SET_DIALOG_VOL, state.dialogVol, 0, 0);
+
+    g_sound->flag2 = (s16)state.effectsVol;
+    rsEvent(RS_SET_EFFECTS_VOL, state.effectsVol, 0, 0);
+    rsEvent(RS_SET_EFFECTS_VOL_AUX, state.effectsVol, 0, 0);
+
+    g_sound->flag0 = (s16)state.musicVol;
+    rsEvent(RS_SET_MUSIC_VOL, state.musicVol, 0, 0);
+
+    g_sound->activeFlag = state.stereoEnabled;
+    rsEvent(state.stereoEnabled ? RS_SET_STEREO : RS_SET_MONO, 0, 0, 0);
+}
+
+static void SaveControlState(FeControlState& state) {
+    if (g_inputManager) {
+        state.playerConfig = g_inputManager->GetPlayerConfig();
+    }
+    state.shockEnabled = GetShock();
+}
+
+static void RestoreControlState(const FeControlState& state) {
+    if (g_inputManager) {
+        g_inputManager->SetPlayerConfig(state.playerConfig);
+    }
+    SetShock(state.shockEnabled);
+}
 
 // Menu item callback hashes
-static constexpr u32 HASH_ITEM_RESUME = (u32)(-1778775893);
-static constexpr u32 HASH_ITEM_LOAD = 1837767642;
-static constexpr u32 HASH_ITEM_SAVE = (u32)(-558495447);
-static constexpr u32 HASH_ITEM_CREDITS = (u32)(-372502450);
-static constexpr u32 HASH_ITEM_SHOCK = 1143775739;
-static constexpr u32 HASH_ITEM_NEWGAME = 100369;
-static constexpr u32 HASH_ITEM_NEWGAME_RESUME = 2685;
-static constexpr u32 HASH_ITEM_CTRL_SEL = (u32)(-1528003751);
+static constexpr u32 HASH_ITEM_RESUME = 0x95FA08AB;
+static constexpr u32 HASH_ITEM_LOAD = 0x6D8E23DA;
+static constexpr u32 HASH_ITEM_SAVE = 0xDEB60929;
+static constexpr u32 HASH_ITEM_CREDITS = 0xE9CC104E;
+static constexpr u32 HASH_ITEM_SHOCK = 0x442CA1FB;
+static constexpr u32 HASH_ITEM_NEWGAME = 0x00018811;
+static constexpr u32 HASH_ITEM_NEWGAME_RESUME = 0x00000A7D;
+static constexpr u32 HASH_ITEM_CTRL_SEL = 0xA4EC8359;
 
-// --- Static menu callbacks (called by hdMenu item selection) ---
+// Sound menu item hashes (shared with gameMenu - PSX SOUND.CPP)
+static constexpr u32 HASH_SOUND_EFFECT = 0x1B5DD3F5;
+static constexpr u32 HASH_SOUND_MUSIC = 0xB3DA1CE9;
+static constexpr u32 HASH_SOUND_VOICE = 0xB47983DE;
+static constexpr u32 HASH_SOUND_STEREO = 0x3D030EFA;
+
+// PSX: _SetMusicVolume (SOUND.CPP:148, 0x80059594)
+static s32 SetMusicVolumeCallback(hdMenuItem* item) {
+    u32 raw = item->GetValue();
+    u32 val = SliderToFlag(raw);
+    rsEvent(RS_SET_MUSIC_VOL, (s32)val, 0, 0);
+    if (g_sound) {
+        g_sound->flag0 = (s16)val;
+    }
+    return 8;
+}
+
+// PSX: _SetEffectsVolume (SOUND.CPP:159, 0x80059600)
+static s32 SetEffectsVolumeCallback(hdMenuItem* item) {
+    u32 raw = item->GetValue();
+    u32 val = SliderToFlag(raw);
+    rsEvent(RS_SET_EFFECTS_VOL, (s32)val, 0, 0);
+    rsEvent(RS_SET_EFFECTS_VOL_AUX, (s32)val, 0, 0);
+    if (g_sound) {
+        g_sound->flag2 = (s16)val;
+    }
+    return 8;
+}
+
+// PSX: _SetDialogVolume (SOUND.CPP:170, 0x80059698)
+static s32 SetDialogVolumeCallback(hdMenuItem* item) {
+    u32 raw = item->GetValue();
+    u32 val = SliderToFlag(raw);
+    rsEvent(RS_SET_DIALOG_VOL, (s32)val, 0, 0);
+    if (g_sound) {
+        g_sound->flag1 = (s16)val;
+    }
+    return 8;
+}
+
+// PSX: _StereoOnOff (SOUND.CPP:129, 0x8005950C)
+static s32 StereoOnOffCallback(hdMenuItem* item) {
+    if (item->GetValue()) {
+        rsEvent(RS_SET_STEREO, 0, 0, 0);
+        if (g_sound) {
+            g_sound->activeFlag = 1;
+        }
+    }
+    else {
+        rsEvent(RS_SET_MONO, 0, 0, 0);
+        if (g_sound) {
+            g_sound->activeFlag = 0;
+        }
+    }
+    return 8;
+}
+
+// PSX: InstallMenu__5Sound (SOUND.CPP:272, 0x80059A4C)
+static void InstallSoundMenu(hdMenu* menu) {
+    if (!menu || !g_sound) {
+        return;
+    }
+
+    menu->SetCallback(HASH_SOUND_EFFECT, (hdMenuItemCallback)SetEffectsVolumeCallback);
+    hdMenuItem* effectsItem = menu->FindItem(HASH_SOUND_EFFECT);
+    if (effectsItem) {
+        effectsItem->SetValue(FlagToSlider((u32)(u16)g_sound->flag2));
+    }
+
+    menu->SetCallback(HASH_SOUND_MUSIC, (hdMenuItemCallback)SetMusicVolumeCallback);
+    hdMenuItem* musicItem = menu->FindItem(HASH_SOUND_MUSIC);
+    if (musicItem) {
+        musicItem->SetValue(FlagToSlider((u32)(u16)g_sound->flag0));
+    }
+
+    menu->SetCallback(HASH_SOUND_VOICE, (hdMenuItemCallback)SetDialogVolumeCallback);
+    hdMenuItem* voiceItem = menu->FindItem(HASH_SOUND_VOICE);
+    if (voiceItem) {
+        voiceItem->SetValue(FlagToSlider((u32)(u16)g_sound->flag1));
+    }
+
+    menu->SetCallback(HASH_SOUND_STEREO, (hdMenuItemCallback)StereoOnOffCallback);
+    hdMenuItem* stereoItem = menu->FindItem(HASH_SOUND_STEREO);
+    if (stereoItem) {
+        stereoItem->SetValue(g_sound->activeFlag != 0);
+    }
+
+    if (g_frontEndSound) {
+        g_frontEndSound->ProcessSoundEvent(FE_SND_CURSOR_BACK);
+    }
+}
 
 // PSX: ResumeGame__9feMenuMgrP10hdMenuItem (Overlay4 0x80010968)
 static s32 ResumeGame(hdMenuItem* item) {
@@ -83,13 +253,20 @@ static s32 ShowCredits(hdMenuItem* item) {
 // PSX: SetControllerShock__FP10hdMenuItem (0x800378D0)
 // Free function - sets DualShock vibration on/off based on item value.
 static s32 SetControllerShock(hdMenuItem* item) {
-    (void)item;
-    // PSX: gets item value, calls SetShock, triggers vibration test
-    // TODO: implement DualShock control
+    if (!item) {
+        return 8;
+    }
+
+    s32 enabled = item->GetValue() ? 1 : 0;
+    SetShock(enabled);
+    if (enabled) {
+        Shock(SHOCK_0);
+    }
+    else {
+        Shock(SHOCK_CLEAR);
+    }
     return 8;
 }
-
-// --- feMenuMgr implementation ---
 
 // PSX: __9feMenuMgr (Overlay4 0x80010EB4)
 feMenuMgr::feMenuMgr() {
@@ -164,33 +341,43 @@ void feMenuMgr::HandleInputChange() {
     if (curMenu == controllerMenu && controllerMenu) {
         hdMenuItem* shockItem = controllerMenu->FindItem(HASH_ITEM_SHOCK);
         if (shockItem) {
-            // PSX: IsDualShock check - enable/disable shock item
-            // PSX: if DualShock, enable item with normal color
-            // PSX: else disable item with dim color, move selection if on it
-            // TODO: implement DualShock detection
+            hdItemSelection* shockSelection = static_cast<hdItemSelection*>(shockItem);
+            if (IsDualShock()) {
+                shockSelection->enabled = 1;
+                shockItem->SetValue(GetShock() ? 1 : 0);
+            }
+            else {
+                shockSelection->enabled = 0;
+                shockItem->SetValue(0);
+                if (controllerMenu->curItem == shockItem) {
+                    controllerMenu->InputNextItem();
+                    if (controllerMenu->curItem == shockItem) {
+                        controllerMenu->InputPrevItem();
+                    }
+                }
+            }
         }
     }
 }
 
 // PSX: InputItemPush__9feMenuMgr (Overlay4 0x80010A7C)
-// Before pushing, saves sound/control state if on Sound or Controller menu.
+// On sound/controller menu: save both states, persist to INI, then deactivate.
+// PSX calls Deactivate directly (jal Deactivate__9feMenuMgr in overlay).
 void feMenuMgr::InputItemPush() {
     MARKFUNCTION(0x80010A7C);
 
-    bool isSoundOrController = false;
-    if (curMenu == FindMenu(HASH_SOUND_MENU) || curMenu == FindMenu(HASH_CONTROLLER_MENU)) {
-        isSoundOrController = true;
-    }
-
-    if (!isSoundOrController) {
+    if (curMenu != FindMenu(HASH_SOUND_MENU) && curMenu != FindMenu(HASH_CONTROLLER_MENU)) {
         MenuMgr::InputItemPush();
         return;
     }
 
-    // PSX: ProcessSoundEvent(0, 14) — confirm sound
-    // PSX: Save__14SoundMenuState(gSoundState)
-    // PSX: Save__12ControlState(gControlState)
-    // Then deactivate (falls through to Deactivate via vtable+80)
+    if (g_frontEndSound) {
+        g_frontEndSound->ProcessSoundEvent(FE_SND_MENU_6);
+    }
+
+    SaveSoundMenuState(g_feSoundState);
+    SaveControlState(g_feControlState);
+    g_settings.Save(SETTINGS_PATH);
     Deactivate();
 }
 
@@ -265,11 +452,11 @@ void feMenuMgr::PushMenu(hdMenu* menu) {
     MARKFUNCTION(0x80010D08);
 
     if (menu == FindMenu(HASH_SOUND_MENU)) {
-        // PSX: Save__14SoundMenuState(gSoundState)
-        // Falls through to base PushMenu
+        SaveSoundMenuState(g_feSoundState);
+        InstallSoundMenu(menu);
     }
     else if (menu == FindMenu(HASH_CONTROLLER_MENU)) {
-        // PSX: Save__12ControlState(gControlState)
+        SaveControlState(g_feControlState);
         // PSX: Find controller selection item, set value from ShockEnable[2]
         // PSX: SetControlDescription
         // PSX: Find shock toggle item
@@ -285,10 +472,10 @@ void feMenuMgr::PopMenu() {
     MARKFUNCTION(0x80010E30);
 
     if (curMenu == FindMenu(HASH_SOUND_MENU)) {
-        // PSX: Restore__14SoundMenuState(gSoundState)
+        RestoreSoundMenuState(g_feSoundState);
     }
     else if (curMenu == FindMenu(HASH_CONTROLLER_MENU)) {
-        // PSX: Restore__12ControlState(gControlState)
+        RestoreControlState(g_feControlState);
     }
 
     MenuMgr::PopMenu();
@@ -301,8 +488,11 @@ void feMenuMgr::QueryInput(bool processInput) {
     if (!g_actionInput) return;
     if (!processInput) return;
 
-    // Back/Start - only if not on level select screen
-    if (g_actionInput->JustPressed(ACTION_START)) {
+    // Back/Start - prioritize back so ESC pops instead of closing.
+    if (g_actionInput->JustPressed(ACTION_MENU_BACK)) {
+        InputItemPop();
+    }
+    else if (g_actionInput->JustPressed(ACTION_START)) {
         hdMenu* levelMenu = FindMenu(HASH_LEVEL_SCREEN);
         if (curMenu != levelMenu) {
             state = 8;
@@ -325,10 +515,6 @@ void feMenuMgr::QueryInput(bool processInput) {
     if (g_actionInput->JustPressed(ACTION_MENU_RIGHT)) {
         InputPadRight();
     }
-    // Cancel/Pop
-    if (g_actionInput->JustPressed(ACTION_MENU_BACK)) {
-        InputItemPop();
-    }
     // Confirm/Push
     if (g_actionInput->JustPressed(ACTION_MENU_CONFIRM)) {
         InputItemPush();
@@ -343,12 +529,16 @@ void feMenuMgr::Deactivate() {
 
     if (feMode == 1) {
         if (state == 8) {
-            // PSX: HandleVolumeExit__14FrontEndVolumeP8Humanoid(frontEndVolume, humanoid)
-            // Returns to 3D hub from level select
+            if (frontEndVolume && humanoid) {
+                frontEndVolume->HandleVolumeExit(humanoid);
+            }
         }
         else {
-            // PSX: saves frontEndVolume position [29],[30],[31] into globals
-            // gDestSelectReturnPos = frontEndVolume[29]
+            // PSX: save FrontEndVolume return position for next hub load.
+            if (frontEndVolume) {
+                g_destSelectReturnPos = frontEndVolume->savedPos;
+                g_destSelectReturnPosValid = true;
+            }
         }
     }
 }
@@ -377,25 +567,145 @@ void feMenuMgr::ShowLevel(FrontEndVolume* vol, Humanoid* hum) {
 
 // PSX: InitLevelMenu__9feMenuMgr (Overlay4 0x80011260)
 // Sets up the level select screen with score data and unlock state.
+// Callback hash for level menu execute
+static constexpr u32 HASH_LEVEL_EXECUTE = 0x893DA6B2;
+
+// Overlay and text object hashes for the level select screen
+static constexpr u32 HASH_LOCATION_OVERLAY = 42519405;   // Menu_Location overlay
+static constexpr u32 HASH_TEXT_LEVELNAME   = 0x39AA5899;  // LevelName text
+static constexpr u32 HASH_TEXT_DRAGONBAR   = 0x3E799456;  // dragon bar text
+static constexpr u32 HASH_TEXT_GOLDDRAGON  = 0x07C775B9;  // gold dragon text
+static constexpr u32 HASH_TEXT_LEVELGRADE  = 0x6E7FDFDB;  // LevelGrade text
+
 void feMenuMgr::InitLevelMenu() {
     MARKFUNCTION(0x80011260);
     feMode = 1;
     SetTopMenu(startScreenHashes[1]);
 
-    // PSX: reads frontEndVolume+128 for level code
-    // PSX: finds overlay 42519405, gets text objects for score display
-    // PSX: complex level/score display setup using World, ScoreManager, oxFontFile
-    // PSX: sets callback HASH -1992448334 on level menu for LevelMenuExecute
-    // TODO: implement full level menu setup
+    s32 levelCode = 0;
+    if (frontEndVolume) {
+        levelCode = frontEndVolume->levelCode;
+    }
+    s32 levelID = levelCode / 10;
+    s32 subLevel = levelCode % 10;
+
+    World* world = g_game ? g_game->GetWorld() : nullptr;
+    s32 levelIndex = 0;
+    if (world) {
+        levelIndex = world->LevelIDToIndex(levelID);
+    }
+
+    xcSection* sec = GetSection();
+    xcOverlayData* overlay = FindOverlay(HASH_LOCATION_OVERLAY);
+    if (overlay && sec) {
+        u8* raw = sec->rawData;
+
+        xcTextPrim* levelNameText = (xcTextPrim*)overlay->GetTextObj(HASH_TEXT_LEVELNAME, raw);
+        xcTextPrim* dragonBarText = (xcTextPrim*)overlay->GetTextObj(HASH_TEXT_DRAGONBAR, raw);
+        xcTextPrim* goldDragonText = (xcTextPrim*)overlay->GetTextObj(HASH_TEXT_GOLDDRAGON, raw);
+
+        if (levelNameText && dragonBarText && goldDragonText) {
+            // Resolve string data pointers for dragon bar and gold dragon
+            u32 dragonBarStrHash = dragonBarText->GetStringHash();
+            u32 goldDragonStrHash = goldDragonText->GetStringHash();
+            char* dragonBarStr = (char*)sec->FindString(dragonBarStrHash);
+            char* goldDragonStr = (char*)sec->FindString(goldDragonStrHash);
+
+            if (world && world->GetCurLevelID() == 6) {
+                // Final level (level 6) - special display
+                xcFont* font = sectionMan ? sectionMan->FindFont("Gold_dr") : nullptr;
+                levelNameText->paletteIdx = 3;
+                dragonBarText->fontHash = font ? xcHash("Gold_dr") : dragonBarText->fontHash;
+                dragonBarText->hdr.subtype = 5;
+                goldDragonText->fontHash = font ? xcHash("Gold_dr") : goldDragonText->fontHash;
+                goldDragonText->hdr.subtype = 5;
+            } else {
+                levelNameText->paletteIdx = (u8)subLevel;
+                dragonBarText->hdr.subtype = 4;
+                goldDragonText->hdr.subtype = 4;
+
+                // Set dragon bar font
+                if (sectionMan) {
+                    xcFont* dragonFont = sectionMan->FindFont("Red_dr");
+                    if (dragonFont) {
+                        dragonBarText->fontHash = xcHash("Red_dr");
+                    }
+                }
+
+                // Fill dragon bar string: 10 dragons, '1'=collected '0'=not
+                // String layout: 5 chars, newline, 5 chars
+                u8 collectCount = 0;
+                if (g_scoreManager) {
+                    collectCount = g_scoreManager->petalStats[levelIndex * 3 + subLevel].collectCount;
+                }
+                if (dragonBarStr) {
+                    s32 v13 = 0;
+                    while (v13 < 10) {
+                        s32 v15 = 0;
+                        if (v13 == 5) {
+                            dragonBarStr[5] = '\n';
+                        }
+                        if (v13 >= 5) {
+                            v15 = 1;
+                        }
+                        s32 pos = v13 + v15;
+                        if (v13 >= collectCount) {
+                            dragonBarStr[pos] = '0';
+                        } else {
+                            dragonBarStr[pos] = '1';
+                        }
+                        v13++;
+                    }
+                }
+
+                // Set gold dragon font and display
+                if (sectionMan) {
+                    xcFont* goldFont = sectionMan->FindFont("Gold_dr");
+                    if (goldFont) {
+                        goldDragonText->fontHash = xcHash("Gold_dr");
+                    }
+                }
+                if (goldDragonStr) {
+                    if (g_scoreManager && g_scoreManager->CalcGDrags(collectCount)) {
+                        goldDragonStr[0] = '1';
+                    } else {
+                        goldDragonStr[0] = '0';
+                    }
+                }
+            }
+        }
+
+        // Grade text
+        xcTextPrim* gradeText = (xcTextPrim*)overlay->GetTextObj(HASH_TEXT_LEVELGRADE, raw);
+        if (gradeText) {
+            u8 gradeIdx = 8;
+            if (g_scoreManager) {
+                PetalStats* ps = &g_scoreManager->petalStats[levelIndex * 3 + subLevel];
+                if (ps->fightScore >= 0) {
+                    gradeIdx = ps->grade;
+                }
+            }
+            gradeText->paletteIdx = gradeIdx;
+        }
+    }
+
+    // Set the LevelMenuExecute callback on the level menu
+    hdMenu* levelMenu = FindMenu(startScreenHashes[1]);
+    if (levelMenu) {
+        levelMenu->SetCallback(HASH_LEVEL_EXECUTE, (hdMenuItemCallback)World::LevelMenuExecute);
+        hdMenuItem* execItem = levelMenu->FindItem(HASH_LEVEL_EXECUTE);
+        if (execItem) {
+            execItem->itemFlags = World::PackLevelName(levelIndex, subLevel);
+        }
+    }
 }
 
 // PSX: OpenDoors__9feMenuMgr (Overlay4 0x80011680)
 // Iterates level table, finds scene nodes by CRC, and enables valid doors.
 void feMenuMgr::OpenDoors() {
     MARKFUNCTION(0x80011680);
-    // PSX: copies 256-byte table from ROM (level ID, sublevel, node CRC triples)
-    // PSX: for each entry: FindNodeCRC, check LevelValid, enable door
-    // TODO: implement door opening (needs ccList, World level table)
+    // PSX uses a static level-door table + scene-node CRC lookup.
+    // Scene node door activation is not wired in the current PC runtime.
 }
 
 // PSX: PushLoadSaveMenu__9feMenuMgri (Overlay4 0x80011618)
@@ -413,8 +723,14 @@ void feMenuMgr::PushLoadSaveMenu(s32 mode) {
 // Checks if a level/sublevel combination is unlocked.
 s32 feMenuMgr::LevelValid(s32 levelID, s32 subLevel) {
     MARKFUNCTION(0x80011188);
-    // PSX: if levelID==6, check GetTotalGoldDragon >= 6
-    // PSX: else LevelIDToIndex, check score data at 48*index + 0x1C + 16*subLevel
-    // TODO: implement (needs ScoreManager, World)
-    return 0;
+    if (levelID == 6) {
+        // Final level: requires 6+ gold dragons
+        if (g_scoreManager) {
+            return g_scoreManager->GetTotalGoldDragon() >= 6 ? 1 : 0;
+        }
+        return 0;
+    }
+    // All other levels: return 1 for now (ScoreManager data not fully reversed)
+    // PSX: LevelIDToIndex, then checks score data at 48*index + 0x1C + 16*subLevel >= -1
+    return 1;
 }

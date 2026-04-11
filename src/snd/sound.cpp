@@ -124,7 +124,7 @@ AudioVoice Sound::PlayWaxSample(u32 bankIndex, u32 sampleIndex, f32 volume, f32 
     if (sampleIndex >= banks[bankIndex].numSamples) return AUDIO_VOICE_INVALID;
     AudioSample s = banks[bankIndex].samples[sampleIndex];
     if (s == AUDIO_SAMPLE_INVALID) return AUDIO_VOICE_INVALID;
-    return AudioEngine::PlaySample(s, volume, pan, false);
+    return AudioEngine::PlaySample(s, volume * effectsVolume, pan, false);
 }
 
 u32 Sound::GetBankSampleCount(u32 bankIndex) const {
@@ -167,7 +167,9 @@ bool Sound::PlayMusicTrack(const char* fagPath, f32 volume) {
     }
 
     // Play looped through the voice mixer
-    musicVoice = AudioEngine::PlaySample(musicSample, volume, 0.0f, true);
+    musicVolume = volume;
+    f32 playVol = musicMuted ? 0.0f : volume;
+    musicVoice = AudioEngine::PlaySample(musicSample, playVol, 0.0f, true);
     musicPlaying = (musicVoice != AUDIO_VOICE_INVALID);
 
     LOG("Sound: playing music '%s' (%u frames, %u ch @ %u Hz, sample=%u, voice=%u)",
@@ -185,11 +187,35 @@ void Sound::StopMusic() {
         musicSample = AUDIO_SAMPLE_INVALID;
     }
     musicPlaying = false;
+    musicMuted = false;
 }
 
 void Sound::SetMusicVolume(f32 volume) {
+    musicVolume = volume;
     if (musicVoice != AUDIO_VOICE_INVALID) {
         AudioEngine::SetVoiceVolume(musicVoice, volume);
+    }
+}
+
+void Sound::SetEffectsVolume(f32 volume) {
+    effectsVolume = volume;
+}
+
+void Sound::SetDialogVolume(f32 volume) {
+    dialogVolume = volume;
+}
+
+void Sound::MuteMusic() {
+    musicMuted = true;
+    if (musicVoice != AUDIO_VOICE_INVALID) {
+        AudioEngine::SetVoiceVolume(musicVoice, 0.0f);
+    }
+}
+
+void Sound::UnmuteMusic() {
+    musicMuted = false;
+    if (musicVoice != AUDIO_VOICE_INVALID) {
+        AudioEngine::SetVoiceVolume(musicVoice, musicVolume);
     }
 }
 

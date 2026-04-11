@@ -40,7 +40,7 @@ s32 rsdWorld::PlayTransientPositional(u32 sampleId, void* posPtr, u16 volume, s1
         return 0;
     }
 
-    f32 vol = PsxVolToFloat(volume);
+    f32 vol = PsxVolToFloat(volume) * g_sound->effectsVolume;
     f32 pitchF = PsxPitchToFloat(pitch);
 
     AudioSample s = g_sound->GetBankSample(bank, sample);
@@ -73,7 +73,7 @@ s32 rsdWorld::PlayTransientNonPositional(u32 sampleId, u16 volL, u16 volR, s16 p
     // PC: approximate L/R by averaging for volume and computing pan
     f32 fVolL = PsxVolToFloat(volL);
     f32 fVolR = PsxVolToFloat(volR);
-    f32 vol = (fVolL + fVolR) * 0.5f;
+    f32 vol = (fVolL + fVolR) * 0.5f * g_sound->effectsVolume;
     f32 pcPan = 0.0f;
     if (fVolL + fVolR > 0.0f) {
         pcPan = (fVolR - fVolL) / (fVolL + fVolR);
@@ -111,7 +111,7 @@ rsdPersistent::rsdPersistent(u32 sampleId_, void* posPtr, u8 reverb, u16 volume_
         return;
     }
 
-    f32 vol = PsxVolToFloat(volume_);
+    f32 vol = PsxVolToFloat(volume_) * g_sound->effectsVolume;
     f32 pitchF = PsxPitchToFloat(pitch);
 
     AudioVoice v = AudioEngine::PlaySample(s, vol, 0.0f, true);

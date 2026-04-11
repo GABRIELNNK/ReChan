@@ -243,6 +243,10 @@ const u8* InputManager::DefaultMapArray() const {
     return sDefaultMapArray;
 }
 
+u8 InputManager::GetPlayerConfig() const {
+    return playerConfig;
+}
+
 void InputManager::SetPlayerConfig(u8 config) {
     playerConfig = config % 3;
     UpdateReverseMap();
@@ -275,6 +279,18 @@ void InputManager::InternalReset() {
 
 // PSX: gp+144 - shock enabled flag (0 on PC, no DualShock)
 static s32 g_shockEnabled = 0;
+
+s32 GetShock() {
+    return g_shockEnabled;
+}
+
+s32 IsDualShock() {
+    return PadGetState(0) == 6 ? 1 : 0;
+}
+
+void SetShock(s32 enabled) {
+    g_shockEnabled = enabled ? 1 : 0;
+}
 
 // PSX: PadGetState (Sony lib) - PC stub returns 0 (not state 6)
 s32 PadGetState(s32 /*port*/) {

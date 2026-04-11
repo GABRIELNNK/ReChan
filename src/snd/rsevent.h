@@ -18,15 +18,18 @@ enum rsSoundEvent : s32 {
     RS_CD_ACCESS = 13,  // jcsCdAccess(param1)
     RS_SET_STEREO = 14,  // set stereo mode
     RS_SET_MONO = 15,  // set mono mode
-    RS_SET_SFX_VOL = 16,  // set SFX volume
-    RS_NOP = 17,  // no-op
-    RS_SET_MUSIC_VOL = 18,  // set music volume
+    RS_SET_MUSIC_VOL = 16,  // SetMusicVolume__FP10hdMenuItem
+    RS_SET_EFFECTS_VOL_AUX = 17,  // secondary effects/ambience volume path
+    RS_SET_EFFECTS_VOL = 18,  // SetEffectsVolume__FP10hdMenuItem
+    RS_SET_DIALOG_VOL = 19,  // SetDialogVolume__FP10hdMenuItem
     // Events 19-23: additional control events
     // Events 26-31: dialog events
     RS_LOAD_DIALOG = 26,
     RS_PLAY_DIALOG = 27,
     RS_STOP_DIALOG = 28,
     RS_KILL_DIALOG = 29,
+    RS_LOAD_AND_PLAY_DIALOG = 30,
+    RS_QUERY_DIALOG_PRIORITY = 31,
 };
 
 // Central sound event dispatcher

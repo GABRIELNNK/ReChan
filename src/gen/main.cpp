@@ -64,6 +64,7 @@ int main() {
 
     Game game;
     game.Open();
+
     game.SetState(GameState::Intro);
 
     p3d::context->SetClearColour(pddiColour(30, 30, 35));

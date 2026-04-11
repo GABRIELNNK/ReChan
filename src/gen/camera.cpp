@@ -248,10 +248,8 @@ void Camera::Move() {
         }
     }
 
-    // PSX writes interpolated result to homePos (a1[31..33] = +124).
-    // pos (a1[7..9] = +28) stays at initial lookAtMode snap value.
-    // Update reads pos for rendering; LookAtTarget reads pos for eye.
-    prevPosition = nextPos;
+    prevPosition = position;
+    position = nextPos;
 
     if (flags & 0x02) {
         LookAtTarget(&targetPos);
@@ -313,9 +311,9 @@ void Camera::Update() {
         // PSX: GetPosition from the tMatrixCamera to sync Camera fields
         LVector matPos;
         p3dCamera.GetPosition(&matPos);
+        prevPosition = position;
         position = matPos;
         curPos = matPos;
-        prevPosition = matPos;
         prevTargetPos = camTarget;
         targetPos = camTarget;
         return;
@@ -791,8 +789,8 @@ void Camera::FollowPath() {
         LookAtTarget(&targetPos);
 
         // Copy curPos to position (camera eye)
+        prevPosition = position;
         position = curPos;
-        prevPosition = curPos;
 
         SetCurFOV(desiredFOV);
 
@@ -873,11 +871,10 @@ void Camera::CameraShake() {
         shakeZ = rmRandom0() % shakeStrength.z;
     }
 
+    prevPosition = position;
     position.x += shakeX;
     position.y += shakeY;
     position.z += shakeZ;
-
-    prevPosition = position;
 }
 
 

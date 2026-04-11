@@ -25,13 +25,13 @@ ActionInput::ActionInput() {
     bindings[ACTION_LOOK_LEFT]  = { 0,               GpBtn::NONE,    GpBtn::NONE,        GpAxis::RightX, -0.3f };
     bindings[ACTION_LOOK_RIGHT] = { 0,               GpBtn::NONE,    GpBtn::NONE,        GpAxis::RightX,  0.3f };
 
-    bindings[ACTION_START]      = { KEY_ENTER,       GpBtn::Start,   GpBtn::NONE,        GpAxis::NONE,   0 };
+    bindings[ACTION_START]      = { KEY_ESCAPE,      GpBtn::Start,   GpBtn::NONE,        GpAxis::NONE,   0 };
     bindings[ACTION_SELECT]     = { KEY_TAB,         GpBtn::Back,    GpBtn::NONE,        GpAxis::NONE,   0 };
 
-    bindings[ACTION_MENU_UP]      = { KEY_W,         GpBtn::DpadUp,    GpBtn::NONE,      GpAxis::LeftY, -0.5f };
-    bindings[ACTION_MENU_DOWN]    = { KEY_S,         GpBtn::DpadDown,  GpBtn::NONE,      GpAxis::LeftY,  0.5f };
-    bindings[ACTION_MENU_LEFT]    = { KEY_A,         GpBtn::DpadLeft,  GpBtn::NONE,      GpAxis::LeftX, -0.5f };
-    bindings[ACTION_MENU_RIGHT]   = { KEY_D,         GpBtn::DpadRight, GpBtn::NONE,      GpAxis::LeftX,  0.5f };
+    bindings[ACTION_MENU_UP]      = { KEY_UP,         GpBtn::DpadUp,    GpBtn::NONE,      GpAxis::LeftY, -0.5f };
+    bindings[ACTION_MENU_DOWN]    = { KEY_DOWN,       GpBtn::DpadDown,  GpBtn::NONE,      GpAxis::LeftY,  0.5f };
+    bindings[ACTION_MENU_LEFT]    = { KEY_LEFT,       GpBtn::DpadLeft,  GpBtn::NONE,      GpAxis::LeftX, -0.5f };
+    bindings[ACTION_MENU_RIGHT]   = { KEY_RIGHT,      GpBtn::DpadRight, GpBtn::NONE,      GpAxis::LeftX,  0.5f };
     bindings[ACTION_MENU_CONFIRM] = { KEY_ENTER,     GpBtn::A,       GpBtn::NONE,        GpAxis::NONE,   0 };
     bindings[ACTION_MENU_BACK]    = { KEY_ESCAPE,    GpBtn::B,       GpBtn::NONE,        GpAxis::NONE,   0 };
 }

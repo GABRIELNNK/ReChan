@@ -258,6 +258,8 @@ s32 LinearPath::Subdivide(s32 threshold) {
         delete del;
         del = next;
     }
+    tempList.head = nullptr;
+    tempList.tail = nullptr;
 
     return 0;
 }

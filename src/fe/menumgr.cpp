@@ -2,7 +2,12 @@
 #include "fe/hdmenuitems.h"
 #include "gen/linefile.h"
 #include "gen/control.h"
+#include "gen/game.h"
+#include "gen/world.h"
 #include "pc/inputaction.h"
+#include "pc/log.h"
+#include "snd/fesnd.h"
+#include "snd/rsevent.h"
 #include "xclib/xclib.h"
 
 // PSX: __7MenuMgr (0x8005F4A4)
@@ -208,11 +213,16 @@ void MenuMgr::ParseMenu(LineFile& lf, hdMenu* menu) {
 void MenuMgr::Activate() {
     MARKFUNCTION(0x8005FBA4);
     active = 1;
-    // PSX: rsEvent(10, 0, 0, 0) — menu open sound
-    // PSX: ProcessSoundEvent(0, 10)
-    // PSX: if soundFlag, play ambient music (rsEvent(30, ...))
+    rsEvent(RS_MUTE, 0, 0, 0);
+    if (g_frontEndSound) {
+        g_frontEndSound->ProcessSoundEvent(FE_SND_MENU_MOVE);
+    }
+    if (soundFlag) {
+        World* world = g_game ? g_game->GetWorld() : nullptr;
+        s32 track = (world && world->GetCurLevelID() == 7) ? 18 : 23;
+        rsEvent(RS_LOAD_AND_PLAY_DIALOG, 0, track, 0x1C);
+    }
     state = 1;
-    // PSX: save MEMORY[0x1C] into savedControl
     if (topMenu) {
         topMenu->DynSetup();
     }
@@ -228,16 +238,19 @@ void MenuMgr::Activate() {
 void MenuMgr::Deactivate() {
     MARKFUNCTION(0x8005FD30);
     active = 0;
-    // PSX: ProcessSoundEvent(0, 11) — menu close sound
-    // PSX: rsEvent(11, 0, 0, 0)
+    if (g_frontEndSound) {
+        g_frontEndSound->ProcessSoundEvent(FE_SND_MENU_ACCEPT);
+    }
+    rsEvent(RS_UNMUTE, 0, 0, 0);
     screenStackDepth = 0;
-    // PSX: MEMORY[0x1C] = savedControl
 }
 
 // PSX: InputPadUp__7MenuMgr (0x8005F660)
 void MenuMgr::InputPadUp() {
     MARKFUNCTION(0x8005F660);
-    // PSX: ProcessSoundEvent(0, 15) — nav sound
+    if (g_frontEndSound) {
+        g_frontEndSound->ProcessSoundEvent(FE_SND_MENU_7);
+    }
     if (curMenu) {
         curMenu->InputPrevItem();
     }
@@ -246,7 +259,9 @@ void MenuMgr::InputPadUp() {
 // PSX: InputPadDown__7MenuMgr (0x8005F740)
 void MenuMgr::InputPadDown() {
     MARKFUNCTION(0x8005F740);
-    // PSX: ProcessSoundEvent(0, 15) — nav sound
+    if (g_frontEndSound) {
+        g_frontEndSound->ProcessSoundEvent(FE_SND_MENU_7);
+    }
     if (curMenu) {
         curMenu->InputNextItem();
     }
@@ -255,6 +270,7 @@ void MenuMgr::InputPadDown() {
 // PSX: InputPadRight__7MenuMgr (0x8005F6B0)
 void MenuMgr::InputPadRight() {
     MARKFUNCTION(0x8005F6B0);
+    if (!curMenu) return;
     hdMenuItem* item = curMenu->curItem;
     if (item) {
         item->IncItem();
@@ -264,6 +280,7 @@ void MenuMgr::InputPadRight() {
 // PSX: InputPadLeft__7MenuMgr (0x8005F6F8)
 void MenuMgr::InputPadLeft() {
     MARKFUNCTION(0x8005F6F8);
+    if (!curMenu) return;
     hdMenuItem* item = curMenu->curItem;
     if (item) {
         item->DecItem();
@@ -273,7 +290,9 @@ void MenuMgr::InputPadLeft() {
 // PSX: InputItemPush__7MenuMgr (0x8005F790)
 void MenuMgr::InputItemPush() {
     MARKFUNCTION(0x8005F790);
-    // PSX: if state != 8, play confirm sound
+    if (state != 8 && g_frontEndSound) {
+        g_frontEndSound->ProcessSoundEvent(FE_SND_MENU_5);
+    }
     if (curMenu) {
         curMenu->InputPush(this);
     }
@@ -288,9 +307,13 @@ void MenuMgr::InputItemPop() {
             state = 8;
         }
         else {
-            // PSX: calls curMenu vtable+32 (DeselectItem) then vtable+36 (???)
-            // PSX: ProcessSoundEvent(0, 12) — back sound
-            Deactivate();
+            if (curMenu->CanAbortNow()) {
+                curMenu->Cleanup();
+                if (g_frontEndSound) {
+                    g_frontEndSound->ProcessSoundEvent(FE_SND_MENU_SPECIAL_4);
+                }
+                PopMenu();
+            }
         }
     }
 }
@@ -303,7 +326,7 @@ void MenuMgr::PushMenu(hdMenu* menu) {
         PushScreen(menu->menuID);
         Update();
         Update();
-        // PSX: calls menu vtable+28 (DynSetup/Select)
+        menu->DynSetup();
     }
 }
 
@@ -340,8 +363,11 @@ void MenuMgr::QueryInput(bool processInput) {
     if (!g_actionInput) return;
     if (!processInput) return;
 
-    // Back/Start
-    if (g_actionInput->JustPressed(ACTION_START)) {
+    // Cancel/Pop (ESC or gamepad B) - check before START since both may share a key
+    if (g_actionInput->JustPressed(ACTION_MENU_BACK)) {
+        InputItemPop();
+    }
+    else if (g_actionInput->JustPressed(ACTION_START)) {
         state = 8;
     }
     // D-pad navigation
@@ -356,10 +382,6 @@ void MenuMgr::QueryInput(bool processInput) {
     }
     if (g_actionInput->JustPressed(ACTION_MENU_RIGHT)) {
         InputPadRight();
-    }
-    // Cancel/Pop
-    if (g_actionInput->JustPressed(ACTION_MENU_BACK)) {
-        InputItemPop();
     }
     // Confirm/Push
     if (g_actionInput->JustPressed(ACTION_MENU_CONFIRM)) {

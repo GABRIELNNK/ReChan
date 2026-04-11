@@ -342,6 +342,8 @@ public:
     void RequestAction(u32 actionID);
     void FaceThing(Thing* target, s32 immediate);
     void FacePoint(const LVector& point, s32 immediate);
+    bool FaceThingDesired(Thing* target);
+    bool FacePointDesired(const LVector& point);
     Humanoid* FindFoe(u32 range, s32 param, s32 immediate);
     void SetTarget(Humanoid* target);
     void ReleaseTarget();

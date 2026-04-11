@@ -123,7 +123,8 @@ u32* DBRoot::Process(u32* data, const u32* end) {
             }
             str[len] = '\0';
 
-            SetName(str, 0);
+            // PSX keeps a persistent copy of DB root names from the stream.
+            SetName(str, 1);
             delete[] str;
 
             nameAttribs++;
@@ -494,7 +495,8 @@ void Database::Scan(const u8* data, u32 size) {
                 if (first) {
                     const char* ptName = first->GetName();
                     if (ptName && ptName[0] != '\0') {
-                        obj->SetName(ptName, 0);
+                        // PSX duplicates the first child point name for DBPath.
+                        obj->SetName(ptName, 1);
                     }
                 }
 
@@ -621,14 +623,10 @@ DBRoot* Database::GetFirstBlock() {
 // PSX: FindSphere__8DatabasePCcP8DBSphere (DATABASE.CPP:901)
 DBSphere* Database::FindSphere(const char* name, DBSphere* after) {
     MARKFUNCTION(0x800391A8);
-    ccMinNode* start = after ? after->next : sphereList.GetFirst();
-    for (ccMinNode* n = start; n; n = n->next) {
-        DBSphere* s = static_cast<DBSphere*>(n);
-        if (strcmp(s->GetName(), name) == 0) {
-            return s;
-        }
+    if (!name) {
+        return nullptr;
     }
-    return nullptr;
+    return static_cast<DBSphere*>(sphereList.FindNode(name, after));
 }
 
 // PSX: FindSphere__8DatabasePCc (DATABASE.CPP:938)
@@ -640,37 +638,28 @@ DBSphere* Database::FindSphere(const char* name) {
 // PSX: FindLine__8DatabasePCc (DATABASE.CPP:944)
 DBLine* Database::FindLine(const char* name) {
     MARKFUNCTION(0x800391EC);
-    for (ccMinNode* n = lineList.GetFirst(); n; n = n->next) {
-        DBLine* obj = static_cast<DBLine*>(n);
-        if (strcmp(obj->GetName(), name) == 0) {
-            return obj;
-        }
+    if (!name) {
+        return nullptr;
     }
-    return nullptr;
+    return static_cast<DBLine*>(lineList.FindNode(name));
 }
 
 // PSX: FindPath__8DatabasePCc (DATABASE.CPP:950)
 DBPath* Database::FindPath(const char* name) {
     MARKFUNCTION(0x80039210);
-    for (ccMinNode* n = pathList.GetFirst(); n; n = n->next) {
-        DBPath* obj = static_cast<DBPath*>(n);
-        if (strcmp(obj->GetName(), name) == 0) {
-            return obj;
-        }
+    if (!name) {
+        return nullptr;
     }
-    return nullptr;
+    return static_cast<DBPath*>(pathList.FindNode(name));
 }
 
 // PSX: FindPoint__8DatabasePCc (DATABASE.CPP:956)
 DBPoint* Database::FindPoint(const char* name) {
     MARKFUNCTION(0x80039234);
-    for (ccMinNode* n = pointList.GetFirst(); n; n = n->next) {
-        DBPoint* obj = static_cast<DBPoint*>(n);
-        if (strcmp(obj->GetName(), name) == 0) {
-            return obj;
-        }
+    if (!name) {
+        return nullptr;
     }
-    return nullptr;
+    return static_cast<DBPoint*>(pointList.FindNode(name));
 }
 
 // PSX: FindPath__8DatabaseUl (DATABASE.CPP:978)

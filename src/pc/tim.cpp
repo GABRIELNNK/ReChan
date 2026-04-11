@@ -260,7 +260,7 @@ void ScreenDraw::DrawColoredRect(f32 x, f32 y, f32 w, f32 h,
     static tTexture* s_colorTex = nullptr;
     static u32 s_lastColor = 0;
 
-    u32 color = ((u32)a << 24) | ((u32)b << 16) | ((u32)g << 8) | (u32)r;
+    u32 color = (255u << 24) | ((u32)b << 16) | ((u32)g << 8) | (u32)r;
     if (!s_colorTex || s_lastColor != color) {
         if (s_colorTex) s_colorTex->Release();
         s_colorTex = new tTexture();
@@ -272,7 +272,7 @@ void ScreenDraw::DrawColoredRect(f32 x, f32 y, f32 w, f32 h,
     p3d::context->SetBlendMode(PDDI_BLEND_ALPHA);
 
     s_screenShader->SetTexture(0, s_colorTex->GetTexture());
-    s_screenShader->SetColour(0, pddiColour(128, 128, 128, 255));
+    s_screenShader->SetColour(0, pddiColour(128, 128, 128, a));
     p3d::context->DrawQuad(s_screenShader, x, y, w, h, 0.0f, 0.0f, 1.0f, 1.0f);
 
     EndOverlay(prev);

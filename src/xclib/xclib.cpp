@@ -6,6 +6,7 @@
 #include "pc/tim.h"
 #include <cstdio>
 #include <cstring>
+#include <unordered_map>
 
 // ---- SQU LZSS Decompression (PSX: EXPAND.CPP:67, addr 0x80026D10) ----
 // Command byte encoding:
@@ -54,6 +55,105 @@ s32 SquExpandData(u8* dst, const u8* src) {
 }
 
 // ---- xcHash (PSX: XCHASH.CPP:11, addr 0x80091310) ----
+
+static std::unordered_map<u32, const char*> s_runtimeStrings;
+static u32 s_nextRuntimeStringToken = 0xF0000000;
+
+static bool IsSoundBarString(const char* str) {
+    if (!str || !*str) {
+        return false;
+    }
+    for (const char* p = str; *p; p++) {
+        if (*p != 'o' && *p != 'f') {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void DrawCircleBand(s32 x, s32 y, s32 size, f32 outerRadius, f32 innerRadius,
+                           u8 r, u8 g, u8 b, u8 a) {
+    if (outerRadius <= 0.0f) {
+        return;
+    }
+
+    if (innerRadius < 0.0f) {
+        innerRadius = 0.0f;
+    }
+    if (innerRadius > outerRadius) {
+        return;
+    }
+
+    f32 cx = ((f32)size - 1.0f) * 0.5f;
+    f32 cy = ((f32)size - 1.0f) * 0.5f;
+    f32 outer2 = outerRadius * outerRadius;
+    f32 inner2 = innerRadius * innerRadius;
+
+    for (s32 py = 0; py < size; py++) {
+        for (s32 px = 0; px < size; px++) {
+            f32 dx = (f32)px - cx;
+            // Slight vertical squash to better match PSX marker shape.
+            f32 dy = ((f32)py - cy) * 1.5f;
+            f32 dist2 = dx * dx + dy * dy;
+            if (dist2 > outer2 || dist2 < inner2) {
+                continue;
+            }
+
+            s32 sx = x + px;
+            s32 sy = y + py;
+            f32 nx = SCALE_NORM_X((f32)sx);
+            f32 ny = 1.0f - SCALE_NORM_Y((f32)(sy + 1));
+            f32 nw = SCALE_NORM_X(1.0f);
+            f32 nh = SCALE_NORM_Y(1.0f);
+            ScreenDraw::DrawColoredRect(nx, ny, nw, nh, r, g, b, a);
+        }
+    }
+}
+
+static void DrawSoundBarCircle(s32 x, s32 y, s32 size, u8 a, bool filled) {
+    const u8 redR = 99;
+    const u8 redG = 0;
+    const u8 redB = 0;
+    const u8 yellowR = 181;
+    const u8 yellowG = 148;
+    const u8 yellowB = 0;
+    const u8 darkR = 8;
+    const u8 darkG = 6;
+    const u8 darkB = 0;
+
+    f32 outer = ((f32)size - 1.0f) * 0.5f;
+    f32 r1 = outer - 1.25f;
+    f32 r2 = outer - 2.5f;
+    f32 r3 = outer - 4.25f;
+
+    DrawCircleBand(x, y, size, outer, r1, redR, redG, redB, a);
+    DrawCircleBand(x, y, size, r1, r2, yellowR, yellowG, yellowB, a);
+    DrawCircleBand(x, y, size, r2, r3, redR, redG, redB, a);
+
+    if (filled) {
+        DrawCircleBand(x, y, size, r3, 0.0f, yellowR, yellowG, yellowB, a);
+    }
+    else {
+        DrawCircleBand(x, y, size, r3, 0.0f, darkR, darkG, darkB, a);
+    }
+}
+
+u32 xcRegisterRuntimeString(const char* str) {
+    if (!str) {
+        return 0;
+    }
+    u32 token = s_nextRuntimeStringToken++;
+    s_runtimeStrings[token] = str;
+    return token;
+}
+
+const char* xcResolveRuntimeString(u32 token) {
+    auto it = s_runtimeStrings.find(token);
+    if (it == s_runtimeStrings.end()) {
+        return nullptr;
+    }
+    return it->second;
+}
 
 u32 xcHash(const char* str) {
     u32 hash = 0;
@@ -527,7 +627,11 @@ void xcSection::DrawPrimObj(u8* primData) {
             f32 nw = SCALE_NORM_X(x1 - x0);
             f32 nh = SCALE_NORM_Y(y1 - y0);
 
-            ScreenDraw::DrawColoredRect(nx, ny, nw, nh, prim->r, prim->g, prim->b, 255);
+            u8 alpha = (prim->code & 0x02) ? 128 : 255;
+            if (prim->r == 0 && prim->g == 0 && prim->b == 0 && hdr->subtype == 0) {
+                alpha = 128;
+            }
+            ScreenDraw::DrawColoredRect(nx, ny, nw, nh, prim->r, prim->g, prim->b, alpha);
             break;
         }
         case XC_PRIM_POLYG4:
@@ -543,7 +647,11 @@ void xcSection::DrawPrimObj(u8* primData) {
             f32 nw = SCALE_NORM_X(x1 - x0);
             f32 nh = SCALE_NORM_Y(y1 - y0);
 
-            ScreenDraw::DrawColoredRect(nx, ny, nw, nh, r, g, b, 255);
+            u8 alpha = (prim->code & 0x02) ? 128 : 255;
+            if (r == 0 && g == 0 && b == 0 && hdr->subtype == 0) {
+                alpha = 128;
+            }
+            ScreenDraw::DrawColoredRect(nx, ny, nw, nh, r, g, b, alpha);
             break;
         }
         case XC_PRIM_SPRITE:
@@ -573,8 +681,47 @@ void xcSection::DrawPrimObj(u8* primData) {
             auto* prim = reinterpret_cast<xcTextPrim*>(primData);
             if (prim->numStrings == 0) break;
 
-            const char* str = FindString(prim->GetStringHash());
-            if (!str) break;
+            u32 strKey = prim->GetStringHash();
+            const char* runtimeStr = xcResolveRuntimeString(strKey);
+            const char* str = runtimeStr;
+            if (!str) {
+                str = FindString(strKey);
+            }
+            if (!str)
+                break;
+
+            if (runtimeStr && IsSoundBarString(runtimeStr)) {
+                s32 count = (s32)strlen(runtimeStr);
+                s32 step = 20;
+                s32 dotSize = 16;
+                s32 totalW = count > 0 ? (count * step - (step - dotSize)) : 0;
+                s32 startX = prim->mtx.GetX();
+                s32 startY = prim->mtx.GetY();
+
+                if (prim->hdr.flags & XC_JUST_RIGHT) {
+                    if ((prim->hdr.flags & XC_JUST_HMASK) == XC_JUST_CENTER) {
+                        startX -= totalW / 2;
+                    }
+                    else {
+                        startX -= totalW;
+                    }
+                }
+
+                for (s32 i = 0; i < count; i++) {
+                    const char ch = runtimeStr[i];
+                    s32 x = startX + i * step + 1;
+                    s32 y = startY;
+                    u8 a = prim->colorA;
+
+                    if (ch == 'o') {
+                        DrawSoundBarCircle(x, y, dotSize, a, true);
+                    }
+                    else {
+                        DrawSoundBarCircle(x, y, dotSize, a, false);
+                    }
+                }
+                break;
+            }
 
             xcFont* font = nullptr;
             if (sectionMan) font = sectionMan->FindFont(prim->fontHash);

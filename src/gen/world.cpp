@@ -1,12 +1,17 @@
 #include "common.h"
+#include "ai/player.h"
 #include "gen/world.h"
 #include "gen/ai.h"
+#include "gen/camera.h"
 #include "gen/charmgr.h"
 #include "gen/database.h"
+#include "gen/display.h"
 #include "gen/director.h"
+#include "gen/game.h"
 #include "gen/geometry.h"
 #include "gen/levelmgr.h"
 #include "snd/rsevent.h"
+#include "fe/hdmenu.h"
 #include "fe/loadanim.h"
 #include "p3d/context.h"
 #include "p3d/stream.h"
@@ -18,6 +23,10 @@
 
 // Global block manager pointer (PSX: gp scope, set by World)
 BlockManager* g_blockManager = nullptr;
+
+// PSX globals used by destination select return positioning.
+LVector g_destSelectReturnPos = { 0, 0, 0 };
+bool g_destSelectReturnPosValid = false;
 
 // DynamicThing physics globals (PSX: gp+1740, gp+1744)
 s32 g_maxFallSpeed = 0x4000;
@@ -423,6 +432,36 @@ bool World::LoadLevelIndex(u32 levelIndex) {
         g_ai->Populate();
     }
 
+    // PSX hub return flow: when loading level ID 7, apply saved return position.
+    if (levelList && currentLevelIndex < (u32)levelCount) {
+        if (levelList[currentLevelIndex * 2] == 7 && g_destSelectReturnPosValid && Player::s_player) {
+            Player* player = Player::s_player;
+
+            LVector delta;
+            delta.x = g_destSelectReturnPos.x - player->homePos.x;
+            delta.y = g_destSelectReturnPos.y - player->homePos.y;
+            delta.z = g_destSelectReturnPos.z - player->homePos.z;
+
+            player->homePos = g_destSelectReturnPos;
+
+            player->pos.x += delta.x;
+            player->pos.y += delta.y;
+            player->pos.z += delta.z;
+
+            player->SetActionState(AS_STAND, 0);
+
+            if (g_display) {
+                Camera* cam = g_display->GetCamera();
+                if (cam) {
+                    const LVector& camPos = cam->GetPosition();
+                    player->FacePointDesired(camPos);
+                    player->FacePoint(camPos, 0);
+                    cam->SetLookAtTarget(player, 1);
+                }
+            }
+        }
+    }
+
     // PSX: LoadBG, InitBG - background rendering
     // TODO: BackG not yet reversed
 
@@ -475,52 +514,76 @@ bool World::Load(const std::string& lcfPath) {
     // Load TPG textures into VRAM (PSX HandleTPGChunk)
     LoadTPGTextures(data, dataSize);
 
-    // Count BLK and WDB entries from stream header
+    // PSX petal-based loading: the LCF contains multiple WDB+BLK groups,
+    // one per petal. Each petal starts with a .WDB entry followed by .BLK entries.
+    // PSX LoadPetal__6Stream finds the N-th WDB and reads only that petal's data.
+    // We replicate that: find petal boundaries, load only the target petal.
+
+    // Find WDB entry indices to identify petal boundaries
+    std::vector<u32> wdbIndices;
+    for (u32 i = 0; i < (u32)entries.size(); i++) {
+        if (strncmp(entries[i].magic, ".WDB", 4) == 0) {
+            wdbIndices.push_back(i);
+        }
+    }
+
+    if (wdbIndices.empty()) {
+        LOG("[World] No WDB entries in %s", lcfPath.c_str());
+        streamData.clear();
+        return false;
+    }
+
+    // Clamp target petal to valid range
+    u32 petalIdx = targetPetalIndex;
+    if (petalIdx >= (u32)wdbIndices.size()) {
+        petalIdx = 0;
+    }
+
+    // Determine entry range for this petal: [wdbIndex, nextWdbIndex)
+    u32 petalStart = wdbIndices[petalIdx];
+    u32 petalEnd = (petalIdx + 1 < (u32)wdbIndices.size())
+                       ? wdbIndices[petalIdx + 1]
+                       : (u32)entries.size();
+
+    LOG("[World] Loading petal %u/%u (entries %u-%u) from %s",
+        petalIdx, (u32)wdbIndices.size(), petalStart, petalEnd - 1, lcfPath.c_str());
+
+    // Count BLK entries for this petal
     u32 blkCount = 0;
-    u32 wdbCount = 0;
-    for (const auto& e : entries) {
-        if (strncmp(e.magic, ".BLK", 4) == 0) blkCount++;
-        if (strncmp(e.magic, ".WDB", 4) == 0) wdbCount++;
+    for (u32 i = petalStart; i < petalEnd; i++) {
+        if (strncmp(entries[i].magic, ".BLK", 4) == 0) blkCount++;
     }
-    LOG("[World] Found %u BLK, %u WDB entries in %s", blkCount, wdbCount, lcfPath.c_str());
 
-    // Parse WDB entries using Database::Scan (PSX HandleWDBChunk)
-    // Each WDB has block numbers starting from 0 - they are local to that WDB's
-    // BLK group. Count BLK entries between WDB entries to compute the base offset.
-    // Use the global Database (created in Game::InternalOpen) so entities
-    // remain accessible to AI::Populate after this function returns.
+    // Scan only this petal's WDB into the database
     g_database->Close();
-
-    // Scan all WDB entries into the database
-    for (const auto& e : entries) {
-        if (strncmp(e.magic, ".WDB", 4) != 0) continue;
-        if (e.offset + e.size > dataSize) continue;
-        g_database->Scan(data + e.offset, e.size);
+    for (u32 i = petalStart; i < petalEnd; i++) {
+        if (strncmp(entries[i].magic, ".WDB", 4) != 0) continue;
+        if (entries[i].offset + entries[i].size > dataSize) continue;
+        g_database->Scan(data + entries[i].offset, entries[i].size);
     }
 
-    // PSX _LoadBlocksFunc: iterate GetFirstBlock linked list to build volume list.
-    // PSX iterates the database block list sequentially - no index mapping needed.
+    // Build block volume list from this petal's WDB
     std::vector<DBVolume*> blockVolumes;
     for (DBRoot* v = g_database->GetFirstBlock(); v; v = static_cast<DBRoot*>(v->next)) {
         blockVolumes.push_back(static_cast<DBVolume*>(v));
     }
-    LOG("[World] Parsed %u block volumes from WDB", (u32)blockVolumes.size());
+    LOG("[World] Parsed %u block volumes from petal %u WDB", (u32)blockVolumes.size(), petalIdx);
 
     // Initialize blocks from volumes (PSX _LoadBlocksFunc - Block::Init)
     blockMgr.LoadBlocksFunc(blockVolumes);
 
-    // Parse BLK data into blocks (PSX LoadBlocks - LoadSingleBlockAndParse - Parse)
+    // Parse only this petal's BLK data into blocks
     std::vector<const u8*> blkPtrs;
     std::vector<u32> blkSizes;
-    for (const auto& e : entries) {
-        if (strncmp(e.magic, ".BLK", 4) != 0) continue;
-        if (e.offset + e.size > dataSize) {
+    for (u32 i = petalStart; i < petalEnd; i++) {
+        if (strncmp(entries[i].magic, ".BLK", 4) != 0) continue;
+        if (entries[i].offset + entries[i].size > dataSize) {
             blkPtrs.push_back(nullptr);
             blkSizes.push_back(0);
         }
         else {
-            blkPtrs.push_back(data + e.offset);
-            blkSizes.push_back(e.size);
+            blkPtrs.push_back(data + entries[i].offset);
+            blkSizes.push_back(entries[i].size);
         }
     }
     blockMgr.LoadBlocks(0, blkPtrs.data(), blkSizes.data(), blkCount);
@@ -916,6 +979,9 @@ void World::OffsetToPreventSeams(LVector& pos, const LVector& camPos) {
 
 void World::Unload() {
     blockMgr.InternalClose();
+    if (g_ai) {
+        g_ai->UnPopulate(0);
+    }
     streamData.clear();
     if (vramHandle && p3d::context) {
         p3d::context->DestroyVRAMTexture(vramHandle);
@@ -926,6 +992,14 @@ void World::Unload() {
 // PSX: UnloadPetal__5World (WORLD.CPP:1176, 0x80045F34)
 void World::UnloadPetal() {
     MARKFUNCTION(0x80045F34);
+
+    // Unload current blocks (collision sectors, geometry)
+    blockMgr.InternalClose();
+
+    // Clear all AI entities from previous petal
+    if (g_ai) {
+        g_ai->UnPopulate(0);
+    }
 
     if (g_director) {
         g_director->PurgeAnims();
@@ -961,8 +1035,76 @@ void World::LoadPetal(u32 petalIndex) {
     targetPetalIndex = petalIndex;
     currentPetalIndex = petalIndex;
 
-    if (g_levelManager) {
-        g_levelManager->LoadPetal();
+    // PSX: LevelManager::LoadPetal re-reads from Stream at petal position.
+    // PC: re-parse the already-loaded LCF data for the new petal.
+    if (!streamData.empty()) {
+        u32 dataSize = static_cast<u32>(streamData.size());
+        const u8* data = streamData.data();
+
+        auto entries = ParseStreamHeader(data, dataSize);
+
+        // Find WDB entry indices (petal boundaries)
+        std::vector<u32> wdbIndices;
+        for (u32 i = 0; i < (u32)entries.size(); i++) {
+            if (strncmp(entries[i].magic, ".WDB", 4) == 0) {
+                wdbIndices.push_back(i);
+            }
+        }
+
+        u32 pi = petalIndex;
+        if (pi >= (u32)wdbIndices.size()) pi = 0;
+
+        u32 petalStart = wdbIndices[pi];
+        u32 petalEnd = (pi + 1 < (u32)wdbIndices.size())
+                           ? wdbIndices[pi + 1]
+                           : (u32)entries.size();
+
+        LOG("[World] LoadPetal %u: entries %u-%u", pi, petalStart, petalEnd - 1);
+
+        // Scan this petal's WDB
+        g_database->Close();
+        for (u32 i = petalStart; i < petalEnd; i++) {
+            if (strncmp(entries[i].magic, ".WDB", 4) != 0) continue;
+            if (entries[i].offset + entries[i].size > dataSize) continue;
+            g_database->Scan(data + entries[i].offset, entries[i].size);
+        }
+
+        // Build block volumes
+        std::vector<DBVolume*> blockVolumes;
+        for (DBRoot* v = g_database->GetFirstBlock(); v; v = static_cast<DBRoot*>(v->next)) {
+            blockVolumes.push_back(static_cast<DBVolume*>(v));
+        }
+        blockMgr.LoadBlocksFunc(blockVolumes);
+
+        // Parse BLK data
+        u32 blkCount = 0;
+        std::vector<const u8*> blkPtrs;
+        std::vector<u32> blkSizes;
+        for (u32 i = petalStart; i < petalEnd; i++) {
+            if (strncmp(entries[i].magic, ".BLK", 4) != 0) continue;
+            blkCount++;
+            if (entries[i].offset + entries[i].size > dataSize) {
+                blkPtrs.push_back(nullptr);
+                blkSizes.push_back(0);
+            }
+            else {
+                blkPtrs.push_back(data + entries[i].offset);
+                blkSizes.push_back(entries[i].size);
+            }
+        }
+        blockMgr.LoadBlocks(0, blkPtrs.data(), blkSizes.data(), blkCount);
+
+        LOG("[World] LoadPetal: loaded %u blocks", blockMgr.GetNumBlocks());
+    }
+
+    // PSX: AI::Populate for new petal entities
+    if (g_ai) {
+        g_ai->Populate();
+    }
+
+    if (g_director) {
+        g_director->Reset();
+        g_director->SetScript();
     }
 
     rsEvent(RS_LEVEL_BEGIN, 0, 0, 0);
@@ -979,5 +1121,45 @@ void World::ResetLevel() {
     if (g_director) {
         g_director->LevelReset();
     }
+}
+
+// PSX: LevelMenuExecute__5WorldP10hdMenuItem (WORLD.CPP:868, 0x80045634)
+// Callback invoked when a level is selected in the level menu.
+s32 World::LevelMenuExecute(hdMenuItem* item) {
+    MARKFUNCTION(0x80045634);
+
+    u32 levelIndex = 0;
+    u32 petalIndex = 0;
+
+    // PSX: item->data[5] holds the packed level name (set by InitLevelMenu)
+    // hdMenuItem: +20 = itemFlags, +24 = itemID. But PSX uses offset +20 as value.
+    // Actually PSX reads item[5] = *(item + 20) = itemFlags field repurposed as value.
+    UnpackLevelName(item->itemFlags, levelIndex, petalIndex);
+
+    World* world = g_game ? g_game->GetWorld() : nullptr;
+    if (!world) {
+        return 4;
+    }
+
+    u32 curLevel = world->currentLevelIndex;
+    u32 curPetal = world->currentPetalIndex;
+
+    world->targetLevelIndex = levelIndex;
+    world->targetPetalIndex = petalIndex;
+
+    // PSX: if same level + same petal -> QueuePetalLoad (21)
+    // PSX: else -> stop music, QueueLevelLoad (20)
+    bool sameLevel = (curLevel == levelIndex) && (curPetal == petalIndex);
+    GameState nextState = GameState::QueuePetalLoad;
+
+    if (!sameLevel) {
+        rsEvent(RS_STOP_MUSIC, 0, 0, 0);
+        nextState = GameState::QueueLevelLoad;
+    }
+
+    g_game->SetState(nextState);
+    world->ResetLevel();
+
+    return 4;
 }
 

@@ -6,6 +6,28 @@
 #include "gen/database.h"
 #include "gen/display.h"
 #include "gen/camera.h"
+#include "gen/game.h"
+#include "pc/log.h"
+
+#include <cstdio>
+
+static const char* GetAttribStringCompat(const DBAttrib* attrib, char* tempBuf, size_t tempBufSize) {
+    if (!attrib) {
+        return nullptr;
+    }
+
+    if (attrib->type == 0) {
+        return attrib->strValue;
+    }
+
+    if (!tempBuf || tempBufSize == 0) {
+        return nullptr;
+    }
+
+    // PSX GetAttribString returns decimal text for numeric attributes.
+    snprintf(tempBuf, tempBufSize, "%d", (s32)attrib->value);
+    return tempBuf;
+}
 
 FrontEndVolume::FrontEndVolume(const LVector* pos, u16 type) : Obstacle(pos, type) {
     MARKFUNCTION(0x8001A758);
@@ -48,14 +70,16 @@ void FrontEndVolume::AnalyzeMesh(DBRoot* root) {
     FillCollisionBox(localBox, *vol);
     SetCollisionBox(localBox);
 
-    savedPos = root->pos;
+    // PSX copies this object's position after AnalyzeMesh setup.
+    savedPos = pos;
 
     const DBAttrib* a7 = root->FindAttrib(7);
     if (a7) {
-        const char* pointName = a7->strValue;
-        DBPoint* point = g_database->FindPoint(pointName);
+        char pointNameBuf[32] = {};
+        const char* pointName = GetAttribStringCompat(a7, pointNameBuf, sizeof(pointNameBuf));
+        DBPoint* point = (g_database && pointName) ? g_database->FindPoint(pointName) : nullptr;
         if (point) {
-            savedPos = root->pos;
+            savedPos = point->pos;
         }
     }
 
@@ -73,15 +97,17 @@ void FrontEndVolume::HandleHumanoidCollision(Humanoid* hum) {
             g_feMenuMgr->ShowLevel(this, hum);
         }
     } else {
-        // PSX: hdDestSelect path (levelCode < 10)
-        // Loads hdDestSelect at global+0x230, checks if already showing this levelCode,
-        // calls HUD::DisplayTake, sets g_levelCodeFlag, calls hdDestSelect::ShowLevel.
-        // TODO: requires HUD and hdDestSelect classes (not yet reversed)
+        // PSX path for levelCode < 10 routes through hdDestSelect/HUD.
+        // That subsystem is not active in the current PC runtime.
     }
 }
 
 void FrontEndVolume::HandleVolumeExit(Humanoid* hum) {
     MARKFUNCTION(0x8001A9CC);
+
+    if (!hum) {
+        return;
+    }
 
     LVector delta;
     delta.x = savedPos.x - hum->homePos.x;
@@ -94,10 +120,16 @@ void FrontEndVolume::HandleVolumeExit(Humanoid* hum) {
     hum->pos.y += delta.y;
     hum->pos.z += delta.z;
 
-    // TODO: hum->SetFloorForced(1, 0, pos, delta) - vtable+232, not yet reversed
-    // TODO: FaceThingDesired(hum, nullptr) - not yet reversed
-    hum->FaceThing(nullptr, 0);
+    // PSX vtable+232 call from HandleVolumeExit maps to SetActionState(1, 0).
+    hum->SetActionState(AS_STAND, 0);
+
     if (g_display) {
-        g_display->GetCamera()->SetLookAtTarget(hum, 1);
+        Camera* cam = g_display->GetCamera();
+        if (cam) {
+            const LVector& camPos = cam->GetPosition();
+            hum->FacePointDesired(camPos);
+            hum->FacePoint(camPos, 0);
+            cam->SetLookAtTarget(hum, 1);
+        }
     }
 }
