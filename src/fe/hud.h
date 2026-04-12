@@ -37,6 +37,7 @@ public:
     s32 visible = 1;                    // +108
     s32 dragonShowState = 0;            // +112
     s32 foeTracking = 0;               // +116
+    s32 inputEnabled = 0;
 
     hdHealth playerHealth;          // +120
     hdHealth bossHealth;            // +156

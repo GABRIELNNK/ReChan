@@ -1,17 +1,21 @@
 #include "fe/gamemenu.h"
 #include "fe/hdmenuitems.h"
 #include "gen/game.h"
+#include "gen/control.h"
 #include "gen/scoremgr.h"
 #include "snd/fesnd.h"
 #include "snd/rsevent.h"
 #include "snd/sound.h"
 #include "pc/settings.h"
+#include "xclib/xclib.h"
+#include <cstdio>
 
 // Global gameMenu pointer
 gameMenu* g_gameMenu = nullptr;
 
 // Hash constants for gameMenu
 static constexpr u32 HASH_PAUSE_MENU = (u32)(-1033476366);  // 0xC26EF5F2
+static constexpr u32 HASH_PAUSE_GOLD_DRAGON_TEXT = (u32)(-1928898378);
 static constexpr u32 HASH_ITEM_RESUME_GAME = (u32)(-961823183);  // ResumeGame callback
 static constexpr u32 HASH_ITEM_SHOCK_TOGGLE = 810498402;  // SetControllerShock callback
 static constexpr u32 HASH_SOUND_MENU = 102551593;     // xcHash("Sound")
@@ -44,6 +48,8 @@ struct SoundMenuState {
 };
 
 static SoundMenuState g_soundState;
+static char s_pauseGoldDragonBuf[8] = {};
+static u32 s_pauseGoldDragonToken = 0;
 
 // PSX: __8gameMenu (Overlay4 0x80010100)
 gameMenu::gameMenu() {
@@ -58,6 +64,47 @@ gameMenu::gameMenu() {
 gameMenu::~gameMenu() {
     MARKFUNCTION(0x80010200);
     if (g_gameMenu == this) g_gameMenu = nullptr;
+}
+
+// PSX: Activate__8gameMenu (Overlay4 0x80037A88)
+void gameMenu::Activate() {
+    MARKFUNCTION(0x80037A88);
+    MenuMgr::Activate();
+
+    if (pauseIndex != 0) {
+        return;
+    }
+
+    xcOverlayData* overlay = FindOverlay(HASH_PAUSE_MENU);
+    xcSection* sec = GetSection();
+    if (overlay && sec) {
+        u8* raw = sec->rawData;
+        auto* goldDragonText = reinterpret_cast<xcTextPrim*>(overlay->GetTextObj(HASH_PAUSE_GOLD_DRAGON_TEXT, raw));
+        if (goldDragonText && goldDragonText->numStrings != 0) {
+            s32 totalGoldDragon = g_scoreManager ? g_scoreManager->GetTotalGoldDragon() : 0;
+            if (totalGoldDragon > 99) {
+                totalGoldDragon = 99;
+            }
+
+            std::snprintf(s_pauseGoldDragonBuf, sizeof(s_pauseGoldDragonBuf), "%d", totalGoldDragon);
+            if (s_pauseGoldDragonToken == 0) {
+                s_pauseGoldDragonToken = xcRegisterRuntimeString(s_pauseGoldDragonBuf);
+            }
+
+            u8 idx = (goldDragonText->paletteIdx < goldDragonText->numStrings) ? goldDragonText->paletteIdx : 0;
+            goldDragonText->StringHashes()[idx] = s_pauseGoldDragonToken;
+        }
+    }
+
+    hdMenu* pauseMenu = FindMenu(HASH_PAUSE_MENU);
+    if (!pauseMenu) {
+        return;
+    }
+
+    hdMenuItem* shockItem = pauseMenu->FindItem(HASH_ITEM_SHOCK_TOGGLE);
+    if (shockItem) {
+        shockItem->SetValue(GetShock() ? 1 : 0);
+    }
 }
 
 // PSX: _ResumeGame__8gameMenuP10hdMenuItem (0x8003791C)

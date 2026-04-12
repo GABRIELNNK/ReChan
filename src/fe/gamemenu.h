@@ -19,6 +19,7 @@ public:
     gameMenu();
     ~gameMenu() override;
 
+    void Activate() override;
     void SelfInit() override;
     void GotoStartScreen() override;
     void InputItemPush() override;

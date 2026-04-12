@@ -7,6 +7,7 @@
 #include "ai/humanoid.h"
 #include "ai/player.h"
 #include "gen/ai.h"
+#include "pc/inputaction.h"
 
 HUD* g_hud = nullptr;
 char HUD::szBossStatic[32] = {};
@@ -161,8 +162,7 @@ void HUD::SelfInit() {
 // PSX: EnableInput__3HUDi (HUD.CPP:542, 0x8003FB84)
 void HUD::EnableInput(s32 enable) {
     MARKFUNCTION(0x8003FB84);
-    // PSX: FindButtonMapping(0,0) -> SetButtonCallback/ClearButtonCallback
-    // Requires InputManager button callback system (not yet reversed)
+    inputEnabled = enable;
 }
 
 // PSX: DebugDisplay__3HUDi (HUD.CPP:553, 0x8003FBD0)
@@ -197,6 +197,13 @@ void HUD::DebugDisplay(s32 flag) {
 // PSX: SelfUpdate__3HUD (HUD.CPP:611, 0x8003FC10)
 void HUD::SelfUpdate() {
     MARKFUNCTION(0x8003FC10);
+    if (inputEnabled && g_actionInput && g_actionInput->JustPressed(ACTION_COUNTER)) {
+        World* world = g_game ? g_game->GetWorld() : nullptr;
+        if (!world || world->GetCurLevelID() != 7) {
+            ToggleShowAll();
+        }
+    }
+
     hits.Update();
     foeHealth.Update();
     playerHealth.Update();

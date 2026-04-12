@@ -535,6 +535,9 @@ bool World::LoadLevelIndex(u32 levelIndex) {
                 g_arrowInside = 1;
             } else {
                 returnPos = sOrigDestSelectReturnPos;
+                if (g_hud) {
+                    g_hud->DisplayTake(player->livesLeft, 1);
+                }
                 g_arrowInside = 0;
             }
 

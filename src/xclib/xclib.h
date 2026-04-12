@@ -77,10 +77,10 @@ struct xcCellImage {
 struct xcCellHeader {
     u8  magic[4];           // +0:  "CELL"
     u32 totalSize;          // +4:  total block size including header
-    s16 hotX;               // +8:  hotspot X
-    s16 hotY;               // +10: hotspot Y
-    u16 pixelW;             // +12: full image width in pixels
-    u16 pixelH;             // +14: full image height in pixels
+    u16 tileCols;           // +8:  number of cell columns in the image
+    u16 tileRows;           // +10: number of cell rows in the image
+    u16 pixelW;             // +12: visible image width in pixels
+    u16 pixelH;             // +14: visible image height in pixels
     u8  cellW;              // +16: cell tile width
     u8  cellH;              // +17: cell tile height
     u8  bppCode;            // +18: 1=8bpp, 2=4bpp
@@ -88,8 +88,8 @@ struct xcCellHeader {
     u16 compressedClutSize; // +20: compressed CLUT size (0 = uncompressed)
     u16 clutEntries;        // +22: number of CLUT palette entries
     u16 cellsPerFrame;      // +24: cells per frame (tile count)
-    u16 paletteCount;       // +26
-    u32 frameCount;         // +28: number of animation frames
+    u16 paletteCount;       // +26: trailing static tile count when frameCount == 0
+    u32 frameCount;         // +28: number of compressed frame blocks
     // CLUT data follows at +32, then frame data
 };
 

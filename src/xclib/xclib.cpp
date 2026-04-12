@@ -161,6 +161,50 @@ xcCellImage::~xcCellImage() {
     }
 }
 
+static void DecodeCellBlock(u32* rgba,
+                            s32 width,
+                            s32 height,
+                            const u32* palette,
+                            const xcCellHeader* hdr,
+                            const u8* pixelData,
+                            s32 tileCols,
+                            s32 firstTile,
+                            s32 cellsInBlock,
+                            s32 frameByteSz,
+                            s32 blockDecompSz) {
+    for (s32 cellIndex = 0; cellIndex < cellsInBlock; cellIndex++) {
+        s32 cellDataOff = cellIndex * frameByteSz;
+        s32 tileIndex = firstTile + cellIndex;
+        s32 baseX = (tileIndex % tileCols) * hdr->cellW;
+        s32 baseY = (tileIndex / tileCols) * hdr->cellH;
+
+        for (s32 cy = 0; cy < hdr->cellH; cy++) {
+            for (s32 cx = 0; cx < hdr->cellW; cx++) {
+                u8 idx = 0;
+                if (hdr->bppCode == 1) {
+                    s32 byteOff = cellDataOff + cy * (hdr->cellW >> 1) * 2 + cx;
+                    if (byteOff < blockDecompSz) {
+                        idx = pixelData[byteOff];
+                    }
+                }
+                else if (hdr->bppCode == 2) {
+                    s32 byteOff = cellDataOff + cy * (hdr->cellW >> 2) * 2 + cx / 2;
+                    if (byteOff < blockDecompSz) {
+                        u8 b = pixelData[byteOff];
+                        idx = (cx & 1) ? ((b >> 4) & 0x0F) : (b & 0x0F);
+                    }
+                }
+
+                s32 px = baseX + cx;
+                s32 py = baseY + cy;
+                if (px < width && py < height) {
+                    rgba[py * width + px] = palette[idx];
+                }
+            }
+        }
+    }
+}
+
 bool xcCellImage::Decode(const u8* cellData) {
     if (std::memcmp(cellData, "CELL", 4) != 0) {
         LOG("[xcCellImage] Bad CELL magic");
@@ -171,8 +215,15 @@ bool xcCellImage::Decode(const u8* cellData) {
 
     bppCode = hdr->bppCode;
 
-    if (hdr->frameCount == 0 || hdr->clutEntries == 0) {
-        LOG("[xcCellImage] No frames or no CLUT (frames=%u clut=%u)", hdr->frameCount, hdr->clutEntries);
+    if (hdr->clutEntries == 0) {
+        LOG("[xcCellImage] No CLUT entries");
+        return false;
+    }
+
+    s32 blockCount = hdr->frameCount ? (s32)hdr->frameCount : (hdr->paletteCount ? 1 : 0);
+    s32 cellsInBlock = hdr->frameCount ? (s32)hdr->cellsPerFrame : (s32)hdr->paletteCount;
+    if (blockCount == 0 || cellsInBlock == 0) {
+        LOG("[xcCellImage] No image blocks (frames=%u staticTiles=%u)", hdr->frameCount, hdr->paletteCount);
         return false;
     }
 
@@ -213,68 +264,52 @@ bool xcCellImage::Decode(const u8* cellData) {
     }
 
     s32 frameByteSz = vramW * hdr->cellH * 2;
-    s32 frameDecompSz = frameByteSz * hdr->cellsPerFrame;
+    s32 blockDecompSz = frameByteSz * cellsInBlock;
+    if (blockDecompSz > 16384) {
+        LOG("[xcCellImage] Block too large (%d bytes)", blockDecompSz);
+        return false;
+    }
+
+    s32 tileCols = hdr->tileCols ? (s32)hdr->tileCols : cellsInBlock;
+    s32 totalTiles = blockCount * cellsInBlock;
+    s32 tileRows = hdr->tileRows ? (s32)hdr->tileRows : ((totalTiles + tileCols - 1) / tileCols);
+    if (tileCols <= 0 || tileRows <= 0) {
+        LOG("[xcCellImage] Invalid tile grid %d x %d", tileCols, tileRows);
+        return false;
+    }
 
     // Allocate output image
-    width = hdr->cellsPerFrame * hdr->cellW;
-    height = hdr->frameCount * hdr->cellH;
+    width = hdr->pixelW ? (s32)hdr->pixelW : tileCols * hdr->cellW;
+    height = hdr->pixelH ? (s32)hdr->pixelH : tileRows * hdr->cellH;
     rgba = new u32[width * height];
     std::memset(rgba, 0, width * height * sizeof(u32));
 
-    LOG("[xcCellImage] Decoding %dx%d, %u frames x %u cells, bpp=%u",
-        width, height, hdr->frameCount, hdr->cellsPerFrame, hdr->bppCode);
-
-    // Decompress and decode frames
+    // Decompress and decode blocks
     u8 expandBuf[16384];
-    const u8* framePtr = clutSrc + clutAdvance;
+    const u8* blockPtr = clutSrc + clutAdvance;
 
-    for (u32 fi = 0; fi < hdr->frameCount; fi++) {
-        if (framePtr + 4 > cellData + hdr->totalSize) break;
+    for (s32 blockIndex = 0; blockIndex < blockCount; blockIndex++) {
+        if (blockPtr + 4 > cellData + hdr->totalSize) {
+            break;
+        }
 
-        u32 compSize = *(const u32*)framePtr;
-        const u8* frameSrc = framePtr + 4;
+        u32 compSize = *(const u32*)blockPtr;
+        const u8* blockSrc = blockPtr + 4;
         const u8* pixelData;
 
-        if (compSize < 8192) {
-            SquExpandData(expandBuf, frameSrc);
+        if (compSize < (u32)blockDecompSz) {
+            SquExpandData(expandBuf, blockSrc);
             pixelData = expandBuf;
         }
         else {
-            pixelData = frameSrc;
+            pixelData = blockSrc;
         }
 
-        // Place cells into image grid
-        for (u32 ci = 0; ci < hdr->cellsPerFrame; ci++) {
-            s32 cellDataOff = ci * frameByteSz;
-            s32 baseX = ci * hdr->cellW;
-            s32 baseY = fi * hdr->cellH;
+        DecodeCellBlock(rgba, width, height, palette, hdr, pixelData,
+                        tileCols, blockIndex * cellsInBlock, cellsInBlock,
+                        frameByteSz, blockDecompSz);
 
-            for (s32 cy = 0; cy < hdr->cellH; cy++) {
-                for (s32 cx = 0; cx < (s32)hdr->cellW; cx++) {
-                    u8 idx = 0;
-                    if (hdr->bppCode == 1) { // 8bpp
-                        s32 byteOff = cellDataOff + cy * vramW * 2 + cx;
-                        if (byteOff < frameDecompSz)
-                            idx = pixelData[byteOff];
-                    }
-                    else if (hdr->bppCode == 2) { // 4bpp
-                        s32 byteOff = cellDataOff + cy * vramW * 2 + cx / 2;
-                        if (byteOff < frameDecompSz) {
-                            u8 b = pixelData[byteOff];
-                            idx = (cx & 1) ? ((b >> 4) & 0x0F) : (b & 0x0F);
-                        }
-                    }
-
-                    s32 px = baseX + cx;
-                    s32 py = baseY + cy;
-                    if (px < width && py < height) {
-                        rgba[py * width + px] = palette[idx];
-                    }
-                }
-            }
-        }
-
-        framePtr += 4 + compSize;
+        blockPtr += 4 + compSize;
     }
 
     return true;
@@ -410,20 +445,17 @@ void xcSection::LoadCells() {
     for (s32 i = 0; i < numCells; i++) {
         u32 offset = items[i].dataOffset;
         if (offset + 32 > rawSize) {
-            LOG("[xcSection] Cell %d offset 0x%X out of bounds", i, offset);
             continue;
         }
 
         const u8* cellData = rawData + offset;
         if (std::memcmp(cellData, "CELL", 4) != 0) {
-            LOG("[xcSection] Cell %d at 0x%X: not a CELL block", i, offset);
             continue;
         }
 
         xcCellImage* cell = new xcCellImage();
         if (cell->Decode(cellData)) {
             cells[i] = cell;
-            LOG("[xcSection] Cell %d: %dx%d decoded", i, cell->width, cell->height);
         }
         else {
             delete cell;
@@ -576,8 +608,11 @@ void xcSection::DrawPrimObj(u8* primData) {
             auto* prim = reinterpret_cast<xcSpritePrim*>(primData);
             if (prim->numImages == 0) break;
 
-            xcCellImage* cell = FindCell(prim->GetImageHash());
-            if (!cell) break;
+            u32 imgHash = prim->GetImageHash();
+            xcCellImage* cell = FindCell(imgHash);
+            if (!cell) {
+                break;
+            }
             tTexture* tex = cell->GetTexture();
             if (!tex) break;
 

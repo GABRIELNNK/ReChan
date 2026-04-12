@@ -54,7 +54,7 @@ void hdHealth::SelfInit() {
     if (overlay && rawData) {
         healthBar = (xcPolyG4Prim*)overlay->GetPrimObj(0x282435AB, XC_PRIM_POLYG4, rawData);
         if (healthBar) {
-            barWidth = healthBar->x3 - healthBar->x0;
+            barWidth = healthBar->x2 - healthBar->x0;
         }
         textObj = (xcTextPrim*)overlay->GetTextObj(0x002C70A1, rawData);
     }
@@ -100,21 +100,21 @@ void hdHealth::Update() {
     MARKFUNCTION(0x8008EE98);
     hdTtlive::Update();
 
+    if (healthBar) {
+        u8 alpha = (u8)flashAlpha;
+        healthBar->r0 = 255;
+        healthBar->g0 = 255;
+        healthBar->b0 = alpha;
+        healthBar->r2 = 255;
+        healthBar->g2 = 255;
+        healthBar->b2 = alpha;
+    }
+
     if (flashAlpha > 0) {
         flashAlpha -= 16;
         if (flashAlpha < 0) {
             flashAlpha = 0;
         }
-    }
-
-    if (healthBar) {
-        u8 alpha = (u8)flashAlpha;
-        healthBar->r1 = 255;
-        healthBar->g1 = 255;
-        healthBar->b1 = alpha;
-        healthBar->r2 = 255;
-        healthBar->g2 = 255;
-        healthBar->b2 = alpha;
     }
 }
 
