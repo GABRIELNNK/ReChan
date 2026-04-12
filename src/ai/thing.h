@@ -10,6 +10,12 @@ struct DBRoot;
 class BlockManager;
 struct Ticket;
 
+// ThingHandle - lazy-allocated safe reference (8 bytes on PSX)
+struct ThingHandle {
+    class Thing* owner = nullptr;
+    u16 refCount = 0;
+};
+
 // Block number sentinel (unassigned)
 static constexpr u16 BLOCK_UNASSIGNED = 0x1000;
 
@@ -121,13 +127,13 @@ public:
     // PSX +52 (s32): general-purpose state counter (initialized to 1)
     s32 stateCounter = 1;
 
-    // PSX +56 (u16): active/draw radius
-    u16 activeRadius = 1;
-    // PSX +58 (u16): initial active radius (restored on Reset)
-    u16 initialActiveRadius = 1;
+    // PSX +56 (u16): current hit points
+    u16 health = 1;
+    // PSX +58 (u16): max hit points (restored on Reset)
+    u16 maxHealth = 1;
 
     // PSX +60 (ptr): ThingHandle used for safe cross-references
-    void* thingHandle = nullptr;
+    ThingHandle* thingHandle = nullptr;
 
     // PSX +64: embedded ccNode for secondary list insertion (entity lists in BlockManager)
     ccNode subNode;
@@ -176,7 +182,7 @@ public:
     void AddPassenger(class DynamicThing* passenger);
     void RemPassenger(Ticket* ticket);
     void RemAllPassengers();
-    u32 GetThingHandle();
+    ThingHandle* GetThingHandle();
     void ClearFloorHeight();
     void SetFloorHeight(s32 height);
 
@@ -188,8 +194,8 @@ public:
 // DynamicThing - Thing with physics (velocity, gravity, forces)
 class DynamicThing : public Thing {
 public:
-    // PSX +96 (s32): hit points (initialized to 100)
-    s32 health = 100;
+    // PSX +96 (s32): max displacement magnitude per frame (speed cap)
+    s32 maxSpeed = 100;
 
     // PSX +100,+104,+108: velocity vector
     LVector velocity = {};

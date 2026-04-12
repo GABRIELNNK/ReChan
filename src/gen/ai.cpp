@@ -12,6 +12,7 @@
 #include "ai/humanoid.h"
 #include "ai/fevolume.h"
 #include "ai/activezn.h"
+#include "ai/arrow.h"
 
 AI* g_ai = nullptr;
 
@@ -135,6 +136,11 @@ void AI::AddThingNoTagList(const char* name, u16 type,
                 FrontEndVolume* vol = new FrontEndVolume(pos, type);
                 thing = vol;
                 LOG("[AI] FrontEndVolume created: name=%s pos=(%d,%d,%d)", name ? name : "null", pos->x, pos->y, pos->z);
+            }
+            // Type 472 = Arrow (hub navigational arrow)
+            else if (type == AITypes::TT_ARROW) {
+                Arrow* arrow = new Arrow(pos, type);
+                thing = arrow;
             }
         }
     }
@@ -416,14 +422,41 @@ void AI::Populate() {
 }
 
 // PSX: UnPopulate__2AIs (AI.CPP:1906, 0x800567CC)
+// PSX preserves the player when blockNum == 0 (normal level transition).
+// When blockNum != 0 (UnloadPermanent), the player is deleted.
 void AI::UnPopulate(s16 blockNum) {
     MARKFUNCTION(0x800567CC);
+
+    // PSX: remove player from humanoidList before clearing
+    Player* player = Player::s_player;
+    if (player) {
+        humanoidList.RemNode(static_cast<ccMinNode*>(player));
+    }
+
+    // PSX: clear all entity lists
     ccMinNode* n;
     while ((n = activeZoneList.RemHead()) != nullptr) { delete n; }
     while ((n = humanoidList.RemHead()) != nullptr) { delete n; }
-    while ((n = pickupList.RemHead()) != nullptr) { delete n; }
     while ((n = inactivePickupList.RemHead()) != nullptr) { delete n; }
+    while ((n = pickupList.RemHead()) != nullptr) { delete n; }
     while ((n = moveList.RemHead()) != nullptr) { delete n; }
+
+    // PSX: handle player after list cleanup
+    if (player) {
+        if (blockNum != 0) {
+            // UnloadPermanent path: delete the player
+            delete player;
+            // ~Player sets s_player = nullptr
+        }
+        else {
+            // Normal level transition: keep player, re-add to humanoidList
+            player->DeleteRightHandObj();
+            player->DeleteLeftHandObj();
+            humanoidList.AddNode(nullptr, static_cast<ccMinNode*>(player));
+        }
+    }
+
+    // PSX: clear thingList (death staging)
     while ((n = thingList.RemHead()) != nullptr) { delete n; }
 }
 

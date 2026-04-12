@@ -113,6 +113,28 @@ void main() {
 }
 )";
 
+
+static const char* kGouraudVert = R"(
+#version 450 core
+layout(location=0) in vec2 aPos;
+layout(location=1) in vec4 aColor;
+uniform mat4 uProj;
+out vec4 vColor;
+void main() {
+    vColor = aColor;
+    gl_Position = uProj * vec4(aPos, 0.0, 1.0);
+}
+)";
+
+static const char* kGouraudFrag = R"(
+#version 450 core
+in vec4 vColor;
+out vec4 FragColor;
+void main() {
+    FragColor = vColor;
+}
+)";
+
 // GL helpers
 
 static u32 CompileGLShader(u32 type, const char* src) {
@@ -719,12 +741,16 @@ void glDisplay::ScrollCallback(GLFWwindow* win, double xoff, double yoff) {
 glContext::glContext(glDisplay* disp)
     : display(disp) {
     InitQuadMesh();
+    InitGouraudMesh();
     Init3DShader();
 }
 
 glContext::~glContext() {
     if (quadVBO) glDeleteBuffers(1, &quadVBO);
     if (quadVAO) glDeleteVertexArrays(1, &quadVAO);
+    if (gouraudVBO) glDeleteBuffers(1, &gouraudVBO);
+    if (gouraudVAO) glDeleteVertexArrays(1, &gouraudVAO);
+    if (gouraudProgram) glDeleteProgram(gouraudProgram);
     if (program3D) glDeleteProgram(program3D);
 }
 
@@ -822,6 +848,10 @@ void glContext::SetBlendMode(pddiBlendMode mode) {
     stateDirty = false;
 }
 
+void glContext::SetScissor(int x, int y, int w, int h) {
+    glScissor(x, y, w, h);
+}
+
 void glContext::DrawQuad(pddiBaseShader* shader,
                          float x, float y, float w, float h,
                          float u0, float v0, float u1, float v1) {
@@ -860,6 +890,57 @@ void glContext::InitQuadMesh() {
                           (void*)(sizeof(float) * 2));
     glEnableVertexAttribArray(1);
     glBindVertexArray(0);
+}
+
+void glContext::InitGouraudMesh() {
+    glGenVertexArrays(1, &gouraudVAO);
+    glGenBuffers(1, &gouraudVBO);
+    glBindVertexArray(gouraudVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, gouraudVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 6 * 6, nullptr, GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 6, (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(float) * 6,
+                          (void*)(sizeof(float) * 2));
+    glEnableVertexAttribArray(1);
+    glBindVertexArray(0);
+
+    u32 vs = CompileGLShader(GL_VERTEX_SHADER, kGouraudVert);
+    u32 fs = CompileGLShader(GL_FRAGMENT_SHADER, kGouraudFrag);
+    if (vs && fs) {
+        gouraudProgram = glCreateProgram();
+        glAttachShader(gouraudProgram, vs);
+        glAttachShader(gouraudProgram, fs);
+        glLinkProgram(gouraudProgram);
+    }
+    if (vs) glDeleteShader(vs);
+    if (fs) glDeleteShader(fs);
+}
+
+void glContext::DrawGouraudQuad(float x0, float y0, float r0, float g0, float b0, float a0,
+                                float x1, float y1, float r1, float g1, float b1, float a1,
+                                float x2, float y2, float r2, float g2, float b2, float a2,
+                                float x3, float y3, float r3, float g3, float b3, float a3) {
+    if (!gouraudProgram) return;
+
+    // Two triangles: (v0, v1, v2) and (v1, v3, v2)
+    float verts[] = {
+        x0, y0, r0, g0, b0, a0,
+        x1, y1, r1, g1, b1, a1,
+        x2, y2, r2, g2, b2, a2,
+        x1, y1, r1, g1, b1, a1,
+        x3, y3, r3, g3, b3, a3,
+        x2, y2, r2, g2, b2, a2,
+    };
+
+    glUseProgram(gouraudProgram);
+    glUniformMatrix4fv(glGetUniformLocation(gouraudProgram, "uProj"),
+                       1, GL_FALSE, projection.Data());
+
+    glBindVertexArray(gouraudVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, gouraudVBO);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(verts), verts);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
 }
 
 void glContext::Init3DShader() {

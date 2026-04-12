@@ -23,6 +23,8 @@
 #include "fe/titlescreen.h"
 #include "fe/gameoverscreen.h"
 #include "fe/xcfont.h"
+#include "gen/animmgr.h"
+#include "fe/hud.h"
 #include "radmovie/movieplayer.h"
 #include "pc/tim.h"
 #include "pc/inputaction.h"
@@ -110,11 +112,23 @@ Game::Game() {
 
 Game::~Game() {
     // Clean up intro/title resources
-    if (introTexture) { introTexture->Release(); introTexture = nullptr; }
-    if (titleScreen) { delete titleScreen; titleScreen = nullptr; }
-    if (gameOverScreen) { delete gameOverScreen; gameOverScreen = nullptr; }
+    if (introTexture) { 
+        introTexture->Release();
+        introTexture = nullptr; 
+    }
+    if (titleScreen) {
+        delete titleScreen; 
+        titleScreen = nullptr; 
+    }
+    if (gameOverScreen) { 
+        delete gameOverScreen; 
+        gameOverScreen = nullptr;
+    }
     FreeXconFE();
-    if (g_oxFontFile) { delete g_oxFontFile; g_oxFontFile = nullptr; }
+    if (g_oxFontFile) {
+        delete g_oxFontFile;
+        g_oxFontFile = nullptr; 
+    }
     ScreenDraw::Shutdown();
 
     // Close and delete all managers
@@ -205,7 +219,10 @@ void Game::InternalOpen() {
     // BlockManager is currently owned by World, so we don't create a separate instance.
     // TODO: extract from World when block loading is decoupled
 
-    // 15. AnimationManager (40) - animation playback (TODO)
+    // 15. AnimationManager (40)
+    AnimationManager* animMgr = new AnimationManager();
+    animMgr->SetName("AnimationManager", 0);
+    managerList.AddNodePri(animMgr);
 
     // 16. CharacterManager (PSX: 3004 bytes)
     g_characterManager = new CharacterManager();
@@ -340,16 +357,15 @@ void Game::DrawEverythingHandlerCB(Handler*) {
     p3d::context->SetBlendMode(PDDI_BLEND_NONE);
     p3d::context->SetCullMode(PDDI_CULL_NONE);
 
-    const LVector& camPos = g_display->GetCamera()->GetPosition();
-    world->Render(&camPos);
+    // PSX: passes player position (MEMORY[0x1C] = thePlayer->pos) to DrawEverythingHandler,
+    // NOT the camera position. Used for block distance sorting and seam offsets.
+    const LVector& playerPos = Player::s_player ? Player::s_player->pos
+                                                : g_display->GetCamera()->GetPosition();
+    world->Render(&playerPos);
 
-    // PSX: entities are drawn inside DrawEverythingHandler with VRAM active.
-    // PC: VRAM handle must be set for character tpage/cba texture lookup.
-    if (Player::s_player) {
-        p3d::context->SetVRAMHandle(world->GetVRAMHandle());
-        Player::s_player->Draw();
-        p3d::context->SetVRAMHandle(0);
-    }
+    // PSX: entities are drawn inside DrawEverythingHandler with VRAM active,
+    // per-block via DrawLoop (humanoidList, inactivePickupList, pickupList, moveList).
+    // Player is in humanoidList and drawn there. Nothing extra needed here.
 }
 
 // PSX: MenuRender__FP7MenuMgr (GAME.CPP:1714, 0x80029D68)
@@ -361,7 +377,9 @@ static void MenuRender(MenuMgr* menuMgr) {
     // PSX: DrawDirectorOverlays(null)
     DrawDirectorOverlays(nullptr);
     // PSX: HUD::Display()
-    // TODO: g_hud->Display();
+    if (g_hud) {
+        g_hud->Display();
+    }
     // PSX: if menuMgr: menuMgr->Render() (via oxScreenManager)
     if (menuMgr) {
         menuMgr->Render();
@@ -720,8 +738,10 @@ bool Game::gsPrePlayState(Game* game) {
     // On PC we pass zeros - audio spatialization not yet wired.
     rsEvent(21, 0, 0, 0);
 
-    // PSX: if CheckpointInfo::IsValid(player+636): cameraManager field364 = 1
-    // TODO: CheckpointInfo not yet reversed
+    // PSX: if CheckpointInfo::IsValid(player+636): player field364 = 1
+    if (Player::s_player && Player::s_player->checkpoint.IsValid()) {
+        Player::s_player->field364 = 1;
+    }
 
     // PSX: SetState(Play=8)
     game->SetState(GameState::Play);
@@ -730,7 +750,7 @@ bool Game::gsPrePlayState(Game* game) {
     g_directorActive = 1;
 
     // PSX: HUD->InternalReset()
-    // TODO: HUD not yet reversed
+    // InternalReset is empty on PSX
 
     // PSX: clear controlVal
     game->controlVal[0] = 0;
@@ -739,7 +759,12 @@ bool Game::gsPrePlayState(Game* game) {
     // PSX: loop i=0..1: SetControlModeArray, PlayerMapArray, SetControlMapArray
 
     // PSX: if level != 7: SetHUDVisible(0, 1, 1)
-    // TODO: HUD not yet reversed
+    if (g_hud) {
+        World* world = game->GetWorld();
+        if (world && world->GetCurLevelID() != 7) {
+            g_hud->SetHUDVisible(1, 1);
+        }
+    }
 
     // PSX: MEMSTAT_NEW_PRINT, SetMemoryState(1)
 
@@ -937,7 +962,9 @@ bool Game::gsQueueLevelLoad(Game* game) {
     // TODO: MenuFade not yet reversed (blocking inline loop on PSX)
 
     // PSX: SetHUDVisible(0, 0, 1) - hide HUD during load
-    // TODO: HUD not yet reversed
+    if (g_hud) {
+        g_hud->SetHUDVisible(0, 1);
+    }
 
     // PSX: SetMemoryState(0), MEMSTAT_CLEAR, MEMSTAT_MIN_CLEAR, MEMSTAT_NEW_RESET
     // PSX memory tracking - not applicable on PC
@@ -1013,8 +1040,10 @@ bool Game::gsQueuePetalLoad(Game* game) {
     rsEvent(RS_STOP_MUSIC, 0, 0, 0);
 
     // PSX: Shock(18), MenuFade(), SetHUDVisible(0, 0, 1)
+    if (g_hud) {
+        g_hud->SetHUDVisible(0, 1);
+    }
     // PSX: SetMemoryState(0), MEMSTAT_CLEAR()
-    // TODO: not yet reversed
 
     World* world = game->GetWorld();
     if (!world) {
@@ -1120,6 +1149,9 @@ bool Game::gsEndGameState(Game* game) {
     MARKFUNCTION(0x8002C3B4); // gsEndGameState
 
     // PSX: SetHUDVisible(hud, 0, 1), UnloadLevel(world), LoadOverlay(1)
+    if (g_hud) {
+        g_hud->SetHUDVisible(0, 1);
+    }
     // PSX: FreeXconFE(), InitXconFSImage()
     FreeXconFE();
     InitXconFSImage();
@@ -1311,7 +1343,15 @@ void Game::FreeXconFE() {
         delete g_gameMenu;
         g_gameMenu = nullptr;
     }
-    // PSX: also destroys HUD (g_hud)
+    if (g_hud) {
+        if (g_hud->displayHandler) {
+            g_hud->displayHandler->RemoveFromList();
+            delete g_hud->displayHandler;
+            g_hud->displayHandler = nullptr;
+        }
+        delete g_hud;
+        g_hud = nullptr;
+    }
 }
 
 // PSX: InitXconFSImage__4Game (GAME.CPP:3826, 0x8002C838)
@@ -1359,7 +1399,13 @@ void Game::LoadXconFE() {
     g_gameMenu = new gameMenu();
 
     // PSX: new(712) HUD -> g_hud
-    // HUD not yet reversed
+    g_hud = new HUD();
+
+    // PSX: HUD constructor registers DisplayXHUD handler at pri -40 in handlerSet2
+    // On PC, we add it after construction since our Handler is heap-allocated.
+    g_hud->displayHandler = g_game->GetHandlerSet2().AddHandler([](Handler*) {
+        if (g_hud) g_hud->Display();
+    }, -40);
 
     // PSX: feMenuMgr->Init("xc/fe.1", gp[56])  -- gp[56] is oxFontFile
     g_feMenuMgr->Init("XC/FE.1", g_oxFontFile);
@@ -1368,6 +1414,7 @@ void Game::LoadXconFE() {
     g_gameMenu->Init("XC/GAMEMENU.1", g_oxFontFile);
 
     // PSX: hud->Init("xc/hud.1", gp[56])
+    g_hud->Init("XC/HUD.1", g_oxFontFile);
 }
 
 // PSX: fade globals (gp+3388, gp+3392)

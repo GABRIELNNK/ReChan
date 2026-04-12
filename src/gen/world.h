@@ -11,6 +11,7 @@ class hdMenuItem;
 // PSX globals used by front-end destination selection return flow.
 extern LVector g_destSelectReturnPos;
 extern bool g_destSelectReturnPosValid;
+extern u8 g_arrowInside;
 
 // PSX VRAM simulation (1024x512 16-bit words), heap-allocated
 struct PsxVRAM {
@@ -52,7 +53,7 @@ public:
     void LoadPetal(u32 petalIndex);
     void LoadLevelNames();
     void LoadPermanent();
-    void Render(const LVector* camPos);
+    void Render(const LVector* playerPos);
     void Unload();
     void UnloadPetal();
     void ResetLevel();
@@ -133,21 +134,21 @@ private:
     s32 levelCount = 0;
 
     // PSX world progression fields (offsets +0x3C..+0x4C in original layout)
-    u32 currentLevelIndex = 6;
+    u32 currentLevelIndex = 0xFFFFFFFF;
     u32 targetLevelIndex = 6;
     u32 currentPetalIndex = 0;
     u32 targetPetalIndex = 0;
-    u32 previousLevelIndex = 0;
+    u32 previousLevelIndex = 0xFFFFFFFF;
 
     void LoadTPGTextures(const u8* lcfData, u32 lcfSize);
 
     // DrawEverythingHandler (GAME.CPP:2211) - sorting + rendering pipeline
-    void DrawEverythingHandler(const LVector* camPos);  // 0x8002A98C
+    void DrawEverythingHandler(const LVector* playerPos);  // 0x8002A98C
 
     // computeBlockToPointDistances (GAME.CPP:1976) - 8-corner bbox distance + frustum cull
-    void computeBlockToPointDistances(const Block* block, const LVector* point,
+    void computeBlockToPointDistances(const Block* block, const LVector* playerPos,
                                       s32* outDistSq, s32* outZDepth);  // 0x8002A238
 
-    // OffsetToPreventSeams (GAME.CPP:2482) - shifts block pos toward camera
-    void OffsetToPreventSeams(LVector& pos, const LVector& camPos);  // 0x8002AF88
+    // OffsetToPreventSeams (GAME.CPP:2482) - shifts block pos toward player
+    void OffsetToPreventSeams(LVector& pos, const LVector& playerPos);  // 0x8002AF88
 };

@@ -238,12 +238,15 @@ struct xcOverlayData {
 
     // PSX: GetPrimObj__9xcOverlayUl11xcChunkEnum (XCSOS.CPP:109)
     u8* GetPrimObj(u32 hash, u8 type, u8* rawData) const;
+    u8* GetPrimObj(const char* name, u8 type, u8* rawData) const;
 
     // PSX: GetTextObj__9xcOverlayUl (XCSOS.CPP:148, 0x8005E9D0)
     u8* GetTextObj(u32 hash, u8* rawData) const;
+    u8* GetTextObj(const char* name, u8* rawData) const;
 
     // PSX: GetSprite__9xcOverlayUl (XCSOS.CPP:136, 0x8005E9B0)
     u8* GetSprite(u32 hash, u8* rawData) const;
+    u8* GetSprite(const char* name, u8* rawData) const;
 };
 
 // Raw screen data within .1 file (cast from rawData + offset).

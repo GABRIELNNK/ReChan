@@ -804,7 +804,7 @@ void HandleHumanoidPickupCollisions(ccList& humanoidList, ccList& pickupList) {
 
                 // PSX: check if pickup has damage (velocity.x, PSX +100) or knockback (velocity.z, PSX +108)
                 s32 hasEffect = 0;
-                if (pickup->health != 0 || pickup->velocity.z != 0) {
+                if (pickup->maxSpeed != 0 || pickup->velocity.z != 0) {
                     hasEffect = 1;
                 }
 

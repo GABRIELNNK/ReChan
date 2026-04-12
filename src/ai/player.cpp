@@ -10,6 +10,8 @@
 #include "snd/hmndsnd.h"
 #include "p3d/p3dmath.h"
 #include "pc/log.h"
+#include "gen/blockmgr.h"
+#include "gen/scoremgr.h"
 
 // Command bit masks - derived from GameAction enum bit positions.
 // RequestAction does: commandBits |= (1 << actionID)
@@ -285,16 +287,13 @@ Player::Player(const LVector* initialPos)
     : Humanoid(initialPos, AITypes::TT_PLAYER) {
     MARKFUNCTION(0x8002FA80);
 
-    initialActiveRadius = 200;
+    maxHealth = 200;
     attackRange = 3000;
     comboCount = 1;
 
-    // PSX: embedded sub-object init (+636..+688)
-    for (int i = 0; i < 13; i++) {
-        subObject[i] = 0;
-    }
-    subObject[7] = -1; // invalid ID sentinel at PSX +664
-    subVtable = nullptr;
+    // PSX: embedded CheckpointInfo init (+636..+688)
+    checkpoint = {};
+    checkpoint.field28 = -1;
 
     hitCombo = 0;
     comboTimer = 0;
@@ -362,7 +361,7 @@ void Player::Reset() {
     Humanoid::Reset();
 
     stateCounter = 100;
-    activeRadius = 200;
+    health = 200;
     flags |= TF_DYNAMIC | TF_BIT5 | TF_BIT3;
     velocity = {};
     contactForce = {};
@@ -504,7 +503,7 @@ void Player::SetActionState(u32 state, s32 param) {
             // PSX case 6: running jump (from _Run context).
             // stateDispatch=28(SD_JUMP), DoJump with combined base+running force,
             // field704=1 (hold flag), runJumpHold table, AddForce initial burst.
-            if (!field500 && !field504) {
+            if (!rightHandObj && !leftHandObj) {
                 // PSX: model->ClearSemiTransMode() if no pickups
             }
             field344 = 0;
@@ -1024,7 +1023,20 @@ void Player::CheckForLanding() {
 
 void Player::OnCheckpoint() {
     MARKFUNCTION(0x80033D0C);
-    homePos = pos;
+    if (g_scoreManager) {
+        g_scoreManager->HandleCheckpoint();
+    }
+    checkpoint.field0 = pos.x;
+    checkpoint.field4 = pos.y;
+    checkpoint.field8 = pos.z;
+    checkpoint.field12 = orientation.x;
+    checkpoint.field16 = orientation.y;
+    checkpoint.field20 = orientation.z;
+    if (g_blockManager) {
+        checkpoint.field24 = g_blockManager->GetBlockNumber(pos);
+    }
+    checkpoint.field28 = 0;
+    checkpoint.SetValidState(1);
 }
 
 void Player::SetLivesLeft(s32 lives) {
@@ -1106,8 +1118,8 @@ void Player::LoadCombatDialog() {
         return;
     }
 
-    // PSX: check field500 (weapon/held item) and sub-type in range 10-12
-    Thing* weapon = (Thing*)(uintptr_t)field500;
+    // PSX: check rightHandObj (weapon/held item) and sub-type in range 10-12
+    Thing* weapon = rightHandObj;
     if (weapon) {
         s32 dialogID = GetWeaponFinalBlowDialog((s32)weapon->thingType);
         LoadDialog((u32)dialogID, 0x33);
@@ -1151,7 +1163,7 @@ void Player::PlayCombatKnockDownDialog(s32 damageType) {
         case 11:
         case 12:
         {
-            Thing* weapon = (Thing*)(uintptr_t)field500;
+            Thing* weapon = rightHandObj;
             if (weapon) {
                 s32 dialogID = GetWeaponFinalBlowDialog((s32)weapon->thingType);
                 PlayDialog((u32)dialogID, 51);
@@ -1421,7 +1433,7 @@ void Player::_Stand() {
             hasPickupBits = 1;
         }
         if (hasPickupBits) {
-            if (field500 != 0 || field504 != 0) {
+            if (rightHandObj != 0 || leftHandObj != 0) {
                 SetActionState(AS_THROW_PICKUP, 0);
             }
             else {
@@ -1628,7 +1640,7 @@ standPostDispatch:
     if ((s16)idleAnimThreshold < idleTimer) {
         idleTimer = 0;
         // PSX: checks MEMORY[0xA8] level flag (not yet wired)
-        if (!field500 && !field504) {
+        if (!rightHandObj && !leftHandObj) {
             SetActionState(AS_WALL_JUMP_TAUNT, 0);
         }
     }
@@ -1956,7 +1968,7 @@ void Player::_Run() {
             hasPickup = 1;
         }
         if (hasPickup) {
-            if (field500 != 0 || field504 != 0) {
+            if (rightHandObj != 0 || leftHandObj != 0) {
                 SetActionState(AS_THROW_PICKUP, 0);
                 // PSX: falls through to LABEL_13
             }

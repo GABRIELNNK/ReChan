@@ -184,6 +184,7 @@ public:
     void SetCullMode(pddiCullMode mode) override;
     void EnableZBuffer(bool enable) override;
     void SetBlendMode(pddiBlendMode mode) override;
+    void SetScissor(int x, int y, int w, int h) override;
 
     void DrawQuad(pddiBaseShader* shader,
                   float x, float y, float w, float h,
@@ -199,6 +200,11 @@ public:
 
     u32 Get3DProgram() const { return program3D; }
 
+    void DrawGouraudQuad(float x0, float y0, float r0, float g0, float b0, float a0,
+                         float x1, float y1, float r1, float g1, float b1, float a1,
+                         float x2, float y2, float r2, float g2, float b2, float a2,
+                         float x3, float y3, float r3, float g3, float b3, float a3);
+
 private:
     glDisplay* display;
     pddiColour clearColour;
@@ -210,6 +216,9 @@ private:
     u32 quadVAO = 0;
     u32 quadVBO = 0;
     u32 program3D = 0;
+    u32 gouraudVAO = 0;
+    u32 gouraudVBO = 0;
+    u32 gouraudProgram = 0;
 
     // Renderstate cache
     pddiCullMode cachedCullMode = PDDI_CULL_NONE;
@@ -218,6 +227,7 @@ private:
     bool stateDirty = true;
 
     void InitQuadMesh();
+    void InitGouraudMesh();
     void Init3DShader();
 };
 

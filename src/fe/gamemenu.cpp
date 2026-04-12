@@ -188,7 +188,10 @@ static s32 ExitGameCallback(hdMenuItem* item) {
         if (g_scoreManager) {
             g_scoreManager->HandleLevelAbort();
         }
-        g_game->SetState(GameState::Title);
+
+        if (g_game) {
+            g_game->SetState(GameState::OpenLocationMenu);
+        }
         return 4;
     }
     return 8;

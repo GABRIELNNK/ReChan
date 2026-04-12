@@ -1,6 +1,7 @@
 #include "ai/fevolume.h"
 #include "ai/humanoid.h"
 #include "fe/femenumgr.h"
+#include "fe/hud.h"
 #include "gen/config.h"
 #include "gen/colvol.h"
 #include "gen/database.h"
@@ -97,8 +98,10 @@ void FrontEndVolume::HandleHumanoidCollision(Humanoid* hum) {
             g_feMenuMgr->ShowLevel(this, hum);
         }
     } else {
-        // PSX path for levelCode < 10 routes through hdDestSelect/HUD.
-        // That subsystem is not active in the current PC runtime.
+        // PSX: ShowLevel on HUD destSelect for low-code (hub door) volumes.
+        if (g_hud) {
+            g_hud->destSelect.ShowLevel(levelCode);
+        }
     }
 }
 
@@ -120,8 +123,10 @@ void FrontEndVolume::HandleVolumeExit(Humanoid* hum) {
     hum->pos.y += delta.y;
     hum->pos.z += delta.z;
 
-    // PSX vtable+232 call from HandleVolumeExit maps to SetActionState(1, 0).
     hum->SetActionState(AS_STAND, 0);
+
+    hum->FaceThingDesired(nullptr);
+    hum->FaceThing(nullptr, 0);
 
     if (g_display) {
         Camera* cam = g_display->GetCamera();

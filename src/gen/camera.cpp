@@ -195,7 +195,6 @@ void Camera::Move() {
 
     s32 targetFOV = desiredFOV * 3000;
     if (curFOV != targetFOV) {
-        // PSX uses velocityMag.x (+344) for FOV time, not movementTime.x (+300)
         EvalCubic(&curFOV, &fovAccel, targetFOV, fovVel, velocityMag.x);
         pushFovToCamera(&p3dCamera, curFOV);
     }
@@ -203,7 +202,7 @@ void Camera::Move() {
     LVector nextPos = position;
 
     if (!(flags & 0x01)) {
-        s32 deltaX = nextPos.x - curPos.x;
+        s32 deltaX = curPos.x - nextPos.x;
         if (deltaX < 0) {
             deltaX = -deltaX;
         }
@@ -215,7 +214,7 @@ void Camera::Move() {
             EvalCubic(&nextPos.y, &movementAccel.y, curPos.y, movementVel.y, movementTime.y);
         }
 
-        s32 deltaZ = nextPos.z - curPos.z;
+        s32 deltaZ = curPos.z - nextPos.z;
         if (deltaZ < 0) {
             deltaZ = -deltaZ;
         }
@@ -223,7 +222,7 @@ void Camera::Move() {
             EvalCubic(&nextPos.z, &movementAccel.z, curPos.z, movementVel.z, movementTime.z);
         }
 
-        s32 dtx = targetPos.x - prevTargetPos.x;
+        s32 dtx = prevTargetPos.x - targetPos.x;
         if (dtx < 0) {
             dtx = -dtx;
         }
@@ -231,7 +230,7 @@ void Camera::Move() {
             EvalCubic(&targetPos.x, &trackingAccel.x, prevTargetPos.x, trackingVel.x, trackingTime.x);
         }
 
-        s32 dty = targetPos.y - prevTargetPos.y;
+        s32 dty = prevTargetPos.y - targetPos.y;
         if (dty < 0) {
             dty = -dty;
         }
@@ -239,7 +238,7 @@ void Camera::Move() {
             EvalCubic(&targetPos.y, &trackingAccel.y, prevTargetPos.y, trackingVel.y, trackingTime.y);
         }
 
-        s32 dtz = targetPos.z - prevTargetPos.z;
+        s32 dtz = prevTargetPos.z - targetPos.z;
         if (dtz < 0) {
             dtz = -dtz;
         }
@@ -248,8 +247,8 @@ void Camera::Move() {
         }
     }
 
-    prevPosition = position;
     position = nextPos;
+    prevPosition = nextPos;
 
     if (flags & 0x02) {
         LookAtTarget(&targetPos);
@@ -789,8 +788,8 @@ void Camera::FollowPath() {
         LookAtTarget(&targetPos);
 
         // Copy curPos to position (camera eye)
-        prevPosition = position;
         position = curPos;
+        prevPosition = curPos;
 
         SetCurFOV(desiredFOV);
 

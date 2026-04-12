@@ -60,6 +60,7 @@ struct HandlerSet : public ccNode {
         Handler* h = new Handler();
         h->funcPtr = func;
         h->pri = priority;
+        h->ownerList = &handlerList;
         // Insert by priority into the embedded list
         // (Higher pri = earlier execution)
         ccNode* cur = (ccNode*)handlerList.head;

@@ -12,6 +12,7 @@
 #include "gen/levelmgr.h"
 #include "snd/rsevent.h"
 #include "fe/hdmenu.h"
+#include "fe/hud.h"
 #include "fe/loadanim.h"
 #include "p3d/context.h"
 #include "p3d/stream.h"
@@ -27,6 +28,9 @@ BlockManager* g_blockManager = nullptr;
 // PSX globals used by destination select return positioning.
 LVector g_destSelectReturnPos = { 0, 0, 0 };
 bool g_destSelectReturnPosValid = false;
+
+// PSX: _5Arrow_gInside (0x800DD558) - set by Construct when returning to hub
+u8 g_arrowInside = 0;
 
 // DynamicThing physics globals (PSX: gp+1740, gp+1744)
 s32 g_maxFallSpeed = 0x4000;
@@ -424,7 +428,13 @@ bool World::LoadLevelIndex(u32 levelIndex) {
     // PSX: Init__17FightingCollision, InsertHumanoid (player)
     // TODO: FightingCollision not yet reversed
 
-    // PSX: CheckpointInfo, WorldEffects, PWorldEffects, ParticleSystem
+    // PSX: CheckpointInfo
+    u32 startBlockNum = 0;
+    bool hasCheckpoint = false;
+    // TODO: CheckpointInfo::IsValid() not yet reversed
+    // if (checkpoint.IsValid()) { startBlockNum = checkpoint.field24; hasCheckpoint = true; }
+
+    // PSX: WorldEffects, PWorldEffects, ParticleSystem
     // TODO: not yet reversed
 
     // PSX: Populate__2AI(0) - spawn entities from WDB database
@@ -432,38 +442,22 @@ bool World::LoadLevelIndex(u32 levelIndex) {
         g_ai->Populate();
     }
 
-    // PSX hub return flow: when loading level ID 7, apply saved return position.
-    if (levelList && currentLevelIndex < (u32)levelCount) {
-        if (levelList[currentLevelIndex * 2] == 7 && g_destSelectReturnPosValid && Player::s_player) {
-            Player* player = Player::s_player;
+    // PSX: v5 = player->blockNum (after Populate sets it from attrib 15)
+    u16 playerBlockNum = 0x1000;
+    if (Player::s_player) {
+        playerBlockNum = Player::s_player->blockNum;
+    }
 
-            LVector delta;
-            delta.x = g_destSelectReturnPos.x - player->homePos.x;
-            delta.y = g_destSelectReturnPos.y - player->homePos.y;
-            delta.z = g_destSelectReturnPos.z - player->homePos.z;
-
-            player->homePos = g_destSelectReturnPos;
-
-            player->pos.x += delta.x;
-            player->pos.y += delta.y;
-            player->pos.z += delta.z;
-
-            player->SetActionState(AS_STAND, 0);
-
-            if (g_display) {
-                Camera* cam = g_display->GetCamera();
-                if (cam) {
-                    const LVector& camPos = cam->GetPosition();
-                    player->FacePointDesired(camPos);
-                    player->FacePoint(camPos, 0);
-                    cam->SetLookAtTarget(player, 1);
-                }
-            }
-        }
+    // PSX: if no checkpoint, start block = player's block
+    if (!hasCheckpoint) {
+        startBlockNum = playerBlockNum;
     }
 
     // PSX: LoadBG, InitBG - background rendering
     // TODO: BackG not yet reversed
+
+    // PSX: PopulateWEffects
+    // TODO: not yet reversed
 
     // PSX: ScoreManager::SetPar
     // TODO: not yet reversed
@@ -476,6 +470,85 @@ bool World::LoadLevelIndex(u32 levelIndex) {
 
     // PSX: SetupModelAmbientLighting, ProcessSwitches
     // TODO: not yet reversed
+
+    // PSX: Close__8Database(0)
+    // TODO: database close not yet implemented
+
+    // PSX: AllocBlockPool__12BlockManager(0) - allocate block node pool
+    // PC: blocks already allocated by LoadBlocksFunc
+
+    // PSX: LoadBlocks__12BlockManagerUl(0, startBlockNum)
+    // PC: blocks already parsed by Load(). The active/draw lists were built in LoadBlocks.
+    // Pop ulateBlock is called by LoadBlocks on PSX. On PC we call it here.
+    if (g_ai) {
+        g_ai->PopulateBlock();
+    }
+
+    // PSX: if (IsValidBlockNumber(playerBlockNum) == 4096) -> reposition player
+    // PSX returns 0x1000 (4096) when block is NOT valid.
+    if (Player::s_player && g_blockManager) {
+        if (!g_blockManager->IsValidBlockNumber(playerBlockNum)) {
+            // PSX: get first loaded block position, add 2048 to Y
+            Block* firstBlock = g_blockManager->GetBlock(0);
+            if (firstBlock) {
+                Player::s_player->pos.x = firstBlock->posX;
+                Player::s_player->pos.y = firstBlock->posY + 2048;
+                Player::s_player->pos.z = firstBlock->posZ;
+                Player::s_player->homePos = Player::s_player->pos;
+                LOG("[World] Player blockNum %u invalid, repositioned to block 0 (%d,%d,%d)",
+                    playerBlockNum, firstBlock->posX, firstBlock->posY + 2048, firstBlock->posZ);
+            }
+        }
+    }
+
+    // PSX hub return flow: when current level ID == 7, apply saved return position
+    if (levelList && currentLevelIndex < (u32)levelCount) {
+        if (levelList[currentLevelIndex * 2] == 7 && Player::s_player) {
+            Player* player = Player::s_player;
+
+            if (g_hud) {
+                g_hud->ShowDestLevel();
+            }
+
+            // PSX: if previousLevelIndex >= levelCount, save player pos as original return pos
+            static LVector sOrigDestSelectReturnPos = {};
+            if (previousLevelIndex >= (u32)levelCount) {
+                sOrigDestSelectReturnPos = player->homePos;
+            }
+
+            // PSX: determine if we should show level selection
+            bool doShowLevel = false;
+            if (previousLevelIndex < (u32)levelCount
+                && previousLevelIndex != currentLevelIndex) {
+                // PSX: additional check: (!v10 || MEMORY[0x24] != 11)
+                doShowLevel = true;
+            }
+
+            LVector returnPos;
+            if (doShowLevel) {
+                returnPos = g_destSelectReturnPos;
+                if (g_hud) {
+                    g_hud->destSelect.ShowLevel(0);
+                    s32 prevLevelID = levelList[previousLevelIndex * 2];
+                    g_hud->destSelect.ShowLevel(prevLevelID);
+                }
+                g_arrowInside = 1;
+            } else {
+                returnPos = sOrigDestSelectReturnPos;
+                g_arrowInside = 0;
+            }
+
+            player->homePos = returnPos;
+            player->pos = returnPos;
+
+            if (g_display) {
+                Camera* cam = g_display->GetCamera();
+                if (cam) {
+                    cam->SetLookAtTarget(player, 1);
+                }
+            }
+        }
+    }
 
     // PSX: rsEvent(5, 0, 0, 0) - start music for current location
     rsEvent(RS_LEVEL_BEGIN, 0, 0, 0);
@@ -627,9 +700,9 @@ void World::RefreshVRAMTexture() {
     vramHandle = p3d::context->CreateVRAMTexture(1024, 512, vram.data);
 }
 
-void World::Render(const LVector* camPos) {
+void World::Render(const LVector* playerPos) {
     p3d::context->SetVRAMHandle(vramHandle);
-    DrawEverythingHandler(camPos);
+    DrawEverythingHandler(playerPos);
     p3d::context->SetVRAMHandle(0);
 }
 
@@ -675,83 +748,111 @@ static s32 vecLengthSquared(s32 x, s32 y, s32 z) {
     return sx * sx + sy * sy + sz * sz;
 }
 
-// DrawEverythingHandler__FP7Handler (GAME.CPP:2211)
-// Reversed from PSX: builds draw list from block pool, selection-sorts by distSq,
-// applies OffsetToPreventSeams, renders each block with Draw.
-void World::DrawEverythingHandler(const LVector* camPos) {
+// PSX: DrawLoop__FP6ccListUl (GAME.CPP:2543, 0x8002B224)
+// Iterates a ccList and calls Draw() on entities in the given block.
+static void DrawEntityList(ccList& list, u16 blockNum) {
+    MARKFUNCTION(0x8002B224);
+    for (ccMinNode* n = list.head; n; n = n->next) {
+        Thing* thing = static_cast<Thing*>(n);
+        if (thing->blockNum == blockNum) {
+            thing->Draw();
+        }
+    }
+}
+
+// DrawEverythingHandler__FP7Handler (GAME.CPP:2211, 0x8002A98C)
+// Reversed from PSX: builds draw list from loaded blocks, selection-sorts by distSq
+// DESCENDING (farthest first for back-to-front rendering), applies OffsetToPreventSeams,
+// checks InDrawList, renders entities + block geometry.
+void World::DrawEverythingHandler(const LVector* playerPos) {
     MARKFUNCTION(0x8002A98C);
 
     u32 numBlocks = blockMgr.GetNumBlocks();
     if (numBlocks == 0) return;
 
+    // PSX: DemandLoading when game state == 8
+    // PC: all blocks always loaded, no demand loading needed.
+
     // Build draw entry array: {Block*, distSq, zDepth}
-    // PSX uses 12-byte entries: [block_ptr, distSq, zDepth]
+    // PSX: iterates loaded block linked list (offset +144)
+    // PC: iterates all blocks (all are loaded)
     struct DrawEntry {
         Block* block;
         s32 distSq;
         s32 zDepth;
     };
-    std::vector<DrawEntry> drawList;
-    drawList.reserve(numBlocks);
+    DrawEntry drawArray[32]; // PSX uses stack, max ~8 blocks
+    u32 count = 0;
 
-    for (u32 i = 0; i < numBlocks; i++) {
+    for (u32 i = 0; i < numBlocks && count < 32; i++) {
         Block* block = blockMgr.GetBlock(i);
         if (!block || !block->primBuffer) continue;
 
         s32 distSq, zDepth;
-        computeBlockToPointDistances(block, camPos, &distSq, &zDepth);
-        drawList.push_back({ block, distSq, zDepth });
+        computeBlockToPointDistances(block, playerPos, &distSq, &zDepth);
+        drawArray[count].block = block;
+        drawArray[count].distSq = distSq;
+        drawArray[count].zDepth = zDepth;
+        count++;
     }
 
-    u32 count = static_cast<u32>(drawList.size());
     if (count == 0) return;
 
-    // Selection sort by distSq ascending (nearest first)
-    // PSX: inner loop finds minimum, swaps 12-byte entries
+    // PSX selection sort: DESCENDING by distSq (farthest first = back-to-front)
+    // PSX inner loop finds the entry with the SMALLEST distSq, swaps to front.
+    // After sorting: index 0 = farthest, last = nearest.
     for (u32 i = 0; i < count - 1; i++) {
         u32 minIdx = i;
         for (u32 j = i + 1; j < count; j++) {
-            if (drawList[j].distSq < drawList[minIdx].distSq) {
+            if (drawArray[minIdx].distSq < drawArray[j].distSq) {
                 minIdx = j;
             }
         }
         if (minIdx != i) {
-            DrawEntry tmp = drawList[i];
-            drawList[i] = drawList[minIdx];
-            drawList[minIdx] = tmp;
+            DrawEntry tmp = drawArray[i];
+            drawArray[i] = drawArray[minIdx];
+            drawArray[minIdx] = tmp;
         }
     }
 
-    // PSX: find maxZDepth across all entries, add 64, clamp to 0xFFFF
-    // PSX: count entries with positive distSq (s6 index)
-    // PSX: EnterLayer on tView (OT bucket management - handled by z-buffer on PC)
-
-    // Render each block in sorted order
+    // PSX: count visible blocks (positive distSq) = v27
+    u32 visibleCount = 0;
     for (u32 i = 0; i < count; i++) {
-        DrawEntry& entry = drawList[i];
+        if (drawArray[i].distSq > 0) {
+            visibleCount = i + 1;
+        }
+    }
 
-        // Skip culled blocks (distSq == -1 from frustum test)
-        if (entry.distSq < 0) continue;
+    // PSX: find maxZDepth among far blocks (index >= 5), add 64, clamp to 0xFFFF
+    // Used for OT layer setup on PSX - not functionally needed with z-buffer on PC.
+
+    // Render visible blocks
+    for (u32 i = 0; i < visibleCount; i++) {
+        DrawEntry& entry = drawArray[i];
 
         // Copy block->pos to local and apply OffsetToPreventSeams
-        // PSX: reads block+4/+8/+12 (posX/Y/Z) to stack local
+        // PSX: uses player position (MEMORY[0x1C]) for seam offset
         LVector localPos;
         localPos.x = entry.block->posX;
         localPos.y = entry.block->posY;
         localPos.z = entry.block->posZ;
-        OffsetToPreventSeams(localPos, *camPos);
+        OffsetToPreventSeams(localPos, *playerPos);
 
-        // PSX: profile begin(10), DrawLoop(blockMgr+52, blockNum) - entity list 1
-        // PSX: profile end(10), begin(11), DrawLoop(blockMgr+76, blockNum) - entity list 2
-        // PSX: DrawLoop(blockMgr+64, blockNum) - entity list 3
-        // PSX: profile end(11), begin(12), DrawLoop(blockMgr+88, blockNum) - entity list 4
-        // PSX: profile end(12), begin(13), DrawEffects(blockNum)
-        // PSX: profile end(13)
+        u16 bn = entry.block->blockNum;
 
-        // PSX: profile begin(9), Draw(block, &localPos), profile end(9)
-        entry.block->Draw(&localPos);
+        // PSX: only draw entities + geometry if block is in draw list
+        if (blockMgr.InDrawList(bn)) {
+            // PSX: DrawLoop for each entity list
+            if (g_ai) {
+                DrawEntityList(g_ai->humanoidList, bn);
+                DrawEntityList(g_ai->inactivePickupList, bn);
+                DrawEntityList(g_ai->pickupList, bn);
+                DrawEntityList(g_ai->moveList, bn);
+            }
 
-        // PSX: ExitLayer on tView if current layer == 2
+            // PSX: Draw__5BlockRC10tagLVector(block, &localPos)
+            entry.block->Draw(&localPos);
+        }
     }
 
     // PSX: DebugDrawSector, ExitLayer(2), profile end(7)
@@ -761,8 +862,8 @@ void World::DrawEverythingHandler(const LVector* camPos) {
 // Reversed from PSX: builds 8 bounding box corners + center (9 points),
 // transforms each through view matrix, computes clip codes + view-space distance,
 // tests 13 clip code pairs for frustum culling.
-// a0=block, a1=point, a2=outDistSq, a3=outZDepth
-void World::computeBlockToPointDistances(const Block* block, const LVector* point,
+// a0=block, a1=playerPos (unused - view matrix already set), a2=outDistSq, a3=outZDepth
+void World::computeBlockToPointDistances(const Block* block, const LVector* playerPos,
                                          s32* outDistSq, s32* outZDepth) {
     MARKFUNCTION(0x8002A238);
 
@@ -930,16 +1031,14 @@ void World::computeBlockToPointDistances(const Block* block, const LVector* poin
 }
 
 // OffsetToPreventSeams__FR10tagLVectorRC10tagLVector (GAME.CPP:2482)
-// Reversed from PSX func_8002AF94: computes per-axis sign of (pos - camPos),
-// then offset = -sign * (sign * delta / divisor + 1), clamped to Â±limit.
-// Modifies pos in-place.
-void World::OffsetToPreventSeams(LVector& pos, const LVector& camPos) {
+// PSX: computes per-axis sign of (pos - playerPos),
+// then offset = -sign * (sign * delta / divisor + 1), clamped to +/-limit.
+void World::OffsetToPreventSeams(LVector& pos, const LVector& playerPos) {
     MARKFUNCTION(0x8002AF88);
 
-    // PSX: t1 = &pos, v1 = pos.x, v0 = camPos.x
-    s32 dx = pos.x - camPos.x; // sp[0]
-    s32 dy = pos.y - camPos.y; // sp[4]
-    s32 dz = pos.z - camPos.z; // sp[8]
+    s32 dx = pos.x - playerPos.x;
+    s32 dy = pos.y - playerPos.y;
+    s32 dz = pos.z - playerPos.z;
 
     // Compute sign per axis: -1, 0, or +1 - sp[16], sp[20], sp[24]
     s32 signX = (dx < 0) ? -1 : (dx > 0) ? 1 : 0;

@@ -987,6 +987,9 @@ void Director::Process() {
             case DirectorOpcode::ClearCheckpointValid:
                 // PSX: SetValidState__14CheckpointInfo(636, 0)
                 scriptPtr += 1;
+                if (Player::s_player) {
+                    Player::s_player->checkpoint.SetValidState(0);
+                }
                 break;
 
             case DirectorOpcode::SpawnEffectFromMatrix:
@@ -1897,7 +1900,11 @@ void Director::DetermineLevelIntro() {
 
     // PSX: if (IsValid__14CheckpointInfo(player+636) && checkpoint_killCount > 0)
     //          KillThings__2AIl(0, checkpoint_killCount);
-    // TODO: Player doesn't expose CheckpointInfo member yet.
+    if (Player::s_player && Player::s_player->checkpoint.IsValid()) {
+        if (Player::s_player->checkpoint.field28 > 0) {
+            g_ai->KillThings(Player::s_player->checkpoint.field28);
+        }
+    }
 
     const bool visitedLevel = (levelID >= 0 && levelID < 31) ? ((visitedLevels & (1 << levelID)) != 0) : false;
     if (visitedLevel) {

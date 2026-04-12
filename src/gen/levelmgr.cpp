@@ -1,6 +1,7 @@
 #include "common.h"
 #include "gen/levelmgr.h"
 #include "gen/charmgr.h"
+#include "gen/animmgr.h"
 #include "gen/model.h"
 
 namespace {
@@ -71,6 +72,9 @@ void LevelManager::PurgeLevel() {
     DeletePermMemID(2);
 
     // PSX: AnimationManager::PurgeLevel()
+    if (g_animMgr) {
+        g_animMgr->PurgeLevel();
+    }
 
     LOG("[LevelManager] PurgeLevel");
 }
@@ -94,6 +98,9 @@ void LevelManager::PurgePetal() {
 
     // PSX: EnvironmentManager::Reset()
     // PSX: AnimationManager::PurgePetal()
+    if (g_animMgr) {
+        g_animMgr->PurgePetal();
+    }
     // PSX: Obstacle::ClearPetalAnimList()
 
     LOG("[LevelManager] PurgePetal");

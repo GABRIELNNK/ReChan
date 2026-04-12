@@ -1,5 +1,6 @@
 #pragma once
 #include "ai/humanoid.h"
+#include "gen/scoremgr.h"
 
 // Player flags (s32 playerFlags bitmask)
 enum PlayerFlags : s32 {
@@ -22,10 +23,8 @@ public:
     // PSX +632 (u8): encounter state byte (1=active, 2=enemy dead)
     u8 encounterState = 0;
 
-    // PSX +636..+688: embedded sub-object (targeting/combat, 52 bytes)
-    s32 subObject[13] = {};
-    // PSX +688 (ptr): sub-object vtable
-    void* subVtable = nullptr;
+    // PSX +636..+688: embedded CheckpointInfo (56 bytes)
+    CheckpointInfo checkpoint = {};
 
     // PSX +692 (s32): current lives left
     s32 livesLeft = 4;

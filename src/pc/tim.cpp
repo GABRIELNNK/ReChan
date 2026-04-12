@@ -187,9 +187,10 @@ static Mat4 BeginOverlay() {
 
     f32 left = 0.0f, right = 1.0f, bottom = 0.0f, top = 1.0f;
 
-#if CORRECT_UI_ASPECT
     int winW = p3d::display->GetWidth();
     int winH = p3d::display->GetHeight();
+
+#if CORRECT_UI_ASPECT
     if (winW > 0 && winH > 0) {
         f32 windowAspect = (f32)winW / (f32)winH;
         f32 contentAspect = 4.0f / 3.0f;
@@ -215,6 +216,24 @@ static Mat4 BeginOverlay() {
     p3d::context->SetProjectionMatrix(Ortho(left, right, bottom, top, -1.0f, 1.0f));
     p3d::context->EnableZBuffer(false);
     p3d::context->SetCullMode(PDDI_CULL_NONE);
+
+    // Clip overlay rendering to the 4:3 content area.
+    // PSX screen is 512x240 - elements pushed off-screen by GoToMinPos etc.
+    // must not bleed into the widescreen pillarbox/letterbox area.
+    if (winW > 0 && winH > 0) {
+        f32 windowAspect = (f32)winW / (f32)winH;
+        f32 contentAspect = 4.0f / 3.0f;
+        int cx = 0, cy = 0, cw = winW, ch = winH;
+        if (windowAspect > contentAspect) {
+            cw = (int)(winH * contentAspect);
+            cx = (winW - cw) / 2;
+        } else if (windowAspect < contentAspect) {
+            ch = (int)(winW / contentAspect);
+            cy = (winH - ch) / 2;
+        }
+        p3d::context->SetScissor(cx, cy, cw, ch);
+    }
+
     return prev;
 }
 
@@ -223,6 +242,11 @@ static void EndOverlay(const Mat4& prev) {
     p3d::context->SetProjectionMatrix(prev);
     p3d::context->EnableZBuffer(true);
     p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+
+    // Restore full-window scissor
+    int winW = p3d::display->GetWidth();
+    int winH = p3d::display->GetHeight();
+    p3d::context->SetScissor(0, 0, winW, winH);
 }
 
 void ScreenDraw::DrawFullscreen(tTexture* tex) {
@@ -274,6 +298,22 @@ void ScreenDraw::DrawColoredRect(f32 x, f32 y, f32 w, f32 h,
     s_screenShader->SetTexture(0, s_colorTex->GetTexture());
     s_screenShader->SetColour(0, pddiColour(128, 128, 128, a));
     p3d::context->DrawQuad(s_screenShader, x, y, w, h, 0.0f, 0.0f, 1.0f, 1.0f);
+
+    EndOverlay(prev);
+}
+
+void ScreenDraw::DrawGouraudQuad(f32 x0, f32 y0, u8 r0, u8 g0, u8 b0, u8 a0,
+                                 f32 x1, f32 y1, u8 r1, u8 g1, u8 b1, u8 a1,
+                                 f32 x2, f32 y2, u8 r2, u8 g2, u8 b2, u8 a2,
+                                 f32 x3, f32 y3, u8 r3, u8 g3, u8 b3, u8 a3) {
+    Mat4 prev = BeginOverlay();
+    p3d::context->SetBlendMode(PDDI_BLEND_ALPHA);
+
+    p3d::context->DrawGouraudQuad(
+        x0, y0, r0 / 255.0f, g0 / 255.0f, b0 / 255.0f, a0 / 255.0f,
+        x1, y1, r1 / 255.0f, g1 / 255.0f, b1 / 255.0f, a1 / 255.0f,
+        x2, y2, r2 / 255.0f, g2 / 255.0f, b2 / 255.0f, a2 / 255.0f,
+        x3, y3, r3 / 255.0f, g3 / 255.0f, b3 / 255.0f, a3 / 255.0f);
 
     EndOverlay(prev);
 }

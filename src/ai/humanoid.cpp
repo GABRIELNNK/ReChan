@@ -52,8 +52,8 @@ Humanoid::Humanoid(const LVector* initialPos, u16 type)
     field364 = 0;
     field256 = 0;
     field260 = 0;
-    field500 = 0;
-    field504 = 0;
+    rightHandObj = nullptr;
+    leftHandObj = nullptr;
     field496 = 0;
     field532 = 0;
     field384 = 0;
@@ -75,9 +75,9 @@ Humanoid::Humanoid(const LVector* initialPos, u16 type)
     punchDir = 0;
     kickDir = 0;
     comboDir = 0;
-    // PSX: activeRadius/initialActiveRadius set to 100 for humanoids
-    activeRadius = 100;
-    initialActiveRadius = 100;
+    // PSX: health/maxHealth set to 100 for humanoids
+    health = 100;
+    maxHealth = 100;
 
     if (!behaviour) {
         behaviour = new Behaviour(this, thingType, 0);
@@ -87,7 +87,9 @@ Humanoid::Humanoid(const LVector* initialPos, u16 type)
 // PSX: _._8Humanoid (HUMANOID.CPP:490)
 Humanoid::~Humanoid() {
     MARKFUNCTION(0x80062C58);
-    // PSX: KillDialog, delete sound, delete behaviour, etc.
+    // PSX: KillDialog, DeleteModel, DeleteRightHandObj, DeleteLeftHandObj, etc.
+    DeleteRightHandObj();
+    DeleteLeftHandObj();
     if (humanoidSound) {
         humanoidSound->Release();
         humanoidSound = nullptr;
@@ -339,6 +341,24 @@ void Humanoid::DeleteModel() {
     MARKFUNCTION(0x80063514);
     Thing::DeleteModel();
     ReleaseSound();
+}
+
+// PSX: DeleteRightHandObj__8Humanoid (HUMANOID.CPP:6202, 0x8006D070)
+void Humanoid::DeleteRightHandObj() {
+    if (rightHandObj) {
+        delete rightHandObj;
+        rightHandObj = nullptr;
+        flags2 &= ~1;
+    }
+}
+
+// PSX: DeleteLeftHandObj__8Humanoid (HUMANOID.CPP:6225, 0x8006D014)
+void Humanoid::DeleteLeftHandObj() {
+    if (leftHandObj) {
+        delete leftHandObj;
+        leftHandObj = nullptr;
+        flags2 &= ~2;
+    }
 }
 
 // PSX: CreateSound__8Humanoid (HUMANOID.CPP:888, 0x800634C4)
@@ -643,8 +663,8 @@ void Humanoid::SetIdleAnimation(s32 loopType, s32 doTransition) {
         return;
     }
 
-    // PSX: checks field500 (pickup pointer) for weapon idle
-    if (!field500) {
+    // PSX: checks rightHandObj (pickup pointer) for weapon idle
+    if (!rightHandObj) {
         // No weapon: play standard idle (anim 22) via model->SetAnim
         Model* m = static_cast<Model*>(model);
         m->SetAnim(22, loopType, 0, 0);
@@ -674,8 +694,8 @@ bool Humanoid::TestIdleAnimation() {
 
     s32 curAnim = anim->animEnum;
 
-    // PSX: if has weapon (field500), check weapon idle anim ID at +216
-    // PSX: if has field504, check that anim ID
+    // PSX: if has weapon (rightHandObj), check weapon idle anim ID at +216
+    // PSX: if has leftHandObj, check that anim ID
     // Otherwise: check against 22 (standard idle)
     // TODO: weapon idle anim check
     return curAnim == 22;
@@ -804,8 +824,8 @@ void Humanoid::_Stand() {
             SetActionState(AS_BACKFLIP, 0);
             return;
         case 6: // backflip -> pickup/throw or combat idle
-            if (field500 != 0 || field504 != 0) {
-                if (field500 != 0 && field316 != 0) {
+            if (rightHandObj != 0 || leftHandObj != 0) {
+                if (rightHandObj != 0 && field316 != 0) {
                     SetActionState(AS_COMBAT_IDLE, 0);
                 }
                 else {
@@ -947,10 +967,11 @@ void Humanoid::_Taunt() {
         case 7:
         case 15:
         case 16:
-            if (field500 != 0 || field504 != 0) {
+            if (rightHandObj != 0 || leftHandObj != 0) {
                 s32 weaponField = 0;
-                if (field500 != 0) {
-                    Humanoid* pickup = (Humanoid*)(intptr_t)field500;
+                if (rightHandObj != 0) {
+                    // PSX reads pickup->field316 - Pickup class not reversed yet
+                    Humanoid* pickup = static_cast<Humanoid*>(rightHandObj);
                     weaponField = pickup->field316;
                 }
                 if (weaponField != 0) {
@@ -1039,8 +1060,8 @@ void Humanoid::_Run() {
     // Multi-hit combat (bits 7,19,15,16,17,18) -> pickup/throw or combat idle
     if ((sd >> 7) & 1 || (sd >> 19) & 1 || (sd >> 15) & 1
         || (sd >> 16) & 1 || (sd >> 17) & 1 || (sd >> 18) & 1) {
-        if (field500 != 0 || field504 != 0) {
-            if (field500 != 0 && field316 != 0) {
+        if (rightHandObj != 0 || leftHandObj != 0) {
+            if (rightHandObj != 0 && field316 != 0) {
                 SetActionState(AS_COMBAT_IDLE, 0);
             }
             else {
@@ -1134,8 +1155,8 @@ void Humanoid::_Straif() {
     // Multi-hit combat (bits 7,19,15,16,17,18) -> pickup/throw or combat idle
     if ((sd >> 7) & 1 || (sd >> 19) & 1 || (sd >> 15) & 1
         || (sd >> 16) & 1 || (sd >> 17) & 1 || (sd >> 18) & 1) {
-        if (field500 != 0 || field504 != 0) {
-            if (field500 != 0 && field316 != 0) {
+        if (rightHandObj != 0 || leftHandObj != 0) {
+            if (rightHandObj != 0 && field316 != 0) {
                 ReleaseTarget();
                 SetActionState(AS_COMBAT_IDLE, 0);
             }
@@ -1293,7 +1314,7 @@ void Humanoid::_Pickup() {
     // Without animation system, use stateTimer as proxy
     stateTimer++;
 
-    if (field500 != 0 && stateTimer > 10) {
+    if (rightHandObj != 0 && stateTimer > 10) {
         flags2 |= 0x0001; // carrying flag
     }
 
@@ -1477,18 +1498,18 @@ void Humanoid::_Throw() {
     }
 
     // PSX: if pickup object exists and past throw frame, release it
-    if (field500 != 0) {
+    if (rightHandObj != 0) {
         // PSX: GetThrowMoveThrowFrame (not reversed) - use frame 8 as proxy
         if (frame >= 8) {
             if (flags2 & 0x0001) {
                 // PSX: carrying flag set - release with direction
                 // PSX: PlayDialog(84, 10) if this == thePlayer
-                field500 = 0;
+                rightHandObj = nullptr;
                 flags2 &= ~0x0001;
             }
             else {
                 // PSX: release without direction
-                field500 = 0;
+                rightHandObj = nullptr;
             }
         }
     }

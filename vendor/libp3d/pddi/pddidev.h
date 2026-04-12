@@ -163,6 +163,7 @@ public:
     virtual void SetCullMode(pddiCullMode mode) = 0;
     virtual void EnableZBuffer(bool enable) = 0;
     virtual void SetBlendMode(pddiBlendMode mode) = 0;
+    virtual void SetScissor(int x, int y, int w, int h) = 0;
 
     // Immediate-mode textured quad (for UI / debug rendering)
     virtual void DrawQuad(pddiBaseShader* shader,
@@ -172,6 +173,12 @@ public:
 
     // Draw a retained-mode primitive buffer
     virtual void DrawPrimBuffer(pddiPrimBuffer* buffer) = 0;
+
+    // Gouraud-shaded quad with 4 per-vertex colors (PSX POLYG4)
+    virtual void DrawGouraudQuad(float x0, float y0, float r0, float g0, float b0, float a0,
+                                 float x1, float y1, float r1, float g1, float b1, float a1,
+                                 float x2, float y2, float r2, float g2, float b2, float a2,
+                                 float x3, float y3, float r3, float g3, float b3, float a3) = 0;
 
     // Set texture for 3D primitive rendering (nullptr to disable)
     virtual void SetTexture(pddiTexture* tex) = 0;

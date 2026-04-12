@@ -8,7 +8,7 @@
 #include <cstring>
 #include <unordered_map>
 
-// ---- SQU LZSS Decompression (PSX: EXPAND.CPP:67, addr 0x80026D10) ----
+// SQU LZSS Decompression (PSX: EXPAND.CPP:67, addr 0x80026D10)
 // Command byte encoding:
 //   0x00-0x7F: short back-ref: len=((cmd>>4)&7)+2, dist=(cmd&0xF)+1
 //   0x80-0xBF: long back-ref:  len=(cmd&0x3F)+3, dist=nextByte+1
@@ -54,89 +54,12 @@ s32 SquExpandData(u8* dst, const u8* src) {
     return (s32)(dst - dstStart);
 }
 
-// ---- xcHash (PSX: XCHASH.CPP:11, addr 0x80091310) ----
+// xcHash (PSX: XCHASH.CPP:11, addr 0x80091310)
 
 static std::unordered_map<u32, const char*> s_runtimeStrings;
 static u32 s_nextRuntimeStringToken = 0xF0000000;
 
-static bool IsSoundBarString(const char* str) {
-    if (!str || !*str) {
-        return false;
-    }
-    for (const char* p = str; *p; p++) {
-        if (*p != 'o' && *p != 'f') {
-            return false;
-        }
-    }
-    return true;
-}
 
-static void DrawCircleBand(s32 x, s32 y, s32 size, f32 outerRadius, f32 innerRadius,
-                           u8 r, u8 g, u8 b, u8 a) {
-    if (outerRadius <= 0.0f) {
-        return;
-    }
-
-    if (innerRadius < 0.0f) {
-        innerRadius = 0.0f;
-    }
-    if (innerRadius > outerRadius) {
-        return;
-    }
-
-    f32 cx = ((f32)size - 1.0f) * 0.5f;
-    f32 cy = ((f32)size - 1.0f) * 0.5f;
-    f32 outer2 = outerRadius * outerRadius;
-    f32 inner2 = innerRadius * innerRadius;
-
-    for (s32 py = 0; py < size; py++) {
-        for (s32 px = 0; px < size; px++) {
-            f32 dx = (f32)px - cx;
-            // Slight vertical squash to better match PSX marker shape.
-            f32 dy = ((f32)py - cy) * 1.5f;
-            f32 dist2 = dx * dx + dy * dy;
-            if (dist2 > outer2 || dist2 < inner2) {
-                continue;
-            }
-
-            s32 sx = x + px;
-            s32 sy = y + py;
-            f32 nx = SCALE_NORM_X((f32)sx);
-            f32 ny = 1.0f - SCALE_NORM_Y((f32)(sy + 1));
-            f32 nw = SCALE_NORM_X(1.0f);
-            f32 nh = SCALE_NORM_Y(1.0f);
-            ScreenDraw::DrawColoredRect(nx, ny, nw, nh, r, g, b, a);
-        }
-    }
-}
-
-static void DrawSoundBarCircle(s32 x, s32 y, s32 size, u8 a, bool filled) {
-    const u8 redR = 99;
-    const u8 redG = 0;
-    const u8 redB = 0;
-    const u8 yellowR = 181;
-    const u8 yellowG = 148;
-    const u8 yellowB = 0;
-    const u8 darkR = 8;
-    const u8 darkG = 6;
-    const u8 darkB = 0;
-
-    f32 outer = ((f32)size - 1.0f) * 0.5f;
-    f32 r1 = outer - 1.25f;
-    f32 r2 = outer - 2.5f;
-    f32 r3 = outer - 4.25f;
-
-    DrawCircleBand(x, y, size, outer, r1, redR, redG, redB, a);
-    DrawCircleBand(x, y, size, r1, r2, yellowR, yellowG, yellowB, a);
-    DrawCircleBand(x, y, size, r2, r3, redR, redG, redB, a);
-
-    if (filled) {
-        DrawCircleBand(x, y, size, r3, 0.0f, yellowR, yellowG, yellowB, a);
-    }
-    else {
-        DrawCircleBand(x, y, size, r3, 0.0f, darkR, darkG, darkB, a);
-    }
-}
 
 u32 xcRegisterRuntimeString(const char* str) {
     if (!str) {
@@ -163,8 +86,6 @@ u32 xcHash(const char* str) {
     }
     return hash;
 }
-
-// ---- xcInventory (PSX: XCINV.CPP) ----
 
 // PSX: FixDataPointers__11xcInventoryUl (XCINV.CPP:34, 0x800913B0)
 void xcInventory::FixDataPointers(u8* base) {
@@ -221,7 +142,7 @@ void xcInventory::Sort() {
     }
 }
 
-// ---- PSX ABGR1555 to RGBA8888 ----
+// PSX ABGR1555 to RGBA8888
 
 static inline u32 psxColorToRGBA(u16 c) {
     if (c == 0) return 0; // transparent black
@@ -231,7 +152,7 @@ static inline u32 psxColorToRGBA(u16 c) {
     return (255u << 24) | (b << 16) | (g << 8) | r;
 }
 
-// ---- xcCellImage ----
+// xcCellImage
 
 xcCellImage::~xcCellImage() {
     delete[] rgba;
@@ -367,8 +288,6 @@ tTexture* xcCellImage::GetTexture() {
     texture->Create(width, height, 32, 8, rgba);
     return texture;
 }
-
-// ---- xcSection ----
 
 xcSection::~xcSection() {
     if (cells) {
@@ -611,6 +530,7 @@ void xcSection::Draw() {
 }
 
 // PSX: Draw__9xcPrimObj (XCDO.CPP:110, 0x800AE430)
+// PSX checks byte[2] (subtype) == 5 to skip clipping-region prims.
 void xcSection::DrawPrimObj(u8* primData) {
     auto* hdr = reinterpret_cast<xcPrimHeader*>(primData);
     if (hdr->subtype == 5) return;
@@ -637,21 +557,18 @@ void xcSection::DrawPrimObj(u8* primData) {
         case XC_PRIM_POLYG4:
         {
             auto* prim = reinterpret_cast<xcPolyG4Prim*>(primData);
-            s16 x0, y0, x1, y1;
-            prim->GetBounds(x0, y0, x1, y1);
-            u8 r, g, b;
-            prim->GetAvgColor(r, g, b);
-
-            f32 nx = SCALE_NORM_X(x0);
-            f32 ny = 1.0f - SCALE_NORM_Y(y1);
-            f32 nw = SCALE_NORM_X(x1 - x0);
-            f32 nh = SCALE_NORM_Y(y1 - y0);
-
             u8 alpha = (prim->code & 0x02) ? 128 : 255;
-            if (r == 0 && g == 0 && b == 0 && hdr->subtype == 0) {
+            u8 ar, ag, ab;
+            prim->GetAvgColor(ar, ag, ab);
+            if (ar == 0 && ag == 0 && ab == 0 && hdr->subtype == 0) {
                 alpha = 128;
             }
-            ScreenDraw::DrawColoredRect(nx, ny, nw, nh, r, g, b, alpha);
+
+            ScreenDraw::DrawGouraudQuad(
+                SCALE_NORM_X(prim->x0), 1.0f - SCALE_NORM_Y(prim->y0), prim->r0, prim->g0, prim->b0, alpha,
+                SCALE_NORM_X(prim->x1), 1.0f - SCALE_NORM_Y(prim->y1), prim->r1, prim->g1, prim->b1, alpha,
+                SCALE_NORM_X(prim->x2), 1.0f - SCALE_NORM_Y(prim->y2), prim->r2, prim->g2, prim->b2, alpha,
+                SCALE_NORM_X(prim->x3), 1.0f - SCALE_NORM_Y(prim->y3), prim->r3, prim->g3, prim->b3, alpha);
             break;
         }
         case XC_PRIM_SPRITE:
@@ -690,39 +607,6 @@ void xcSection::DrawPrimObj(u8* primData) {
             if (!str)
                 break;
 
-            if (runtimeStr && IsSoundBarString(runtimeStr)) {
-                s32 count = (s32)strlen(runtimeStr);
-                s32 step = 20;
-                s32 dotSize = 16;
-                s32 totalW = count > 0 ? (count * step - (step - dotSize)) : 0;
-                s32 startX = prim->mtx.GetX();
-                s32 startY = prim->mtx.GetY();
-
-                if (prim->hdr.flags & XC_JUST_RIGHT) {
-                    if ((prim->hdr.flags & XC_JUST_HMASK) == XC_JUST_CENTER) {
-                        startX -= totalW / 2;
-                    }
-                    else {
-                        startX -= totalW;
-                    }
-                }
-
-                for (s32 i = 0; i < count; i++) {
-                    const char ch = runtimeStr[i];
-                    s32 x = startX + i * step + 1;
-                    s32 y = startY;
-                    u8 a = prim->colorA;
-
-                    if (ch == 'o') {
-                        DrawSoundBarCircle(x, y, dotSize, a, true);
-                    }
-                    else {
-                        DrawSoundBarCircle(x, y, dotSize, a, false);
-                    }
-                }
-                break;
-            }
-
             xcFont* font = nullptr;
             if (sectionMan) font = sectionMan->FindFont(prim->fontHash);
             if (!font) break;
@@ -753,14 +637,29 @@ u8* xcOverlayData::GetPrimObj(u32 hash, u8 type, u8* rawData) const {
     return nullptr;
 }
 
+u8* xcOverlayData::GetPrimObj(const char* name, u8 type, u8* rawData) const {
+    if (!name) {
+        return nullptr;
+    }
+    return GetPrimObj(xcHash(name), type, rawData);
+}
+
 // PSX: GetTextObj__9xcOverlayUl (XCSOS.CPP:148, 0x8005E9D0)
 u8* xcOverlayData::GetTextObj(u32 hash, u8* rawData) const {
     return GetPrimObj(hash, XC_PRIM_TEXT, rawData);
 }
 
+u8* xcOverlayData::GetTextObj(const char* name, u8* rawData) const {
+    return GetPrimObj(name, XC_PRIM_TEXT, rawData);
+}
+
 // PSX: GetSprite__9xcOverlayUl (XCSOS.CPP:136, 0x8005E9B0)
 u8* xcOverlayData::GetSprite(u32 hash, u8* rawData) const {
     return GetPrimObj(hash, XC_PRIM_SPRITE, rawData);
+}
+
+u8* xcOverlayData::GetSprite(const char* name, u8* rawData) const {
+    return GetPrimObj(name, XC_PRIM_SPRITE, rawData);
 }
 
 // Find raw overlay data by hash
@@ -829,8 +728,6 @@ void xcSection::HideAllOverlays() {
         ovl->visibility = 0;
     }
 }
-
-// ---- xcSectionMan ----
 
 xcSectionMan::~xcSectionMan() {
     DeleteFonts();

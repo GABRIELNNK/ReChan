@@ -15,6 +15,7 @@
 #include "p3d/lvector.h"
 #include <cstdio>
 
+static bool sEnabled = false;
 static bool sShowPlayer = false;
 static bool sShowCamera = false;
 static bool sShowAudio = false;
@@ -180,7 +181,17 @@ static void LVectorText(const char* label, const LVector& v) {
 
 void DebugUI::Init() {}
 
+bool DebugUI::IsEnabled() {
+    return sEnabled;
+}
+
 void DebugUI::Draw() {
+    if (ImGui::IsKeyPressed(ImGuiKey_M, false) && ImGui::GetIO().KeyCtrl) {
+        sEnabled = !sEnabled;
+    }
+    if (!sEnabled) {
+        return;
+    }
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("Windows")) {
             ImGui::MenuItem("Game", nullptr, &sShowGame);

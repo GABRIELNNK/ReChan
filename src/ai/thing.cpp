@@ -60,12 +60,6 @@ static bool IsRenderTeleport(const LVector& prevPos, const LVector& currPos) {
 }
 #endif
 
-// ThingHandle - lazy-allocated safe reference (8 bytes on PSX)
-struct ThingHandle {
-    Thing* owner;
-    u16 refCount;
-};
-
 // PSX: __6TicketP5ThingP12DynamicThing (THING.CPP:1312)
 Ticket::Ticket(Thing* iss, DynamicThing* pass) {
     issuer = iss;
@@ -89,8 +83,8 @@ Thing::Thing(const LVector* initialPos, u16 type) {
     orientation = {};
 
     stateCounter = 1;
-    activeRadius = 1;
-    initialActiveRadius = 1;
+    health = 1;
+    maxHealth = 1;
 
     thingHandle = nullptr;
     field76 = nullptr;
@@ -113,6 +107,7 @@ Thing::~Thing() {
     RemAllPassengers();
     if (thingHandle) {
         // PSX: Close__11ThingHandle - clear the handle's back-pointer
+        thingHandle->owner = nullptr;
         thingHandle = nullptr;
     }
 }
@@ -213,8 +208,8 @@ void Thing::Reset() {
     flags |= TF_NEEDS_ACTIVATION;
     // PSX: clear orientation
     orientation = {};
-    // PSX: restore activeRadius from initialActiveRadius
-    activeRadius = initialActiveRadius;
+    // PSX: restore health from maxHealth
+    health = maxHealth;
     // PSX: flags2 &= 1 (keep only bit 0)
     flags2 &= TF2_KILLED;
 
@@ -229,32 +224,46 @@ void Thing::UpdatePosition() {
     MARKFUNCTION(0x800628F4);
 }
 
-// PSX: Activate__5Thing (THING.CPP:521)
+// PSX: Activate__5Thing (THING.CPP:521, 0x80061790)
+// PSX: checks InActiveList AND IsValidBlockNumber before activating.
 void Thing::Activate() {
     MARKFUNCTION(0x80061790);
-    // PSX: check if block is in active list via BlockManager
-    bool inActiveList = false;
+    bool valid = false;
     if (g_blockManager) {
-        // TODO: InActiveList not yet reversed - use IsValidBlockNumber as fallback
-        inActiveList = g_blockManager->IsValidBlockNumber(blockNum);
+        if (g_blockManager->InActiveList(blockNum)) {
+            if (g_blockManager->IsValidBlockNumber(blockNum)) {
+                valid = true;
+            }
+        }
     }
-
-    if (inActiveList) {
-        // Mark as activated
+    if (valid) {
         flags |= TF_ACTIVATED;
-        // If model not yet created, create it
         if (!(flags & TF_MODEL_CREATED)) {
             CreateModel(nullptr);
         }
     }
 }
 
-// PSX: Deactivate__5Thing (THING.CPP:546)
+// PSX: Deactivate__5Thing (THING.CPP:546, 0x8006182C)
+// PSX: checks flags and InActiveList before clearing activated.
 void Thing::Deactivate() {
     MARKFUNCTION(0x8006182C);
-    // PSX: clear activated flag, delete model
-    flags &= ~TF_ACTIVATED;
-    DeleteModel();
+    bool wasActivated = (flags & TF_ACTIVATED) != 0;
+    bool hasBit5 = (flags & TF_BIT5) != 0;
+
+    if (!hasBit5) {
+        if (g_blockManager && !g_blockManager->InActiveList(blockNum)) {
+            flags &= ~TF_ACTIVATED;
+        }
+    }
+
+    if (!wasActivated) {
+        if (!(flags & TF_ACTIVATED)) {
+            if (flags & TF_MODEL_CREATED) {
+                DeleteModel();
+            }
+        }
+    }
 }
 
 // PSX: Move__5Thing (THING.CPP:835)
@@ -436,7 +445,7 @@ void Thing::RemAllPassengers() {
 }
 
 // PSX: GetThingHandle__5Thing (THING.CPP:1170)
-u32 Thing::GetThingHandle() {
+ThingHandle* Thing::GetThingHandle() {
     MARKFUNCTION(0x80062574);
     // PSX: lazily allocates ThingHandle (8 bytes) with owner=this, refCount=1
     if (!thingHandle) {
@@ -445,7 +454,7 @@ u32 Thing::GetThingHandle() {
         h->refCount = 1;
         thingHandle = h;
     }
-    return uniqueID;
+    return thingHandle;
 }
 
 // PSX: ClearFloorHeight__5Thing (THING.CPP:765)

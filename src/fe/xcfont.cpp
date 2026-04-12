@@ -4,6 +4,25 @@
 #include "pc/tim.h"
 #include "p3d/texture.h"
 
+static bool IsPsxLeadByte(u8 ch) {
+    return (ch >= 0x81 && ch <= 0x9F) || (ch >= 0xE0 && ch <= 0xFC);
+}
+
+static u16 NextPsxChar(const char* text, s32& offset) {
+    const u8* p = reinterpret_cast<const u8*>(text + offset);
+    u8 b0 = p[0];
+    if (b0 == 0) {
+        return 0;
+    }
+    if (IsPsxLeadByte(b0) && p[1] != 0) {
+        u16 ch = (u16)(((u16)b0 << 8) | p[1]);
+        offset += 2;
+        return ch;
+    }
+    offset += 1;
+    return (u16)b0;
+}
+
 // PSX: gp[56] global oxFontFile instance
 oxFontFile* g_oxFontFile = nullptr;
 
@@ -314,8 +333,15 @@ void xcFont::DrawText(const char* text, s32 screenX, s32 screenY,
     // Vertical justification
     if (justify & XC_JUST_BOTTOM) {
         s32 numLines = 1;
-        for (const char* p = text; *p; p++) {
-            if (*p == '\n') numLines++;
+        s32 scan = 0;
+        while (true) {
+            u16 ch = NextPsxChar(text, scan);
+            if (!ch) {
+                break;
+            }
+            if (ch == '\n') {
+                numLines++;
+            }
         }
         s32 totalH = (s32)lineHeight * numLines + lineSpacing * (numLines - 1);
         if ((justify & XC_JUST_VMASK) == XC_JUST_VCENTER)
@@ -336,12 +362,18 @@ void xcFont::DrawText(const char* text, s32 screenX, s32 screenY,
             curX -= (f32)lineW;
     }
 
-    for (const char* p = text; *p; p++) {
-        if (*p == '\n') {
+    s32 pos = 0;
+    while (true) {
+        u16 ch = NextPsxChar(text, pos);
+        if (!ch) {
+            break;
+        }
+
+        if (ch == '\n') {
             curY += (f32)((s32)lineHeight + lineSpacing);
             curX = (f32)screenX;
             if (justify & XC_JUST_RIGHT) {
-                s32 lineW = MeasureText(p + 1);
+                s32 lineW = MeasureText(text + pos);
                 if ((justify & XC_JUST_HMASK) == XC_JUST_CENTER)
                     curX -= (f32)(lineW / 2);
                 else
@@ -349,12 +381,13 @@ void xcFont::DrawText(const char* text, s32 screenX, s32 screenY,
             }
             continue;
         }
-        if (*p == ' ') {
+
+        if (ch == ' ') {
             curX += (f32)spaceWidth;
             continue;
         }
 
-        const xcSpriteLetter* spr = FindLetter((u8)*p);
+        const xcSpriteLetter* spr = FindLetter(ch);
         if (!spr) {
             curX += (f32)spaceWidth;
             continue;
@@ -389,11 +422,19 @@ void xcFont::DrawText(const char* text, s32 screenX, s32 screenY,
 s32 xcFont::MeasureText(const char* text) const {
     if (!text || !sprites)
         return 0;
+
     s32 width = 0;
-    for (const char* p = text; *p; p++) {
-        if (*p == '\n') break;
-        if (*p == ' ') { width += spaceWidth; continue; }
-        const xcSpriteLetter* spr = FindLetter((u8)*p);
+    s32 pos = 0;
+    while (true) {
+        u16 ch = NextPsxChar(text, pos);
+        if (!ch || ch == '\n') {
+            break;
+        }
+        if (ch == ' ') {
+            width += spaceWidth;
+            continue;
+        }
+        const xcSpriteLetter* spr = FindLetter(ch);
         if (!spr) { width += spaceWidth; continue; }
         width += spr->w;
     }
@@ -523,17 +564,25 @@ void oxFontFile::ReloadFont(const char* path) {
             xcInventory* fontInv = reinterpret_cast<xcInventory*>(innerEnd + 12);
             if (fontInv->tag == 4 && fontInv->itemCount > 0) {
                 // PSX: FixDataPointers on the new file's font inventory
-                // Then iterate font items, calling ReloadData on each existing xcFont
+                // Then iterate font items, calling ReloadData on each existing xcFont.
+                // PSX iterates by sequential index since its 32-bit pointers fit in dataOffset.
+                // PC: fontObjects are sorted by hash but new file items are unsorted,
+                // so match by hash to pair them correctly.
                 if (sectionMan->fonts && sectionMan->fontObjects) {
                     xcInventoryItem* oldItems = sectionMan->fonts->GetItems();
                     xcInventoryItem* newItems = fontInv->GetItems();
-                    u32 count = sectionMan->fonts->itemCount;
-                    if (count > fontInv->itemCount) count = fontInv->itemCount;
+                    u32 oldCount = sectionMan->fonts->itemCount;
+                    u32 newCount = fontInv->itemCount;
 
-                    for (u32 i = 0; i < count; i++) {
-                        if (sectionMan->fontObjects[i]) {
-                            const u8* rawData = data + newItems[i].dataOffset;
-                            sectionMan->fontObjects[i]->ReloadData(rawData);
+                    for (u32 i = 0; i < oldCount; i++) {
+                        if (!sectionMan->fontObjects[i]) continue;
+                        u32 hash = oldItems[i].hash;
+                        for (u32 j = 0; j < newCount; j++) {
+                            if (newItems[j].hash == hash) {
+                                const u8* rawData = data + newItems[j].dataOffset;
+                                sectionMan->fontObjects[i]->ReloadData(rawData);
+                                break;
+                            }
                         }
                     }
                 }

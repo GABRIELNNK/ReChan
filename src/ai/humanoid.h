@@ -297,9 +297,10 @@ public:
 
     // PSX +496 (s32): reserved
     s32 field496 = 0;
-    // PSX +500,+504 (s32): reserved
-    s32 field500 = 0;
-    s32 field504 = 0;
+    // PSX +500 (ptr): right hand held object (Pickup*)
+    Thing* rightHandObj = nullptr;
+    // PSX +504 (ptr): left hand held object (Pickup*)
+    Thing* leftHandObj = nullptr;
 
     // PSX +508 (u16): from global (gp+1756)
     u16 field508 = 0;
@@ -385,4 +386,7 @@ public:
     virtual void ReleaseSound();
     virtual void _DoStand();
     virtual void _DoRun();
+
+    void DeleteRightHandObj();
+    void DeleteLeftHandObj();
 };

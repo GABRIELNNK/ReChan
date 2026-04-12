@@ -30,8 +30,18 @@ void Obstacle::Think() {
 void Obstacle::Draw() {
     MARKFUNCTION(0x8007AE04);
     if (model) {
-        // PSX: Obstacle::Draw sets up GModel transform from pos/orient
-        // and calls GModel::Draw. Simplified for now.
+        // PSX: selects render table based on shadowFlag and lightingFlag
+        // (litTable, ZSortTable, litFarTable, ZFarTable) - not needed on PC
+
+        // PSX: copies pos and orientation to model fields
+        SModel* sm = static_cast<SModel*>(static_cast<Model*>(model));
+        sm->posX = pos.x;
+        sm->posY = pos.y;
+        sm->posZ = pos.z;
+        sm->rotX = (u16)orientation.x;
+        sm->rotY = (u16)orientation.y;
+        sm->rotZ = (u16)orientation.z;
+        sm->Show(0);
     }
 }
 
@@ -49,10 +59,14 @@ void Obstacle::UpdatePosition() {
 
 void Obstacle::CreateModel(const char* name) {
     MARKFUNCTION(0x8007CC64);
+    // PSX: empty stub - real work in AllocateAndCreateModel
+    // PC: call Thing::CreateModel which creates SModel
+    Thing::CreateModel(name);
 }
 
 void Obstacle::DeleteModel() {
     MARKFUNCTION(0x8007CD94);
+    Thing::DeleteModel();
 }
 
 void Obstacle::AnalyzeMesh(DBRoot* root) {
