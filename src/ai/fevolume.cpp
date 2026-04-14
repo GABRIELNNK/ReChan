@@ -10,26 +10,6 @@
 #include "gen/game.h"
 #include "pc/log.h"
 
-#include <cstdio>
-
-static const char* GetAttribStringCompat(const DBAttrib* attrib, char* tempBuf, size_t tempBufSize) {
-    if (!attrib) {
-        return nullptr;
-    }
-
-    if (attrib->type == 0) {
-        return attrib->strValue;
-    }
-
-    if (!tempBuf || tempBufSize == 0) {
-        return nullptr;
-    }
-
-    // PSX GetAttribString returns decimal text for numeric attributes.
-    snprintf(tempBuf, tempBufSize, "%d", (s32)attrib->value);
-    return tempBuf;
-}
-
 FrontEndVolume::FrontEndVolume(const LVector* pos, u16 type) : Obstacle(pos, type) {
     MARKFUNCTION(0x8001A758);
     savedPos = {};
@@ -37,12 +17,15 @@ FrontEndVolume::FrontEndVolume(const LVector* pos, u16 type) : Obstacle(pos, typ
 }
 
 void FrontEndVolume::Reset() {
+    MARKFUNCTION(0x8001A900);
 }
 
 void FrontEndVolume::Think() {
+    MARKFUNCTION(0x8001A908);
 }
 
 void FrontEndVolume::UpdatePosition() {
+    MARKFUNCTION(0x8001A910);
 }
 
 void FrontEndVolume::CreateModel(const char* name) {
@@ -56,6 +39,7 @@ void FrontEndVolume::DeleteModel() {
 }
 
 void FrontEndVolume::HandlePickupCollision(Thing* pickup) {
+    MARKFUNCTION(0x8001A918);
 }
 
 void FrontEndVolume::AnalyzeMesh(DBRoot* root) {
@@ -75,10 +59,8 @@ void FrontEndVolume::AnalyzeMesh(DBRoot* root) {
     savedPos = pos;
 
     const DBAttrib* a7 = root->FindAttrib(7);
-    if (a7) {
-        char pointNameBuf[32] = {};
-        const char* pointName = GetAttribStringCompat(a7, pointNameBuf, sizeof(pointNameBuf));
-        DBPoint* point = (g_database && pointName) ? g_database->FindPoint(pointName) : nullptr;
+    if (a7 && a7->type == 0 && a7->strValue) {
+        DBPoint* point = g_database ? g_database->FindPoint(a7->strValue) : nullptr;
         if (point) {
             savedPos = point->pos;
         }
@@ -97,7 +79,8 @@ void FrontEndVolume::HandleHumanoidCollision(Humanoid* hum) {
         if (g_feMenuMgr) {
             g_feMenuMgr->ShowLevel(this, hum);
         }
-    } else {
+    }
+    else {
         // PSX: ShowLevel on HUD destSelect for low-code (hub door) volumes.
         if (g_hud) {
             g_hud->destSelect.ShowLevel(levelCode);

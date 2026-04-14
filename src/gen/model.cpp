@@ -33,11 +33,23 @@ OriginalSTree::~OriginalSTree() {
     }
 }
 
+OriginalGeo::OriginalGeo() {
+    SetType(0); // Geo type
+}
+
+OriginalGeo::~OriginalGeo() {
+    if (meshBuffer) {
+        meshBuffer->Release();
+        meshBuffer = nullptr;
+    }
+}
+
+DrawableBasic::~DrawableBasic() = default;
+
 // DrawableSTree
 DrawableSTree::DrawableSTree(OriginalSTree* orig) {
     original = orig;
     alternate = nullptr;
-    displayFlag = 1;
 }
 
 DrawableSTree::~DrawableSTree() {
@@ -90,6 +102,20 @@ void DrawableSTree::Display(u32 /*flags*/) {
         p3d::context->DrawPrimBuffer(fallbackSkel->joints[0].meshBuffer);
     }
     else if (original->meshBuffer) {
+        p3d::context->DrawPrimBuffer(original->meshBuffer);
+    }
+}
+
+DrawableGeo::DrawableGeo(OriginalGeo* orig) {
+    original = orig;
+}
+
+DrawableGeo::~DrawableGeo() {
+    original = nullptr;
+}
+
+void DrawableGeo::Display(u32 /*flags*/) {
+    if (original && original->meshBuffer) {
         p3d::context->DrawPrimBuffer(original->meshBuffer);
     }
 }
@@ -278,6 +304,49 @@ void SModel::InitSemiTransMode() {
     // PSX: calls SetSemiMode on the OriginalSTree - no-op on PC for now
 }
 
+// PSX: PlayDynamicAnim__6SModeli (MODEL.CPP:1710, 0x8006FAFC)
+void SModel::PlayDynamicAnim(s32 animEnumVal) {
+    MARKFUNCTION(0x8006FAFC);
+    SetAnim(animEnumVal, 0, 0, 0);
+    AnimStructure* anim = static_cast<AnimStructure*>(animStructure);
+    if (anim) {
+        anim->animEnum = animEnumVal;
+    }
+}
+
+GModel::GModel() {
+    MARKFUNCTION(0x8006E8C8);
+}
+
+GModel::~GModel() {
+    MARKFUNCTION(0x8006E908);
+}
+
+void GModel::Show(u32 flags) {
+    MARKFUNCTION(0x8006EA7C);
+
+    modelFlags &= ~0x30;
+
+    if (!drawable || !backPtr) {
+        return;
+    }
+
+    modelFlags |= 0x50;
+
+    Mat4 world;
+    p3dBuildRotMatrixZYX(rotX, rotY, rotZ, world);
+    world.SetTranslation((f32)posX, (f32)posY, (f32)posZ);
+
+    p3d::context->SetWorldMatrix(world);
+    drawable->Display(flags);
+}
+
+void GModel::SetOriginalGeo(OriginalGeo* original) {
+    DeleteDrawable();
+    drawable = new DrawableGeo(original);
+    drawableType = 1;
+}
+
 // HumanoidModel
 
 // PSX: SetAnim__13HumanoidModelllil (MHUMAN.CPP:166, 0x8006E248)
@@ -294,8 +363,7 @@ void HumanoidModel::SetAnim(s32 animEnum, s32 a3, s32 force, s32 extra) {
     }
 
     // PSX: reads thingType from backPtr + 24 (Thing::thingType)
-    // On PC, player type is always 0
-    s32 thingType = 0;
+    s32 thingType = backPtr->thingType;
 
     // PSX: anims 37-38 are transition anims with blend from current frame
     if (animEnum >= 37 && animEnum <= 38) {
@@ -378,12 +446,31 @@ PlayerModel::PlayerModel() {
 
 PlayerModel::~PlayerModel() {}
 
+void PlayerModel::ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 p4, s32 p5) {
+    Player* owner = (backPtr && backPtr->thingType == AITypes::TT_PLAYER)
+        ? static_cast<Player*>(backPtr)
+        : nullptr;
+
+    if (owner && owner->Debug_IsAnimationOverrideActive() && !owner->Debug_IsAnimationOverrideApplying()) {
+        return;
+    }
+
+    SModel::ApplyAnimToModel(thingType, animEnum, loopType, p4, p5);
+}
+
 // PSX: SetAnim__11PlayerModelllil (MPLAYER.CPP:293, 0x80077B20)
 // Routes player-specific animation enums to correct loop types.
 // Some anims trigger sound effects. Falls back to HumanoidModel::SetAnim
 // for unrecognized enums.
 void PlayerModel::SetAnim(s32 animEnum, s32 a3, s32 force, s32 extra) {
     MARKFUNCTION(0x80077B20);
+
+    Player* owner = (backPtr && backPtr->thingType == AITypes::TT_PLAYER)
+        ? static_cast<Player*>(backPtr)
+        : nullptr;
+    if (owner && owner->Debug_IsAnimationOverrideActive() && !owner->Debug_IsAnimationOverrideApplying()) {
+        return;
+    }
 
     AnimStructure* as = (AnimStructure*)animStructure;
     // Early exit: if not forcing and anim already matches, no-op

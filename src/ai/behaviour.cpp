@@ -5,6 +5,7 @@
 #include "gen/game.h"
 #include "gen/camera.h"
 #include "pc/inputaction.h"
+#include "pc/debugui.h"
 #include "p3d/p3dmath.h"
 #include "pc/log.h"
 
@@ -81,6 +82,11 @@ void Behaviour::PlayerUserControl(Behaviour* self) {
     }
 
     Humanoid* owner = self->owner;
+
+    if (!DebugUI::IsPlayerInputAllowed()) {
+        owner->RequestAction(GA_GUARD_RELEASE);
+        return;
+    }
 
     // Read movement from ActionInput (works for both keyboard and gamepad)
     s32 analogX = (s16)g_actionInput->GetMoveX();
@@ -164,4 +170,50 @@ void Behaviour::PlayerUserControl(Behaviour* self) {
     }
 
     owner->RequestAction((u32)actionReq);
+}
+
+// PSX: MoveToDestinationPoint__9BehaviourUl (BEHAVIOU.CPP:1736, 0x80075408)
+// Returns 1 when the owner humanoid has reached destPoint within threshold distance.
+// Otherwise faces the point and requests Run (far) or Walk (close) action.
+s32 Behaviour::MoveToDestinationPoint(u32 threshold) {
+    MARKFUNCTION(0x80075408);
+
+    u32 dist = (u32)owner->DistanceFromPointXZ(destPoint);
+
+    if (dist >= threshold) {
+        // Far from destination - run
+        owner->FacePointDesired(destPoint);
+        owner->RequestAction(2);  // GA_RUN
+        // PSX: sets owner->attackRange from animConfigPtr speed data
+        if (animConfigPtr) {
+            s16 spd = *(s16*)((u8*)animConfigPtr + 44);
+            owner->attackRange = spd;
+        }
+        return 0;
+    }
+
+    if (dist >= (threshold >> 1)) {
+        // Close to destination - walk (half speed)
+        owner->FacePointDesired(destPoint);
+        owner->RequestAction(6);  // GA_WALK
+        // PSX: sets owner->attackRange to half of speed
+        if (animConfigPtr) {
+            s16 spd = *(s16*)((u8*)animConfigPtr + 44);
+            owner->attackRange = (spd + ((u16)spd >> 15)) >> 1;
+        }
+        return 0;
+    }
+
+    // Arrived at destination
+    return 1;
+}
+
+// PSX: NisControl__9Behaviour (BEHAVIOU.CPP:1774, 0x800753C4)
+void Behaviour::NisControl(Behaviour* b) {
+    if (b->MoveToDestinationPoint(0x4B) != 0) {
+        // Reached destination - restore normal player control
+        b->handlerThisOffset = 0;
+        b->handlerDispatch = -1;
+        b->handler = PlayerUserControl;
+    }
 }

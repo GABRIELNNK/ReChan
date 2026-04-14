@@ -29,6 +29,8 @@ struct tagCollisionSphere {
 };
 
 struct DBVolume;
+struct OriginalGeo;
 
 void FillCollisionBox(tagCollisionBox& box, const DBVolume& vol);
+bool FillCollisionBox(tagCollisionBox& box, const OriginalGeo& geo);
 void SetCollisionBoxExtent(tagCollisionBox& box);

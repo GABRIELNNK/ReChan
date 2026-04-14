@@ -3,6 +3,7 @@
 #pragma once
 
 #include "core.h"
+#include "p3d/p3dmath.h"
 
 class Humanoid;
 
@@ -17,16 +18,22 @@ struct Behaviour {
     // PSX +196 (s16): controller pad port index (0 or 1)
     s16 padPort = 0;
 
-    // PSX +200..+235: action request state data (used by FindActionRequest)
+    // PSX +200..+203: action request state data (used by FindActionRequest)
     u32 actionRequestState[9] = {};
 
-    // PSX +236 (u32): flags (bit 0 = first frame init)
-    u32 behaviourFlags = 0;
+    // PSX +204/+208/+212: destination point for MoveToDestinationPoint
+    LVector destPoint = {};
+
+    // PSX +216 (ptr): animation/config data pointer (speed reference)
+    void* animConfigPtr = nullptr;
 
     // PSX +220/+222/+224: behaviour handler dispatch thunk.
     s16 handlerThisOffset = 0;
     s16 handlerDispatch = -1;
     AIHandler handler = nullptr;
+
+    // PSX +236 (u32): flags (bit 0 = first frame init)
+    u32 behaviourFlags = 0;
 
     // PSX +260 (s32): button hold counter (incremented each frame same buttons held)
     s32 buttonHoldCounter = 0;
@@ -36,9 +43,10 @@ struct Behaviour {
 
     Behaviour(Humanoid* ownerHumanoid, u32 handlerType, s32 aiParam);
     void SetAIHandler(u32 handlerType);
+    s32 MoveToDestinationPoint(u32 threshold);
     virtual void Process();
     virtual ~Behaviour() = default;
 
-private:
     static void PlayerUserControl(Behaviour* behaviour);
+    static void NisControl(Behaviour* behaviour);
 };

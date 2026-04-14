@@ -258,6 +258,11 @@ public:
     bool DoesLevelHaveExtraMem(s32 level);
     void updateVramAnims();
     void cleanUpTexAnim();
+
+    // Script accessor methods for obstacle cutscenes
+    static s32* GetNISDoor1Script();
+    static s32* GetNISDoor1WithDialogScript();
+    static s32* GetNISLadder1Script();
 };
 
 void runDirector(Handler* h);

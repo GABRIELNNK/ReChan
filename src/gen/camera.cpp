@@ -4,11 +4,13 @@
 #include "gen/charmgr.h"
 #include "gen/animstruct.h"
 #include "ai/thing.h"
+#include "ai/player.h"
 #include "p3d/p3dmath.h"
 #include "config.h"
 #include "p3d/keycode.h"
 #include "p3d/input.h"
 #include "p3d/context.h"
+#include "pc/debugui.h"
 #include <cstdlib>
 #include <cmath>
 
@@ -500,7 +502,24 @@ void Camera::ShakeCamera(s32 frames) {
 
 void Camera::DebugCam() {
     MARKFUNCTION(0x80048718);
+
 #if IMPROVED_DEBUG_CAM
+    if (!DebugUI::IsDebugCameraInputAllowed()) {
+        return;
+    }
+    static bool sTeleportPressedPrev = false;
+
+    bool teleportPressed = p3d::input && p3d::input->IsKeyDown(KEY_ENTER);
+    if (teleportPressed && !sTeleportPressedPrev) {
+        if (Player::s_player) {
+            Player::s_player->pos = position;
+            Player::s_player->homePos = position;
+            Player::s_player->velocity = {};
+            Player::s_player->contactForce = {};
+        }
+    }
+    sTeleportPressedPrev = teleportPressed;
+
     // PC debug camera: mouse look + WASD movement + Q/E vertical + Shift speed
     double mdx = 0, mdy = 0;
     p3d::input->GetMouseDelta(mdx, mdy);
@@ -668,9 +687,12 @@ void Camera::FollowPath() {
     s32 toBy = targetWorldPos.y - nodeB_tgt.y;
     s32 toBz = targetWorldPos.z - nodeB_tgt.z;
 
-    s32 dotA = segX * toAx + segY * toAy + segZ * toAz;
-    s32 dotB = segX * toBx + segY * toBy + segZ * toBz;
-    s32 denom = dotA - dotB;
+    s64 dotA64 = (s64)segX * (s64)toAx + (s64)segY * (s64)toAy + (s64)segZ * (s64)toAz;
+    s64 dotB64 = (s64)segX * (s64)toBx + (s64)segY * (s64)toBy + (s64)segZ * (s64)toBz;
+    s64 denom64 = dotA64 - dotB64;
+
+    s32 dotA = (dotA64 > 0x7FFFFFFFLL) ? 0x7FFFFFFF : (dotA64 < -0x80000000LL ? (s32)0x80000000 : (s32)dotA64);
+    s32 denom = (denom64 > 0x7FFFFFFFLL) ? 0x7FFFFFFF : (denom64 < -0x80000000LL ? (s32)0x80000000 : (s32)denom64);
 
     s32 t = 0;
     if (denom != 0)

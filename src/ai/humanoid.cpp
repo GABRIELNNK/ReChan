@@ -1,9 +1,12 @@
 #include "ai/humanoid.h"
 #include "ai/player.h"
+#include "ai/colfight.h"
 #include "gen/common.h"
 #include "gen/model.h"
+#include "gen/ai.h"
 #include "gen/animmat.h"
 #include "gen/animstruct.h"
+#include "gen/director.h"
 #include "gen/colsect.h"
 #include "snd/rsevent.h"
 #include "snd/hmndsnd.h"
@@ -14,10 +17,152 @@
 
 static constexpr s32 HUMANOID_ANIM_RUN = 2;
 static constexpr s32 HUMANOID_ANIM_DIVE_ROLL = 90;
+static constexpr s32 HUMANOID_ANIM_LEDGE_PULLUP = 30;
+static constexpr s32 HUMANOID_ANIM_LEDGE_LATCH = 31;
 static constexpr s16 DIVE_ROLL_FORCE_END_FRAME = 14;
 static constexpr s32 DIVE_ROLL_FORCE = 0xDAC;
 static constexpr s16 DIVE_ROLL_JUMP_PAUSE_FRAME = 0xB;
 static constexpr s16 DIVE_ROLL_RUN_STRAFE_FRAME = 0xD;
+static constexpr s32 LEDGE_TRACE_DISTANCE = 384;
+static constexpr s32 LEDGE_TRACE_MIN_Y = 500;
+static constexpr s32 LEDGE_TRACE_MAX_Y = 750;
+static constexpr s32 LEDGE_TRACE_CLEARANCE = 1024;
+static constexpr s32 LEDGE_FLOOR_MIN_HEIGHT = 1022;
+
+static bool DetectObstacleAboveLedge(const LVector& /*normal*/, const LVector& /*ledgePos*/) {
+    return false;
+}
+
+static s32 GetTrackedFloorHeight(const Humanoid* humanoid) {
+    if (!humanoid || !humanoid->model) {
+        return (s32)0x80000001;
+    }
+
+    const Model* m = static_cast<const Model*>(humanoid->model);
+    if (!m->field36) {
+        return (s32)0x80000001;
+    }
+
+    const ModelFloorHeightState* floorState = static_cast<const ModelFloorHeightState*>(m->field36);
+    return floorState->current;
+}
+
+struct FightingComboNode {
+    u8 requestedCommand = 0;
+    s8 minFrame = 0;
+    s8 maxFrame = 0;
+    u8 pad03 = 0;
+    void* field04 = nullptr;
+    void* moveData = nullptr;
+    FightingComboNode* child = nullptr;
+    FightingComboNode* sibling = nullptr;
+};
+
+static s32 FindSiblingWithRequestedCommand(const FightingComboNode* root, u32 requestedBits) {
+    const FightingComboNode* node = root;
+    while (node) {
+        if (((requestedBits >> node->requestedCommand) & 1u) != 0) {
+            return static_cast<s32>(reinterpret_cast<intptr_t>(node));
+        }
+        node = node->sibling;
+    }
+    return 0;
+}
+
+static s32 HandleAnimationControl(Humanoid* humanoid) {
+    if (!humanoid) {
+        return 0;
+    }
+
+    if ((humanoid->flags2 & TF2_NIS_ENTER) == 0) {
+        return 0;
+    }
+
+    if (!humanoid->model) {
+        return 0;
+    }
+
+    Model* m = static_cast<Model*>(humanoid->model);
+    AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+    if (!anim) {
+        return 0;
+    }
+
+    SVector localOffset = {};
+    bool hasLocalOffset = false;
+
+    HumanoidModel* hm = static_cast<HumanoidModel*>(humanoid->model);
+    if (hm && hm->animMatrices) {
+        const s32* rootMat = hm->animMatrices->GetMatrix(0);
+        if (rootMat) {
+            localOffset.x = static_cast<s16>(rootMat[5]);
+            localOffset.y = static_cast<s16>(rootMat[6]);
+            localOffset.z = static_cast<s16>(rootMat[7]);
+            hasLocalOffset = true;
+        }
+    }
+
+    // Fallback when animation matrices are unavailable: use the Bip01 bind/translation.
+    if (!hasLocalOffset && m->drawable) {
+        OriginalSTree* source = m->drawable->GetAlternateSTree();
+        if (!source) {
+            source = m->drawable->GetOriginalSTree();
+        }
+        if (source && source->skeleton && source->skeleton->joints && source->skeleton->numJoints > 1) {
+            const STreeJoint& bip01 = source->skeleton->joints[1];
+            s32 lx = bip01.bindTranslationX;
+            s32 ly = bip01.bindTranslationY;
+            s32 lz = bip01.bindTranslationZ;
+            if (lx == 0 && ly == 0 && lz == 0) {
+                lx = bip01.translationX;
+                ly = bip01.translationY;
+                lz = bip01.translationZ;
+            }
+            localOffset.x = static_cast<s16>(lx);
+            localOffset.y = static_cast<s16>(ly);
+            localOffset.z = static_cast<s16>(lz);
+            hasLocalOffset = true;
+        }
+    }
+
+    if (!hasLocalOffset) {
+        return 0;
+    }
+
+    LVector nextHome = humanoid->homePos;
+    SVector worldOffset = {};
+    humanoid->GetObjectToWorldSpaceVector(localOffset, worldOffset);
+
+    const s16 frame = static_cast<s16>((u32)anim->currentFrame >> 16);
+    const s32 loopCount = anim->loopCount;
+    if (loopCount > 0 && frame == 0) {
+        humanoid->field516 = worldOffset.x;
+        humanoid->field520 = worldOffset.y;
+        humanoid->field524 = worldOffset.z;
+    }
+
+    if ((humanoid->flags2 & TF2_NIS_FROZEN) == 0) {
+        nextHome.y += static_cast<s32>(worldOffset.y) - humanoid->field520;
+    }
+
+    if (((humanoid->flags2 >> 6) & 1) == 0) {
+        nextHome.z += static_cast<s32>(worldOffset.z) - humanoid->field524;
+        nextHome.x += static_cast<s32>(worldOffset.x) - humanoid->field516;
+    }
+
+    humanoid->field516 = worldOffset.x;
+    humanoid->field520 = worldOffset.y;
+    humanoid->field524 = worldOffset.z;
+
+    if (loopCount == 0 && frame == 0) {
+        if (humanoid->actionState == 59) {
+            humanoid->pos.y = nextHome.y;
+        }
+    }
+
+    humanoid->homePos = nextHome;
+    return 1;
+}
 
 // PSX: __8HumanoidPC10tagLVectorUs (HUMANOID.CPP:350)
 Humanoid::Humanoid(const LVector* initialPos, u16 type)
@@ -196,7 +341,7 @@ void Humanoid::Activate() {
     // PSX: if newly activated (wasn't before, is now), insert into FightingCollision
     bool isActivated = (flags & TF_ACTIVATED) != 0;
     if (!wasActivated && isActivated) {
-        // FightingCollision::InsertHumanoid(this) not yet reversed
+        FightingCollision::InsertHumanoid(this);
     }
 }
 
@@ -204,15 +349,14 @@ void Humanoid::Activate() {
 void Humanoid::Deactivate() {
     MARKFUNCTION(0x80063270);
     Thing::Deactivate();
-    // PSX: if was activated (bit 4 now clear after base call), remove from FightingCollision
-    // FightingCollision::RemoveHumanoid(this) not yet reversed
+    FightingCollision::RemoveHumanoid(this);
 }
 
 // PSX: Move__8Humanoid (HUMANOID.CPP:1544)
 void Humanoid::Move() {
     MARKFUNCTION(0x80064100);
     DynamicThing::Move();
-    // PSX: HandleAnimationControl (animation system not yet implemented)
+    HandleAnimationControl(this);
     // PSX: CheckSwitches for trigger volumes (world system not yet implemented)
 }
 
@@ -229,9 +373,9 @@ s32 Humanoid::RestorePositionFromBip01() {
         return 0;
     }
 
-    OriginalSTree* source = m->drawable->alternate;
+    OriginalSTree* source = m->drawable->GetAlternateSTree();
     if (!source) {
-        source = m->drawable->original;
+        source = m->drawable->GetOriginalSTree();
     }
     if (!source || !source->skeleton || !source->skeleton->joints || source->skeleton->numJoints <= 1) {
         return 0;
@@ -297,11 +441,118 @@ bool Humanoid::CheckForLedges2(LVector& outNormal, LVector& outCorrectionPos, s3
         clearance);
 }
 
+// PSX: PrepareLedgeLatch__8HumanoidPC10tagLVectorPC9_RMVECT16 (HUMANOID.CPP:6581)
+void Humanoid::PrepareLedgeLatch(const LVector& correctionPos, const LVector& normal) {
+    MARKFUNCTION(0x80069FEC);
+
+    velocity = {};
+    contactForce = {};
+
+    s32 facingAngle = 0;
+    if (normal.x != 0) {
+        if (normal.z == 0) {
+            facingAngle = (normal.x > 0) ? 0xC000 : 0x4000;
+        }
+        else {
+            facingAngle = (0x4000 - (s32)rmATan216((f32)(-normal.x), (f32)(-normal.z))) & 0xFFFF;
+        }
+    }
+    else {
+        facingAngle = (normal.z > 0) ? 0x8000 : 0;
+    }
+
+    orientation.y = facingAngle;
+
+    s32 offsetX = (s16)((s64)rmSin16((s16)facingAngle) >> 9);
+    s32 offsetZ = (s16)((s64)rmSin16((s16)(facingAngle + 0x4000)) >> 9);
+
+    pos.x = correctionPos.x + offsetX;
+    pos.y = correctionPos.y;
+    pos.z = correctionPos.z + offsetZ;
+    homePos = pos;
+}
+
+// PSX: CheckForLedges__8Humanoid (HUMANOID.CPP:6644)
+bool Humanoid::CheckForLedges() {
+    MARKFUNCTION(0x8006A1D8);
+
+    if (velocity.y > 0) {
+        return false;
+    }
+
+    LVector startPos = pos;
+    LVector endPos = startPos;
+    endPos.x += (s32)(((s64)LEDGE_TRACE_DISTANCE * rmSin16(orientation.y)) >> 16);
+    endPos.z += (s32)(((s64)LEDGE_TRACE_DISTANCE * rmSin16((s16)(orientation.y + 0x4000))) >> 16);
+
+    LVector ledgeNormal = {};
+    LVector ledgePos = {};
+    u16 ledgeMaterial = 0;
+    if (!CollisionSector::LedgePrototype(
+            startPos,
+            endPos,
+            startPos.y + LEDGE_TRACE_MIN_Y,
+            startPos.y + LEDGE_TRACE_MAX_Y,
+            ledgeNormal,
+            ledgePos,
+            ledgeMaterial,
+            LEDGE_TRACE_CLEARANCE)) {
+        return false;
+    }
+
+    if (DetectObstacleAboveLedge(ledgeNormal, ledgePos)) {
+        return false;
+    }
+
+    s32 floorDelta = 0x2000;
+    s32 floorHeight = GetTrackedFloorHeight(this);
+    if (floorHeight != (s32)0x80000001) {
+        floorDelta = ledgePos.y - floorHeight;
+    }
+
+    if (floorDelta < LEDGE_FLOOR_MIN_HEIGHT) {
+        return false;
+    }
+
+    SetActionState(AS_LEDGE_LATCH, 0);
+    if (humanoidSound) {
+        humanoidSound->Grab((CSoundMaterial)ledgeMaterial);
+    }
+
+    Land();
+    PrepareLedgeLatch(ledgePos, ledgeNormal);
+    return true;
+}
+
 // PSX: CheckForPickup__8Humanoid (HUMANOID.CPP:6081, 0x800697C4)
 s32 Humanoid::CheckForPickup() {
     MARKFUNCTION(0x800697C4);
-    // TODO: reverse from PSX - searches nearby pickup items
-    return 0;
+    // PSX: only tries to acquire when right hand is free.
+    if (rightHandObj) {
+        return 0;
+    }
+
+    if (!g_ai) {
+        return 0;
+    }
+
+    Thing* pickup = g_ai->GetPickupWithinReach(this);
+    if (!pickup) {
+        return 0;
+    }
+
+    // PSX removes from pickupList, stores owner pointer in pickup, clears combat flag,
+    // plays GrabWeapon SFX, then enters AS_PICKUP.
+    g_ai->pickupList.RemNode(static_cast<ccMinNode*>(pickup));
+    rightHandObj = pickup;
+    combatFlag = 0;
+
+    if (humanoidSound) {
+        humanoidSound->GrabWeapon();
+    }
+
+    SetActionState(AS_PICKUP, 0);
+    return 1;
 }
 
 // PSX: CreateModel__8HumanoidPCc (HUMANOID.CPP:795, 0x80063248)
@@ -358,6 +609,36 @@ void Humanoid::DeleteLeftHandObj() {
         delete leftHandObj;
         leftHandObj = nullptr;
         flags2 &= ~2;
+    }
+}
+
+// PSX: DropPickup__8Humanoidii (HUMANOID.CPP:7819, 0x8006B6A0)
+// Releases held pickups back to g_ai->pickupList.
+// PSX calls Pickup::Release which re-adds to the list. On PC, Pickup class
+// not yet reversed, so we detach and add back to pickupList.
+void Humanoid::DropPickup(s32 dropRight, s32 dropLeft) {
+    MARKFUNCTION(0x8006B6A0);
+    if (dropRight) {
+        if (rightHandObj) {
+            // PSX: checks pickup->field316 == 0 before releasing
+            // PSX: Release__6Pickup(rightHandObj, this, &g_ai->pickupList, 0, 0)
+            rightHandObj->Remove();
+            if (g_ai) {
+                g_ai->pickupList.AddNode(nullptr, static_cast<ccMinNode*>(rightHandObj));
+            }
+            rightHandObj = nullptr;
+            flags2 &= ~1u;
+        }
+    }
+    if (dropLeft) {
+        if (leftHandObj) {
+            leftHandObj->Remove();
+            if (g_ai) {
+                g_ai->pickupList.AddNode(nullptr, static_cast<ccMinNode*>(leftHandObj));
+            }
+            leftHandObj = nullptr;
+            flags2 &= ~2u;
+        }
     }
 }
 
@@ -480,6 +761,8 @@ void Humanoid::SetActionState(u32 state, s32 param) {
         }
         case AS_PAUSE:             stateDispatch = SD_PAUSE; break;
         case AS_JUMP:              stateDispatch = SD_JUMP; break;
+        case AS_WALL_JUMP:         stateDispatch = SD_WALLJUMP; break;
+
         case AS_RUN:
             stateDispatch = SD_RUN;
             if (model) {
@@ -489,10 +772,32 @@ void Humanoid::SetActionState(u32 state, s32 param) {
             break;
         case AS_BACKFLIP:          stateDispatch = SD_BACKFLIP; break;
         case AS_STRAFE:            stateDispatch = SD_STRAFE; break;
+        case AS_LEDGE_LATCH:
+            stateDispatch = SD_LEDGE_LATCH;
+            if (model) {
+                Model* m = static_cast<Model*>(model);
+                m->SetAnim(HUMANOID_ANIM_LEDGE_LATCH, 0, 0, 0);
+            }
+            break;
+        case AS_LEDGE_PULLUP:
+            flags2 &= ~0x70;
+            stateDispatch = SD_LEDGE_PULLUP;
+            if (model) {
+                Model* m = static_cast<Model*>(model);
+                m->SetAnim(HUMANOID_ANIM_LEDGE_PULLUP, 0, 0, 0);
+            }
+            break;
         case AS_SLOPE_SLIDE:       stateDispatch = SD_STRAFE; break;
         case AS_PUNCH_ATTACK:      stateDispatch = SD_THROW; break;
         case AS_KICK_ATTACK:       stateDispatch = SD_THROW; break;
         case AS_COMBAT_IDLE:       stateDispatch = SD_STAND; break;
+        case AS_PICKUP:
+            stateDispatch = SD_PICKUP;
+            if (model) {
+                Model* m = static_cast<Model*>(model);
+                m->SetAnim(44, 0, 0, 0);
+            }
+            break;
         case AS_THROW_PICKUP:      stateDispatch = SD_THROW; break;
         case AS_STUNNED:
         {
@@ -547,6 +852,8 @@ void Humanoid::ProcessAction() {
         case SD_STUNNED:      _Stunned(); break;
         case SD_THROW:        _Throw(); break;
         case SD_PICKUP:       _Pickup(); break;
+        case SD_LEDGE_LATCH:  _LedgeLatch(); break;
+        case SD_LEDGE_PULLUP: _LedgePullup(); break;
         default: break;
     }
 }
@@ -703,10 +1010,31 @@ bool Humanoid::TestIdleAnimation() {
 
 // PSX: FindFoe__8HumanoidUlli (HUMANOID.CPP:2446)
 // Searches nearby humanoids within range for a combat target.
-// Requires FightingCollision system for entity iteration.
-Humanoid* Humanoid::FindFoe(u32 /*range*/, s32 /*param*/, s32 /*immediate*/) {
+// Searches nearby humanoids within range for a combat target.
+Humanoid* Humanoid::FindFoe(u32 range, s32 param, s32 immediate) {
     MARKFUNCTION(0x80064F94);
-    return nullptr;
+
+    Humanoid** arr = FightingCollision::GetHumanoidArray();
+    Humanoid* best = nullptr;
+    s32 bestDist = (s32)range;
+
+    for (s32 i = 0; i < FIGHTING_COLLISION_MAX; ++i) {
+        Humanoid* h = arr[i];
+        if (!h || h == this) continue;
+        if (!(h->flags & TF_ACTIVATED)) continue;
+
+        // PSX: distance check on XZ plane
+        s32 dx = h->pos.x - pos.x;
+        s32 dz = h->pos.z - pos.z;
+        if (dx < 0) dx = -dx;
+        if (dz < 0) dz = -dz;
+        s32 dist = dx + dz; // Manhattan distance (PSX approx)
+        if (dist < bestDist) {
+            bestDist = dist;
+            best = h;
+        }
+    }
+    return best;
 }
 
 // PSX: SetTarget__8HumanoidP8Humanoid (HUMANOID.CPP:2502)
@@ -836,8 +1164,21 @@ void Humanoid::_Stand() {
                 SetActionState(AS_COMBAT_IDLE, 0);
             }
             return;
-        case 7: // combat attack -> punch
-            SetActionState(AS_PUNCH_ATTACK, 0);
+        case 7: // PSX case 7: grab/combat - CheckForPickup then combat idle
+            if (rightHandObj != 0 || leftHandObj != 0) {
+                if (rightHandObj != 0 && field316 != 0) {
+                    SetActionState(AS_COMBAT_IDLE, 0);
+                }
+                else {
+                    SetActionState(AS_THROW_PICKUP, 0);
+                }
+            }
+            else {
+                if (CheckForPickup() == 1) {
+                    return;
+                }
+                SetActionState(AS_COMBAT_IDLE, 0);
+            }
             return;
         case 8: // dodge -> combat idle
             SetActionState(AS_COMBAT_IDLE, 0);
@@ -889,7 +1230,7 @@ void Humanoid::_DiveRoll() {
             return;
         }
         if ((cb >> 5) & 1) {
-            SetActionState(AS_STRAFE, 0);
+            SetActionState(AS_DIVE_ROLL, 0);
             return;
         }
         if ((cb >> 2) & 1) {
@@ -925,7 +1266,7 @@ void Humanoid::_DiveRoll() {
             m->SetAnim(HUMANOID_ANIM_RUN, 0, 0, 0);
         }
         else if ((cb >> 5) & 1) {
-            SetActionState(AS_STRAFE, 0);
+            SetActionState(AS_DIVE_ROLL, 0);
         }
     }
 
@@ -1195,7 +1536,7 @@ void Humanoid::_Straif() {
     }
 
     // Dive roll (bit 21)
-    if (sd & 0x200000) {
+    if (sd  & 0x200000) {
         ReleaseTarget();
         SetActionState(AS_DIVE_ROLL, 0);
         return;
@@ -1231,22 +1572,88 @@ void Humanoid::_Straif() {
         return;
     }
 
-    // No commands -> strafe movement
-    // PSX: face target, select strafe animation based on angle difference
-    if (field256 != 0) {
-        // field256 = target thing pointer (stored as s32)
-        // FaceAngleY toward target's direction
+    // PSX: No commands -> strafe movement
+    // PSX: if has target, face it. Otherwise use stored enemy.
+    Humanoid* target = (Humanoid*)(intptr_t)field256;
+    if (target) {
+        // PSX: FaceThingDesired to compute angle toward target
+        FaceThingDesired(target);
         FaceAngleY(faceAngle, 1);
+
+        // PSX: if target dead (actionState 72), release
+        if (target->actionState == AS_DEAD) {
+            ReleaseTarget();
+        }
     }
 
-    // Apply movement force in facing direction
+    // PSX: apply movement force in faceAngle direction (from stick input OR target lock)
+    // orientation.y = current facing, faceAngle = desired movement direction
     if (attackRange != 0) {
         SVector dir;
-        dir.x = (s16)orientation.x;
+        dir.x = 0;
         dir.y = 0;
-        dir.z = (s16)orientation.y;
+        dir.z = (s16)(faceAngle & 0xFFFF);
         dir.pad = 0;
         AddForce(attackRange, &dir);
+
+        // PSX: select strafe animation based on angle difference
+        if (model && faceAngleData) {
+            Model* m = static_cast<Model*>(model);
+            s32* animArray = (s32*)faceAngleData;
+            
+            // PSX: angle difference = orientation.y - faceAngle (inverted from movement direction)
+            s32 angleDiff = orientation.y - faceAngle;
+            
+            // Select animation pair based on angle ranges (PSX exact logic)
+            // Ranges: forward (0-8193), side (8193-24577), back-side (24577-40960), back (40960-57344), forward (57344+)
+            s32 animIndex = 0;
+            s32 loopType = 0;
+            
+            s32 absAngle = (angleDiff >= 0) ? angleDiff : -angleDiff;
+            
+            if (absAngle >= 24577 && absAngle <= 40960) {
+                // 135-225 degrees: back-side strafe (left/right animations)
+                animIndex = animArray[4];
+                loopType = animArray[5];
+            }
+            else if (absAngle >= 8193 && absAngle < 24577) {
+                // 45-135 degrees: side strafe (left/right animations)
+                animIndex = animArray[8];
+                loopType = animArray[9];
+            }
+            else if (absAngle > 40960 && absAngle <= 57344) {
+                // 225-315 degrees: backward strafe (forward/backward animations)
+                animIndex = animArray[6];
+                loopType = animArray[7];
+            }
+            else {
+                // 0-45 degrees or 315-360 degrees: forward strafe (forward/backward animations)
+                animIndex = animArray[2];
+                loopType = animArray[3];
+            }
+            
+            m->SetAnim(animIndex, 0, 0, 0);
+            
+            if (m->animStructure) {
+                AnimStructure* anim = (AnimStructure*)m->animStructure;
+                anim->SetLoopType(loopType, 0);
+            }
+        }
+    }
+    else {
+        // PSX: no movement - play idle if not already playing
+        if (model && faceAngleData) {
+            Model* m = static_cast<Model*>(model);
+            s32* animArray = (s32*)faceAngleData;
+            
+            if (m->animStructure) {
+                AnimStructure* anim = (AnimStructure*)m->animStructure;
+                bool atEnd = (s16)((u32)anim->currentFrame >> 16) == anim->endFrame;
+                if (anim->animEnum != animArray[0] || atEnd) {
+                    m->SetAnim(animArray[0], 3, 0, 0);
+                }
+            }
+        }
     }
 }
 
@@ -1324,8 +1731,11 @@ void Humanoid::_Pickup() {
     }
 }
 
-// PSX: LadderDismount__8Humanoid - not yet reversed
-void Humanoid::_LadderDismount() {}
+// PSX: LadderDismount__8Humanoid (HUMANOID.CPP:6426, 0x80069CC8)
+void Humanoid::_LadderDismount() {
+    MARKFUNCTION(0x80069CC8);
+    _Jump();
+}
 
 // PSX: ClimbLadder__8Humanoid (HUMANOID.CPP:6448, 0x80069CF8)
 void Humanoid::_ClimbLadder() {
@@ -1360,9 +1770,12 @@ void Humanoid::_ClimbLadder() {
     // PSX: NIS override check - if player and director is running NIS ladder script,
     // force climbing behavior (skip dismount check)
     s32 nisOverride = 0;
-    if (this == Player::s_player) {
-        // PSX: checks theDirector->field_0xA8 and theDirector->currentScript == NISladder1
-        // Director not yet reversed - nisOverride stays 0
+    if (this == (Humanoid*)Player::s_player) {
+        if (g_director && g_director->scriptState != 0) {
+            if (g_director->codeSnipPtr == Director::GetNISLadder1Script()) {
+                nisOverride = 1;
+            }
+        }
     }
 
     if (!nisOverride) {
@@ -1423,14 +1836,76 @@ void Humanoid::_ClimbLadder() {
     }
 }
 
+// PSX: _LedgeLatch__8Humanoid (HUMANOID.CPP:6753, 0x8006A4C4)
+void Humanoid::_LedgeLatch() {
+    MARKFUNCTION(0x8006A4C4);
+
+    if (!model) {
+        return;
+    }
+
+    Model* m = static_cast<Model*>(model);
+    AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+    s32 shouldPullUp = 0;
+    if (anim && anim->loopCount > 0) {
+        shouldPullUp = 1;
+    }
+    else if ((commandBits & (1 << GA_MOVE)) != 0) {
+        shouldPullUp = 1;
+    }
+
+    if (shouldPullUp) {
+        SetActionState(AS_LEDGE_PULLUP, 0);
+    }
+}
+
+// PSX: _LedgePullup__8Humanoid (HUMANOID.CPP:6764, 0x8006A538)
+void Humanoid::_LedgePullup() {
+    MARKFUNCTION(0x8006A538);
+
+    if (!model) {
+        if (homePos.y < 0) {
+            homePos.y = 0;
+        }
+        return;
+    }
+
+    Model* m = static_cast<Model*>(model);
+    AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+    if (anim && anim->loopCount > 0) {
+        SetActionState(AS_STAND, 0);
+    }
+
+    if (homePos.y < 0) {
+        homePos.y = 0;
+    }
+}
+
 // PSX: TestAndSetRisingAttack__8Humanoid (HUMANOID.CPP:5438, 0x80068D38)
 // Checks command bit 9 (rising attack), sets combat flags, finds combo node.
 // Combat system not fully reversed - stub for now.
 s32 Humanoid::TestAndSetRisingAttack() {
     MARKFUNCTION(0x80068D38);
-    // PSX: checks field488 (combat lock), then commandBits bit 9
-    // If set, masks commandBits, calls FindSiblingWithRequestedCommand
-    // Returns combo node pointer (field488)
+    if (field488 != 0) {
+        return field488;
+    }
+
+    const u32 requested = static_cast<u32>(commandBits);
+    if (((requested >> GA_KICK) & 1u) != 0) {
+        u32 remapped = requested;
+        remapped &= ~(1u << GA_PUNCH);         // clear bit 8
+        remapped &= ~(1u << GA_KICK);          // clear bit 9
+        remapped &= ~(1u << GA_GRAB);          // clear bit 7
+        remapped &= ~(1u << GA_GRAB_FORWARD);  // clear bit 15
+        remapped &= ~(1u << 17);               // clear combo bit 17
+        remapped &= ~(1u << 18);               // clear combo bit 18
+        remapped |= (1u << 23);                // set rising-attack request bit
+
+        commandBits = static_cast<s32>(remapped);
+        field488 = FindSiblingWithRequestedCommand(
+            static_cast<const FightingComboNode*>(defaultFightingSystem), remapped);
+    }
+
     return field488;
 }
 
@@ -1794,7 +2269,7 @@ void Humanoid::_Dead() {
         }
 
 cleanup:
-        // PSX: RemoveHumanoid from FightingCollision (not reversed)
+        FightingCollision::RemoveHumanoid(this);
         ReleaseTarget();
         flags &= ~0x0080; // clear bit 7
 
@@ -1864,11 +2339,9 @@ s32 Humanoid::EnterCombatCombo() {
     // PSX: FindSiblingWithRequestedCommand(this, defaultFightingSystem, commandBits)
     // defaultFightingSystem (+480) is the combo tree root node.
     // If null, FindSiblingWithRequestedCommand returns 0.
-    s32 foundNode = 0;
-    if (defaultFightingSystem) {
-        // Fighting combo tree search would go here
-        // (requires FightingComboNode structure reversal)
-    }
+    s32 foundNode = FindSiblingWithRequestedCommand(
+        static_cast<const FightingComboNode*>(defaultFightingSystem),
+        static_cast<u32>(commandBits));
     field488 = foundNode;
 
     if (foundNode) {

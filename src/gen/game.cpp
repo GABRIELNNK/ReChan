@@ -618,7 +618,7 @@ bool Game::gsTitleLoopState(Game* game) {
         return true;
     }
 
-    if (g_actionInput && (g_actionInput->JustPressed(ACTION_START) || g_actionInput->JustPressed(ACTION_MENU_CONFIRM))) {
+    if (g_actionInput && (g_actionInput->JustPressed(ACTION_OPEN_CLOSE_MENU) || g_actionInput->JustPressed(ACTION_MENU_CONFIRM))) {
         // PSX: ProcessSoundEvent(gp[72], 8)
         if (g_frontEndSound) {
             g_frontEndSound->ProcessSoundEvent(FE_SND_MENU_OPEN);
@@ -793,7 +793,7 @@ bool Game::gsPlayState(Game* game) {
     // PSX: check state==Play AND director scriptState==0 for pause eligibility
     if (game->state == GameState::Play) {
         s32 canPause = (!g_director || g_director->scriptState == 0);
-        if (canPause && g_actionInput && g_actionInput->JustPressed(ACTION_START)) {
+        if (canPause && g_actionInput && g_actionInput->JustPressed(ACTION_OPEN_CLOSE_MENU)) {
             game->SetState(GameState::Menu);
             // PSX: Shock(18) - controller vibration on pause
             // TODO: Shock not yet reversed
@@ -801,21 +801,6 @@ bool Game::gsPlayState(Game* game) {
     }
 
     // PSX: Update__7Profile() - PSX profiling system, not applicable on PC
-
-#if IMPROVED_DEBUG_CAM
-    // CTRL+B: toggle between debug camera and follow camera
-    if (p3d::input->IsKeyDown(KEY_LEFT_CONTROL) && p3d::input->IsKeyTriggered(KEY_B)) {
-        Camera* cam = g_display->GetCamera();
-
-        if (cam->GetMode() == CAM_MODE_DEFAULT) {
-            cam->SetMode(CAM_MODE_FOLLOW);
-        }
-        else {
-            cam->SetMode(CAM_MODE_DEFAULT);
-        }
-    }
-#endif
-
     return true;
 }
 
@@ -851,8 +836,12 @@ bool Game::gsEndLevelExitState(Game* game) {
     }
 
     s32 nextPetal = (s32)world->GetCurrentPetalIndex() + 1;
+    s32 currentLevel = (s32)world->GetCurrentLevelIndex();
     if (nextPetal < world->GetCurLevelPetals()) {
         g_scoreManager->OpenPetal(world->GetCurrentLevelIndex(), nextPetal);
+    }
+    else if ((u32)currentLevel < 4) {
+        g_scoreManager->OpenPetal((u32)(currentLevel + 1), 0);
     }
 
     s32 hubIndex = world->LevelIDToIndex(7);
@@ -1211,7 +1200,7 @@ bool Game::gsEndGameLoopState(Game* game) {
     g_display->EndFrame();
 
     // PSX: check start or confirm to continue
-    if (g_actionInput && (g_actionInput->JustPressed(ACTION_START) || g_actionInput->JustPressed(ACTION_MENU_CONFIRM))) {
+    if (g_actionInput && (g_actionInput->JustPressed(ACTION_OPEN_CLOSE_MENU) || g_actionInput->JustPressed(ACTION_MENU_CONFIRM))) {
         // PSX: ProcessSoundEvent(frontEndSound, 19) = FE_SND_JT_0
         if (g_frontEndSound) {
             g_frontEndSound->ProcessSoundEvent(FE_SND_JT_0);

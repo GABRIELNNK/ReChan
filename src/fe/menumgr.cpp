@@ -367,7 +367,7 @@ void MenuMgr::QueryInput(bool processInput) {
     if (g_actionInput->JustPressed(ACTION_MENU_BACK)) {
         InputItemPop();
     }
-    else if (g_actionInput->JustPressed(ACTION_START)) {
+    else if (g_actionInput->JustPressed(ACTION_OPEN_CLOSE_MENU)) {
         state = 8;
     }
     // D-pad navigation

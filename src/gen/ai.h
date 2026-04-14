@@ -68,3 +68,14 @@ void aiPrivHandler(Handler* h);
 
 // Global AI pointer
 extern AI* g_ai;
+
+// WorldPoints - NIS reference points populated from DB type 110 points
+struct WorldPointNode : public ccNode {
+    LVector pos = {};
+    s32 parValue = 9999;
+    ~WorldPointNode() override = default;
+};
+void WorldPoints_Reset();
+void WorldPoints_AddPoint(struct DBPoint* pt);
+WorldPointNode* WorldPoints_GetNISPoint(u32 crc);
+s32 WorldPoints_GetParValue();

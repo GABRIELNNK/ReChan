@@ -39,7 +39,6 @@ public:
     void DeleteModel() override;
     void Reset() override;
     void Think() override;
-    void UpdatePosition() override;
     void Draw() override;
     void HandleHumanoidCollision(Humanoid* hum) override;
     void HandlePickupCollision(Thing* pickup) override;

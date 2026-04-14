@@ -86,6 +86,29 @@ struct OriginalSTree : public OriginalBasic {
     ~OriginalSTree() override;
 };
 
+// OriginalGeo - static/dynamic geometry model data (40 bytes on PSX)
+// Stored in LevelManager geo lists, looked up by nameCRC.
+// PC: stores a PC-ready prim buffer built from tDynGeom polygon data.
+struct OriginalGeo : public OriginalBasic {
+    pddiPrimBuffer* meshBuffer = nullptr;
+    s32 bboxMin[3] = {};
+    s32 bboxMax[3] = {};
+
+    OriginalGeo();
+    ~OriginalGeo() override;
+};
+
+// DrawableBasic - base drawable wrapper used by Model.
+// STree models expose skeleton accessors for animation code; Geo models return null.
+struct DrawableBasic {
+    u16 displayFlag = 1;
+
+    virtual ~DrawableBasic();
+    virtual void Display(u32 flags) = 0;
+    virtual OriginalSTree* GetOriginalSTree() const { return nullptr; }
+    virtual OriginalSTree* GetAlternateSTree() const { return nullptr; }
+};
+
 // DrawableSTree - wraps OriginalSTree for per-entity rendering (36 bytes on PSX)
 // PSX layout:
 //   +0..11:  DrawableTree base
@@ -93,22 +116,33 @@ struct OriginalSTree : public OriginalBasic {
 //   +24:     OriginalSTree* original
 //   +28:     OriginalSTree* alternate (for suit changes)
 //   +32:     (reserved)
-struct DrawableSTree {
+struct DrawableSTree : public DrawableBasic {
     OriginalSTree* original = nullptr;   // +24 on PSX
     OriginalSTree* alternate = nullptr;  // +28 on PSX
-    u16 displayFlag = 1;                 // +16 on PSX
 
     DrawableSTree(OriginalSTree* orig);
-    ~DrawableSTree();
+    ~DrawableSTree() override;
 
     // PSX: Display__13DrawableSTree (calls OriginalSTree::Draw -> tPrimGeom::Display)
     // PC: draws the pddiPrimBuffer
-    void Display(u32 flags);
+    void Display(u32 flags) override;
+    OriginalSTree* GetOriginalSTree() const override { return original; }
+    OriginalSTree* GetAlternateSTree() const override { return alternate; }
+};
+
+// DrawableGeo - wraps OriginalGeo for per-entity rendering.
+struct DrawableGeo : public DrawableBasic {
+    OriginalGeo* original = nullptr;
+
+    DrawableGeo(OriginalGeo* orig);
+    ~DrawableGeo() override;
+
+    void Display(u32 flags) override;
 };
 
 // Model - base class for per-entity 3D models (96 bytes on PSX)
 // PSX layout (24 bytes ccNode base + 72 bytes Model-specific):
-//   +24: DrawableSTree* drawable
+//   +24: DrawableBasic* drawable
 //   +28: s32 drawableType (0=none, 1=Geo, 2=STree)
 //   +32: void* animStructure (AnimStructure*)
 //   +36: (reserved)
@@ -132,7 +166,7 @@ struct DrawableSTree {
 class Model : public ccNode {
 public:
     // +24
-    DrawableSTree* drawable = nullptr;
+    DrawableBasic* drawable = nullptr;
     // +28
     s32 drawableType = 0;
     // +32
@@ -213,6 +247,18 @@ public:
     void ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 p4, s32 p5) override;
     void SetOriginalSTree(OriginalSTree* original);
     void InitSemiTransMode();
+    void PlayDynamicAnim(s32 animEnum);
+};
+
+// GModel - geometry model (96 bytes on PSX, same allocation as Model)
+// Used by props loaded through OriginalGeo/tDynGeom.
+class GModel : public Model {
+public:
+    GModel();
+    ~GModel() override;
+
+    void Show(u32 flags) override;
+    void SetOriginalGeo(OriginalGeo* original);
 };
 
 // HumanoidModel - character model with animation matrices (136 bytes on PSX)
@@ -256,6 +302,7 @@ public:
     PlayerModel();
     ~PlayerModel() override;
 
+    void ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 p4, s32 p5) override;
     void SetAnim(s32 animEnum, s32 a3, s32 force, s32 extra) override;
     void HandleLoop(AnimStructure* anim) override;
     void HandleRunToLast(AnimStructure* anim) override;

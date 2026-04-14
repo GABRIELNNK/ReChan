@@ -296,25 +296,40 @@ void Thing::CreateModel(const char* name) {
     OriginalBasic* found = g_levelManager->FindModel(modelHash);
     if (!found) {
         LOG("[Thing::CreateModel] Model not found for hash 0x%08X", (u32)modelHash);
-        flags |= TF_MODEL_CREATED;
         return;
     }
 
     // PSX: check type at OriginalBasic+16 (0=Geo, 1=STree, 2=ETree)
     u16 modelType = found->GetType();
-    SModel* sm = static_cast<SModel*>(static_cast<Model*>(model));
+    Model* existing = static_cast<Model*>(model);
 
-    if (sm) {
-        // Model already exists - just update the drawable
-        if (modelType == 1) {
-            sm->SetOriginalSTree(static_cast<OriginalSTree*>(found));
+    if (modelType == 0) {
+        GModel* gm = nullptr;
+        if (existing && existing->drawableType == 1) {
+            gm = static_cast<GModel*>(existing);
         }
+        else {
+            if (existing) {
+                delete existing;
+            }
+            gm = new GModel();
+            model = gm;
+        }
+        gm->SetOriginalGeo(static_cast<OriginalGeo*>(found));
     }
     else if (modelType == 1) {
-        // Create new SModel for STree type
-        sm = new SModel();
+        SModel* sm = nullptr;
+        if (existing && existing->drawableType != 1) {
+            sm = static_cast<SModel*>(existing);
+        }
+        else {
+            if (existing) {
+                delete existing;
+            }
+            sm = new SModel();
+            model = sm;
+        }
         sm->SetOriginalSTree(static_cast<OriginalSTree*>(found));
-        model = sm;
     }
 
     if (model) {

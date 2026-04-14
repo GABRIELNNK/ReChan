@@ -95,6 +95,13 @@ public:
     // gp+3428: cached pointer to FightingCollision humanoid array
     void* encounterHumanoidArray = nullptr;
 
+    // Debug animation override state (PC only)
+    bool debugAnimOverrideActive = false;
+    bool debugAnimOverridePaused = false;
+    bool debugAnimOverrideApplying = false;
+    s32 debugAnimOverrideEnum = -1;
+    s32 debugAnimOverrideLoopType = 0;
+
     // Global player pointer - PSX: gp+3432
     static Player* s_player;
 
@@ -159,9 +166,12 @@ public:
     void PlayPlayerTauntResponse();
 
     // PC helpers for debug/iteration: direct animation control on player model.
-    bool PlayAnimation(s32 animEnum, s32 loopType);
-    void PauseAnimation();
-    void ResumeAnimation();
-    void StopAnimation();
-    bool IsAnimationPaused() const;
+    void Debug_ApplyForcedAnimation();
+    bool Debug_PlayAnimation(s32 animEnum, s32 loopType);
+    void Debug_PauseAnimation();
+    void Debug_ResumeAnimation();
+    void Debug_StopAnimation();
+    bool Debug_IsAnimationOverrideActive() const;
+    bool Debug_IsAnimationOverrideApplying() const;
+    bool Debug_IsAnimationPaused() const;
 };

@@ -4,10 +4,12 @@
 #include "gen/charmgr.h"
 #include "gen/blockmgr.h"
 #include "gen/colmgr.h"
+#include "ai/colfight.h"
 #include "pc/log.h"
 #include "gen/camera.h"
 #include "gen/path.h"
 #include "p3d/p3dmath.h"
+#include "ai/obstacle.h"
 #include "ai/player.h"
 #include "ai/humanoid.h"
 #include "ai/fevolume.h"
@@ -16,12 +18,107 @@
 
 AI* g_ai = nullptr;
 
+// WorldPoints system - stores NIS reference points parsed from WDB database.
+// PSX: WorldPointLists global at gp+FF0 (theWorldPoints).
+// Populated from DBPoints with type 110 during AI::Populate.
+static ccList g_worldPointList;
+
+// PSX: gp+0x5E0 (0x800DCF2C)
+static s32 humanoidVolumeRadius = 0xC0;
+
+static s32 AbsS32(s32 v) {
+    if (v < 0) {
+        return -v;
+    }
+    return v;
+}
+
+static bool IsHumanoidCollisionSkipStateA(s32 state) {
+    if ((u32)(state - 69) < 4u) {
+        return true;
+    }
+    return state == 56;
+}
+
+static bool IsHumanoidCollisionSkipStateB(s32 state) {
+    return state == 36 || state == 59 || state == 37 || state == 38 ||
+        state == 60 || state == 61 || state == 62;
+}
+
+void WorldPoints_Reset() {
+    while (ccNode* n = static_cast<ccNode*>(g_worldPointList.RemHead())) {
+        delete n;
+    }
+}
+
+void WorldPoints_AddPoint(DBPoint* pt) {
+    if (!pt) return;
+
+    if (pt->subType == 0) {
+        // Position point (40 bytes on PSX)
+        WorldPointNode* node = new WorldPointNode();
+        node->pos = pt->pos;
+        node->parValue = 9999;
+        node->SetName(pt->GetName(), 0);
+
+        const DBAttrib* a15 = pt->FindAttrib(15);
+        if (a15) {
+            node->parValue = (s32)a15->value;
+        }
+
+        g_worldPointList.AddNode(g_worldPointList.tail, node);
+    }
+    else if (pt->subType == 2) {
+        // Par value point (28 bytes on PSX) - stores attrib 4 value
+        WorldPointNode* node = new WorldPointNode();
+        const DBAttrib* a4 = pt->FindAttrib(4);
+        if (a4) {
+            node->parValue = (s32)a4->value;
+        }
+        // PSX: sets name from dword_800DD2E8 (likely "par" or similar)
+        node->SetName(pt->GetName(), 0);
+        g_worldPointList.AddNode(g_worldPointList.tail, node);
+    }
+}
+
+WorldPointNode* WorldPoints_GetNISPoint(u32 crc) {
+    return static_cast<WorldPointNode*>(g_worldPointList.FindNodeCRC(crc, nullptr));
+}
+
+s32 WorldPoints_GetParValue() {
+    // PSX: searches by name for the "par" point
+    for (ccNode* n = static_cast<ccNode*>(g_worldPointList.head); n; n = static_cast<ccNode*>(n->next)) {
+        WorldPointNode* wp = static_cast<WorldPointNode*>(n);
+        if (wp->parValue != 9999) {
+            return wp->parValue;
+        }
+    }
+    return 0;
+}
+
+// PSX Populate__2AI: mesh loop (lst TEXT:80056698) then volume loop (80056748); same nameCRC yields two moveList
+// nodes. Skip volume AddThing when a type-6 mesh twin already exists.
+static bool SceneVolumeHasMeshTwin(const DBVolume* vol, u16 subType) {
+    if (!g_database) {
+        return false;
+    }
+    for (DBMesh* mesh = g_database->GetFirstMesh(); mesh; mesh = static_cast<DBMesh*>(mesh->next)) {
+        if (mesh->type == 6 && mesh->subType == subType && mesh->nameCRC == vol->nameCRC) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // PSX: KillThingsInList__FR6ccListl (AI.CPP:1252 helper)
 // For each Thing in list, if blockNum < param, call Kill().
 // When param=0, kills nothing (unsigned comparison).
 static void KillThingsInList(ccList& list, s32 param) {
     for (ccMinNode* n = list.head; n; n = n->next) {
         Thing* thing = static_cast<Thing*>(n);
+        if (thing == Player::s_player) {
+            continue;
+        }
         if (thing->blockNum < (u32)param) {
             thing->Kill();
         }
@@ -137,6 +234,19 @@ void AI::AddThingNoTagList(const char* name, u16 type,
                 thing = vol;
                 LOG("[AI] FrontEndVolume created: name=%s pos=(%d,%d,%d)", name ? name : "null", pos->x, pos->y, pos->z);
             }
+            else if (type == AITypes::TT_DOOR) {
+                Door* d = new Door(pos, type);
+                thing = d;
+            }
+            else if (type == AITypes::TT_TELEPORTER) {
+                thing = new Teleporter(pos, type);
+            }
+            else if (type == AITypes::TT_LADDER) {
+                thing = new Ladder(pos, type);
+            }
+            else if (type == AITypes::TT_TRAPDOOR) {
+                thing = new TrapDoor(pos, type);
+            }
             // Type 472 = Arrow (hub navigational arrow)
             else if (type == AITypes::TT_ARROW) {
                 Arrow* arrow = new Arrow(pos, type);
@@ -189,10 +299,174 @@ void AI::AddThingNoTagList(const char* name, u16 type,
     targetList->AddNodeTail(thing);
 }
 
+// PSX: HandleHumanoidHumanoidCollision__FP8HumanoidT0 (AI.CPP:986, 0x80055584)
+static void HandleHumanoidHumanoidCollision(Humanoid* a, Humanoid* b) {
+    const s32 yTolerance = 0x300;
+    const s32 xzRadius = humanoidVolumeRadius;
+    const s32 stateA = a->actionState;
+    const s32 stateB = b->actionState;
+
+    bool skipStateA = IsHumanoidCollisionSkipStateA(stateA) || IsHumanoidCollisionSkipStateA(stateB);
+    bool skipStateB = IsHumanoidCollisionSkipStateB(stateA) && IsHumanoidCollisionSkipStateB(stateB);
+    bool skipState63 = stateA == 63 || stateB == 63;
+    bool skipState73 = stateA == 73 || stateB == 73;
+    bool skipState23 = stateA == 23 || stateB == 23;
+
+    if (skipStateA || skipStateB || skipState63 || skipState73 || skipState23) {
+        return;
+    }
+
+    s32 dx = b->pos.x - a->pos.x;
+    s32 dy = b->pos.y - a->pos.y;
+    s32 dz = b->pos.z - a->pos.z;
+    s32 twiceRadius = xzRadius + xzRadius;
+
+    if (dx < -twiceRadius || dx > twiceRadius) {
+        return;
+    }
+    if (dy < -yTolerance || dy > yTolerance) {
+        return;
+    }
+    if (dz < -twiceRadius || dz > twiceRadius) {
+        return;
+    }
+
+    bool aMoved = false;
+    if (AbsS32(a->pos.x - a->homePos.x) >= 11 || AbsS32(a->pos.z - a->homePos.z) >= 11) {
+        aMoved = true;
+    }
+
+    bool bMoved = false;
+    if (AbsS32(b->pos.x - b->homePos.x) >= 11 || AbsS32(b->pos.z - b->homePos.z) >= 11) {
+        bMoved = true;
+    }
+
+    bool lockA = false;
+    if (a->velocity.x || a->velocity.z || aMoved) {
+        lockA = true;
+    }
+
+    bool lockB = false;
+    if (b->velocity.x || b->velocity.z || bMoved) {
+        lockB = true;
+    }
+
+    LVector posA = a->pos;
+    LVector posB = b->pos;
+
+    s32 diffX = posB.x - posA.x;
+    s32 diffZ = posB.z - posA.z;
+
+    s32 half = rmDiv16i(xzRadius, twiceRadius);
+
+    if (AbsS32(diffZ) >= AbsS32(diffX)) {
+        if (lockA) {
+            if (!lockB) {
+                if (posA.z >= posB.z) {
+                    posA.z = posB.z + twiceRadius;
+                }
+                else {
+                    posA.z = posB.z - twiceRadius;
+                }
+            }
+            else {
+                s32 split = posA.z + (s32)(((s64)half * (s64)diffZ) >> 16);
+                if (posA.z >= split) {
+                    posA.z = split + xzRadius;
+                    posB.z = split - xzRadius;
+                }
+                else {
+                    posA.z = split - xzRadius;
+                    posB.z = split + xzRadius;
+                }
+            }
+        }
+        else if (lockB) {
+            if (posB.z >= posA.z) {
+                posB.z = posA.z + twiceRadius;
+            }
+            else {
+                posB.z = posA.z - twiceRadius;
+            }
+        }
+        else {
+            s32 split = posA.z + (s32)(((s64)half * (s64)diffZ) >> 16);
+            if (posA.z >= split) {
+                posA.z = split + xzRadius;
+                posB.z = split - xzRadius;
+            }
+            else {
+                posA.z = split - xzRadius;
+                posB.z = split + xzRadius;
+            }
+        }
+    }
+    else {
+        if (lockA) {
+            if (!lockB) {
+                if (posA.x >= posB.x) {
+                    posA.x = posB.x + twiceRadius;
+                }
+                else {
+                    posA.x = posB.x - twiceRadius;
+                }
+            }
+            else {
+                s32 split = posA.x + (s32)(((s64)half * (s64)diffX) >> 16);
+                if (posA.x >= split) {
+                    posA.x = split + xzRadius;
+                    posB.x = split - xzRadius;
+                }
+                else {
+                    posA.x = split - xzRadius;
+                    posB.x = split + xzRadius;
+                }
+            }
+        }
+        else if (lockB) {
+            if (posB.x >= posA.x) {
+                posB.x = posA.x + twiceRadius;
+            }
+            else {
+                posB.x = posA.x - twiceRadius;
+            }
+        }
+        else {
+            s32 split = posA.x + (s32)(((s64)half * (s64)diffX) >> 16);
+            if (posA.x >= split) {
+                posA.x = split + xzRadius;
+                posB.x = split - xzRadius;
+            }
+            else {
+                posA.x = split - xzRadius;
+                posB.x = split + xzRadius;
+            }
+        }
+    }
+
+    a->pos = posA;
+    b->pos = posB;
+}
+
 // PSX: HandleHumanoidHumanoidCollision__Fv (AI.CPP:951, 0x800554D0)
-// Iterates FightingCollision humanoid array, calls pairwise collision.
-// FightingCollision not yet reversed - stub.
-static void HandleHumanoidHumanoidCollision() {}
+static void HandleHumanoidHumanoidCollision() {
+    MARKFUNCTION(0x800554D0);
+    Humanoid** arr = FightingCollision::GetHumanoidArray();
+    for (s32 i = 0; i < FIGHTING_COLLISION_MAX; ++i) {
+        Humanoid* a = arr[i];
+        if (!a) {
+            continue;
+        }
+
+        for (s32 j = i + 1; j < FIGHTING_COLLISION_MAX; ++j) {
+            Humanoid* b = arr[j];
+            if (!b) {
+                continue;
+            }
+            HandleHumanoidHumanoidCollision(a, b);
+        }
+    }
+}
 
 // PSX: MoveThings__2AI (AI.CPP:1268, 0x80055D10)
 // Full per-frame pipeline matching PSX exactly.
@@ -339,8 +613,12 @@ void AI::Populate() {
     if (!g_database)
         return;
 
-    // PSX: iterate points list - type 6 = spawnable entity
+    // PSX: iterate points list - type 6 = spawnable entity, type 110 = NIS world points
     for (DBPoint* pt = g_database->GetFirstPoint(); pt; pt = static_cast<DBPoint*>(pt->next)) {
+        if (pt->type == 110) {
+            WorldPoints_AddPoint(pt);
+            continue;
+        }
         if (pt->type != 6)
             continue;
 
@@ -415,6 +693,10 @@ void AI::Populate() {
         volCount++;
         if (vol->type != 6)
             continue;
+        if ((vol->subType == AITypes::TT_DOOR || vol->subType == AITypes::TT_TELEPORTER) &&
+            SceneVolumeHasMeshTwin(vol, vol->subType)) {
+            continue;
+        }
         AddThingNoTagList(vol->GetName(), vol->subType, &vol->pos,
                           nullptr, nullptr, vol);
     }
@@ -458,6 +740,9 @@ void AI::UnPopulate(s16 blockNum) {
 
     // PSX: clear thingList (death staging)
     while ((n = thingList.RemHead()) != nullptr) { delete n; }
+
+    // PSX: clear world points (NIS reference points)
+    WorldPoints_Reset();
 }
 
 // PSX: PopulateActiveZones__2AI (AI.CPP:1449, 0x80055FC8)

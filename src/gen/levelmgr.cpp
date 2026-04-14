@@ -241,6 +241,17 @@ OriginalBasic* LevelManager::FindSTree(s32 id) {
     return nullptr;
 }
 
+// PSX: FindGeo__12LevelManagerl (0x80059318)
+OriginalBasic* LevelManager::FindGeo(s32 id) {
+    MARKFUNCTION(0x80059318);
+    u32 crc = static_cast<u32>(id);
+    for (ccMinNode* n = modelLists[2].head; n; n = n->next) {
+        OriginalBasic* ob = static_cast<OriginalBasic*>(static_cast<ccNode*>(n));
+        if (ob->nameCRC == crc) return ob;
+    }
+    return nullptr;
+}
+
 // PSX: AddPermMemory__12LevelManagerPcl (0x800590D8)
 void* LevelManager::AddPermMemory(s32 size, s32 id) {
     MARKFUNCTION(0x800590D8);

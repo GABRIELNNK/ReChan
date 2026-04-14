@@ -3,10 +3,12 @@
 #include "fe/hdmenuitems.h"
 #include "xclib/xclib.h"
 #include "gen/game.h"
+#include "gen/ai.h"
 #include "gen/world.h"
 #include "gen/scoremgr.h"
 #include "gen/control.h"
 #include "ai/fevolume.h"
+#include "ai/obstacle.h"
 #include "pc/inputaction.h"
 #include "pc/settings.h"
 #include "pc/log.h"
@@ -38,6 +40,36 @@ static constexpr u32 HASH_NEWGAME_MENU = 0xB320874D;     // New game confirm
 static constexpr u32 HASH_OPTIONS_MENU = 0xC073AB79;     // Options menu
 static constexpr u32 HASH_MEMCARD_MENU = 0x1AB82599;     // Memory card menu
 
+struct HubDoorEntry {
+    s32 levelID;
+    s32 subLevel;
+    u32 doorCRC;
+};
+
+static const HubDoorEntry HUB_DOOR_TABLE[] = {
+    { 1, 1, 0x09F04430 },
+    { 1, 2, 0x09F04400 },
+    { 1, 2, 0x09F04401 },
+    { 2, 0, 0x0D8AC541 },
+    { 2, 0, 0x0D8AC542 },
+    { 2, 1, 0x0D8AC520 },
+    { 2, 1, 0x0D8AC521 },
+    { 2, 2, 0x0D8AC510 },
+    { 2, 2, 0x0D8AC511 },
+    { 3, 0, 0x09CDC541 },
+    { 3, 1, 0x09CDC520 },
+    { 3, 2, 0x09CDC510 },
+    { 4, 0, 0x07965931 },
+    { 4, 1, 0x07965950 },
+    { 4, 2, 0x07965960 },
+    { 5, 0, 0x0AB6F041 },
+    { 5, 0, 0x0AB6F042 },
+    { 5, 1, 0x0AB6F020 },
+    { 5, 2, 0x0AB6F010 },
+    { 6, 0, 0x0C472F91 },
+    { 6, 0, 0x0C472F92 },
+};
+
 struct FeSoundMenuState {
     u16 musicVol = 0;
     u16 dialogVol = 0;
@@ -54,6 +86,38 @@ struct FeControlState {
 
 static FeSoundMenuState g_feSoundState;
 static FeControlState g_feControlState;
+
+static bool IsRegularPetalUnlocked(s32 levelIndex, s32 subLevel) {
+    if (!g_scoreManager) {
+        return false;
+    }
+
+    if ((u32)levelIndex >= 5 || (u32)subLevel >= 3) {
+        return false;
+    }
+
+    const PetalStats& ps = g_scoreManager->petalStats[levelIndex * 3 + subLevel];
+    return ps.fightScore >= -1;
+}
+
+static bool IsRegularLevelComplete(s32 levelIndex) {
+    if (!g_scoreManager) {
+        return false;
+    }
+
+    if ((u32)levelIndex >= 5) {
+        return false;
+    }
+
+    for (s32 subLevel = 0; subLevel < 3; subLevel++) {
+        const PetalStats& ps = g_scoreManager->petalStats[levelIndex * 3 + subLevel];
+        if (ps.fightScore < 0) {
+            return false;
+        }
+    }
+
+    return true;
+}
 
 static void SaveSoundMenuState(FeSoundMenuState& state) {
     if (!g_sound) {
@@ -492,7 +556,7 @@ void feMenuMgr::QueryInput(bool processInput) {
     if (g_actionInput->JustPressed(ACTION_MENU_BACK)) {
         InputItemPop();
     }
-    else if (g_actionInput->JustPressed(ACTION_START)) {
+    else if (g_actionInput->JustPressed(ACTION_OPEN_CLOSE_MENU)) {
         hdMenu* levelMenu = FindMenu(HASH_LEVEL_SCREEN);
         if (curMenu != levelMenu) {
             state = 8;
@@ -556,6 +620,7 @@ void feMenuMgr::ShowNewGameMenu() {
 // Switches to level select mode from the 3D hub.
 void feMenuMgr::ShowLevel(FrontEndVolume* vol, Humanoid* hum) {
     MARKFUNCTION(0x80011218);
+
     frontEndVolume = vol;
     soundFlag = 1;
     humanoid = hum;
@@ -704,8 +769,35 @@ void feMenuMgr::InitLevelMenu() {
 // Iterates level table, finds scene nodes by CRC, and enables valid doors.
 void feMenuMgr::OpenDoors() {
     MARKFUNCTION(0x80011680);
-    // PSX uses a static level-door table + scene-node CRC lookup.
-    // Scene node door activation is not wired in the current PC runtime.
+
+    if (!g_ai) {
+        return;
+    }
+
+    for (const HubDoorEntry& entry : HUB_DOOR_TABLE) {
+        ccNode* node = g_ai->moveList.FindNodeCRC(entry.doorCRC);
+        if (!node) {
+            continue;
+        }
+
+        if (!LevelValid(entry.levelID, entry.subLevel)) {
+            continue;
+        }
+
+        Thing* thing = static_cast<Thing*>(node);
+        if (!thing) {
+            continue;
+        }
+
+        if (thing->thingType != AITypes::TT_DOOR &&
+            thing->thingType != AITypes::TT_TELEPORTER &&
+            thing->thingType != AITypes::TT_TRAPDOOR) {
+            continue;
+        }
+
+        Obstacle* obstacle = static_cast<Obstacle*>(thing);
+        obstacle->Trigger();
+    }
 }
 
 // PSX: PushLoadSaveMenu__9feMenuMgri (Overlay4 0x80011618)
@@ -723,14 +815,37 @@ void feMenuMgr::PushLoadSaveMenu(s32 mode) {
 // Checks if a level/sublevel combination is unlocked.
 s32 feMenuMgr::LevelValid(s32 levelID, s32 subLevel) {
     MARKFUNCTION(0x80011188);
-    if (levelID == 6) {
-        // Final level: requires 6+ gold dragons
-        if (g_scoreManager) {
-            return g_scoreManager->GetTotalGoldDragon() >= 6 ? 1 : 0;
-        }
-        return 0;
+
+    if (levelID == 7) {
+        return 1;
     }
-    // All other levels: return 1 for now (ScoreManager data not fully reversed)
-    // PSX: LevelIDToIndex, then checks score data at 48*index + 0x1C + 16*subLevel >= -1
-    return 1;
+
+    World* world = g_game ? g_game->GetWorld() : nullptr;
+    if (!world || !g_scoreManager) {
+        return (levelID == 1 && subLevel == 0) ? 1 : 0;
+    }
+
+    if (levelID == 6) {
+        return g_scoreManager->GetTotalGoldDragon() >= 6 ? 1 : 0;
+    }
+
+    s32 levelIndex = world->LevelIDToIndex(levelID);
+    if ((u32)levelIndex < 5) {
+        return IsRegularPetalUnlocked(levelIndex, subLevel) ? 1 : 0;
+    }
+
+    switch (levelID) {
+        case 11:
+            return IsRegularLevelComplete(0) ? 1 : 0;
+        case 12:
+            return IsRegularLevelComplete(1) ? 1 : 0;
+        case 13:
+            return IsRegularLevelComplete(2) ? 1 : 0;
+        case 14:
+            return IsRegularLevelComplete(3) ? 1 : 0;
+        case 8:
+            return IsRegularLevelComplete(4) ? 1 : 0;
+        default:
+            return 0;
+    }
 }

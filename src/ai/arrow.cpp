@@ -1,10 +1,14 @@
 #include "ai/arrow.h"
 #include "gen/blockmgr.h"
+#include "gen/colvol.h"
 #include "gen/database.h"
+#include "gen/config.h"
 #include "gen/scoremgr.h"
 #include "gen/world.h"
+#include "ai/player.h"
 
 Arrow::Arrow(const LVector* pos, u16 type) : Obstacle(pos, type) {
+    MARKFUNCTION(0x8001B688);
     arrowState = -7;
 }
 
@@ -12,15 +16,19 @@ Arrow::~Arrow() {
 }
 
 void Arrow::AnalyzeMesh(DBRoot* root) {
+    MARKFUNCTION(0x8001B6E8);
     Obstacle::AnalyzeMesh(root);
 
     // PSX: builds point names "00".."43" (row+col), looks up DB points
-    char buf[8] = {};
+    char buf[16] = {};
+    strcpy(buf, "arrow  ");
+    memset(&buf[7], 0, 3);
 
     for (s32 row = 0; row < 5; row++) {
         buf[5] = (char)('0' + row);
         for (s32 col = 0; col < 4; col++) {
             buf[6] = (char)('0' + col);
+            buf[7] = '\0';
 
             DBPoint* child = g_database ? g_database->FindPoint(buf) : nullptr;
             if (child) {
@@ -42,9 +50,25 @@ void Arrow::AnalyzeMesh(DBRoot* root) {
             }
         }
     }
+
+    DBVolume* vol = dynamic_cast<DBVolume*>(root);
+    if (!vol && g_database) {
+        for (DBVolume* dbv = g_database->GetFirstVolume(); dbv; dbv = static_cast<DBVolume*>(dbv->next)) {
+            if (dbv->nameCRC == root->nameCRC) {
+                vol = dbv;
+                break;
+            }
+        }
+    }
+    if (vol) {
+        tagCollisionBox box = {};
+        FillCollisionBox(box, *vol);
+        SetCollisionBox(box);
+    }
 }
 
 void Arrow::CreateModel(const char* name) {
+    MARKFUNCTION(0x8001B8CC);
     shadowFlag = 0;
     // PSX: calls AllocateAndCreateModel which creates GModel + Thing::CreateModel
     // PC: Thing::CreateModel creates SModel directly
@@ -56,6 +80,7 @@ void Arrow::DeleteModel() {
 }
 
 void Arrow::Reset() {
+    MARKFUNCTION(0x8001B90C);
     arrowState = -7;
     currentRow = -1;
     currentCol = -1;
@@ -118,6 +143,11 @@ void Arrow::Reset() {
 }
 
 void Arrow::Think() {
+    MARKFUNCTION(0x8001BBD8);
+    if ((currentRow < 0 || currentCol < 0) && g_scoreManager) {
+        Reset();
+    }
+
     if (currentRow < 0 || currentCol < 0) {
         return;
     }
@@ -144,10 +174,6 @@ void Arrow::Think() {
     if (arrowState >= 8) {
         arrowState = -7;
     }
-}
-
-void Arrow::UpdatePosition() {
-    // empty - position computed entirely in Think
 }
 
 void Arrow::Draw() {

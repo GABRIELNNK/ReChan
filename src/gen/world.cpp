@@ -10,17 +10,22 @@
 #include "gen/game.h"
 #include "gen/geometry.h"
 #include "gen/levelmgr.h"
+#include "gen/model.h"
 #include "snd/rsevent.h"
 #include "fe/hdmenu.h"
 #include "fe/hud.h"
 #include "fe/loadanim.h"
+#include "p3d/hash.h"
 #include "p3d/context.h"
 #include "p3d/stream.h"
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
+#include "ai/colfight.h"
+#include "pc/log.h"
 
 #include <fstream>
 #include <filesystem>
+#include <unordered_map>
 
 // Global block manager pointer (PSX: gp scope, set by World)
 BlockManager* g_blockManager = nullptr;
@@ -113,6 +118,362 @@ static u32 ReadU32(const u8* p) { return p[0] | (p[1] << 8) | (p[2] << 16) | (p[
 static s16 ReadS16(const u8* p) { return static_cast<s16>(p[0] | (p[1] << 8)); }
 static s32 ReadS32(const u8* p) { return static_cast<s32>(p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24)); }
 
+struct GeoMaterialInfo {
+    u8 primCmd = 0;
+    u16 cba = 0;
+    u16 tpage = 0;
+};
+
+struct GeoVertex {
+    f32 x;
+    f32 y;
+    f32 z;
+    f32 r;
+    f32 g;
+    f32 b;
+    f32 u;
+    f32 v;
+    f32 tpage;
+    f32 cba;
+};
+
+static void DecodePackedUV(u16 packed, GeoVertex& vertex, const GeoMaterialInfo& material) {
+    vertex.u = static_cast<f32>(packed & 0xFF);
+    vertex.v = static_cast<f32>((packed >> 8) & 0xFF);
+    vertex.tpage = static_cast<f32>(material.tpage);
+    vertex.cba = static_cast<f32>(material.cba);
+}
+
+static pddiPrimBuffer* ParseDynGeoPrims(
+    const u8* geoData,
+    u32 geoSize,
+    const std::unordered_map<u32, GeoMaterialInfo>& materials)
+{
+    if (!geoData || geoSize < 0x58) {
+        return nullptr;
+    }
+
+    u32 vertListOff = ReadU32(geoData + 0x10) << 2;
+    u16 numVerts = ReadU16(geoData + 0x14);
+    u16 numPolys = ReadU16(geoData + 0x16);
+    u32 polyListOff = ReadU32(geoData + 0x40) << 2;
+
+    if (numVerts == 0 || numPolys == 0) {
+        return nullptr;
+    }
+    if (vertListOff + numVerts * 8 > geoSize) {
+        return nullptr;
+    }
+    if (polyListOff + numPolys * 24 > geoSize) {
+        return nullptr;
+    }
+
+    const u8* verts = geoData + vertListOff;
+    const u8* polys = geoData + polyListOff;
+
+    std::vector<GeoVertex> vertBuf;
+    std::vector<u16> idxBuf;
+
+    auto makeVertex = [&](u16 index) -> GeoVertex {
+        GeoVertex vertex = {};
+        if (index >= numVerts) {
+            return vertex;
+        }
+
+        const u8* src = verts + index * 8;
+        vertex.x = static_cast<f32>(ReadS16(src + 0));
+        vertex.y = static_cast<f32>(ReadS16(src + 2));
+        vertex.z = static_cast<f32>(ReadS16(src + 4));
+        vertex.r = 0.85f;
+        vertex.g = 0.85f;
+        vertex.b = 0.85f;
+        vertex.u = 0.0f;
+        vertex.v = 0.0f;
+        vertex.tpage = -1.0f; // TEMP: force untextured to test geometry
+        vertex.cba = 0.0f;
+        return vertex;
+    };
+
+    for (u16 polyIndex = 0; polyIndex < numPolys; polyIndex++) {
+        const u8* poly = polys + polyIndex * 24;
+        u32 materialHash = ReadU32(poly + 0);
+        auto materialIt = materials.find(materialHash);
+        if (materialIt == materials.end()) {
+            continue;
+        }
+
+        const GeoMaterialInfo& material = materialIt->second;
+        u8 primCmd = static_cast<u8>(material.primCmd & 0xFD);
+
+        GeoVertex v0 = makeVertex(ReadU16(poly + 8));
+        GeoVertex v1 = makeVertex(ReadU16(poly + 10));
+        GeoVertex v2 = makeVertex(ReadU16(poly + 12));
+        GeoVertex v3 = makeVertex(ReadU16(poly + 14));
+
+        if (primCmd == 0x34 || primCmd == 0x24 || primCmd == 0x3C || primCmd == 0x2C) {
+            DecodePackedUV(ReadU16(poly + 16), v0, material);
+            DecodePackedUV(ReadU16(poly + 18), v1, material);
+            DecodePackedUV(ReadU16(poly + 20), v2, material);
+            if (primCmd == 0x3C || primCmd == 0x2C) {
+                DecodePackedUV(ReadU16(poly + 22), v3, material);
+            }
+        }
+
+        u16 base = static_cast<u16>(vertBuf.size());
+        switch (primCmd) {
+            case 0x30:
+            case 0x20:
+            case 0x34:
+            case 0x24:
+                vertBuf.push_back(v0);
+                vertBuf.push_back(v1);
+                vertBuf.push_back(v2);
+                idxBuf.push_back(base + 0);
+                idxBuf.push_back(base + 1);
+                idxBuf.push_back(base + 2);
+                break;
+
+            case 0x38:
+            case 0x28:
+            case 0x3C:
+            case 0x2C:
+                vertBuf.push_back(v0);
+                vertBuf.push_back(v1);
+                vertBuf.push_back(v2);
+                vertBuf.push_back(v3);
+                idxBuf.push_back(base + 0);
+                idxBuf.push_back(base + 1);
+                idxBuf.push_back(base + 2);
+                idxBuf.push_back(base + 1);
+                idxBuf.push_back(base + 3);
+                idxBuf.push_back(base + 2);
+                break;
+
+            default:
+                break;
+        }
+    }
+
+    if (idxBuf.empty()) {
+        return nullptr;
+    }
+
+    // Temp diagnostic: dump vertex stats
+    if (!vertBuf.empty()) {
+        f32 minX = vertBuf[0].x, maxX = vertBuf[0].x;
+        f32 minY = vertBuf[0].y, maxY = vertBuf[0].y;
+        f32 minZ = vertBuf[0].z, maxZ = vertBuf[0].z;
+        for (auto& v : vertBuf) {
+            if (v.x < minX) minX = v.x; if (v.x > maxX) maxX = v.x;
+            if (v.y < minY) minY = v.y; if (v.y > maxY) maxY = v.y;
+            if (v.z < minZ) minZ = v.z; if (v.z > maxZ) maxZ = v.z;
+        }
+        LOG("[ParseGeo] verts=%u idx=%u bbox=(%.0f,%.0f,%.0f)-(%.0f,%.0f,%.0f) v0=(%.0f,%.0f,%.0f) tpage=%.0f cba=%.0f",
+            (u32)vertBuf.size(), (u32)idxBuf.size(),
+            minX, minY, minZ, maxX, maxY, maxZ,
+            vertBuf[0].x, vertBuf[0].y, vertBuf[0].z, vertBuf[0].tpage, vertBuf[0].cba);
+    }
+
+    u32 format = PDDI_V_POSITION | PDDI_V_COLOUR | PDDI_V_UV | PDDI_V_TEXINFO;
+    pddiPrimBufferDesc desc(
+        PDDI_PRIM_TRIANGLES,
+        format,
+        static_cast<u32>(vertBuf.size()),
+        static_cast<u32>(idxBuf.size()));
+
+    pddiPrimBuffer* buffer = p3d::device->NewPrimBuffer(desc);
+    buffer->SetVertexData(vertBuf.data(), static_cast<u32>(vertBuf.size()));
+    buffer->SetIndices(idxBuf.data(), static_cast<u32>(idxBuf.size()));
+    return buffer;
+}
+
+static void LoadGeoPair(
+    World* world,
+    const u8* permData,
+    u32 permSize,
+    const u8* p3dData,
+    u32 p3dSize,
+    s32 storeId)
+{
+    if (!g_levelManager || !permData || !p3dData || p3dSize < 6) {
+        return;
+    }
+    if (ReadU16(p3dData) != 0xFF04) {
+        return;
+    }
+
+        std::unordered_map<u32, GeoMaterialInfo> materials;
+
+        u32 rootSize = ReadU32(p3dData + 2);
+        u32 chunkEnd = (rootSize < p3dSize) ? rootSize : p3dSize;
+        u32 chunkPos = 6;
+        u32 permCursor = 0;
+
+        while (chunkPos + 6 <= chunkEnd) {
+            u16 chunkId = ReadU16(p3dData + chunkPos);
+            u32 chunkSize = ReadU32(p3dData + chunkPos + 2);
+            if (chunkSize < 6 || chunkPos + chunkSize > chunkEnd) {
+                break;
+            }
+
+            const u8* chunkBody = p3dData + chunkPos + 6;
+
+            if (chunkId == 0x6001 || chunkId == 0x6002) {
+                u32 nameCount = ReadU32(chunkBody + 0);
+                u32 chunkPermSize = ReadU32(chunkBody + 4);
+                u32 namesPos = 8;
+                std::vector<std::string> names;
+                names.reserve(nameCount);
+
+                for (u32 i = 0; i < nameCount; i++) {
+                    if (namesPos >= chunkSize - 6) {
+                        break;
+                    }
+                    u8 nameLen = chunkBody[namesPos++];
+                    if (namesPos + nameLen > chunkSize - 6) {
+                        break;
+                    }
+                    names.emplace_back(reinterpret_cast<const char*>(chunkBody + namesPos), nameLen);
+                    namesPos += nameLen;
+                }
+
+                if (permCursor + chunkPermSize > permSize) {
+                    LOG("[World] Geo perm overflow for chunk 0x%04X (need 0x%X, have 0x%X)",
+                        chunkId, permCursor + chunkPermSize, permSize);
+                    break;
+                }
+
+                if (chunkId == 0x6001) {
+                    if (nameCount != 0) {
+                        u32 recordSize = chunkPermSize / nameCount;
+                        if (recordSize >= 24) {
+                            for (u32 i = 0; i < nameCount; i++) {
+                                u32 recordOff = permCursor + i * recordSize;
+                                const u8* record = permData + recordOff;
+
+                                GeoMaterialInfo info = {};
+                                // PSX primitive command byte lives in the high byte of this word.
+                                info.primCmd = static_cast<u8>((ReadU32(record + 16) >> 24) & 0xFF);
+                                u32 texInfo = ReadU32(record + 20);
+                                info.cba = static_cast<u16>(texInfo & 0xFFFF);
+                                info.tpage = static_cast<u16>(texInfo >> 16);
+
+                                u32 materialHash = ReadU32(record + 0);
+                                if (materialHash == 0 && i < names.size()) {
+                                    materialHash = p3dHash(names[i].c_str());
+                                }
+                                materials[materialHash] = info;
+                                LOG("[GeoMat] hash=0x%08X primCmd=0x%02X tpage=%u cba=%u (tx=%u ty=%u depth=%u clutX=%u clutY=%u)",
+                                    materialHash, info.primCmd, info.tpage, info.cba,
+                                    info.tpage & 0xF, (info.tpage >> 4) & 1, (info.tpage >> 7) & 3,
+                                    (info.cba & 0x3F) * 16, (info.cba >> 6) & 0x1FF);
+                            }
+                        }
+                    }
+                }
+                else if (chunkId == 0x6002) {
+                    if (nameCount != 1 || names.empty()) {
+                        LOG("[World] Unsupported multi-geo chunk with %u entries", nameCount);
+                    }
+                    else {
+                        u32 modelHash = ReadU32(permData + permCursor + 0);
+                        if (!g_levelManager->FindModel(static_cast<s32>(modelHash))) {
+                            pddiPrimBuffer* buffer = ParseDynGeoPrims(
+                                permData + permCursor,
+                                chunkPermSize,
+                                materials);
+                            if (buffer) {
+                                OriginalGeo* original = new OriginalGeo();
+                                original->nameCRC = modelHash ? modelHash : p3dHash(names[0].c_str());
+                                original->SetStoreID(static_cast<s8>(storeId));
+                                original->meshBuffer = buffer;
+                                original->bboxMin[0] = ReadS32(permData + permCursor + 0x18);
+                                original->bboxMin[1] = ReadS32(permData + permCursor + 0x1C);
+                                original->bboxMin[2] = ReadS32(permData + permCursor + 0x20);
+                                original->bboxMax[0] = ReadS32(permData + permCursor + 0x24);
+                                original->bboxMax[1] = ReadS32(permData + permCursor + 0x28);
+                                original->bboxMax[2] = ReadS32(permData + permCursor + 0x2C);
+                                g_levelManager->AddOriginal(original, 0);
+                                LOG("[World] Loaded Geo model '%s' (hash 0x%08X, store %d)",
+                                    names[0].c_str(), original->nameCRC, storeId);
+                            }
+                        }
+                    }
+                }
+
+                permCursor += chunkPermSize;
+            }
+
+            else if (chunkId == 0x6008 && world) {
+                u32 p = 0;
+                u32 bodyLen = chunkSize - 6;
+                if (bodyLen < 1) { chunkPos += chunkSize; continue; }
+                u8 nameLen = chunkBody[p++];
+                p += nameLen;
+                if (p + 12 > bodyLen) { chunkPos += chunkSize; continue; }
+                s16 rx = ReadS16(chunkBody + p); p += 2;
+                s16 ry = ReadS16(chunkBody + p); p += 2;
+                s16 rw = ReadS16(chunkBody + p); p += 2;
+                s16 rh = ReadS16(chunkBody + p); p += 2;
+                p += 4; // skip type
+                if (rw > 0 && rh > 0 && rw <= 1024 && rh <= 512 &&
+                    p + (u32)(rw * rh * 2) <= bodyLen) {
+                    world->UploadToVRAM(rx, ry, rw, rh, chunkBody + p);
+                    LOG("[GeoTex] VRAM upload: x=%d y=%d w=%d h=%d", rx, ry, rw, rh);
+                }
+            }
+
+            chunkPos += chunkSize;
+        }
+    }
+
+static void LoadGeoPairsInRange(
+    World* world,
+    const std::vector<tStreamEntry>& entries,
+    const u8* fileData,
+    u32 fileSize,
+    u32 rangeStart,
+    u32 rangeEnd,
+    const char* permMagic,
+    const char* p3dMagic,
+    s32 storeId)
+{
+    for (u32 i = rangeStart; i < rangeEnd; i++) {
+        if (strncmp(entries[i].magic, permMagic, 4) != 0) {
+            continue;
+        }
+
+            u32 pairIndex = rangeEnd;
+            for (u32 j = i + 1; j < rangeEnd; j++) {
+                if (strncmp(entries[j].magic, p3dMagic, 4) == 0) {
+                    pairIndex = j;
+                    break;
+                }
+                if (strncmp(entries[j].magic, permMagic, 4) == 0) {
+                    break;
+                }
+            }
+
+            if (pairIndex == rangeEnd) {
+                continue;
+            }
+
+            const tStreamEntry& permEntry = entries[i];
+            const tStreamEntry& p3dEntry = entries[pairIndex];
+            if (permEntry.offset + permEntry.size > fileSize ||
+                p3dEntry.offset + p3dEntry.size > fileSize) {
+                continue;
+            }
+
+        LoadGeoPair(
+            world,
+            fileData + permEntry.offset,
+            permEntry.size,
+            fileData + p3dEntry.offset,
+            p3dEntry.size,
+            storeId);
+    }
+}
 // Database::Scan handles WDB parsing now (see database.cpp).
 
 void World::LoadTPGTextures(const u8* lcfData, u32 lcfSize) {
@@ -170,6 +531,7 @@ void World::LoadTPGTextures(const u8* lcfData, u32 lcfSize) {
                 if (rw > 0 && rh > 0 && rw <= 1024 && rh <= 512 &&
                     p + rw * rh * 2 <= offset + size) {
                     vram.Upload(rx, ry, rw, rh, d + p);
+                    LOG("[World] VRAM upload: x=%d y=%d w=%d h=%d", rx, ry, rw, rh);
                 }
             }
             cpos += chunkSize;
@@ -426,7 +788,10 @@ bool World::LoadLevelIndex(u32 levelIndex) {
     // We inline the steps we can handle here.
 
     // PSX: Init__17FightingCollision, InsertHumanoid (player)
-    // TODO: FightingCollision not yet reversed
+    FightingCollision::Init();
+    if (Player::s_player) {
+        FightingCollision::InsertHumanoid(static_cast<Humanoid*>(Player::s_player));
+    }
 
     // PSX: CheckpointInfo
     u32 startBlockNum = 0;
@@ -590,6 +955,9 @@ bool World::Load(const std::string& lcfPath) {
     // Load TPG textures into VRAM (PSX HandleTPGChunk)
     LoadTPGTextures(data, dataSize);
 
+    // RCI/RCP resources are level-wide and survive petal reloads until PurgeLevel.
+    LoadGeoPairsInRange(this, entries, data, dataSize, 0, (u32)entries.size(), ".RCI", ".RCP", 1);
+
     // PSX petal-based loading: the LCF contains multiple WDB+BLK groups,
     // one per petal. Each petal starts with a .WDB entry followed by .BLK entries.
     // PSX LoadPetal__6Stream finds the N-th WDB and reads only that petal's data.
@@ -637,6 +1005,10 @@ bool World::Load(const std::string& lcfPath) {
         if (entries[i].offset + entries[i].size > dataSize) continue;
         g_database->Scan(data + entries[i].offset, entries[i].size);
     }
+
+    LoadGeoPairsInRange(this, entries, data, dataSize, petalStart, petalEnd, ".PCI", ".PCP", 2);
+
+    RefreshVRAMTexture();
 
     // Build block volume list from this petal's WDB
     std::vector<DBVolume*> blockVolumes;
@@ -692,6 +1064,7 @@ bool World::Load(const std::string& lcfPath) {
 }
 
 void World::UploadToVRAM(s16 x, s16 y, s16 w, s16 h, const u8* raw) {
+    LOG("[VRAM] ext upload: x=%d y=%d w=%d h=%d", x, y, w, h);
     vram.Upload(x, y, w, h, raw);
 }
 
@@ -1170,6 +1543,11 @@ void World::LoadPetal(u32 petalIndex) {
             if (entries[i].offset + entries[i].size > dataSize) continue;
             g_database->Scan(data + entries[i].offset, entries[i].size);
         }
+
+        LoadGeoPairsInRange(this, entries, data, dataSize, petalStart, petalEnd, ".PCI", ".PCP", 2);
+
+        // Refresh VRAM GL texture after Geo texture uploads
+        RefreshVRAMTexture();
 
         // Build block volumes
         std::vector<DBVolume*> blockVolumes;

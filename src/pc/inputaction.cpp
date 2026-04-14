@@ -6,34 +6,33 @@
 ActionInput* g_actionInput = nullptr;
 
 ActionInput::ActionInput() {
-    //                            keyboard         gpBtn           gpBtn2              gpAxis          threshold
-    bindings[ACTION_JUMP]       = { KEY_SPACE,       GpBtn::A,       GpBtn::NONE,        GpAxis::NONE,   0 };
-    bindings[ACTION_PUNCH]      = { KEY_J,           GpBtn::X,       GpBtn::NONE,        GpAxis::NONE,   0 };
-    bindings[ACTION_KICK]       = { KEY_K,           GpBtn::Y,       GpBtn::NONE,        GpAxis::NONE,   0 };
-    bindings[ACTION_GRAB]       = { KEY_L,           GpBtn::B,       GpBtn::NONE,        GpAxis::NONE,   0 };
-    bindings[ACTION_DIVE_ROLL]  = { KEY_LEFT_SHIFT,  GpBtn::RB,      GpBtn::NONE,        GpAxis::NONE,   0 };
-    bindings[ACTION_STRAFE]     = { KEY_F,           GpBtn::NONE,    GpBtn::NONE,        GpAxis::RTrigger, 0.5f };
-    bindings[ACTION_COUNTER]    = { KEY_Q,           GpBtn::LB,      GpBtn::NONE,        GpAxis::NONE,   0 };
+    // keyboard, gpBtn, gpBtn2, gpAxis, threshold
+    bindings[ACTION_JUMP] = { KEY_SPACE, GpBtn::A, GpBtn::NONE, GpAxis::NONE, 0 };
+    bindings[ACTION_PUNCH] = { KEY_J, GpBtn::X, GpBtn::NONE, GpAxis::NONE, 0 };
+    bindings[ACTION_KICK] = { KEY_K, GpBtn::Y, GpBtn::NONE, GpAxis::NONE, 0 };
+    bindings[ACTION_GRAB] = { KEY_L, GpBtn::B, GpBtn::NONE, GpAxis::NONE, 0 };
+    bindings[ACTION_DIVE_ROLL] = { KEY_LEFT_CONTROL,  GpBtn::RB, GpBtn::NONE, GpAxis::NONE,   0 };
+    bindings[ACTION_STRAFE] = { KEY_LEFT_SHIFT, GpBtn::NONE, GpBtn::NONE, GpAxis::RTrigger, 0.5f };
+    bindings[ACTION_COUNTER] = { KEY_TAB, GpBtn::LB, GpBtn::NONE, GpAxis::NONE,   0 };
 
-    bindings[ACTION_MOVE_UP]    = { KEY_W,           GpBtn::NONE,    GpBtn::DpadUp,      GpAxis::LeftY, -0.3f };
-    bindings[ACTION_MOVE_DOWN]  = { KEY_S,           GpBtn::NONE,    GpBtn::DpadDown,    GpAxis::LeftY,  0.3f };
-    bindings[ACTION_MOVE_LEFT]  = { KEY_A,           GpBtn::NONE,    GpBtn::DpadLeft,    GpAxis::LeftX, -0.3f };
-    bindings[ACTION_MOVE_RIGHT] = { KEY_D,           GpBtn::NONE,    GpBtn::DpadRight,   GpAxis::LeftX,  0.3f };
+    bindings[ACTION_MOVE_UP] = { KEY_W, GpBtn::NONE, GpBtn::DpadUp, GpAxis::LeftY, -0.3f };
+    bindings[ACTION_MOVE_DOWN] = { KEY_S, GpBtn::NONE, GpBtn::DpadDown, GpAxis::LeftY,  0.3f };
+    bindings[ACTION_MOVE_LEFT] = { KEY_A, GpBtn::NONE, GpBtn::DpadLeft, GpAxis::LeftX, -0.3f };
+    bindings[ACTION_MOVE_RIGHT] = { KEY_D, GpBtn::NONE, GpBtn::DpadRight, GpAxis::LeftX,  0.3f };
 
-    bindings[ACTION_LOOK_UP]    = { 0,               GpBtn::NONE,    GpBtn::NONE,        GpAxis::RightY, -0.3f };
-    bindings[ACTION_LOOK_DOWN]  = { 0,               GpBtn::NONE,    GpBtn::NONE,        GpAxis::RightY,  0.3f };
-    bindings[ACTION_LOOK_LEFT]  = { 0,               GpBtn::NONE,    GpBtn::NONE,        GpAxis::RightX, -0.3f };
-    bindings[ACTION_LOOK_RIGHT] = { 0,               GpBtn::NONE,    GpBtn::NONE,        GpAxis::RightX,  0.3f };
+    bindings[ACTION_LOOK_UP] = { 0, GpBtn::NONE, GpBtn::NONE, GpAxis::RightY, -0.3f };
+    bindings[ACTION_LOOK_DOWN] = { 0, GpBtn::NONE, GpBtn::NONE, GpAxis::RightY,  0.3f };
+    bindings[ACTION_LOOK_LEFT] = { 0, GpBtn::NONE, GpBtn::NONE, GpAxis::RightX, -0.3f };
+    bindings[ACTION_LOOK_RIGHT] = { 0, GpBtn::NONE, GpBtn::NONE, GpAxis::RightX,  0.3f };
 
-    bindings[ACTION_START]      = { KEY_ESCAPE,      GpBtn::Start,   GpBtn::NONE,        GpAxis::NONE,   0 };
-    bindings[ACTION_SELECT]     = { KEY_TAB,         GpBtn::Back,    GpBtn::NONE,        GpAxis::NONE,   0 };
+    bindings[ACTION_OPEN_CLOSE_MENU] = { KEY_ESCAPE, GpBtn::Start, GpBtn::NONE, GpAxis::NONE,   0 };
 
-    bindings[ACTION_MENU_UP]      = { KEY_UP,         GpBtn::DpadUp,    GpBtn::NONE,      GpAxis::LeftY, -0.5f };
-    bindings[ACTION_MENU_DOWN]    = { KEY_DOWN,       GpBtn::DpadDown,  GpBtn::NONE,      GpAxis::LeftY,  0.5f };
-    bindings[ACTION_MENU_LEFT]    = { KEY_LEFT,       GpBtn::DpadLeft,  GpBtn::NONE,      GpAxis::LeftX, -0.5f };
-    bindings[ACTION_MENU_RIGHT]   = { KEY_RIGHT,      GpBtn::DpadRight, GpBtn::NONE,      GpAxis::LeftX,  0.5f };
-    bindings[ACTION_MENU_CONFIRM] = { KEY_ENTER,     GpBtn::A,       GpBtn::NONE,        GpAxis::NONE,   0 };
-    bindings[ACTION_MENU_BACK]    = { KEY_ESCAPE,    GpBtn::B,       GpBtn::NONE,        GpAxis::NONE,   0 };
+    bindings[ACTION_MENU_UP] = { KEY_UP, GpBtn::DpadUp, GpBtn::NONE, GpAxis::LeftY, -0.5f };
+    bindings[ACTION_MENU_DOWN] = { KEY_DOWN, GpBtn::DpadDown, GpBtn::NONE, GpAxis::LeftY,  0.5f };
+    bindings[ACTION_MENU_LEFT] = { KEY_LEFT, GpBtn::DpadLeft, GpBtn::NONE, GpAxis::LeftX, -0.5f };
+    bindings[ACTION_MENU_RIGHT] = { KEY_RIGHT, GpBtn::DpadRight, GpBtn::NONE, GpAxis::LeftX,  0.5f };
+    bindings[ACTION_MENU_CONFIRM] = { KEY_ENTER, GpBtn::A, GpBtn::NONE, GpAxis::NONE,   0 };
+    bindings[ACTION_MENU_BACK] = { KEY_ESCAPE, GpBtn::B, GpBtn::NONE, GpAxis::NONE,   0 };
 }
 
 bool ActionInput::PollAction(Action action, PlatformInput* platform) const {
@@ -87,7 +86,8 @@ void ActionInput::Update(PlatformInput* platform) {
     bool gpConnected = platform->IsGamepadConnected();
     if (!gpConnected) {
         gamepadActive = false;
-    } else {
+    }
+    else {
         bool hasKb = platform->HasAnyKeyboardInput();
         bool hasGp = platform->HasAnyGamepadInput();
         if (hasGp) {
@@ -106,7 +106,8 @@ void ActionInput::Update(PlatformInput* platform) {
 
         if (s.down) {
             s.duration++;
-        } else {
+        }
+        else {
             s.duration = 0;
         }
     }
@@ -135,7 +136,8 @@ void ActionInput::Update(PlatformInput* platform) {
         float ry = platform->GetRightStickY();
         lookX = (s32)(rx * 127.0f);
         lookY = (s32)(ry * 127.0f);
-    } else {
+    }
+    else {
         lookX = 0;
         lookY = 0;
     }
@@ -219,17 +221,12 @@ s32 ActionInput::ResolveGameAction(s32 direction) const {
     }
 
     // Priority 1: Dive roll
-    if (IsHeld(ACTION_DIVE_ROLL)) {
+    if (JustPressed(ACTION_DIVE_ROLL)) {
         return GA_DIVE_ROLL;
     }
 
-    // Priority 2: Counter
-    if (IsHeld(ACTION_COUNTER)) {
-        return GA_COUNTER;
-    }
-
     // Priority 3: Punch variants
-    if (IsHeld(ACTION_PUNCH)) {
+    if (JustPressed(ACTION_PUNCH)) {
         if (direction & 2) {
             return GA_BACK_PUNCH;
         }
@@ -240,7 +237,7 @@ s32 ActionInput::ResolveGameAction(s32 direction) const {
     }
 
     // Priority 4: Kick variants
-    if (IsHeld(ACTION_KICK)) {
+    if (JustPressed(ACTION_KICK)) {
         if (direction & 2) {
             return GA_BACK_KICK;
         }
@@ -259,6 +256,9 @@ s32 ActionInput::ResolveGameAction(s32 direction) const {
     }
 
     // Priority 6: Grab variants
+    // PSX FindActionRequest returns combat/grab while held (not just JustPressed).
+    // This is needed for door interaction: the door check reads commandBits
+    // one frame after _Stand dispatches, so the grab bit must persist.
     if (IsHeld(ACTION_GRAB)) {
         if ((direction & 1) && GetDuration(ACTION_GRAB) >= GRAB_HOLD_THRESHOLD) {
             return GA_GRAB_FWD_HELD;

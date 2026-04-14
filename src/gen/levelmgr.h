@@ -52,6 +52,7 @@ public:
     OriginalBasic* FindModel(ModelListEnum listType, s32 id);
     OriginalBasic* FindModel(s32 id);
     OriginalBasic* FindSTree(s32 id);
+    OriginalBasic* FindGeo(s32 id);
 
     void* AddPermMemory(s32 size, s32 id);
     void DeleteAllPermMem();

@@ -2,6 +2,7 @@
 #include "gen/game.h"
 #include "gen/world.h"
 #include "gen/handler.h"
+#include "gen/ai.h"
 
 ScoreManager* g_scoreManager = nullptr;
 
@@ -153,8 +154,9 @@ void ScoreManager::SetPar() {
     MARKFUNCTION(0x8004CEA0);
 
     // PSX: parValue = GetParPointValue__11WorldPoints(&WorldPointLists);
-    // WorldPoints not yet wired - default to 1.
-    parValue = 1;
+    parValue = WorldPoints_GetParValue();
+    if (parValue <= 0)
+        parValue = 1;
 }
 
 // PSX: OpenAllLevels__12ScoreManager (SCOREMGR.CPP:376, 0x8004CEE0)

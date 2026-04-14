@@ -1,3 +1,4 @@
+#include "gen/common.h"
 #include "pc/debugui.h"
 #include "imgui.h"
 #include "gen/game.h"
@@ -13,7 +14,7 @@
 #include "snd/sound.h"
 #include "pc/audio.h"
 #include "p3d/lvector.h"
-#include <cstdio>
+#include "gen/display.h"
 
 static bool sEnabled = false;
 static bool sShowPlayer = false;
@@ -24,6 +25,22 @@ static bool sShowGame = false;
 static bool sShowImGuiDemo = false;
 static s32 sAnimSelectedEnum = 0;
 static s32 sAnimSelectedLoopType = ANIM_LOOP;
+static bool sInputRoutingOverride = false;
+static s32 sInputRoutingSelection = 0; // 0 = Camera input, 1 = Player input
+
+bool DebugUI::IsPlayerInputAllowed() {
+    if (!sInputRoutingOverride) {
+        return true;
+    }
+    return sInputRoutingSelection == 1;
+}
+
+bool DebugUI::IsDebugCameraInputAllowed() {
+    if (!sInputRoutingOverride) {
+        return true;
+    }
+    return sInputRoutingSelection == 0;
+}
 
 static const char* GameStateName(GameState s) {
     switch (s) {
@@ -68,7 +85,7 @@ static const char* ActionStateName(s32 s) {
         case AS_DIVE_ROLL: return "DiveRoll";
         case AS_PAUSE: return "Pause/RunJump";
         case AS_JUMP: return "Jump";
-        case AS_LEDGE_LATCH: return "LedgeLatch";
+        case AS_WALL_JUMP: return "WallJump";
         case AS_RUN: return "Run";
         case AS_BACKFLIP: return "Backflip";
         case AS_STRAFE: return "Strafe";
@@ -81,7 +98,7 @@ static const char* ActionStateName(s32 s) {
         case AS_PUSH_OBJECT: return "PushObject";
         case AS_SLOPE_SLIDE: return "SlopeSlide";
         case AS_TABLE_ROLL: return "TableRoll";
-        case AS_POLE_SWING: return "PoleSwing";
+        case AS_LEDGE_LATCH: return "LedgeLatch";
         case AS_LEDGE_PULLUP: return "LedgePullup";
         case AS_PUNCH_ATTACK: return "PunchAttack";
         case AS_KICK_ATTACK: return "KickAttack";
@@ -123,10 +140,11 @@ static const char* StateDispatchName(u16 d) {
         case SD_THROW: return "Throw";
         case SD_PICKUP: return "Pickup";
         case SD_GET_UP: return "GetUp";
-        case SD_POLE_IDLE: return "PoleIdle";
-        case SD_POLE_SWING: return "PoleSwing";
+        case SD_HORIZONTAL_POLE: return "HorizontalPole";
         case SD_SLOPE_SLIDE: return "SlopeSlide";
         case SD_DEAD_PLAYER: return "DeadPlayer";
+        case SD_CLIMB_LADDER: return "ClimbLadder";
+        case SD_LADDER_DISMOUNT: return "LadderDismount";
         case SD_HARDFALL: return "HardFall";
         case SD_HARDLAND: return "HardLand";
         case SD_FLIP: return "Flip";
@@ -189,6 +207,20 @@ void DebugUI::Draw() {
     if (ImGui::IsKeyPressed(ImGuiKey_M, false) && ImGui::GetIO().KeyCtrl) {
         sEnabled = !sEnabled;
     }
+
+    if (ImGui::IsKeyPressed(ImGuiKey_B, false) && ImGui::GetIO().KeyCtrl) {
+        Camera* cam = g_display->GetCamera();
+
+        if (cam->GetMode() == CAM_MODE_DEFAULT) {
+            cam->SetMode(CAM_MODE_FOLLOW);
+            sInputRoutingOverride = false;
+        }
+        else {
+            cam->SetMode(CAM_MODE_DEFAULT);
+            sInputRoutingOverride = true;
+        }
+    }
+
     if (!sEnabled) {
         return;
     }
@@ -293,6 +325,32 @@ void DebugUI::Draw() {
         if (ImGui::Begin("Camera", &sShowCamera)) {
             Camera& cam = g_game->GetCamera();
             ImGui::Text("Mode: %s", CameraModeName(cam.GetMode()));
+
+            s32 camModeIdx = (s32)cam.GetMode();
+            if (camModeIdx < CAM_MODE_DEFAULT || camModeIdx > CAM_MODE_RIGID) {
+                camModeIdx = CAM_MODE_FOLLOW;
+            }
+            if (ImGui::BeginCombo("Camera Mode", CameraModeName((CameraMode)camModeIdx))) {
+                for (s32 mode = CAM_MODE_DEFAULT; mode <= CAM_MODE_RIGID; mode++) {
+                    bool selected = (camModeIdx == mode);
+                    if (ImGui::Selectable(CameraModeName((CameraMode)mode), selected)) {
+                        cam.SetMode((CameraMode)mode);
+                    }
+                    if (selected) {
+                        ImGui::SetItemDefaultFocus();
+                    }
+                }
+                ImGui::EndCombo();
+            }
+
+            ImGui::SeparatorText("Input Routing Override");
+            ImGui::Checkbox("Override input owner while Debug UI open", &sInputRoutingOverride);
+            if (sInputRoutingOverride) {
+                ImGui::RadioButton("Camera input only", &sInputRoutingSelection, 0);
+                ImGui::SameLine();
+                ImGui::RadioButton("Player input only", &sInputRoutingSelection, 1);
+            }
+
             LVectorText("Position", cam.GetPosition());
             LVectorText("Target", cam.GetTargetPos());
             ImGui::Text("FOV: %d (desired: %d)", cam.GetCurFOV(), cam.GetDesiredFOV());
@@ -338,6 +396,9 @@ void DebugUI::Draw() {
                     ImGui::EndCombo();
                 }
 
+                const bool overrideActive = p->Debug_IsAnimationOverrideActive();
+                ImGui::Text("Override: %s", overrideActive ? "Active" : "Off");
+
                 if (ImGui::Button("Load")) {
                     if (g_characterManager) {
                         g_characterManager->LoadAnimationBatch(0, sAnimSelectedEnum, nullptr);
@@ -345,19 +406,19 @@ void DebugUI::Draw() {
                 }
                 ImGui::SameLine();
                 if (ImGui::Button("Play")) {
-                    p->PlayAnimation(sAnimSelectedEnum, sAnimSelectedLoopType);
+                    p->Debug_PlayAnimation(sAnimSelectedEnum, sAnimSelectedLoopType);
                 }
                 ImGui::SameLine();
                 if (ImGui::Button("Pause")) {
-                    p->PauseAnimation();
+                    p->Debug_PauseAnimation();
                 }
                 ImGui::SameLine();
                 if (ImGui::Button("Resume")) {
-                    p->ResumeAnimation();
+                    p->Debug_ResumeAnimation();
                 }
                 ImGui::SameLine();
                 if (ImGui::Button("Stop")) {
-                    p->StopAnimation();
+                    p->Debug_StopAnimation();
                 }
 
                 CharSlot* playerSlot = nullptr;
@@ -420,7 +481,7 @@ void DebugUI::Draw() {
 
                 ImGui::SeparatorText("Current Playback");
                 ImGui::Text("Current Anim Enum: %d", p->currentAnimEnum);
-                ImGui::Text("Anim State: %s", p->IsAnimationPaused() ? "Paused" : "Playing");
+                ImGui::Text("Anim State: %s", p->Debug_IsAnimationPaused() ? "Paused" : "Playing");
 
                 if (anim) {
                     ImGui::Text("Frame: %d (0x%X)", anim->currentFrame >> 16, anim->currentFrame);

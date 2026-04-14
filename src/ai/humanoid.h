@@ -18,7 +18,7 @@ enum ActionState : u32 {
     AS_DIVE_ROLL = 4,
     AS_PAUSE = 6,             // Humanoid: pause/guard. Player: running jump
     AS_JUMP = 8,              // standing jump (no tables)
-    AS_LEDGE_LATCH = 9,       // PSX Player case 9: ledge grab
+    AS_WALL_JUMP = 9,         // PSX Player case 9: wall jump
     AS_RUN = 10,
     AS_BACKFLIP = 11,         // PSX Player case 11: face enemy + strafe init
     AS_STRAFE = 12,
@@ -31,8 +31,11 @@ enum ActionState : u32 {
     AS_PUSH_OBJECT = 19,      // PSX Player case 19: push object
     AS_SLOPE_SLIDE = 20,      // PSX Player case 20: slope slide
     AS_TABLE_ROLL = 21,       // PSX Player case 21: table roll
-    AS_POLE_SWING = 23,       // PSX Player case 23: horizontal pole swing
+    AS_LEDGE_LATCH = 23,      // PSX: ledge hang sequence
     AS_LEDGE_PULLUP = 24,     // PSX: ledge pull-up sequence
+    AS_LADDER_CLIMB_DOWN = 25, // PSX 0x19: climbing down on ladder (entered from top)
+    AS_LADDER_CLIMB_UP = 26,   // PSX 0x1A: climbing up on ladder (entered from bottom)
+    AS_LADDER_CLIMBING = 27,   // PSX 0x1B: active ladder climbing / position adjustment
     AS_LADDER_DISMOUNT = 28,  // PSX: exit ladder (jump off)
     AS_PUNCH_ATTACK = 32,
     AS_KICK_ATTACK = 34,
@@ -76,10 +79,13 @@ enum StateDispatch : u16 {
     SD_PICKUP = 40,
     // PSX vtable indices 41-48 used by Player-specific handlers
     SD_GET_UP = 43,   // PSX case 68: get up from knockdown
-    SD_POLE_IDLE = 44,   // PSX case 18: pole/table idle
-    SD_POLE_SWING = 45,   // PSX case 23: horizontal pole swing
+    SD_HORIZONTAL_POLE = 44,   // PSX case 18: horizontal pole swing setup/state
+    SD_LEDGE_LATCH = 45,   // PSX case 23: ledge latch
+    SD_LEDGE_PULLUP = 46,   // PSX case 24: ledge pull-up
     SD_SLOPE_SLIDE = 47,   // PSX case 20: slope slide
     SD_DEAD_PLAYER = 48,   // PSX case 72: player death
+    SD_CLIMB_LADDER = 49,   // PSX case 27: climb ladder
+    SD_LADDER_DISMOUNT = 50,   // PSX case 28: ladder dismount
     // Player-specific dispatch via direct function pointer (stateDispatch = -1 on PSX)
     SD_HARDFALL = 250,
     SD_HARDLAND = 251,
@@ -87,8 +93,6 @@ enum StateDispatch : u16 {
     SD_INACTIVE_IDLE = 253,
     SD_PUSH_OBJECT = 254,
     SD_TABLE_ROLL = 255,
-    SD_LEDGE_LATCH = 256,
-    SD_LEDGE_PULLUP = 257,
     SD_DO_STAND = 258,
 };
 
@@ -203,7 +207,6 @@ public:
     inline bool HasGrabForward() const { return HasAction(GA_GRAB_FORWARD); }
     inline bool HasGrabHeld() const { return HasAction(GA_GRAB_HELD); }
     inline bool HasGrabFwdHeld() const { return HasAction(GA_GRAB_FWD_HELD); }
-    inline bool HasCounter() const { return HasAction(GA_COUNTER); }
     inline bool HasAIDiveRoll() const { return HasAction(GA_AI_DIVE_ROLL); }
 
     // Check if any attack bit (7-20) is set
@@ -354,6 +357,8 @@ public:
     s32 LoadDialog(u32 dialogID, s32 priority);
     s32 PlayDialog(u32 dialogID, s32 priority);
     s32 EnterCombatCombo();
+    void PrepareLedgeLatch(const LVector& correctionPos, const LVector& normal);
+    bool CheckForLedges();
     bool CheckForLedges2(LVector& outNormal, LVector& outCorrectionPos, s32 clearance);
     s32 CheckForPickup();
     s32 RestorePositionFromBip01();
@@ -380,6 +385,8 @@ public:
     virtual void _Stunned();
     virtual void _Throw();
     virtual void _Pickup();
+    virtual void _LedgeLatch();
+    virtual void _LedgePullup();
     virtual void _LadderDismount();
     virtual void _ClimbLadder();
     virtual void CreateSound();
@@ -389,4 +396,5 @@ public:
 
     void DeleteRightHandObj();
     void DeleteLeftHandObj();
+    void DropPickup(s32 dropRight, s32 dropLeft);
 };

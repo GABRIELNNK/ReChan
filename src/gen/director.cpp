@@ -1,5 +1,7 @@
 #include "gen/director.h"
 #include "gen/ai.h"
+#include "gen/model.h"
+#include "ai/obstacle.h"
 #include "ai/humanoid.h"
 #include "ai/player.h"
 #include "gen/charmgr.h"
@@ -28,6 +30,9 @@ namespace {
     static s32 directorDialogLimit = 180;
     static s32* returnAddress[8] = {};
     static Thing* g_codeSnipThing = nullptr; // PSX: gp[869]
+    // PSX: gp+3476 = gp[869] — same as g_codeSnipThing! ProcessDoorFunc/LadderFunc read
+    // the door/ladder from this global. SetCodeSnip stores the thing here via gp[869].
+    static Thing*& g_selectedDoorOrLadder = g_codeSnipThing;
     static s32 g_dialogHandle = 0;          // PSX: gp[3496/4=874]
 
     static s32 start_generic[12] = { 9, 6, -1, 98, 102, 40, 103, 256, 100, 0, 5, 0 };
@@ -52,16 +57,26 @@ namespace {
     static s32 death_fall_pavement[2] = { 115, 0 };
     static s32 death_fall_water[2] = { 115, 0 };
     static s32 death_generic[2] = { 115, 0 };
-    static s32 death_fall_goo[35] = {
+    static s32 death_fall_goo[9] = {
         14, 84386293, 69, 3, -2146597480,
-        14, 84386293, 69, 4,
+        14, 84386293, 69, 4
+    };
+
+    // PSX: NISdoor1 at 0x800D85E4 (WORLDPTS.CPP)
+    // Door enter cutscene: disable input, attach to door, open, wait, teleport, restore
+    static s32 NISdoor1[23] = {
         9, 56, 62, 84386293, 5, 56, 58, 5,
-        6, -1, 6, 15,
-        56, 59, 5,
-        6, 30,
-        56, 63, 5,
-        20, 8, 2,
-        9, 116, 0
+        6, -1, 6, 15, 56, 59, 5, 6,
+        30, 56, 63, 5, 20, 8, 2
+    };
+
+    // PSX: NISdoor1WithDialog at 0x800D8640 (WORLDPTS.CPP)
+    // Same as NISdoor1 but loads and plays dialog first
+    static s32 NISdoor1WithDialog[28] = {
+        9, 116, 0, 109, 99, 56, 62, 84386293,
+        5, 119, 56, 58, 5, 6, -1, 6,
+        15, 56, 59, 5, 6, 30, 56, 63,
+        5, 20, 8, 2
     };
 
     static s32 levelEnd[7] = { 9, 73, 74, 126, 26, 9, 2 };
@@ -407,6 +422,8 @@ namespace {
         RegisterScriptRegion(0x800D855Cu, death_fall_water, ScriptArrayWordCount(death_fall_water));
         RegisterScriptRegion(0x800D8598u, death_generic, ScriptArrayWordCount(death_generic));
         RegisterScriptRegion(0x800D85C0u, death_fall_goo, ScriptArrayWordCount(death_fall_goo));
+        RegisterScriptRegion(0x800D85E4u, NISdoor1, ScriptArrayWordCount(NISdoor1));
+        RegisterScriptRegion(0x800D8640u, NISdoor1WithDialog, ScriptArrayWordCount(NISdoor1WithDialog));
         RegisterScriptRegion(0x800D86B0u, levelEnd, ScriptArrayWordCount(levelEnd));
         RegisterScriptRegion(0x800D86CCu, wait_subroutine, ScriptArrayWordCount(wait_subroutine));
         RegisterScriptRegion(0x800D86E0u, defaultBeginScript, ScriptArrayWordCount(defaultBeginScript));
@@ -436,6 +453,8 @@ namespace {
         RegisterScriptRegion(ToVirtualAddress(death_fall_water), death_fall_water, ScriptArrayWordCount(death_fall_water));
         RegisterScriptRegion(ToVirtualAddress(death_generic), death_generic, ScriptArrayWordCount(death_generic));
         RegisterScriptRegion(ToVirtualAddress(death_fall_goo), death_fall_goo, ScriptArrayWordCount(death_fall_goo));
+        RegisterScriptRegion(ToVirtualAddress(NISdoor1), NISdoor1, ScriptArrayWordCount(NISdoor1));
+        RegisterScriptRegion(ToVirtualAddress(NISdoor1WithDialog), NISdoor1WithDialog, ScriptArrayWordCount(NISdoor1WithDialog));
         RegisterScriptRegion(ToVirtualAddress(gotopoint), gotopoint, ScriptArrayWordCount(gotopoint));
         RegisterScriptRegion(ToVirtualAddress(NISladder1), NISladder1, ScriptArrayWordCount(NISladder1));
         RegisterScriptRegion(ToVirtualAddress(death), death, ScriptArrayWordCount(death));
@@ -887,12 +906,13 @@ void Director::Process() {
 
             case DirectorOpcode::WaitForNisControl:
             {
-                // PSX: reads thingRef, finds humanoid, checks if its behaviour
-                // is NisControl. If so, wait (block). If not, continue.
                 const u32 thingRef = static_cast<u32>(scriptPtr[1]);
                 Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
-                // PSX checks humanoid->behaviour->funcPtr == NisControl__9Behaviour
-                // For now, don't block - NIS behaviours not yet implemented
+                if (humanoid && humanoid->behaviour &&
+                    humanoid->behaviour->handler == Behaviour::NisControl) {
+                    // Still walking to destination - block script
+                    return;
+                }
                 scriptPtr += 2;
                 break;
             }
@@ -905,14 +925,13 @@ void Director::Process() {
 
             case DirectorOpcode::PlayThingDynamicAnim:
             {
-                // PSX: reads thingRef and animEnum, calls PlayDynamicAnim on model
                 const u32 thingRef = static_cast<u32>(scriptPtr[1]);
-                const s32 animEnum = scriptPtr[2];
+                const s32 animEnumVal = scriptPtr[2];
                 scriptPtr += 3;
                 Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
                 if (humanoid && humanoid->model) {
-                    // PSX: PlayDynamicAnim__6SModeli(thing->model, animEnum)
-                    // TODO: SModel::PlayDynamicAnim not yet reversed
+                    SModel* sm = static_cast<SModel*>(humanoid->model);
+                    sm->PlayDynamicAnim(animEnumVal);
                 }
                 break;
             }
@@ -1052,13 +1071,11 @@ void Director::Process() {
 
             case DirectorOpcode::DropPickup:
             {
-                // PSX: finds humanoid, calls DropPickup(humanoid, 1, 1)
                 const u32 thingRef = static_cast<u32>(scriptPtr[1]);
                 scriptPtr += 2;
                 Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
                 if (humanoid) {
-                    // PSX: DropPickup__8Humanoidii(humanoid, 1, 1)
-                    // TODO: Humanoid::DropPickup not yet reversed
+                    humanoid->DropPickup(1, 1);
                 }
                 break;
             }
@@ -1078,13 +1095,17 @@ void Director::Process() {
                 scriptPtr += 1;
                 if (Player::s_player) {
                     const LVector target = { nisPointX, nisPointY, nisPointZ };
-                    Player::s_player->FacePoint(target, 1);
-                    // PSX: also sets player homePos to nisPoint
+                    Player::s_player->FacePointDesired(target);
                     Player::s_player->homePos.x = nisPointX;
                     Player::s_player->homePos.y = nisPointY;
                     Player::s_player->homePos.z = nisPointZ;
-                    // PSX: sets behaviour to NisControl
-                    // TODO: behaviour system not yet reversed
+                    Behaviour* beh = Player::s_player->behaviour;
+                    if (beh) {
+                        beh->destPoint = target;
+                        beh->handlerThisOffset = 0;
+                        beh->handlerDispatch = -1;
+                        beh->handler = Behaviour::NisControl;
+                    }
                 }
                 break;
 
@@ -1253,12 +1274,15 @@ void Director::Process() {
 
             case DirectorOpcode::SetNisPoint:
             {
-                // PSX: reads point index, looks up WorldPoints, stores position
+                // PSX: reads point CRC, looks up WorldPoints, stores position
                 const s32 pointIdx = scriptPtr[1];
                 scriptPtr += 2;
-                // PSX: GetNISPoint__11WorldPointsUl(&WorldPointLists, pointIdx)
-                // TODO: WorldPoints lookup not yet reversed
-                // For now, nisPoint stays at whatever was last set
+                WorldPointNode* wpn = WorldPoints_GetNISPoint(static_cast<u32>(pointIdx));
+                if (wpn) {
+                    nisPointX = wpn->pos.x;
+                    nisPointY = wpn->pos.y;
+                    nisPointZ = wpn->pos.z;
+                }
                 break;
             }
 
@@ -1667,8 +1691,15 @@ void Director::ProcessHumanoidFunc() {
             }
 
             case DirectorHumanoidCmd::PlayDynamicAnim:
+            {
+                const s32 animEnumVal = *scriptPtr;
                 scriptPtr += 1;
+                if (humanoid && humanoid->model) {
+                    SModel* sm = static_cast<SModel*>(humanoid->model);
+                    sm->PlayDynamicAnim(animEnumVal);
+                }
                 break;
+            }
 
             case DirectorHumanoidCmd::SetStandState:
                 if (humanoid) {
@@ -1730,7 +1761,13 @@ void Director::ProcessLadderFunc() {
             }
 
             case DirectorLadderCmd::TeleportPlayer:
+            {
+                Ladder* ladder = dynamic_cast<Ladder*>(g_selectedDoorOrLadder);
+                if (ladder) {
+                    ladder->TeleportPlayer();
+                }
                 break;
+            }
 
             case DirectorLadderCmd::CameraLookAtHatch:
                 if (Player::s_player) {
@@ -1745,9 +1782,23 @@ void Director::ProcessLadderFunc() {
                 break;
 
             case DirectorLadderCmd::CloseHatch:
+            {
+                Ladder* ladder = dynamic_cast<Ladder*>(g_selectedDoorOrLadder);
+                if (ladder) {
+                    ladder->CloseHatch();
+                }
                 break;
+            }
 
             case DirectorLadderCmd::ClearNis:
+                if (Player::s_player) {
+                    Player::s_player->FaceThingDesired(nullptr);
+                    if (Player::s_player->behaviour) {
+                        Player::s_player->behaviour->handlerThisOffset = 0;
+                        Player::s_player->behaviour->handlerDispatch = -1;
+                        Player::s_player->behaviour->handler = nullptr;
+                    }
+                }
                 break;
 
             default:
@@ -1777,14 +1828,41 @@ void Director::ProcessDoorFunc() {
 
         switch (op) {
             case DirectorDoorCmd::SetDoor:
+            {
+                const u32 thingRef = static_cast<u32>(*scriptPtr);
                 scriptPtr += 1;
+
+                Thing* thing = nullptr;
+                if (g_ai) {
+                    ccNode* n = g_ai->moveList.FindNodeCRC(thingRef);
+                    if (n) {
+                        thing = static_cast<Thing*>(n);
+                    }
+                }
+
+                if (thing) {
+                    g_selectedDoorOrLadder = thing;
+                }
                 break;
+            }
 
             case DirectorDoorCmd::OpenDoor:
+            {
+                Door* door = dynamic_cast<Door*>(g_selectedDoorOrLadder);
+                if (door) {
+                    door->Open();
+                }
                 break;
+            }
 
             case DirectorDoorCmd::SetDoorState:
+            {
+                Door* door = dynamic_cast<Door*>(g_selectedDoorOrLadder);
+                if (door) {
+                    door->doorState = 4;
+                }
                 break;
+            }
 
             case DirectorDoorCmd::FaceDoorPoint:
             {
@@ -1792,9 +1870,21 @@ void Director::ProcessDoorFunc() {
                 scriptPtr += 1;
 
                 Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
-                if (humanoid) {
-                    const LVector target = { nisPointX, nisPointY, nisPointZ };
-                    humanoid->FacePoint(target, 1);
+                Door* door = dynamic_cast<Door*>(g_selectedDoorOrLadder);
+                if (humanoid && door) {
+                    LVector localCenter = {};
+                    localCenter.x = ((s32)door->collBox.minX + (s32)door->collBox.maxX) / 2;
+                    localCenter.y = ((s32)door->collBox.minY + (s32)door->collBox.maxY) / 2;
+                    localCenter.z = ((s32)door->collBox.minZ + (s32)door->collBox.maxZ) / 2;
+
+                    s32 sinY = rmSin16(door->orientation.y);
+                    s32 cosY = rmSin16(door->orientation.y + 0x4000);
+
+                    LVector worldCenter = {};
+                    worldCenter.x = door->pos.x + (s32)(((s64)cosY * localCenter.x) >> 16) + (s32)(((s64)sinY * localCenter.z) >> 16);
+                    worldCenter.y = door->pos.y + localCenter.y;
+                    worldCenter.z = door->pos.z + (s32)((-(s64)sinY * localCenter.x) >> 16) + (s32)(((s64)cosY * localCenter.z) >> 16);
+                    humanoid->FacePointDesired(worldCenter);
                 }
                 break;
             }
@@ -1805,8 +1895,9 @@ void Director::ProcessDoorFunc() {
                 scriptPtr += 1;
 
                 Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
-                if (humanoid) {
-                    humanoid->FaceAngleY(humanoid->orientation.y, 1);
+                Door* door = dynamic_cast<Door*>(g_selectedDoorOrLadder);
+                if (humanoid && door) {
+                    humanoid->FaceAngleY(door->orientation.y, 1);
                 }
                 break;
             }
@@ -1817,14 +1908,37 @@ void Director::ProcessDoorFunc() {
                 scriptPtr += 1;
 
                 Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
-                if (humanoid) {
+                Door* door = dynamic_cast<Door*>(g_selectedDoorOrLadder);
+                if (humanoid && door) {
+                    LVector localCenter = {};
+                    localCenter.x = ((s32)door->collBox.minX + (s32)door->collBox.maxX) / 2;
+                    localCenter.y = ((s32)door->collBox.minY + (s32)door->collBox.maxY) / 2;
+                    localCenter.z = ((s32)door->collBox.minZ + (s32)door->collBox.maxZ) / 2;
+
+                    s32 sinY = rmSin16(door->orientation.y);
+                    s32 cosY = rmSin16(door->orientation.y + 0x4000);
+
+                    LVector attachPos = {};
+                    attachPos.x = door->pos.x + (s32)(((s64)cosY * localCenter.x) >> 16) + (s32)(((s64)sinY * localCenter.z) >> 16);
+                    attachPos.y = humanoid->homePos.y;
+                    attachPos.z = door->pos.z + (s32)((-(s64)sinY * localCenter.x) >> 16) + (s32)(((s64)cosY * localCenter.z) >> 16);
+
+                    humanoid->homePos = attachPos;
+                    humanoid->pos = attachPos;
                     humanoid->SetActionState(AS_STAND, 0);
                 }
                 break;
             }
 
             case DirectorDoorCmd::TeleportThroughDoor:
+            {
+                Door* door = dynamic_cast<Door*>(g_selectedDoorOrLadder);
+                if (door) {
+                    door->TeleportPlayer();
+                    door->Reset();
+                }
                 break;
+            }
 
             default:
                 break;
@@ -2222,6 +2336,20 @@ void Director::cleanUpTexAnim() {
     // Texture animation inventory wiring is still pending.
 }
 
+// Script accessor methods - provide access to file-local script arrays
+// for obstacle.cpp cutscene triggers (Door/Ladder).
+s32* Director::GetNISDoor1Script() {
+    return NISdoor1;
+}
+
+s32* Director::GetNISDoor1WithDialogScript() {
+    return NISdoor1WithDialog;
+}
+
+s32* Director::GetNISLadder1Script() {
+    return NISladder1;
+}
+
 // PSX: runDirector (DIRECTOR.CPP:2570, 0x8003BB0C) - handler callback
 void runDirector(Handler* h) {
     MARKFUNCTION(0x8003BB0C);
@@ -2238,7 +2366,6 @@ void DrawDirectorOverlays(Handler* h) {
     if (g_director) {
         g_director->HandleWideScreen();
         g_director->DrawWideScreenPolys();
-        // PSX: DrawEffects__7Effectsi(4096) - particle effects in NIS layer
-        // TODO: Effects system not yet reversed
+        // PSX: DrawEffects__7Effectsi(4096) - requires Effects class (gEffectsList, effect types)
     }
 }
