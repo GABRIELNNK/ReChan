@@ -8,6 +8,8 @@
 #include "gen/display.h"
 #include "gen/camera.h"
 #include "gen/game.h"
+#include "gen/world.h"
+#include "ai/player.h"
 #include "pc/log.h"
 
 FrontEndVolume::FrontEndVolume(const LVector* pos, u16 type) : Obstacle(pos, type) {
@@ -81,9 +83,14 @@ void FrontEndVolume::HandleHumanoidCollision(Humanoid* hum) {
         }
     }
     else {
-        // PSX: ShowLevel on HUD destSelect for low-code (hub door) volumes.
         if (g_hud) {
-            g_hud->destSelect.ShowLevel(levelCode);
+            if (g_hud->destSelect.currentLevel != levelCode) {
+                if (Player::s_player) {
+                    g_hud->DisplayTake(Player::s_player->livesLeft, levelCode < 1);
+                }
+                g_arrowInside = levelCode > 0 ? 1 : 0;
+                g_hud->destSelect.ShowLevel(levelCode);
+            }
         }
     }
 }

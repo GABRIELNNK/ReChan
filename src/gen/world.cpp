@@ -888,14 +888,19 @@ bool World::LoadLevelIndex(u32 levelIndex) {
                 // PSX: additional check: (!v10 || MEMORY[0x24] != 11)
                 doShowLevel = true;
             }
+            if (g_destSelectReturnPosValid) {
+                doShowLevel = true;
+            }
 
             LVector returnPos;
-            if (doShowLevel) {
+            if (doShowLevel && g_destSelectReturnPosValid) {
                 returnPos = g_destSelectReturnPos;
                 if (g_hud) {
                     g_hud->destSelect.ShowLevel(0);
-                    s32 prevLevelID = levelList[previousLevelIndex * 2];
-                    g_hud->destSelect.ShowLevel(prevLevelID);
+                    if (previousLevelIndex < (u32)levelCount) {
+                        s32 prevLevelID = levelList[previousLevelIndex * 2];
+                        g_hud->destSelect.ShowLevel(prevLevelID);
+                    }
                 }
                 g_arrowInside = 1;
             } else {
@@ -906,12 +911,24 @@ bool World::LoadLevelIndex(u32 levelIndex) {
                 g_arrowInside = 0;
             }
 
+            LVector playerDelta = {
+                returnPos.x - player->pos.x,
+                returnPos.y - player->pos.y,
+                returnPos.z - player->pos.z,
+            };
+
             player->homePos = returnPos;
             player->pos = returnPos;
+
+            g_destSelectReturnPosValid = false;
 
             if (g_display) {
                 Camera* cam = g_display->GetCamera();
                 if (cam) {
+                    const LVector& camPos = cam->GetPosition();
+                    cam->SetPosition(camPos.x + playerDelta.x,
+                                     camPos.y + playerDelta.y,
+                                     camPos.z + playerDelta.z);
                     cam->SetLookAtTarget(player, 1);
                 }
             }
