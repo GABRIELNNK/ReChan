@@ -5,6 +5,7 @@
 #include "gen/blockmgr.h"
 #include "gen/colmgr.h"
 #include "ai/colfight.h"
+#include "ai/colfight.h"
 #include "pc/log.h"
 #include "gen/camera.h"
 #include "gen/path.h"
@@ -15,6 +16,11 @@
 #include "ai/fevolume.h"
 #include "ai/activezn.h"
 #include "ai/arrow.h"
+#include "ai/door.h"
+#include "ai/ladder.h"
+#include "ai/trapdoor.h"
+#include "ai/platform.h"
+#include "ai/teleporter.h"
 
 AI* g_ai = nullptr;
 
@@ -246,6 +252,10 @@ void AI::AddThingNoTagList(const char* name, u16 type,
             }
             else if (type == AITypes::TT_TRAPDOOR) {
                 thing = new TrapDoor(pos, type);
+            }
+            else if (type == AITypes::TT_PLATFORM) {
+                thing = new Platform(pos, type);
+                LOG("[AI] Platform created: name=%s pos=(%d,%d,%d)", name ? name : "null", pos->x, pos->y, pos->z);
             }
             // Type 472 = Arrow (hub navigational arrow)
             else if (type == AITypes::TT_ARROW) {
@@ -619,10 +629,16 @@ void AI::Populate() {
             WorldPoints_AddPoint(pt);
             continue;
         }
-        if (pt->type != 6)
+        if (pt->type != 6) {
+            LOG("[AI::Populate] point: type=%u subType=%u name=%s crc=0x%08X (skipped, type!=6)",
+                pt->type, pt->subType, pt->GetName() ? pt->GetName() : "null", pt->GetNameCRC());
             continue;
+        }
 
         u16 subType = pt->subType;
+        LOG("[AI::Populate] point: type=%u subType=%u name=%s crc=0x%08X pos=(%d,%d,%d)",
+            pt->type, subType, pt->GetName() ? pt->GetName() : "null", pt->GetNameCRC(),
+            pt->pos.x, pt->pos.y, pt->pos.z);
 
         if (subType != 0) {
             // PSX: attrib 5 = model name string for entity creation
@@ -670,6 +686,10 @@ void AI::Populate() {
 
     // PSX: iterate meshes list - passes mesh->fileName (+60) as modelName
     for (DBMesh* mesh = g_database->GetFirstMesh(); mesh; mesh = static_cast<DBMesh*>(mesh->next)) {
+        LOG("[AI::Populate] mesh: type=%u subType=%u name=%s crc=0x%08X pos=(%d,%d,%d) model=%s",
+            mesh->type, mesh->subType, mesh->GetName() ? mesh->GetName() : "null",
+            mesh->GetNameCRC(), mesh->pos.x, mesh->pos.y, mesh->pos.z,
+            mesh->fileName ? mesh->fileName : "null");
         if (mesh->type != 6)
             continue;
         AddThingNoTagList(mesh->GetName(), mesh->subType, &mesh->pos,

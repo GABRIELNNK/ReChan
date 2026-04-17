@@ -14,6 +14,9 @@
 #include "snd/sound.h"
 #include "pc/audio.h"
 #include "p3d/lvector.h"
+#include "fe/femenumgr.h"
+#include "gen/ai.h"
+#include "ai/obstacle.h"
 #include "gen/display.h"
 
 static bool sEnabled = false;
@@ -254,6 +257,72 @@ void DebugUI::Draw() {
                 ImGui::Text("Grade: %d", g_scoreManager->currentGrade);
                 ImGui::Text("Gold Dragons: %d", g_scoreManager->currentGoldDragons);
                 ImGui::Text("Collectibles: %d", g_scoreManager->collectibleCount);
+
+                ImGui::SeparatorText("Level Unlock");
+                for (s32 level = 0; level < 7; level++) {
+                    bool unlocked = g_scoreManager->petalStats[level * 3].fightScore >= -1;
+                    char label[32];
+                    std::snprintf(label, sizeof(label), "Level %d", level + 1);
+                    if (ImGui::Checkbox(label, &unlocked)) {
+                        if (unlocked) {
+                            g_scoreManager->petalStats[level * 3].fightScore = -1;
+                        } else {
+                            g_scoreManager->petalStats[level * 3].fightScore = -2;
+                        }
+                    }
+                }
+                if (ImGui::Button("Unlock All Levels")) {
+                    g_scoreManager->OpenAllLevels();
+                    g_scoreManager->GiveAllDragons();
+                    if (g_feMenuMgr) {
+                        g_feMenuMgr->OpenDoors();
+                    }
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Lock All Levels")) {
+                    for (s32 level = 0; level < 7; level++) {
+                        for (s32 petal = 0; petal < 3; petal++) {
+                            g_scoreManager->petalStats[level * 3 + petal].fightScore = -2;
+                        }
+                    }
+                    g_scoreManager->petalStats[0].fightScore = -1;
+
+                    // Keep hub gate state in sync with newly-locked progression.
+                    if (g_ai) {
+                        for (ccMinNode* n = g_ai->moveList.head; n; n = n->next) {
+                            Thing* thing = static_cast<Thing*>(static_cast<ccNode*>(n));
+                            if (thing->thingType == AITypes::TT_DOOR ||
+                                thing->thingType == AITypes::TT_TELEPORTER ||
+                                thing->thingType == AITypes::TT_TRAPDOOR ||
+                                thing->thingType == AITypes::TT_PLATFORM ||
+                                thing->thingType == AITypes::TT_LADDER) {
+                                thing->Reset();
+                            }
+                        }
+                    }
+                }
+
+                ImGui::SeparatorText("Hub Gates");
+                if (ImGui::Button("Open Unlocked Gates")) {
+                    if (g_feMenuMgr) {
+                        g_feMenuMgr->OpenDoors();
+                    }
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Reset All Gates")) {
+                    if (g_ai) {
+                        for (ccMinNode* n = g_ai->moveList.head; n; n = n->next) {
+                            Thing* thing = static_cast<Thing*>(static_cast<ccNode*>(n));
+                            if (thing->thingType == AITypes::TT_DOOR ||
+                                thing->thingType == AITypes::TT_TELEPORTER ||
+                                thing->thingType == AITypes::TT_TRAPDOOR ||
+                                thing->thingType == AITypes::TT_PLATFORM ||
+                                thing->thingType == AITypes::TT_LADDER) {
+                                thing->Reset();
+                            }
+                        }
+                    }
+                }
             }
         }
         ImGui::End();

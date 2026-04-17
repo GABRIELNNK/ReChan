@@ -48,6 +48,7 @@ struct Path : public ccNode {
 
     virtual s32 Subdivide(s32 threshold) = 0;
     virtual s32 EndOfPath() = 0;
+    virtual s32 Reset() = 0;
 };
 
 // LinearPath - linear interpolation between path points
@@ -64,6 +65,7 @@ struct LinearPath : public Path {
     s32 Move(s32 speed);
     s32 Subdivide(s32 threshold) override;
     s32 EndOfPath() override;
+    s32 Reset() override;
 };
 
 // SplinePath - Catmull-Rom spline interpolation between path points
@@ -81,7 +83,7 @@ struct SplinePath : public Path {
     s32 Subdivide(s32 threshold) override;
     s32 EndOfPath() override;
 
-    void Reset();
+    s32 Reset() override;
 
     // Catmull-Rom coefficient computation
     static void CalcCMRCoefficients(s32& a, s32& b, s32& c, s32& d,

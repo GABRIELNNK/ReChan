@@ -307,6 +307,22 @@ void Humanoid::Draw() {
         m->rotY = (u16)(drawOrient.y & 0xFFFF);
         m->rotZ = (u16)(drawOrient.z & 0xFFFF);
         m->Show(0);
+
+        // PC: populate AnimationMatrices with world-space bone positions.
+        // Replaces PSX GTE callback mechanism (SetupModelCallbacks/CopyMatrix).
+        if (hm->animMatrices && m->drawable) {
+            OriginalSTree* ost = m->drawable->GetOriginalSTree();
+            if (ost && ost->skeleton) {
+                // Build world matrix matching Show(): RotMatrixZYX * Scale * Translation
+                Mat4 world;
+                p3dBuildRotMatrixZYX(m->rotX, m->rotY, m->rotZ, world);
+                f32 s = FIX16_TO_FLOAT(static_cast<SModel*>(m)->scale);
+                world.ScaleRotation(s);
+                world.SetTranslation((f32)m->posX, (f32)m->posY, (f32)m->posZ);
+
+                hm->animMatrices->UpdateWorldPositions(ost->skeleton, world);
+            }
+        }
         return;
     }
     // No model: fallback to debug wireframe

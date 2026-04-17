@@ -172,5 +172,29 @@ struct ccList : public ccMinList {
         AddNode(tail, newNode);
     }
 
-    void SortPriReverse();
+    // PSX: SortPriReverse__6ccList (CCLIST.CPP:580, 0x8003780C)
+    // Insertion-sort the list by pri ascending (lowest first = reverse of AddNodePri order).
+    // PSX uses CheckPriReverse (0x800377FC) which compares the s8 pri at ccNode+0x12.
+    void SortPriReverse() {
+        MARKFUNCTION(0x8003780C);
+        if (!head || !head->next) return;
+
+        ccMinList sorted;
+        while (head) {
+            ccNode* node = static_cast<ccNode*>(RemHead());
+
+            ccNode* cur = static_cast<ccNode*>(sorted.head);
+            ccMinNode* insertAfter = nullptr;
+            while (cur && cur->pri <= node->pri) {
+                insertAfter = cur;
+                cur = static_cast<ccNode*>(cur->next);
+            }
+            sorted.AddNode(insertAfter, node);
+        }
+
+        head = sorted.head;
+        tail = sorted.tail;
+        sorted.head = nullptr;
+        sorted.tail = nullptr;
+    }
 };

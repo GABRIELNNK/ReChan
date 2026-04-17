@@ -1,7 +1,4 @@
-// activezn.h - ActiveZone and SubZoneVolume classes
-// Reversed from PSX C:\CHAN\GAME\SRC\AI\ACTIVEZN.CPP
 #pragma once
-
 #include "gen/cclist.h"
 #include "ai/simplbox.h"
 

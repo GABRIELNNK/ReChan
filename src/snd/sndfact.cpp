@@ -3,6 +3,288 @@
 #include "snd/trnssnd.h"
 #include "snd/prstsnd.h"
 #include "snd/hmndsnd.h"
+#include "snd/platsnd.h"
+
+struct PlatformSoundLoadData {
+    u8 pad[2];
+    s16 beginMoveSfx;
+    s16 tiltSfx;
+    s16 impactSfx;
+    s16 hitHumanoidSfx;
+    s16 hitPathNodeSfx;
+    s16 endMoveSfx;
+    s8 movePersistentId;
+    s8 idlePersistentId;
+    s32 material;
+    s16 soundFlags;
+    s8 hitPathNodeCooldownReset;
+    s8 pad23;
+};
+
+// PSX: CreatePlatformSound__21CSoundFactoryDatabaseP6CSoundUl (SNDFDB.CPP:372)
+static void FillPlatformSoundLoadData(u32 soundId, PlatformSoundLoadData& data) {
+    data = {};
+    data.beginMoveSfx = -1;
+    data.tiltSfx = -1;
+    data.impactSfx = -1;
+    data.hitHumanoidSfx = -1;
+    data.hitPathNodeSfx = -1;
+    data.endMoveSfx = -1;
+    data.movePersistentId = -1;
+    data.idlePersistentId = -1;
+    data.material = 2;
+    data.soundFlags = 0;
+    data.hitPathNodeCooldownReset = 60;
+
+    if (soundId == 113565765) {
+        data.movePersistentId = 19;
+        data.hitHumanoidSfx = 215;
+        data.beginMoveSfx = 199;
+        data.hitPathNodeSfx = 199;
+        data.soundFlags = 20000;
+        return;
+    }
+
+    if (soundId <= 0x6C4E045) {
+        if (soundId == 65551800) {
+            goto LABEL_70;
+        }
+
+        if (soundId <= 0x3E83DB8) {
+            if (soundId == 6862914) {
+                goto LABEL_68;
+            }
+
+            if (soundId <= 0x68B842) {
+                if (soundId != 101) {
+                    if (soundId < 0x66) {
+                        if (soundId != 97) {
+                            data.impactSfx = 193;
+                            return;
+                        }
+                        goto LABEL_70;
+                    }
+
+                    if (soundId != 453670) {
+                        data.impactSfx = 193;
+                        return;
+                    }
+
+LABEL_68:
+                    data.movePersistentId = 18;
+                    data.tiltSfx = 195;
+                    data.hitHumanoidSfx = 215;
+                    data.material = 4;
+                    data.soundFlags = 2000;
+                    return;
+                }
+
+                goto LABEL_70;
+            }
+
+            if (soundId == 7587989) {
+                goto LABEL_68;
+            }
+
+            if (soundId <= 0x73C895) {
+                if (soundId != 6874290) {
+                    data.impactSfx = 193;
+                    return;
+                }
+                goto LABEL_70;
+            }
+
+            if (soundId == 28780548) {
+LABEL_70:
+                data.beginMoveSfx = 204;
+                data.impactSfx = 193;
+                goto LABEL_82;
+            }
+
+            if (soundId != 46960034) {
+                data.impactSfx = 193;
+                return;
+            }
+
+LABEL_72:
+            data.movePersistentId = 15;
+            data.beginMoveSfx = 210;
+            data.endMoveSfx = 210;
+            return;
+        }
+
+        if (soundId > 0x5809832) {
+            if (soundId == 93670758) {
+                data.movePersistentId = 23;
+                data.beginMoveSfx = 205;
+                data.endMoveSfx = 206;
+                data.soundFlags = 4000;
+                return;
+            }
+
+            if (soundId < 0x5954D66 || soundId > 0x6A9C359 || soundId < 0x6A9C351) {
+                goto LABEL_85;
+            }
+        }
+        else {
+            if (soundId >= 0x5809831) {
+                goto LABEL_72;
+            }
+
+            if (soundId != 85907506) {
+                if (soundId <= 0x51ED832) {
+                    if (soundId <= 0x4A0AC22 && soundId >= 0x4A0AC21) {
+                        goto LABEL_72;
+                    }
+                    goto LABEL_85;
+                }
+
+                if (soundId != 88477860) {
+                    data.impactSfx = 193;
+                    return;
+                }
+
+LABEL_71:
+                data.tiltSfx = 194;
+                goto LABEL_82;
+            }
+
+            data.movePersistentId = 26;
+        }
+
+LABEL_84:
+        data.material = 1;
+        return;
+    }
+
+    if (soundId == 177858177) {
+        goto LABEL_74;
+    }
+
+    if (soundId > 0xA99E681) {
+        if (soundId == 198801723) {
+LABEL_76:
+            data.movePersistentId = 27;
+            data.hitPathNodeSfx = 200;
+            data.endMoveSfx = 201;
+LABEL_77:
+            data.hitHumanoidSfx = 215;
+            data.soundFlags = 7000;
+            return;
+        }
+
+        if (soundId > 0xBD9793B) {
+            if (soundId == 243816935) {
+                data.movePersistentId = 20;
+                return;
+            }
+
+            if (soundId <= 0xE8859E7) {
+                if (soundId <= 0xE44C202 && soundId >= 0xE44C201) {
+                    data.beginMoveSfx = 203;
+                    data.endMoveSfx = 203;
+                    data.movePersistentId = 24;
+                    return;
+                }
+
+                goto LABEL_85;
+            }
+
+            if (soundId != 245997170) {
+                data.impactSfx = 193;
+                return;
+            }
+        }
+        else if (soundId != 177858401) {
+            if (soundId > 0xA99E761) {
+                if (soundId == 178009377) {
+                    goto LABEL_84;
+                }
+
+                if (soundId != 179951756) {
+                    data.impactSfx = 193;
+                    return;
+                }
+
+                data.movePersistentId = 17;
+                data.beginMoveSfx = 210;
+                goto LABEL_77;
+            }
+
+            if (soundId != 177858179) {
+                data.impactSfx = 193;
+                return;
+            }
+        }
+
+LABEL_74:
+        data.beginMoveSfx = 197;
+        data.hitHumanoidSfx = 215;
+        return;
+    }
+
+    if (soundId > 0x7B9BA12) {
+        if (soundId == 159859508) {
+            data.beginMoveSfx = 203;
+            goto LABEL_85;
+        }
+
+        if (soundId > 0x9874334) {
+            if (soundId != 159873444) {
+                data.impactSfx = 193;
+                return;
+            }
+
+            data.movePersistentId = 25;
+            data.beginMoveSfx = 207;
+            data.endMoveSfx = 208;
+LABEL_82:
+            data.material = 3;
+            return;
+        }
+
+        if (soundId == 145433249) {
+            data.movePersistentId = 22;
+        }
+        else {
+            data.impactSfx = 193;
+        }
+        return;
+    }
+
+    if (soundId >= 0x7B9BA11) {
+        goto LABEL_76;
+    }
+
+    if (soundId > 0x7358985) {
+        if (soundId == 121252748) {
+            data.movePersistentId = 21;
+            data.beginMoveSfx = 210;
+            data.soundFlags = 6000;
+        }
+        else {
+            data.impactSfx = 193;
+        }
+        return;
+    }
+
+    if (soundId >= 0x7358982) {
+        goto LABEL_71;
+    }
+
+    if (soundId == 120076687) {
+        data.movePersistentId = 16;
+        data.beginMoveSfx = 202;
+        data.hitPathNodeSfx = 201;
+        data.hitHumanoidSfx = 215;
+        data.hitPathNodeCooldownReset = 30;
+        data.soundFlags = 3200;
+    }
+    else {
+LABEL_85:
+        data.impactSfx = 193;
+    }
+}
 
 // PSX: CreateObject__13CSoundFactoryUlPP6CSoundUl (SNDFACT.CPP:178, 0x8005759C)
 // Creates a CSound-derived object by type ID and loads the soundId into it.
@@ -13,6 +295,15 @@ s32 CSoundFactory::CreateObject(u32 typeId, CSound** outObj, u32 soundId) {
     *outObj = nullptr;
 
     switch (typeId) {
+        case 10040:
+        {
+            CPlatformSound* obj = new CPlatformSound();
+            PlatformSoundLoadData data = {};
+            FillPlatformSoundLoadData(soundId, data);
+            obj->Load(&data);
+            *outObj = obj;
+            break;
+        }
         case 10060:
         {
             // PSX: CreateHumanoidSound (SNDFDB.CPP:632, 0x800AB9BC)

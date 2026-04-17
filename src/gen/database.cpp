@@ -531,8 +531,8 @@ void Database::Scan(const u8* data, u32 size) {
 done:
     isOpen = 1;
 
-    // Sort block list by priority (reverse)
-    // PSX calls SortPriReverse on the blockList
+    // PSX: SortPriReverse on blockList after parsing (0x80039090)
+    blockList.SortPriReverse();
 }
 
 // PSX: Close__8Database (DATABASE.CPP:821)

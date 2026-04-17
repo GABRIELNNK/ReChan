@@ -777,26 +777,22 @@ void feMenuMgr::OpenDoors() {
     for (const HubDoorEntry& entry : HUB_DOOR_TABLE) {
         ccNode* node = g_ai->moveList.FindNodeCRC(entry.doorCRC);
         if (!node) {
+            LOG("[OpenDoors] door CRC=0x%08X NOT found (level %d/%d)",
+                entry.doorCRC, entry.levelID, entry.subLevel);
             continue;
         }
 
         if (!LevelValid(entry.levelID, entry.subLevel)) {
+            LOG("[OpenDoors] door CRC=0x%08X found but level %d/%d not unlocked",
+                entry.doorCRC, entry.levelID, entry.subLevel);
             continue;
         }
 
         Thing* thing = static_cast<Thing*>(node);
-        if (!thing) {
-            continue;
-        }
-
-        if (thing->thingType != AITypes::TT_DOOR &&
-            thing->thingType != AITypes::TT_TELEPORTER &&
-            thing->thingType != AITypes::TT_TRAPDOOR) {
-            continue;
-        }
-
-        Obstacle* obstacle = static_cast<Obstacle*>(thing);
-        obstacle->Trigger();
+        LOG("[OpenDoors] firing Trigger on door CRC=0x%08X (level %d/%d) thingType=%u name=%s",
+            entry.doorCRC, entry.levelID, entry.subLevel, thing->thingType,
+            node->GetName() ? node->GetName() : "null");
+        static_cast<Obstacle*>(thing)->Trigger();
     }
 }
 

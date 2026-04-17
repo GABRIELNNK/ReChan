@@ -1,4 +1,3 @@
-// view.h — tView render target (Pure3D v11.3)
 #pragma once
 
 #include "p3d/entity.h"

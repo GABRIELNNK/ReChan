@@ -269,6 +269,14 @@ s32 LinearPath::EndOfPath() {
     return (currentSegment >= numPoints - 1) ? 1 : 0;
 }
 
+// PSX: Reset__10LinearPath (PATH.HPP:155)
+s32 LinearPath::Reset() {
+    currentSegment = 0;
+    velocity.x = VELOCITY_SENTINEL;
+    current = positions[0];
+    return VELOCITY_SENTINEL;
+}
+
 // Helper: free nodeAttribs array properly
 static void FreeNodeAttribsArray(NodeAttribs*& arr) {
     if (arr) {
@@ -372,13 +380,16 @@ s32 LinearPath::Move(s32 speed) {
         s32 toEndY = current.y - positions[seg + 1].y;
         s32 toEndZ = current.z - positions[seg + 1].z;
 
-        // Dot product: segment direction dot velocity
-        s64 dot = (s64)segDx * (s64)velocity.x
-            + (s64)segDy * (s64)velocity.y
-            + (s64)segDz * (s64)velocity.z;
+        // PSX crossing test uses the remaining-vector sign:
+        //   toEnd = current - nextPoint
+        //   crossing when dot(toEnd, velocity) >= 0
+        // (negative while approaching, positive once passed).
+        s64 dot = (s64)toEndX * (s64)velocity.x
+            + (s64)toEndY * (s64)velocity.y
+            + (s64)toEndZ * (s64)velocity.z;
 
-        if (dot <= 0) {
-            // Passed the endpoint, advance segment
+        if (dot >= 0) {
+            // Passed/reached endpoint, advance segment.
             crossed = 1;
             currentSegment++;
 
@@ -447,10 +458,11 @@ s32 SplinePath::EndOfPath() {
 }
 
 // PSX: Reset__10SplinePath (PATH.HPP:204)
-void SplinePath::Reset() {
+s32 SplinePath::Reset() {
     currentSegment = 1;
     t = 0;
     current = positions[0];
+    return 1;
 }
 
 // PSX: Init__10SplinePathPC6DBPath (PATH.CPP:417)

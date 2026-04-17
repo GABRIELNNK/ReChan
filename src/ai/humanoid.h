@@ -1,7 +1,4 @@
-// humanoid.h - Humanoid class (combat-capable Thing)
-// Reversed from PSX C:\CHAN\GAME\SRC\AI\HUMANOID.CPP
 #pragma once
-
 #include "ai/thing.h"
 #include "p3d/p3dmath.h"
 #include "ai/behaviour.h"

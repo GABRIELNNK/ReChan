@@ -226,7 +226,7 @@ void Block::Parse(u32 size, const u8* blkData) {
     const u32* colData = (const u32*)(blkData + colOffset);
 
     CollisionSector* slot = nullptr;
-    for (int i = 0; i < 12; i++) {
+    for (int i = 0; i < MAX_COLLISION_SECTORS; i++) {
         if (g_collisionSectors[i].status == -1) {
             slot = &g_collisionSectors[i];
             break;

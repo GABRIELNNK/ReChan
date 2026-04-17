@@ -80,16 +80,16 @@ void main() {
         uint word = texelFetch(uVRAM, ivec2(wordX, pageY + py), 0).r;
         uint palIdx = (word >> ((px % 4u) * 4u)) & 0xFu;
         clutWord = texelFetch(uVRAM, ivec2(clutX + palIdx, clutY), 0).r;
-    } else if (depth == 1u) {
+    } 
+    else if (depth == 1u) {
         uint wordX = pageX + px / 2u;
         uint word = texelFetch(uVRAM, ivec2(wordX, pageY + py), 0).r;
         uint palIdx = (px & 1u) != 0u ? (word >> 8u) & 0xFFu : word & 0xFFu;
         clutWord = texelFetch(uVRAM, ivec2(clutX + palIdx, clutY), 0).r;
-    } else {
+    } 
+    else {
         clutWord = texelFetch(uVRAM, ivec2(pageX + px, pageY + py), 0).r;
     }
-
-    if (clutWord == 0u) discard;
 
     // Magenta (R=31,G=0,B=31) is the transparency key
     if ((clutWord & 0x7FFFu) == 0x7C1Fu) discard;
@@ -816,8 +816,10 @@ void glContext::EnableZBuffer(bool enable) {
         return;
 
     cachedZBuffer = enable;
-    if (enable)
+    if (enable) {
         glEnable(GL_DEPTH_TEST);
+        glDepthFunc(GL_LEQUAL);
+    }
     else
         glDisable(GL_DEPTH_TEST);
 }
@@ -830,14 +832,17 @@ void glContext::SetBlendMode(pddiBlendMode mode) {
     switch (mode) {
         case PDDI_BLEND_NONE:
             glDisable(GL_BLEND);
+            glBlendEquation(GL_FUNC_ADD);
             break;
         case PDDI_BLEND_ALPHA:
             glEnable(GL_BLEND);
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glBlendEquation(GL_FUNC_ADD);
             break;
         case PDDI_BLEND_ADD:
             glEnable(GL_BLEND);
             glBlendFunc(GL_ONE, GL_ONE);
+            glBlendEquation(GL_FUNC_ADD);
             break;
         case PDDI_BLEND_SUBTRACT:
             glEnable(GL_BLEND);

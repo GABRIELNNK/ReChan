@@ -2,7 +2,77 @@
 #include "snd/sound.h"
 #include "snd/sndmath.h"
 #include "gen/common.h"
+#include "gen/display.h"
+#include "gen/camera.h"
+#include "p3d/p3dmath.h"
 #include "pc/audio.h"
+
+static inline s32 MulShift16Signed(s32 a, s32 b) {
+    return (s32)(((s64)a * (s64)b) >> 16);
+}
+
+static bool GetListenerState(LVector& outPos, s32& outYaw) {
+    if (!g_display) {
+        return false;
+    }
+
+    Camera* cam = g_display->GetCamera();
+    if (!cam) {
+        return false;
+    }
+
+    outPos = cam->GetPosition();
+    outYaw = cam->GetOrientY();
+    return true;
+}
+
+static void GetObjectVolumesPsx(u16 baseVol, const LVector* objPos, u16& outVolL, u16& outVolR, u32 extraRange) {
+    // PSX defaults from rsd init globals.
+    static constexpr s32 MIN_AUDIBLE_DIST = 0;
+    static constexpr s32 MAX_AUDIBLE_DIST = 10000;
+    static constexpr s32 STEREO_SEPARATION = 1024;
+
+    LVector listener = {};
+    s32 yaw = 0;
+    if (!objPos || !GetListenerState(listener, yaw)
+        || (listener.x == objPos->x && listener.y == objPos->y && listener.z == objPos->z)) {
+        outVolL = baseVol;
+        outVolR = baseVol;
+        return;
+    }
+
+    const s32 sepX = MulShift16Signed(rmSin16(yaw - 0x4000), STEREO_SEPARATION);
+    const s32 sepZ = MulShift16Signed(rmSin16(yaw), STEREO_SEPARATION);
+
+    const s32 lx = listener.x - sepX;
+    const s32 lz = listener.z - sepZ;
+    const s32 rx = listener.x + sepX;
+    const s32 rz = listener.z + sepZ;
+
+    const u32 distL = (u32)rmMag3ff(lx - objPos->x, listener.y - objPos->y, lz - objPos->z);
+    const u32 distR = (u32)rmMag3ff(rx - objPos->x, listener.y - objPos->y, rz - objPos->z);
+    const u32 maxDist = (u32)(MAX_AUDIBLE_DIST + (s32)extraRange);
+
+    auto attenuate = [&](u32 dist) -> u16 {
+        if (dist >= (u32)MIN_AUDIBLE_DIST) {
+            if (dist > maxDist) {
+                return 0;
+            }
+
+            const u32 span = maxDist - (u32)MIN_AUDIBLE_DIST;
+            if (span == 0) {
+                return 0;
+            }
+
+            return (u16)(((maxDist - dist) * (u32)baseVol) / span);
+        }
+
+        return baseVol;
+    };
+
+    outVolL = attenuate(distL);
+    outVolR = attenuate(distR);
+}
 
 // PC: resolve rsd sample ID to the active WAX bank.
 // PSX loads one bank at a time; rsd sample IDs (0-70) index directly
@@ -31,7 +101,7 @@ static bool RsdSampleToWax(u32 rsdSampleId, u32& outBank, u32& outSample) {
 s32 rsdWorld::PlayTransientPositional(u32 sampleId, void* posPtr, u16 volume, s16 pitch, u16 pan, u32 flags) {
     MARKFUNCTION(0x80080234);
 
-    if (volume == 0) {
+    if (volume == 0 || !g_sound) {
         return 0;
     }
 
@@ -40,7 +110,23 @@ s32 rsdWorld::PlayTransientPositional(u32 sampleId, void* posPtr, u16 volume, s1
         return 0;
     }
 
-    f32 vol = PsxVolToFloat(volume) * g_sound->effectsVolume;
+    const LVector* objPos = static_cast<const LVector*>(posPtr);
+    u16 volL = 0;
+    u16 volR = 0;
+    GetObjectVolumesPsx(volume, objPos, volL, volR, flags);
+
+    if (volL == 0 && volR == 0) {
+        return 0;
+    }
+
+    f32 fVolL = PsxVolToFloat(volL);
+    f32 fVolR = PsxVolToFloat(volR);
+    f32 vol = (fVolL + fVolR) * 0.5f * g_sound->effectsVolume;
+    f32 pcPan = 0.0f;
+    if (fVolL + fVolR > 0.0f) {
+        pcPan = (fVolR - fVolL) / (fVolL + fVolR);
+    }
+
     f32 pitchF = PsxPitchToFloat(pitch);
 
     AudioSample s = g_sound->GetBankSample(bank, sample);
@@ -48,7 +134,7 @@ s32 rsdWorld::PlayTransientPositional(u32 sampleId, void* posPtr, u16 volume, s1
         return 0;
     }
 
-    AudioVoice v = AudioEngine::PlaySample(s, vol, 0.0f, false);
+    AudioVoice v = AudioEngine::PlaySample(s, vol, pcPan, false);
     if (v != AUDIO_VOICE_INVALID && pitchF != 1.0f) {
         AudioEngine::SetVoicePitch(v, pitchF);
     }
@@ -61,7 +147,7 @@ s32 rsdWorld::PlayTransientPositional(u32 sampleId, void* posPtr, u16 volume, s1
 s32 rsdWorld::PlayTransientNonPositional(u32 sampleId, u16 volL, u16 volR, s16 pitch, u16 pan) {
     MARKFUNCTION(0x80080334);
 
-    if (volL == 0 && volR == 0) {
+    if ((volL == 0 && volR == 0) || !g_sound) {
         return 0;
     }
 
@@ -151,6 +237,10 @@ void rsdPersistent::SetVolume(u16 psxVol) {
     volume = psxVol;
     if (voiceHandle) {
         AudioVoice v = static_cast<AudioVoice>(reinterpret_cast<uintptr_t>(voiceHandle));
-        AudioEngine::SetVoiceVolume(v, PsxVolToFloat(psxVol));
+        f32 vol = PsxVolToFloat(psxVol);
+        if (g_sound) {
+            vol *= g_sound->effectsVolume;
+        }
+        AudioEngine::SetVoiceVolume(v, vol);
     }
 }

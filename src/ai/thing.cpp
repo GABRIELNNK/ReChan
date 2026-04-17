@@ -417,46 +417,80 @@ const LVector* Thing::GetInitialPos() {
 }
 
 // PSX: AddPassenger__5ThingP12DynamicThing (THING.CPP:1079)
+// PSX treats Thing::subNode (offset 0x40) as an intrusive ccMinList whose
+// head/tail pointers share layout with ccMinNode::next/prev. New tickets are
+// appended at the tail via ccMinList::AddNode(tail, newNode).
 void Thing::AddPassenger(DynamicThing* passenger) {
     MARKFUNCTION(0x80062400);
-    if (!passenger)
+    if (passenger->ticket != nullptr) {
         return;
-    if (passenger->ticket)
-        return;
-    // Allocate ticket and link into subNode list
+    }
+
     Ticket* t = new Ticket(this, passenger);
-    subNode.next = (ccMinNode*)t; // simplified: single-link for now
+
+    // subNode.next == list head, subNode.prev == list tail.
+    ccMinNode* after = subNode.prev;
+    if (after != nullptr) {
+        ccMinNode* afterNext = after->next;
+        if (afterNext != nullptr) {
+            t->next = afterNext;
+            afterNext->prev = t;
+        }
+        else {
+            t->next = nullptr;
+        }
+        t->prev = after;
+        after->next = t;
+    }
+    else {
+        ccMinNode* head = subNode.next;
+        if (head != nullptr) {
+            t->next = head;
+            head->prev = t;
+        }
+        else {
+            t->next = nullptr;
+        }
+        t->prev = nullptr;
+        subNode.next = t;
+    }
+    if (subNode.prev == after) {
+        subNode.prev = t;
+    }
+
     passenger->ticket = t;
 }
 
 // PSX: RemPassenger__5ThingP6Ticket (THING.CPP:1104)
+// PSX: ccMinList::RemNode(&subNode, t) — subNode's next/prev serve as the
+// list's head/tail, so both must be updated when t is at either end.
 void Thing::RemPassenger(Ticket* t) {
     MARKFUNCTION(0x8006247C);
     if (!t) return;
-    // Clear the passenger's ticket pointer
+
+    // Update head/tail on the owning list before unlinking t itself.
+    if (subNode.next == t) subNode.next = t->next;
+    if (subNode.prev == t) subNode.prev = t->prev;
+    if (t->prev) t->prev->next = t->next;
+    if (t->next) t->next->prev = t->prev;
+    t->next = nullptr;
+    t->prev = nullptr;
+
     if (t->passenger) {
         t->passenger->ticket = nullptr;
     }
-    // Unlink from list
-    t->Remove();
     delete t;
 }
 
 // PSX: RemAllPassengers__5Thing (THING.CPP:1144)
+// PSX walks subNode's list head and calls RemPassenger on each node.
 void Thing::RemAllPassengers() {
     MARKFUNCTION(0x80062504);
-    // Iterate subNode list, remove each ticket
-    ccMinNode* node = subNode.next;
-    while (node) {
-        ccMinNode* next = node->next;
-        Ticket* t = static_cast<Ticket*>(node);
-        if (t->passenger) {
-            t->passenger->ticket = nullptr;
-        }
-        delete t;
-        node = next;
+    while (subNode.next != nullptr) {
+        Ticket* t = static_cast<Ticket*>(subNode.next);
+        RemPassenger(t);
     }
-    subNode.next = nullptr;
+    subNode.prev = nullptr;
 }
 
 // PSX: GetThingHandle__5Thing (THING.CPP:1170)
@@ -777,10 +811,29 @@ void DynamicThing::Land() {
 }
 
 // PSX: DisembarkObstacle__12DynamicThingRC10tagLVector (THING.CPP:810)
-void DynamicThing::DisembarkObstacle(const LVector& newPos) {
+// The parameter is the previous issuer's delta velocity (from
+// Obstacle::GetDeltaVelocity) - NOT a world-space position. The function
+// stores it as the new force, clamps force.y to be non-negative, folds that
+// force into velocity so the passenger keeps the platform's momentum, and
+// clears TF_ON_GROUND. It deliberately does NOT touch pos/homePos or detach
+// the ticket; Disembark() is invoked separately by the caller.
+void DynamicThing::DisembarkObstacle(const LVector& deltaVelocity) {
     MARKFUNCTION(0x80061CC4);
-    pos = newPos;
-    Disembark();
+
+    // PSX: store delta velocity at +0x70/+0x74/+0x78 (force)
+    force.x = deltaVelocity.x;
+    force.y = deltaVelocity.y;
+    force.z = deltaVelocity.z;
+
+    if (force.y < 0) {
+        force.y = 0;
+    }
+
+    velocity.x += force.x;
+    velocity.y += force.y;
+    velocity.z += force.z;
+
+    flags &= ~TF_ON_GROUND;
 }
 
 // PSX: Disembark__12DynamicThing (THING.CPP:1126)

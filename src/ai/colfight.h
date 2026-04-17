@@ -1,7 +1,4 @@
-// colfight.h - FightingCollision system
-// Reversed from PSX C:\CHAN\GAME\SRC\AI\COLFIGHT.CPP
 #pragma once
-
 #include "core.h"
 
 class Humanoid;

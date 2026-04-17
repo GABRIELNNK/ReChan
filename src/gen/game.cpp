@@ -1004,7 +1004,7 @@ bool Game::gsQueueLevelLoad(Game* game) {
     cam->SetFarPlane(500000.0f);
 
     g_display->GetView().SetCamera(g_display->GetCamera()->GetP3DCamera());
-    g_display->GetView().SetBackgroundColour(pddiColour(30, 30, 35));
+    g_display->GetView().SetBackgroundColour(pddiColour(0, 0, 0));
     g_display->GetView().SetClearMask(PDDI_BUFFER_ALL);
 
     // PSX: SetLookAtTarget via CameraManager path system.

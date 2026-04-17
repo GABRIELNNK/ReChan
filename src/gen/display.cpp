@@ -38,7 +38,7 @@ void Display::InternalOpen() {
     p3dCam->SetNearPlane(100.0f);
     p3dCam->SetFarPlane(500000.0f);
     view.SetCamera(p3dCam);
-    view.SetBackgroundColour(pddiColour(30, 30, 35));
+    view.SetBackgroundColour(pddiColour(0, 0, 0));
     view.SetClearMask(PDDI_BUFFER_ALL);
 
     // PSX: SetupLayer calls for 7 view layers, SetViewPort, SetLighting

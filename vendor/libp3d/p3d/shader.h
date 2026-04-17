@@ -1,4 +1,3 @@
-// shader.h — tShader: P3D shader entity wrapping pddiBaseShader
 #pragma once
 
 #include "p3d/entity.h"

@@ -1,5 +1,8 @@
 #include "gen/common.h"
 #include "gen/animmat.h"
+#include "p3d/skeleton.h"
+#include "p3d/matrix.h"
+#include "p3d/hash.h"
 
 namespace {
     void BuildPsxIdentityMatrix(s32* matrixData) {
@@ -29,6 +32,11 @@ AnimationMatrices::AnimationMatrices() {
         BuildPsxIdentityMatrix(matricesA[i]);
         BuildPsxIdentityMatrix(matricesB[i]);
     }
+
+    for (s32 i = 0; i < AM_NUM_SLOTS; i++) {
+        boneJointIndex[i] = -1;
+    }
+    bonesCached = false;
 }
 
 // PSX: SetHumanoid__17AnimationMatricesP8Humanoid (ANIMMAT.CPP:577, 0x80078908)
@@ -104,4 +112,75 @@ s32 AnimationMatrices::GetAttack(u32 joint, LVector& outPrev, LVector& outCur) c
     outCur.y = current[offset + 6];
     outCur.z = current[offset + 7];
     return 1;
+}
+
+// PSX bone name table: 10 tracked joints matching SetupModelCallbacks order.
+// Slot 0: Head, 1: L Hand, 2: R Hand, 3: L Foot, 4: R Foot,
+// 5: Pelvis, 6: L UpperArm, 7: R UpperArm, 8: L Thigh, 9: R Thigh
+static const char* const AM_JointNames[AM_NUM_SLOTS] = {
+    "Bip01 Head",
+    "Bip01 L Hand",
+    "Bip01 R Hand",
+    "Bip01 L Foot",
+    "Bip01 R Foot",
+    "Bip01 Pelvis",
+    "Bip01 L UpperArm",
+    "Bip01 R UpperArm",
+    "Bip01 L Thigh",
+    "Bip01 R Thigh",
+};
+
+void AnimationMatrices::CacheBoneIndices(const STreeData* skeleton) {
+    if (!skeleton || !skeleton->joints || skeleton->numJoints == 0) {
+        return;
+    }
+
+    for (s32 slot = 0; slot < AM_NUM_SLOTS; slot++) {
+        u32 nameHash = p3dHash(AM_JointNames[slot]);
+        boneJointIndex[slot] = -2; // not found
+        for (u32 j = 0; j < skeleton->numJoints; j++) {
+            if (skeleton->joints[j].nameUID == nameHash) {
+                boneJointIndex[slot] = (s32)j;
+                break;
+            }
+        }
+    }
+    bonesCached = true;
+}
+
+void AnimationMatrices::UpdateWorldPositions(const STreeData* skeleton, const Mat4& worldMatrix) {
+    if (!skeleton || !skeleton->joints || skeleton->numJoints == 0 || !current) {
+        return;
+    }
+
+    if (!bonesCached) {
+        CacheBoneIndices(skeleton);
+    }
+
+    // Compute model-local joint matrices (same as rendering path)
+    Mat4* jointMatrices = new Mat4[skeleton->numJoints];
+    skeleton->ComputeWorldMatrices(jointMatrices);
+
+    for (s32 slot = 0; slot < AM_NUM_SLOTS; slot++) {
+        s32 ji = boneJointIndex[slot];
+        if (ji < 0) {
+            continue;
+        }
+
+        // World-space = model world matrix * joint local matrix
+        Mat4 worldJoint = worldMatrix * jointMatrices[ji];
+
+        // Extract world-space translation into current buffer.
+        // PSX layout: [0..4] = 3x3 rotation (Q12 shorts), [5..7] = translation (s32).
+        // On PSX, CopyMatrix reads GTE C0-C7 directly.
+        // Translation goes into offsets 5, 6, 7 of the 8-word slot.
+        s32 offset = slot * 8;
+        current[offset + 5] = (s32)worldJoint.GetTransX();
+        current[offset + 6] = (s32)worldJoint.GetTransY();
+        current[offset + 7] = (s32)worldJoint.GetTransZ();
+    }
+
+    copied = 1;
+
+    delete[] jointMatrices;
 }

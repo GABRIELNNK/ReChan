@@ -68,5 +68,5 @@ struct WallCollisionInfo {
 extern WallCollisionInfo g_wallCollisionInfo;  // PSX: 0x800E00C8
 extern Wall* g_colHitWall;                     // PSX: gp+1160
 
-// Global array of 12 collision sectors (PSX: gp+1156)
-extern CollisionSector g_collisionSectors[12];
+static constexpr s32 MAX_COLLISION_SECTORS = 128;
+extern CollisionSector g_collisionSectors[MAX_COLLISION_SECTORS];

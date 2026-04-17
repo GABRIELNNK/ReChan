@@ -23,6 +23,8 @@
 #include "ai/colfight.h"
 #include "pc/log.h"
 
+#include "gen/uvdata.h"
+
 #include <fstream>
 #include <filesystem>
 #include <unordered_map>
@@ -402,6 +404,16 @@ static void LoadGeoPair(
                 }
 
                 permCursor += chunkPermSize;
+            }
+
+            else if (chunkId == 0x8C20 || chunkId == 0x8C21) {
+                LoadUVPrimData(chunkId, chunkBody, chunkSize - 6,
+                               permData, permCursor, permSize);
+            }
+
+            else if (chunkId == 0x8C30 || chunkId == 0x8C31) {
+                LoadCBVPrimData(chunkId, chunkBody, chunkSize - 6,
+                                permData, permCursor, permSize);
             }
 
             else if (chunkId == 0x6008 && world) {
@@ -1061,8 +1073,8 @@ bool World::Load(const std::string& lcfPath) {
     for (u32 i = 0; i < blockMgr.GetNumBlocks(); i++) {
         Block* b = blockMgr.GetBlock(i);
         if (!b) continue;
-        if (i < 10) LOG("[World] Block %u: pos=(%d,%d,%d) dim=(%d,%d,%d) parsed=%d",
-                        i, b->posX, b->posY, b->posZ, b->dimX, b->dimY, b->dimZ, b->parsed);
+        LOG("[World] Block %u: blockNum=%u pos=(%d,%d,%d) dim=(%d,%d,%d) parsed=%d",
+            i, b->blockNum, b->posX, b->posY, b->posZ, b->dimX, b->dimY, b->dimZ, b->parsed);
         s32 bMinX = b->posX + b->halfExtNegX, bMaxX = b->posX + b->halfExtPosX;
         s32 bMinY = b->posY + b->halfExtNegY, bMaxY = b->posY + b->halfExtPosY;
         s32 bMinZ = b->posZ + b->halfExtNegZ, bMaxZ = b->posZ + b->halfExtPosZ;
@@ -1163,6 +1175,9 @@ void World::DrawEverythingHandler(const LVector* playerPos) {
     u32 numBlocks = blockMgr.GetNumBlocks();
     if (numBlocks == 0) return;
 
+    // PSX: tick UV accumulators each frame
+    TickAllUVPrimData();
+
     // PSX: DemandLoading when game state == 8
     // PC: all blocks always loaded, no demand loading needed.
 
@@ -1174,10 +1189,10 @@ void World::DrawEverythingHandler(const LVector* playerPos) {
         s32 distSq;
         s32 zDepth;
     };
-    DrawEntry drawArray[32]; // PSX uses stack, max ~8 blocks
+    DrawEntry drawArray[128];
     u32 count = 0;
 
-    for (u32 i = 0; i < numBlocks && count < 32; i++) {
+    for (u32 i = 0; i < numBlocks && count < 128; i++) {
         Block* block = blockMgr.GetBlock(i);
         if (!block || !block->primBuffer) continue;
 
@@ -1224,7 +1239,6 @@ void World::DrawEverythingHandler(const LVector* playerPos) {
         DrawEntry& entry = drawArray[i];
 
         // Copy block->pos to local and apply OffsetToPreventSeams
-        // PSX: uses player position (MEMORY[0x1C]) for seam offset
         LVector localPos;
         localPos.x = entry.block->posX;
         localPos.y = entry.block->posY;
@@ -1470,6 +1484,9 @@ void World::OffsetToPreventSeams(LVector& pos, const LVector& playerPos) {
 }
 
 void World::Unload() {
+    UnloadUVPrimData();
+    UnloadCBVPrimData();
+
     blockMgr.InternalClose();
     if (g_ai) {
         g_ai->UnPopulate(0);
@@ -1484,6 +1501,10 @@ void World::Unload() {
 // PSX: UnloadPetal__5World (WORLD.CPP:1176, 0x80045F34)
 void World::UnloadPetal() {
     MARKFUNCTION(0x80045F34);
+
+    // PSX: Unload__10UVPrimData, Unload__11CBVPrimData (0x80045F90, 0x80045F98)
+    UnloadUVPrimData();
+    UnloadCBVPrimData();
 
     // Unload current blocks (collision sectors, geometry)
     blockMgr.InternalClose();

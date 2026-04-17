@@ -3,8 +3,8 @@
 #include "gen/colfloor.h"
 #include "p3d/p3dmath.h"
 
-// Global array of 12 collision sectors (PSX: gp+1156)
-CollisionSector g_collisionSectors[12];
+// PSX: 12 collision sectors (demand-loaded). PC: 128 to cover all blocks at once.
+CollisionSector g_collisionSectors[MAX_COLLISION_SECTORS];
 
 // Scratch buffer for floor pointer collection (PSX: 0x800DFD58, capacity 64)
 static Floor* g_floorPtrScratch[64];
@@ -115,7 +115,7 @@ s32 CollisionSector::FillWorldFloorArray(
 
     s32 totalAdded = 0;
 
-    for (s32 sectorIdx = 0; sectorIdx < 12; sectorIdx++) {
+    for (s32 sectorIdx = 0; sectorIdx < MAX_COLLISION_SECTORS; sectorIdx++) {
         CollisionSector* sector = &g_collisionSectors[sectorIdx];
         if (sector->status == -1) continue;
 
@@ -359,7 +359,7 @@ s32 CollisionSector::FillWorldWallArray(
 
     s32 totalAdded = 0;
 
-    for (s32 sectorIdx = 0; sectorIdx < 12; sectorIdx++) {
+    for (s32 sectorIdx = 0; sectorIdx < MAX_COLLISION_SECTORS; sectorIdx++) {
         CollisionSector* sector = &g_collisionSectors[sectorIdx];
         if (sector->status == -1) continue;
 

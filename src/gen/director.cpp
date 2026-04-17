@@ -17,6 +17,8 @@
 #include "p3d/p3dmath.h"
 #include "snd/rsevent.h"
 #include "pc/tim.h"
+#include "ai/door.h"
+#include "ai/ladder.h"
 
 namespace {
     // PSX globals used by DIRECTOR.CPP script control flow.

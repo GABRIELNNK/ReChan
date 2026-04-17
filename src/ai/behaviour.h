@@ -1,7 +1,4 @@
-// behaviour.h - AI Behaviour base class
-// Reversed from PSX C:\CHAN\GAME\SRC\AI\BEHAVIOU.CPP
 #pragma once
-
 #include "core.h"
 #include "p3d/p3dmath.h"
 
@@ -32,6 +29,11 @@ struct Behaviour {
     s16 handlerDispatch = -1;
     AIHandler handler = nullptr;
 
+    // PSX +228/+230/+232: deferred handler dispatch thunk used by jump/sub-state flows.
+    s16 nextHandlerThisOffset = 0;
+    s16 nextHandlerDispatch = -1;
+    AIHandler nextHandler = nullptr;
+
     // PSX +236 (u32): flags (bit 0 = first frame init)
     u32 behaviourFlags = 0;
 
@@ -49,4 +51,8 @@ struct Behaviour {
 
     static void PlayerUserControl(Behaviour* behaviour);
     static void NisControl(Behaviour* behaviour);
+    static void NDMS(Behaviour* behaviour);
+    static void SubwayDodgeRight(Behaviour* behaviour);
+    static void SubwayDodgeLeft(Behaviour* behaviour);
+    static void SubwayDodgeJump(Behaviour* behaviour);
 };

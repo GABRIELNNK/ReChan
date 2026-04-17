@@ -382,7 +382,7 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
 
             const u8* pkt = primGeomData + primCursor;
             u8 cmd = pkt[7];
-            u8 cmdBase = cmd & 0xFD;
+            u8 cmdBase = cmd & 0xFC;
 
             const u8* poly = polys + polyIdx * 4;
             u8 vi0 = poly[0], vi1 = poly[1], vi2 = poly[2], vi3 = poly[3];

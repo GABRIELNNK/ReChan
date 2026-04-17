@@ -1,6 +1,16 @@
 #pragma once
 #include "core.h"
 
+struct STreeData;
+struct Mat4;
+
+// PSX bone slot names (10 tracked joints):
+// 0: Bip01 Head, 1: Bip01 L Hand, 2: Bip01 R Hand,
+// 3: Bip01 L Foot, 4: Bip01 R Foot, 5: Bip01 Pelvis,
+// 6: Bip01 L UpperArm, 7: Bip01 R UpperArm,
+// 8: Bip01 L Thigh, 9: Bip01 R Thigh
+static constexpr s32 AM_NUM_SLOTS = 10;
+
 // AnimationMatrices - per-humanoid joint matrix buffers (660 bytes on PSX)
 struct AnimationMatrices {
     // +0: Humanoid* owner
@@ -19,6 +29,11 @@ struct AnimationMatrices {
     // +340..+659: second matrix set (10 x 32-byte matrices)
     s32 matricesB[10][8] = {};
 
+    // PC: cached skeleton joint indices for the 10 tracked bones.
+    // -1 = not yet resolved, -2 = bone not found in skeleton.
+    s32 boneJointIndex[AM_NUM_SLOTS];
+    bool bonesCached = false;
+
     AnimationMatrices();
     void SetHumanoid(void* owner);
     void* GetHumanoid() const;
@@ -33,4 +48,11 @@ struct AnimationMatrices {
 
     // Returns prev/cur frame bone translations for attack collision sweep
     s32 GetAttack(u32 joint, LVector& outPrev, LVector& outCur) const;
+
+    // PC: resolve bone name UIDs to skeleton joint indices (called once)
+    void CacheBoneIndices(const STreeData* skeleton);
+
+    // PC: compute world-space bone translations from skeleton + world matrix.
+    // Replaces PSX GTE callback mechanism. Call after Show() each frame.
+    void UpdateWorldPositions(const STreeData* skeleton, const Mat4& worldMatrix);
 };
