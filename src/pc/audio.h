@@ -24,12 +24,25 @@ public:
 
     // Voice playback
     static AudioVoice PlaySample(AudioSample sample, f32 volume = 1.0f, f32 pan = 0.0f, bool loop = false);
+    static AudioVoice PlaySample3D(
+        AudioSample sample,
+        const LVector& position,
+        f32 volume = 1.0f,
+        bool loop = false,
+        bool applyDistanceAttenuation = true,
+        f32 minDistance = 0.0f,
+        f32 maxDistance = 10000.0f);
     static void StopVoice(AudioVoice voice);
     static void StopAllVoices();
     static bool IsVoicePlaying(AudioVoice voice);
     static void SetVoiceVolume(AudioVoice voice, f32 volume);
     static void SetVoicePan(AudioVoice voice, f32 pan);
     static void SetVoicePitch(AudioVoice voice, f32 pitch);
+    static void SetVoicePosition(AudioVoice voice, const LVector& position);
+    static void SetVoiceDistanceRange(AudioVoice voice, f32 minDistance, f32 maxDistance);
+
+    // Listener state (used by 3D voices)
+    static void SetListener(const LVector& position, s32 yaw16);
 
     // Streaming music (reads from file, decoded on the fly)
     static bool PlayMusic(const char* path, f32 volume = 1.0f, bool loop = true);
@@ -40,4 +53,9 @@ public:
     // Master volume
     static void SetMasterVolume(f32 volume);
     static f32 GetMasterVolume();
+
+    // Output controls
+    static void SetOutputMono(bool mono);
+    static bool GetOutputMono();
+    static u32 GetOutputChannels();
 };

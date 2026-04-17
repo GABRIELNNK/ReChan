@@ -6,6 +6,13 @@
 #include "gen/camera.h"
 #include "p3d/p3dmath.h"
 #include "pc/audio.h"
+#include <vector>
+#include <mutex>
+#include <algorithm>
+
+// These are defined inline by p3d math headers; declare here to keep tooling resolution stable.
+s32 rmSin16(s32 angle);
+s32 rmMag3ff(s32 a1, s32 a2, s32 a3);
 
 static inline s32 MulShift16Signed(s32 a, s32 b) {
     return (s32)(((s64)a * (s64)b) >> 16);
@@ -25,6 +32,17 @@ static bool GetListenerState(LVector& outPos, s32& outYaw) {
     outYaw = cam->GetOrientY();
     return true;
 }
+
+static void UpdateListenerInAudioEngine() {
+    LVector listenerPos = {};
+    s32 listenerYaw = 0;
+    if (GetListenerState(listenerPos, listenerYaw)) {
+        AudioEngine::SetListener(listenerPos, listenerYaw);
+    }
+}
+
+static std::vector<rsdPersistent*> g_persistentSounds;
+static std::mutex g_persistentMutex;
 
 static void GetObjectVolumesPsx(u16 baseVol, const LVector* objPos, u16& outVolL, u16& outVolR, u32 extraRange) {
     // PSX defaults from rsd init globals.
@@ -134,7 +152,17 @@ s32 rsdWorld::PlayTransientPositional(u32 sampleId, void* posPtr, u16 volume, s1
         return 0;
     }
 
-    AudioVoice v = AudioEngine::PlaySample(s, vol, pcPan, false);
+    UpdateListenerInAudioEngine();
+
+    AudioVoice v = AUDIO_VOICE_INVALID;
+    if (objPos != nullptr) {
+        // Use backend 3D placement while preserving PSX loudness from GetObjectVolumesPsx.
+        v = AudioEngine::PlaySample3D(s, *objPos, vol, false, false, 0.0f, 10000.0f);
+    }
+    else {
+        v = AudioEngine::PlaySample(s, vol, pcPan, false);
+    }
+
     if (v != AUDIO_VOICE_INVALID && pitchF != 1.0f) {
         AudioEngine::SetVoicePitch(v, pitchF);
     }
@@ -185,6 +213,8 @@ s32 rsdWorld::PlayTransientNonPositional(u32 sampleId, u16 volL, u16 volR, s16 p
 rsdPersistent::rsdPersistent(u32 sampleId_, void* posPtr, u8 reverb, u16 volume_, s16 pitch, u16 flags) {
     sampleId = sampleId_;
     volume = volume_;
+    this->posPtr = static_cast<const LVector*>(posPtr);
+    spatialFlags = flags;
     voiceHandle = nullptr;
 
     u32 bank, sample;
@@ -197,15 +227,38 @@ rsdPersistent::rsdPersistent(u32 sampleId_, void* posPtr, u8 reverb, u16 volume_
         return;
     }
 
-    f32 vol = PsxVolToFloat(volume_) * g_sound->effectsVolume;
+    f32 vol = 0.0f;
+    if (this->posPtr != nullptr) {
+        u16 volL = 0;
+        u16 volR = 0;
+        GetObjectVolumesPsx(volume_, this->posPtr, volL, volR, flags);
+        vol = (PsxVolToFloat(volL) + PsxVolToFloat(volR)) * 0.5f;
+    }
+    else {
+        vol = PsxVolToFloat(volume_);
+    }
+
+    vol *= g_sound->effectsVolume;
     f32 pitchF = PsxPitchToFloat(pitch);
 
-    AudioVoice v = AudioEngine::PlaySample(s, vol, 0.0f, true);
+    UpdateListenerInAudioEngine();
+
+    AudioVoice v = AUDIO_VOICE_INVALID;
+    if (this->posPtr != nullptr) {
+        v = AudioEngine::PlaySample3D(s, *this->posPtr, vol, true, false, 0.0f, 10000.0f);
+    }
+    else {
+        v = AudioEngine::PlaySample(s, vol, 0.0f, true);
+    }
+
     if (v != AUDIO_VOICE_INVALID) {
         if (pitchF != 1.0f) {
             AudioEngine::SetVoicePitch(v, pitchF);
         }
         voiceHandle = reinterpret_cast<void*>(static_cast<uintptr_t>(v));
+
+        std::lock_guard<std::mutex> lock(g_persistentMutex);
+        g_persistentSounds.push_back(this);
     }
 }
 
@@ -219,6 +272,10 @@ void rsdPersistent::End() {
         AudioEngine::StopVoice(v);
         voiceHandle = nullptr;
     }
+
+    std::lock_guard<std::mutex> lock(g_persistentMutex);
+    auto it = std::remove(g_persistentSounds.begin(), g_persistentSounds.end(), this);
+    g_persistentSounds.erase(it, g_persistentSounds.end());
 }
 
 // PSX: ObjectExists__13rsdPersistentP13rsdPersistent
@@ -235,12 +292,38 @@ bool rsdPersistent::ObjectExists(rsdPersistent* obj) {
 
 void rsdPersistent::SetVolume(u16 psxVol) {
     volume = psxVol;
+    UpdateSpatial();
+}
+
+void rsdPersistent::UpdateSpatial() {
     if (voiceHandle) {
         AudioVoice v = static_cast<AudioVoice>(reinterpret_cast<uintptr_t>(voiceHandle));
-        f32 vol = PsxVolToFloat(psxVol);
+
+        if (posPtr != nullptr) {
+            AudioEngine::SetVoicePosition(v, *posPtr);
+        }
+
+        u16 volL = volume;
+        u16 volR = volume;
+        if (posPtr != nullptr) {
+            GetObjectVolumesPsx(volume, posPtr, volL, volR, spatialFlags);
+        }
+
+        f32 vol = (PsxVolToFloat(volL) + PsxVolToFloat(volR)) * 0.5f;
         if (g_sound) {
             vol *= g_sound->effectsVolume;
         }
         AudioEngine::SetVoiceVolume(v, vol);
+    }
+}
+
+void rsdWorld::UpdateSpatialAudioState() {
+    UpdateListenerInAudioEngine();
+
+    std::lock_guard<std::mutex> lock(g_persistentMutex);
+    for (rsdPersistent* snd : g_persistentSounds) {
+        if (snd != nullptr) {
+            snd->UpdateSpatial();
+        }
     }
 }

@@ -783,12 +783,16 @@ bool Game::gsPlayState(Game* game) {
         // PSX: VBlank interrupt handles display/camera updates automatically.
         // PC: we must still run ProcessHandlers so draw handlers fire each frame.
         game->ProcessHandlers();
+
+        rsEvent(21, 0, 0, 0);
         return true;
     }
 
     // PSX: InputManager::Step, then loop 2 pads storing GetControlVal
     // PSX: ProcessHandlers(game) - runs handlerSet1 (think) + handlerSet2 (draw)
     game->ProcessHandlers();
+
+    rsEvent(21, 0, 0, 0);
 
     // PSX: check state==Play AND director scriptState==0 for pause eligibility
     if (game->state == GameState::Play) {

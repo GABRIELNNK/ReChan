@@ -1,6 +1,7 @@
 #include "gen/common.h"
 #include "snd/rsevent.h"
 #include "snd/sound.h"
+#include "snd/rsdworld.h"
 
 // PSX: gp+544 - global sound enabled flag (0 = enabled, nonzero = disabled)
 static s32 g_soundDisabled = 0;
@@ -199,12 +200,22 @@ s32 jcsHandleControlEvent(s32 event, s32 param1, s32 param2, s32 param3) {
             break;
         }
 
+        case RS_SET_STEREO: // 14
+            LOG("[rsEvent] SetStereo");
+            AudioEngine::SetOutputMono(false);
+            break;
+
+        case RS_SET_MONO: // 15
+            LOG("[rsEvent] SetMono");
+            AudioEngine::SetOutputMono(true);
+            break;
+
         case 20: // jcsSetAmbienceSpace + optional crossfade
             LOG("[rsEvent] SetAmbienceSpace(%d, crossfade=%d)", param1, param2);
             break;
 
         case 21: // jcsSetListener(playerPos, cameraData) - 3D audio listener
-            LOG("[rsEvent] SetListener (stub)");
+            rsdWorld::UpdateSpatialAudioState();
             break;
 
         case 22: // jcsFadeOutEngine(-1) - fade out all

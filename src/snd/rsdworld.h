@@ -23,6 +23,8 @@ namespace rsdWorld {
     // volR: right channel PSX SPU volume
     s32 PlayTransientNonPositional(u32 sampleId, u16 volL, u16 volR, s16 pitch, u16 pan);
 
+    void UpdateSpatialAudioState();
+
 } // namespace rsdWorld
 
 // PSX: rsdPersistent - persistent (looping) SPU sound object
@@ -32,6 +34,8 @@ class rsdPersistent {
 public:
     u32 sampleId;       // rsd sample index
     void* voiceHandle;  // PC: AudioVoice cast to void*
+    const LVector* posPtr; // source position pointer (world-space)
+    u16 spatialFlags;   // original spatial attenuation flags
     u16 volume;         // current PSX volume
 
     // Params: sampleId, posPtr, reverb, volume, pitch, flags
@@ -46,4 +50,7 @@ public:
 
     // PSX: SetVolume (update volume on active voice)
     void SetVolume(u16 psxVol);
+
+    // PC: refresh spatial position/volume from live world state.
+    void UpdateSpatial();
 };
