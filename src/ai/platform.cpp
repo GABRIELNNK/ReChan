@@ -428,7 +428,7 @@ void Platform::CreateModel(const char* name) {
 
     if (platformSound == nullptr) {
         CSound* snd = nullptr;
-        if (CSoundFactory::CreateObject(10040, &snd, (u32)PtrToken32(field76)) >= 0) {
+        if (CSoundFactory::CreateObject(10040, &snd, modelHash) >= 0) {
             platformSound = static_cast<CPlatformSound*>(snd);
             platformSound->Initialize(&pos);
         }

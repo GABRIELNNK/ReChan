@@ -11,13 +11,14 @@
 //   Model (96 bytes) -> GModel (96 bytes)
 //
 // Drawable wrappers:
-//   DrawableTree -> DrawableSTree / DrawableGeo
+//   DrawableTree -> DrawableSTree / DrawableGeo / DrawableETree
 
 class pddiPrimBuffer;
 class Thing;
 class AnimStructure;
 struct AnimationMatrices;
 struct STreeData;
+struct TransformAnim;
 
 struct ModelFloorHeightState {
     s32 current = (s32)0x80000001;
@@ -98,6 +99,16 @@ struct OriginalGeo : public OriginalBasic {
     ~OriginalGeo() override;
 };
 
+// OriginalETree - export-tree model data (52 bytes on PSX).
+// Current PC port stores a single renderable mesh buffer, matching the
+// existing Geo path until dedicated ETree data decoding is implemented.
+struct OriginalETree : public OriginalBasic {
+    pddiPrimBuffer* meshBuffer = nullptr;
+
+    OriginalETree();
+    ~OriginalETree() override;
+};
+
 // DrawableBasic - base drawable wrapper used by Model.
 // STree models expose skeleton accessors for animation code; Geo models return null.
 struct DrawableBasic {
@@ -136,6 +147,16 @@ struct DrawableGeo : public DrawableBasic {
 
     DrawableGeo(OriginalGeo* orig);
     ~DrawableGeo() override;
+
+    void Display(u32 flags) override;
+};
+
+// DrawableETree - wraps OriginalETree for EModel rendering.
+struct DrawableETree : public DrawableBasic {
+    OriginalETree* original = nullptr;
+
+    DrawableETree(OriginalETree* orig);
+    ~DrawableETree() override;
 
     void Display(u32 flags) override;
 };
@@ -259,6 +280,19 @@ public:
 
     void Show(u32 flags) override;
     void SetOriginalGeo(OriginalGeo* original);
+};
+
+// EModel - export-tree model (120 bytes on PSX).
+// Uses drawableType=3 so launcher logic can select the EModel anim path.
+class EModel : public Model {
+public:
+    EModel();
+    ~EModel() override;
+
+    void Show(u32 flags) override;
+    void Animate() override;
+    void ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 p4, s32 p5) override;
+    void SetOriginalETree(OriginalETree* original, TransformAnim* animation = nullptr);
 };
 
 // HumanoidModel - character model with animation matrices (136 bytes on PSX)

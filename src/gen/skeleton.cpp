@@ -410,7 +410,7 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
                 return std::make_tuple(r, g, b);
             };
 
-            if (cmdBase == 0x3C || cmdBase == 0x2C) {
+            if (cmdBase == 0x3C) {
                 if (pktSize < 52) { primCursor += pktSize; continue; }
                 SkinVertex v0 = makeSkinVert(vi0), v1 = makeSkinVert(vi1);
                 SkinVertex v2 = makeSkinVert(vi2), v3 = makeSkinVert(vi3);
@@ -433,7 +433,27 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
                 allIndices.push_back(base + 1); allIndices.push_back(base + 3); allIndices.push_back(base + 2);
 
             }
-            else if (cmdBase == 0x34 || cmdBase == 0x24) {
+            else if (cmdBase == 0x2C) {
+                if (pktSize < 40) { primCursor += pktSize; continue; }
+                SkinVertex v0 = makeSkinVert(vi0), v1 = makeSkinVert(vi1);
+                SkinVertex v2 = makeSkinVert(vi2), v3 = makeSkinVert(vi3);
+                f32 tp = (f32)ReadU16(pkt + 22);
+                f32 cb = (f32)ReadU16(pkt + 14);
+                auto [r0, g0, b0] = readRGB(4);
+                v0.r = r0; v0.g = g0; v0.b = b0; v1.r = r0; v1.g = g0; v1.b = b0;
+                v2.r = r0; v2.g = g0; v2.b = b0; v3.r = r0; v3.g = g0; v3.b = b0;
+                v0.u = pkt[12]; v0.v = pkt[13]; v0.tpage = tp; v0.cba = cb;
+                v1.u = pkt[20]; v1.v = pkt[21]; v1.tpage = tp; v1.cba = cb;
+                v2.u = pkt[28]; v2.v = pkt[29]; v2.tpage = tp; v2.cba = cb;
+                v3.u = pkt[36]; v3.v = pkt[37]; v3.tpage = tp; v3.cba = cb;
+                u16 base = (u16)skinVerts.size();
+                skinVerts.push_back(v0); skinVerts.push_back(v1);
+                skinVerts.push_back(v2); skinVerts.push_back(v3);
+                allIndices.push_back(base); allIndices.push_back(base + 1); allIndices.push_back(base + 2);
+                allIndices.push_back(base + 1); allIndices.push_back(base + 3); allIndices.push_back(base + 2);
+
+            }
+            else if (cmdBase == 0x34) {
                 if (pktSize < 40) { primCursor += pktSize; continue; }
                 SkinVertex v0 = makeSkinVert(vi0), v1 = makeSkinVert(vi1), v2 = makeSkinVert(vi2);
                 f32 tp = (f32)ReadU16(pkt + 26);
@@ -447,6 +467,23 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
                 v0.u = pkt[12]; v0.v = pkt[13]; v0.tpage = tp; v0.cba = cb;
                 v1.u = pkt[24]; v1.v = pkt[25]; v1.tpage = tp; v1.cba = cb;
                 v2.u = pkt[36]; v2.v = pkt[37]; v2.tpage = tp; v2.cba = cb;
+                u16 base = (u16)skinVerts.size();
+                skinVerts.push_back(v0); skinVerts.push_back(v1); skinVerts.push_back(v2);
+                allIndices.push_back(base); allIndices.push_back(base + 1); allIndices.push_back(base + 2);
+
+            }
+            else if (cmdBase == 0x24) {
+                if (pktSize < 32) { primCursor += pktSize; continue; }
+                SkinVertex v0 = makeSkinVert(vi0), v1 = makeSkinVert(vi1), v2 = makeSkinVert(vi2);
+                f32 tp = (f32)ReadU16(pkt + 22);
+                f32 cb = (f32)ReadU16(pkt + 14);
+                auto [r0, g0, b0] = readRGB(4);
+                v0.r = r0; v0.g = g0; v0.b = b0;
+                v1.r = r0; v1.g = g0; v1.b = b0;
+                v2.r = r0; v2.g = g0; v2.b = b0;
+                v0.u = pkt[12]; v0.v = pkt[13]; v0.tpage = tp; v0.cba = cb;
+                v1.u = pkt[20]; v1.v = pkt[21]; v1.tpage = tp; v1.cba = cb;
+                v2.u = pkt[28]; v2.v = pkt[29]; v2.tpage = tp; v2.cba = cb;
                 u16 base = (u16)skinVerts.size();
                 skinVerts.push_back(v0); skinVerts.push_back(v1); skinVerts.push_back(v2);
                 allIndices.push_back(base); allIndices.push_back(base + 1); allIndices.push_back(base + 2);

@@ -87,7 +87,7 @@ Thing::Thing(const LVector* initialPos, u16 type) {
     maxHealth = 1;
 
     thingHandle = nullptr;
-    field76 = nullptr;
+    modelHash = 0;
     model = nullptr;
     blockNum = BLOCK_UNASSIGNED;
 
@@ -281,21 +281,21 @@ void Thing::CreateModel(const char* name) {
     if (!g_levelManager)
         return;
 
-    // PSX: if name provided, hash it; else use field76 (nameHash from AnalyzeMesh)
-    s32 modelHash;
+    // PSX: if name provided, hash it; else use modelHash (nameHash from AnalyzeMesh)
+    u32 hash;
     if (name) {
-        modelHash = (s32)p3dHash(name);
+        hash = p3dHash(name);
     }
     else {
-        modelHash = (s32)(uintptr_t)field76;
-        if (!modelHash)
+        hash = modelHash;
+        if (!hash)
             return;
     }
 
     // PSX: FindModel__12LevelManagerl(theLevelMgr, hash)
-    OriginalBasic* found = g_levelManager->FindModel(modelHash);
+    OriginalBasic* found = g_levelManager->FindModel(hash);
     if (!found) {
-        LOG("[Thing::CreateModel] Model not found for hash 0x%08X", (u32)modelHash);
+        LOG("[Thing::CreateModel] Model not found for hash 0x%08X", (u32)hash);
         return;
     }
 
@@ -330,6 +330,20 @@ void Thing::CreateModel(const char* name) {
             model = sm;
         }
         sm->SetOriginalSTree(static_cast<OriginalSTree*>(found));
+    }
+    else if (modelType == 2) {
+        EModel* em = nullptr;
+        if (existing && existing->drawableType == 3) {
+            em = static_cast<EModel*>(existing);
+        }
+        else {
+            if (existing) {
+                delete existing;
+            }
+            em = new EModel();
+            model = em;
+        }
+        em->SetOriginalETree(static_cast<OriginalETree*>(found), nullptr);
     }
 
     if (model) {
@@ -374,11 +388,11 @@ void Thing::AnalyzeMesh(DBRoot* root) {
         if (a5->type == 0) {
             // String attribute - hash it
             const char* str = a5->strValue ? a5->strValue : "";
-            field76 = (void*)(uintptr_t)p3dHash(str);
+            modelHash = p3dHash(str);
         }
         else if (a5->type == 1) {
             // Numeric attribute - use directly
-            field76 = (void*)(uintptr_t)a5->value;
+            modelHash = a5->value;
         }
     }
 

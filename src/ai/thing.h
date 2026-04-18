@@ -139,7 +139,7 @@ public:
     ccNode subNode;
 
     // PSX +76 (ptr): reserved
-    void* field76 = nullptr;
+    u32 modelHash = 0;
 
     // PSX +80 (ptr): tDrawable* model for rendering
     void* model = nullptr;

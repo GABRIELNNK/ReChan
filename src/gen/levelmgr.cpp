@@ -2,7 +2,9 @@
 #include "gen/levelmgr.h"
 #include "gen/charmgr.h"
 #include "gen/animmgr.h"
+#include "gen/geffect.h"
 #include "gen/model.h"
+#include "ai/obstacle.h"
 
 namespace {
     // OriginalBasic fields accessed via proper struct methods now.
@@ -75,6 +77,7 @@ void LevelManager::PurgeLevel() {
     if (g_animMgr) {
         g_animMgr->PurgeLevel();
     }
+    GEffect_Unload();
 
     LOG("[LevelManager] PurgeLevel");
 }
@@ -101,7 +104,9 @@ void LevelManager::PurgePetal() {
     if (g_animMgr) {
         g_animMgr->PurgePetal();
     }
+    GEffect_Unload();
     // PSX: Obstacle::ClearPetalAnimList()
+    Obstacle_ClearPetalAnimList();
 
     LOG("[LevelManager] PurgePetal");
 }
@@ -214,7 +219,7 @@ OriginalBasic* LevelManager::FindModel(ModelListEnum listType, s32 id) {
 
 // PSX: FindModel__12LevelManagerl (0x800592A0)
 // PSX searches 4 lists starting at offset +52: modelLists[2], modelLists[3], streeList, etreeList
-OriginalBasic* LevelManager::FindModel(s32 id) {
+OriginalBasic* LevelManager::FindModel(u32 id) {
     MARKFUNCTION(0x800592A0);
     u32 crc = static_cast<u32>(id);
 

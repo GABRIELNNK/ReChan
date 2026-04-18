@@ -14,6 +14,7 @@
 #include "gen/director.h"
 #include "gen/display.h"
 #include "gen/game.h"
+#include "gen/geffect.h"
 #include "gen/levelmgr.h"
 #include "gen/model.h"
 #include "gen/path.h"
@@ -714,3 +715,68 @@ void Obstacle::HandleHumanoidObstacleCollision(Humanoid* hum) {
     }
 }
 
+// Obstacle animation table (PSX: g_animTable at 0x800E0E58, g_animCount at GP+0xF38)
+#include "gen/animmgr.h"
+
+static constexpr s32 MAX_OBSTACLE_ANIMS = 32;
+static MiscAnimNode* g_obstacleAnimTable[MAX_OBSTACLE_ANIMS] = {};
+static s32 g_obstacleAnimCount = 0;
+
+static u32 ObstacleReadU32LE(const u8* p) {
+    return p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24);
+}
+
+// PSX: GetAnimation__8Obstaclelllll → 0x8007CB88 (OBSTACLE.CPP:1803)
+MiscAnimNode* Obstacle_GetAnimation(s32 animIndex) {
+    MARKFUNCTION(0x8007CB88);
+    if (animIndex < 0 || g_obstacleAnimCount <= animIndex) {
+        return nullptr;
+    }
+    return g_obstacleAnimTable[animIndex];
+}
+
+// PSX: ClearPetalAnimList__8Obstacle → 0x8007CB5C (OBSTACLE.CPP:1797)
+void Obstacle_ClearPetalAnimList() {
+    MARKFUNCTION(0x8007CB5C);
+    for (s32 i = MAX_OBSTACLE_ANIMS - 1; i >= 0; i--) {
+        g_obstacleAnimTable[i] = nullptr;
+    }
+    g_obstacleAnimCount = 0;
+}
+
+// PSX: AddAnimation portion of Obstacle::Load (0x8007CAA4)
+void Obstacle_AddAnimation(MiscAnimNode* node) {
+    if (g_obstacleAnimCount >= MAX_OBSTACLE_ANIMS) {
+        return;
+    }
+    g_obstacleAnimTable[g_obstacleAnimCount] = node;
+    g_obstacleAnimCount++;
+}
+
+// PSX: Load__8ObstacleR10tReadChunkPPv (0x8007CAA4)
+// Chunk payload is two u32 values read from tFile::GetLong(); first is lookup hash.
+void Obstacle_LoadAnimChunk(const u8* body, u32 bodySize) {
+    MARKFUNCTION(0x8007CAA4);
+
+    if (!body || bodySize < 8) {
+        return;
+    }
+
+    u32 animHash = ObstacleReadU32LE(body + 0);
+    (void)ObstacleReadU32LE(body + 4); // PSX reads and ignores second long here.
+
+    MiscAnimNode* misc = nullptr;
+    if (g_animMgr) {
+        misc = g_animMgr->GetMiscAnim(animHash);
+    }
+
+    if (misc) {
+        Obstacle_AddAnimation(misc);
+        return;
+    }
+
+    MiscAnimNode* effectAnim = nullptr;
+    if (GEffect_FindEffectAnim(animHash, &effectAnim)) {
+        Obstacle_AddAnimation(effectAnim);
+    }
+}

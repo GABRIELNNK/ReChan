@@ -9,8 +9,11 @@
 #include "gen/director.h"
 #include "gen/game.h"
 #include "gen/geometry.h"
+#include "gen/geffect.h"
 #include "gen/levelmgr.h"
 #include "gen/model.h"
+#include "gen/skeleton.h"
+#include "gen/animmgr.h"
 #include "snd/rsevent.h"
 #include "fe/hdmenu.h"
 #include "fe/hud.h"
@@ -24,6 +27,7 @@
 #include "pc/log.h"
 
 #include "gen/uvdata.h"
+#include "ai/obstacle.h"
 
 #include <fstream>
 #include <filesystem>
@@ -119,6 +123,167 @@ static u16 ReadU16(const u8* p) { return static_cast<u16>(p[0] | (p[1] << 8)); }
 static u32 ReadU32(const u8* p) { return p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24); }
 static s16 ReadS16(const u8* p) { return static_cast<s16>(p[0] | (p[1] << 8)); }
 static s32 ReadS32(const u8* p) { return static_cast<s32>(p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24)); }
+
+static bool IsValidTransformKeyType(u32 keyType) {
+    switch (keyType) {
+        case KEY_JOINT_1DOF_ANGLE:
+        case KEY_JOINT_3DOF_ANGLE:
+        case KEY_JOINT_3DOF_LP_PSX:
+        case KEY_STATIC_3DOF_ANGLE:
+        case KEY_STATIC_3DOF_POS:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool IsLikelyTransformAnimHeader(const u8* data, u32 dataSize, u32 offset) {
+    if (!data || offset + 40 > dataSize) {
+        return false;
+    }
+
+    const u8* h = data + offset;
+    const u32 nameUID = ReadU32(h + 0);
+    const u32 vtableOff = ReadU32(h + 8);
+    const u32 numFrames = ReadU32(h + 12);
+    const u32 numRot = ReadU32(h + 24);
+    const u32 numTrans = ReadU32(h + 28);
+    const u32 rotArrayOff = ReadU32(h + 32) * 4;
+    const u32 transArrayOff = ReadU32(h + 36) * 4;
+    const u32 remaining = dataSize - offset;
+
+    if (nameUID == 0) {
+        return false;
+    }
+    if (vtableOff != 0) {
+        return false;
+    }
+    if (numFrames == 0 || numFrames > 1024) {
+        return false;
+    }
+    if ((numRot + numTrans) == 0 || numRot > 256 || numTrans > 256) {
+        return false;
+    }
+    if (rotArrayOff < 40 || transArrayOff < 40) {
+        return false;
+    }
+    if ((rotArrayOff & 3) != 0 || (transArrayOff & 3) != 0) {
+        return false;
+    }
+    if (rotArrayOff + (numRot * 4) > remaining) {
+        return false;
+    }
+    if (transArrayOff + (numTrans * 4) > remaining) {
+        return false;
+    }
+
+    return true;
+}
+
+static bool IsLikelyTransformAnim(const TransformAnim* anim) {
+    if (!anim) {
+        return false;
+    }
+    if (anim->nameUID == 0 || anim->numFrames <= 0 || anim->numFrames > 1024) {
+        return false;
+    }
+    if (anim->numRotChannels < 0 || anim->numRotChannels > 256) {
+        return false;
+    }
+    if (anim->numTransChannels < 0 || anim->numTransChannels > 256) {
+        return false;
+    }
+    if ((anim->numRotChannels + anim->numTransChannels) == 0) {
+        return false;
+    }
+
+    // Require channel key types to look like real transform animation data.
+    for (s32 i = 0; i < anim->numRotChannels; i++) {
+        if (!anim->rotChannels || !anim->rotChannels[i].chData) {
+            return false;
+        }
+        if (!IsValidTransformKeyType(anim->rotChannels[i].keyType)) {
+            return false;
+        }
+    }
+    for (s32 i = 0; i < anim->numTransChannels; i++) {
+        if (!anim->transChannels || !anim->transChannels[i].chData) {
+            return false;
+        }
+        if (!IsValidTransformKeyType(anim->transChannels[i].keyType)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// PSX STREAM.CPP parity hook: HandleRCB/HandlePCB load animation entities via
+// AnimLoaderCallback/CompAnimLoaderCallback and append MiscAnimNode objects to
+// AnimationManager. This recreates the missing population pass from perm data.
+static void LoadPermMiscAnimations(const u8* permData, u32 permSize, u8 animType) {
+    if (!permData || permSize < 40 || !g_animMgr) {
+        return;
+    }
+
+    std::vector<u32> headerOffsets;
+    headerOffsets.reserve(64);
+
+    for (u32 off = 0; off + 40 <= permSize; off += 4) {
+        if (!IsLikelyTransformAnimHeader(permData, permSize, off)) {
+            continue;
+        }
+        headerOffsets.push_back(off);
+    }
+
+    if (headerOffsets.empty()) {
+        return;
+    }
+
+    s32 loadedCount = 0;
+    for (u32 i = 0; i < headerOffsets.size(); i++) {
+        const u32 start = headerOffsets[i];
+        const u32 end = (i + 1 < headerOffsets.size()) ? headerOffsets[i + 1] : permSize;
+        if (end <= start || end - start < 40) {
+            continue;
+        }
+
+        const u32 rawSize = end - start;
+        u8* rawCopy = (u8*)std::malloc(rawSize);
+        if (!rawCopy) {
+            continue;
+        }
+        std::memcpy(rawCopy, permData + start, rawSize);
+
+        TransformAnim* anim = TransformAnim::Parse(rawCopy, rawSize);
+        if (!anim) {
+            std::free(rawCopy);
+            continue;
+        }
+        anim->ownedRawData = rawCopy;
+
+        if (!IsLikelyTransformAnim(anim)) {
+            delete anim;
+            continue;
+        }
+
+        if (g_animMgr->GetMiscAnim(anim->nameUID)) {
+            delete anim;
+            continue;
+        }
+
+        MiscAnimNode* node = new MiscAnimNode();
+        node->hash = anim->nameUID;
+        node->anim = anim;
+        node->type = animType;
+        g_animMgr->AddAnim(node);
+        loadedCount++;
+    }
+
+    if (loadedCount > 0) {
+        LOG("[World] Loaded %d misc anims from perm stream (type=%u)", loadedCount, (u32)animType);
+    }
+}
 
 struct GeoMaterialInfo {
     u8 primCmd = 0;
@@ -300,11 +465,20 @@ static void LoadGeoPair(
     if (!g_levelManager || !permData || !p3dData || p3dSize < 6) {
         return;
     }
+
+    // Match PSX Stream.cpp behavior where RCB/PCB loaders push animation
+    // entities into AnimationManager during stream load callbacks.
+    LoadPermMiscAnimations(permData, permSize, (u8)storeId);
+
     if (ReadU16(p3dData) != 0xFF04) {
         return;
     }
 
         std::unordered_map<u32, GeoMaterialInfo> materials;
+
+        // Track PRM (tPrimGeom) perm locations from 0x6009 chunks for STree lookup
+        struct PrmInfo { u32 permOffset; u32 permSize; };
+        std::unordered_map<u32, PrmInfo> prmMap; // nameHash → perm location
 
         u32 rootSize = ReadU32(p3dData + 2);
         u32 chunkEnd = (rootSize < p3dSize) ? rootSize : p3dSize;
@@ -416,6 +590,39 @@ static void LoadGeoPair(
                                 permData, permCursor, permSize);
             }
 
+            else if (chunkId == 0x8A10) {
+                GEffect_LoadChunk(chunkBody, chunkSize - 6);
+            }
+
+            else if (chunkId == 0x8A20) {
+                Obstacle_LoadAnimChunk(chunkBody, chunkSize - 6);
+            }
+
+            // PSX: tETreeLoader::Load / myETreeLoaderCallback (STREAM.CPP:678)
+            // Chunk 0x6140 = tETree. Body: pstring name, u16 jointCount, sub-chunks 0x6141.
+            // Creates OriginalETree and registers in LevelManager for FindModel lookups.
+            else if (chunkId == 0x6140) {
+                u32 bodyLen = chunkSize - 6;
+                if (bodyLen >= 3) {
+                    u8 nameLen = chunkBody[0];
+                    if ((u32)(1 + nameLen + 2) <= bodyLen) {
+                        char nameBuf[256];
+                        u32 copyLen = (nameLen < 255) ? nameLen : 255;
+                        memcpy(nameBuf, chunkBody + 1, copyLen);
+                        nameBuf[copyLen] = '\0';
+
+                        u32 nameHash = p3dHash(nameBuf);
+                        // PSX: always creates ETree (no duplicate check against Geo list).
+                        // Both Geo and ETree can coexist with the same nameCRC in different lists.
+                        OriginalETree* et = new OriginalETree();
+                        et->nameCRC = nameHash;
+                        et->SetStoreID(static_cast<s8>(storeId));
+                        g_levelManager->AddOriginal(et, 0);
+                        LOG("[World] Loaded ETree '%s' (hash 0x%08X, store %d)", nameBuf, nameHash, storeId);
+                    }
+                }
+            }
+
             else if (chunkId == 0x6008 && world) {
                 u32 p = 0;
                 u32 bodyLen = chunkSize - 6;
@@ -432,6 +639,125 @@ static void LoadGeoPair(
                     p + (u32)(rw * rh * 2) <= bodyLen) {
                     world->UploadToVRAM(rx, ry, rw, rh, chunkBody + p);
                     LOG("[GeoTex] VRAM upload: x=%d y=%d w=%d h=%d", rx, ry, rw, rh);
+                }
+            }
+
+            // PSX: tPrimLoader::Load (TPRMLOAD.CPP:61, 0x80088A80)
+            // Chunk 0x6009 = tPrimGeom. Body: u32 permSize, p-string name.
+            // Creates tPrimGeom from perm data at current cursor, stores in P3D inventory.
+            // PC: record perm offset/size for later STree lookup, advance permCursor.
+            else if (chunkId == 0x6009) {
+                u32 bodyLen = chunkSize - 6;
+                if (bodyLen >= 5) {
+                    u32 prmPermSize = ReadU32(chunkBody + 0);
+                    u8 prmNameLen = chunkBody[4];
+                    if ((u32)(5 + prmNameLen) <= bodyLen) {
+                        char prmNameBuf[256];
+                        u32 copyLen = (prmNameLen < 255) ? prmNameLen : 255;
+                        memcpy(prmNameBuf, chunkBody + 5, copyLen);
+                        prmNameBuf[copyLen] = '\0';
+                        u32 prmHash = p3dHash(prmNameBuf);
+
+                        if (permCursor + prmPermSize <= permSize) {
+                            prmMap[prmHash] = { permCursor, prmPermSize };
+                            LOG("[World] PRM '%s' (hash 0x%08X) at permOff=%u size=%u",
+                                prmNameBuf, prmHash, permCursor, prmPermSize);
+                        }
+                        permCursor += prmPermSize;
+                    }
+                }
+            }
+
+            // PSX: tSTreeLoader::Load / mySTreeLoaderCallback (STREAM.CPP:704, 0x8009976C)
+            // Chunk 0x6120 = tSTree. Body: p-string name, u16 jointCount, p-string prmName,
+            // u32 permSize, sub-chunks 0x6121 (tSJoint), optional 0x6122 (joint map).
+            // Creates OriginalSTree with nameCRC, references PRM for geometry data.
+            // PC: create OriginalSTree, build mesh from PRM perm data, register via AddOriginal.
+            else if (chunkId == 0x6120) {
+                u32 bodyLen = chunkSize - 6;
+                u32 p = 0;
+                if (bodyLen >= 3) {
+                    u8 nameLen = chunkBody[p++];
+                    if (p + nameLen + 2 <= bodyLen) {
+                        char nameBuf[256];
+                        u32 copyLen = (nameLen < 255) ? nameLen : 255;
+                        memcpy(nameBuf, chunkBody + p, copyLen);
+                        nameBuf[copyLen] = '\0';
+                        p += nameLen;
+
+                        u16 jointCount = ReadU16(chunkBody + p); p += 2;
+
+                        // Read PRM name
+                        char prmNameBuf[256] = {};
+                        if (p < bodyLen) {
+                            u8 prmNameLen = chunkBody[p++];
+                            u32 prmCopy = (prmNameLen < 255) ? prmNameLen : 255;
+                            if (p + prmCopy <= bodyLen) {
+                                memcpy(prmNameBuf, chunkBody + p, prmCopy);
+                                prmNameBuf[prmCopy] = '\0';
+                                p += prmNameLen;
+                            }
+                        }
+
+                        // Read permSize (perm consumed by STree joint data)
+                        u32 streePermSize = 0;
+                        if (p + 4 <= bodyLen) {
+                            streePermSize = ReadU32(chunkBody + p);
+                            p += 4;
+                        }
+
+                        u32 nameHash = p3dHash(nameBuf);
+
+                        OriginalSTree* original = new OriginalSTree();
+                        original->nameCRC = nameHash;
+                        original->SetStoreID(static_cast<s8>(storeId));
+                        original->skeleton = ParseSTreeChunk(chunkBody, bodyLen, false);
+
+                        // Look up PRM geometry data from perm
+                        u32 prmHash = p3dHash(prmNameBuf);
+                        auto prmIt = prmMap.find(prmHash);
+                        if (prmIt != prmMap.end()) {
+                            const PrmInfo& prm = prmIt->second;
+                            if (prm.permOffset + prm.permSize <= permSize) {
+                                if (original->skeleton) {
+                                    BuildPerJointMeshes(original,
+                                        permData + prm.permOffset, prm.permSize);
+                                }
+
+                                if (original->skeleton && original->skinData &&
+                                    original->skeleton->joints &&
+                                    original->skeleton->numJoints > 0 &&
+                                    original->skeleton->joints[0].meshBuffer) {
+                                    LOG("[World] STree '%s' skinned mesh built from PRM '%s' (%u verts, %u joints)",
+                                        nameBuf, prmNameBuf,
+                                        original->skeleton->joints[0].meshBuffer->GetVertexCount(),
+                                        original->skeleton->numJoints);
+                                }
+                                else {
+                                    pddiPrimBuffer* meshBuf = ParseBLKPrims(
+                                        permData + prm.permOffset, prm.permSize);
+                                    if (meshBuf) {
+                                        original->meshBuffer = meshBuf;
+                                        LOG("[World] STree '%s' mesh built from PRM '%s' (%u verts)",
+                                            nameBuf, prmNameBuf, meshBuf->GetVertexCount());
+                                    }
+                                    else {
+                                        LOG("[World] STree '%s' PRM '%s' mesh parse failed",
+                                            nameBuf, prmNameBuf);
+                                    }
+                                }
+                            }
+                        } else {
+                            LOG("[World] STree '%s' PRM '%s' not found in prmMap",
+                                nameBuf, prmNameBuf);
+                        }
+
+                        g_levelManager->AddOriginal(original, 0);
+                        permCursor += streePermSize;
+
+                        LOG("[World] Loaded STree '%s' (hash 0x%08X, %u joints, store %d)",
+                            nameBuf, nameHash, jointCount, storeId);
+                    }
                 }
             }
 

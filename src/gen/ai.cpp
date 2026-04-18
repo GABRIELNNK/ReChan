@@ -18,6 +18,7 @@
 #include "ai/arrow.h"
 #include "ai/door.h"
 #include "ai/ladder.h"
+#include "ai/launcher.h"
 #include "ai/trapdoor.h"
 #include "ai/platform.h"
 #include "ai/teleporter.h"
@@ -240,6 +241,9 @@ void AI::AddThingNoTagList(const char* name, u16 type,
                 thing = vol;
                 LOG("[AI] FrontEndVolume created: name=%s pos=(%d,%d,%d)", name ? name : "null", pos->x, pos->y, pos->z);
             }
+            else if (type == AITypes::TT_LAUNCHER) {
+                thing = new Launcher(pos, type);
+            }
             else if (type == AITypes::TT_DOOR) {
                 Door* d = new Door(pos, type);
                 thing = d;
@@ -300,8 +304,8 @@ void AI::AddThingNoTagList(const char* name, u16 type,
     }
 
     if (type == AITypes::TT_BOSS) {
-        LOG("[AI] FrontEndVolume post-create: flags=0x%08X field76=%p collRadius=%d",
-            thing->flags, thing->field76, thing->collisionRadius);
+        LOG("[AI] FrontEndVolume post-create: flags=0x%08X modelHash=%p collRadius=%d",
+            thing->flags, thing->modelHash, thing->collisionRadius);
     }
 
     thing->Reset();

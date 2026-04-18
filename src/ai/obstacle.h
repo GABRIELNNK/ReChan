@@ -55,3 +55,15 @@ public:
 
 // Global zero delta velocity (PSX: 0x800CE818)
 extern const LVector ZERO_DELTA_VELOCITY;
+
+// Obstacle animation table (PSX: g_animTable at 0x800E0E58, g_animCount at GP+0xF38)
+// Populated by Obstacle::Load during petal loading, cleared by ClearPetalAnimList.
+// Entries are MiscAnimNode* from AnimationManager. Access TransformAnim* via ->anim.
+struct MiscAnimNode;
+MiscAnimNode* Obstacle_GetAnimation(s32 animIndex);
+void Obstacle_ClearPetalAnimList();
+void Obstacle_AddAnimation(MiscAnimNode* node);
+
+// PSX: Load__8ObstacleR10tReadChunkPPv (0x8007CAA4)
+// Parses chunk 0x8A20 body and appends matching misc anim to obstacle table.
+void Obstacle_LoadAnimChunk(const u8* body, u32 bodySize);

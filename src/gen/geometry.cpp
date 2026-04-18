@@ -149,8 +149,8 @@ pddiPrimBuffer* ParseBLKPrims(const u8* pg, u32 pgSize) {
 
             u8 cmdBase = cmd & 0xFD; // mask out semi-transparency bit (bit 1)
 
-            if (cmdBase == 0x3C || cmdBase == 0x2C) {
-                // POLY_GT4 / POLY_FT4: textured quad (52 bytes)
+            if (cmdBase == 0x3C) {
+                // POLY_GT4: gouraud-textured quad (52 bytes)
                 // Colors at +4, +16, +28, +40; UVs at +12, +24, +36, +48
                 // CBA at +14, TPAGE at +26
                 if (pktSize < 52) { primCursor += pktSize; continue; }
@@ -174,6 +174,36 @@ pddiPrimBuffer* ParseBLKPrims(const u8* pg, u32 pgSize) {
                 v1.u = pkt[24]; v1.v = pkt[25]; v1.tpage = tp; v1.cba = cb;
                 v2.u = pkt[36]; v2.v = pkt[37]; v2.tpage = tp; v2.cba = cb;
                 v3.u = pkt[48]; v3.v = pkt[49]; v3.tpage = tp; v3.cba = cb;
+
+                u16 base = static_cast<u16>(vertBuf.size());
+                vertBuf.push_back(v0); vertBuf.push_back(v1);
+                vertBuf.push_back(v2); vertBuf.push_back(v3);
+                idxBuf.push_back(base); idxBuf.push_back(base + 1); idxBuf.push_back(base + 2);
+                idxBuf.push_back(base + 1); idxBuf.push_back(base + 3); idxBuf.push_back(base + 2);
+
+            }
+            else if (cmdBase == 0x2C) {
+                // POLY_FT4: flat-textured quad (40 bytes)
+                // One color at +4; UVs at +12, +20, +28, +36
+                // CBA at +14, TPAGE at +22
+                if (pktSize < 40) { primCursor += pktSize; continue; }
+
+                Vert v0 = readVert(vi0), v1 = readVert(vi1);
+                Vert v2 = readVert(vi2), v3 = readVert(vi3);
+
+                f32 tp = static_cast<f32>(ReadU16LE(pkt + 22));
+                f32 cb = static_cast<f32>(ReadU16LE(pkt + 14));
+
+                auto [r0, g0, b0] = readRGB(4);
+                v0.r = r0; v0.g = g0; v0.b = b0;
+                v1.r = r0; v1.g = g0; v1.b = b0;
+                v2.r = r0; v2.g = g0; v2.b = b0;
+                v3.r = r0; v3.g = g0; v3.b = b0;
+
+                v0.u = pkt[12]; v0.v = pkt[13]; v0.tpage = tp; v0.cba = cb;
+                v1.u = pkt[20]; v1.v = pkt[21]; v1.tpage = tp; v1.cba = cb;
+                v2.u = pkt[28]; v2.v = pkt[29]; v2.tpage = tp; v2.cba = cb;
+                v3.u = pkt[36]; v3.v = pkt[37]; v3.tpage = tp; v3.cba = cb;
 
                 u16 base = static_cast<u16>(vertBuf.size());
                 vertBuf.push_back(v0); vertBuf.push_back(v1);
@@ -213,8 +243,8 @@ pddiPrimBuffer* ParseBLKPrims(const u8* pg, u32 pgSize) {
                 idxBuf.push_back(base + 1); idxBuf.push_back(base + 3); idxBuf.push_back(base + 2);
 
             }
-            else if (cmdBase == 0x34 || cmdBase == 0x24) {
-                // POLY_GT3 / POLY_FT3: textured tri (40 bytes)
+            else if (cmdBase == 0x34) {
+                // POLY_GT3: gouraud-textured tri (40 bytes)
                 // Colors at +4, +16, +28; UVs at +12, +24, +36
                 // CBA at +14, TPAGE at +26
                 if (pktSize < 40) { primCursor += pktSize; continue; }
@@ -239,6 +269,30 @@ pddiPrimBuffer* ParseBLKPrims(const u8* pg, u32 pgSize) {
                 vertBuf.push_back(v0); vertBuf.push_back(v1); vertBuf.push_back(v2);
                 idxBuf.push_back(base); idxBuf.push_back(base + 1); idxBuf.push_back(base + 2);
 
+            }
+            else if (cmdBase == 0x24) {
+                // POLY_FT3: flat-textured tri (32 bytes)
+                // One color at +4; UVs at +12, +20, +28
+                // CBA at +14, TPAGE at +22
+                if (pktSize < 32) { primCursor += pktSize; continue; }
+
+                Vert v0 = readVert(vi0), v1 = readVert(vi1), v2 = readVert(vi2);
+
+                f32 tp = static_cast<f32>(ReadU16LE(pkt + 22));
+                f32 cb = static_cast<f32>(ReadU16LE(pkt + 14));
+
+                auto [r0, g0, b0] = readRGB(4);
+                v0.r = r0; v0.g = g0; v0.b = b0;
+                v1.r = r0; v1.g = g0; v1.b = b0;
+                v2.r = r0; v2.g = g0; v2.b = b0;
+
+                v0.u = pkt[12]; v0.v = pkt[13]; v0.tpage = tp; v0.cba = cb;
+                v1.u = pkt[20]; v1.v = pkt[21]; v1.tpage = tp; v1.cba = cb;
+                v2.u = pkt[28]; v2.v = pkt[29]; v2.tpage = tp; v2.cba = cb;
+
+                u16 base = static_cast<u16>(vertBuf.size());
+                vertBuf.push_back(v0); vertBuf.push_back(v1); vertBuf.push_back(v2);
+                idxBuf.push_back(base); idxBuf.push_back(base + 1); idxBuf.push_back(base + 2);
             }
             else if (cmdBase == 0x30 || cmdBase == 0x20) {
                 // POLY_G3 / POLY_F3: untextured tri (28 bytes)

@@ -44,6 +44,17 @@ OriginalGeo::~OriginalGeo() {
     }
 }
 
+OriginalETree::OriginalETree() {
+    SetType(2); // ETree type
+}
+
+OriginalETree::~OriginalETree() {
+    if (meshBuffer) {
+        meshBuffer->Release();
+        meshBuffer = nullptr;
+    }
+}
+
 DrawableBasic::~DrawableBasic() = default;
 
 // DrawableSTree
@@ -115,6 +126,20 @@ DrawableGeo::~DrawableGeo() {
 }
 
 void DrawableGeo::Display(u32 /*flags*/) {
+    if (original && original->meshBuffer) {
+        p3d::context->DrawPrimBuffer(original->meshBuffer);
+    }
+}
+
+DrawableETree::DrawableETree(OriginalETree* orig) {
+    original = orig;
+}
+
+DrawableETree::~DrawableETree() {
+    original = nullptr;
+}
+
+void DrawableETree::Display(u32 /*flags*/) {
     if (original && original->meshBuffer) {
         p3d::context->DrawPrimBuffer(original->meshBuffer);
     }
@@ -345,6 +370,79 @@ void GModel::SetOriginalGeo(OriginalGeo* original) {
     DeleteDrawable();
     drawable = new DrawableGeo(original);
     drawableType = 1;
+}
+
+EModel::EModel() {
+    MARKFUNCTION(0x8006FB50);
+}
+
+EModel::~EModel() {
+    MARKFUNCTION(0x8006FB84);
+}
+
+void EModel::SetOriginalETree(OriginalETree* original, TransformAnim* animation) {
+    MARKFUNCTION(0x8006FBAC);
+    DeleteDrawable();
+    drawable = new DrawableETree(original);
+    drawableType = 3;
+
+    if (animation) {
+        if (animStructure) {
+            delete static_cast<AnimStructure*>(animStructure);
+            animStructure = nullptr;
+        }
+        animStructure = new AnimStructure(1, animation, ANIM_LOOP, this, drawable);
+    }
+}
+
+void EModel::ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 /*p4*/, s32 /*p5*/) {
+    MARKFUNCTION(0x8006FC34);
+    if (!g_characterManager) {
+        return;
+    }
+
+    TransformAnim* anim = (TransformAnim*)g_characterManager->GetAnimation((u32)thingType, animEnum);
+    if (!anim) {
+        anim = (TransformAnim*)g_characterManager->GetAnimation(0, animEnum);
+        if (!anim) {
+            return;
+        }
+    }
+
+    if (animStructure) {
+        delete static_cast<AnimStructure*>(animStructure);
+        animStructure = nullptr;
+    }
+    animStructure = new AnimStructure(2, anim, loopType, this, drawable);
+}
+
+void EModel::Animate() {
+    MARKFUNCTION(0x8006FD10);
+    if (!animStructure) {
+        return;
+    }
+
+    s32 doFlip = ((modelFlags >> 6) & 1) ? 1 : 0;
+    static_cast<AnimStructure*>(animStructure)->ExecuteHandler(doFlip);
+}
+
+void EModel::Show(u32 flags) {
+    MARKFUNCTION(0x8006FD44);
+
+    modelFlags &= ~0x30;
+
+    if (!drawable || !backPtr) {
+        return;
+    }
+
+    modelFlags |= 0x50;
+
+    Mat4 world;
+    p3dBuildRotMatrixZYX(rotX, rotY, rotZ, world);
+    world.SetTranslation((f32)posX, (f32)posY, (f32)posZ);
+
+    p3d::context->SetWorldMatrix(world);
+    drawable->Display(flags);
 }
 
 // HumanoidModel
