@@ -168,9 +168,9 @@ static void SetShockEnabledSetting(s32 value) {
 }
 
 static const SettingDef kSettingDefs[] = {
-    { "audio", "music_volume",   100, 0, 125, GetMusicVolume,   SetMusicVolume },
-    { "audio", "effects_volume", 100, 0, 125, GetEffectsVolume, SetEffectsVolume },
-    { "audio", "dialog_volume",  100, 0, 125, GetDialogVolume,  SetDialogVolume },
+    { "audio", "music_volume",   100, 0, 100, GetMusicVolume,   SetMusicVolume },
+    { "audio", "effects_volume", 100, 0, 100, GetEffectsVolume, SetEffectsVolume },
+    { "audio", "dialog_volume",  100, 0, 100, GetDialogVolume,  SetDialogVolume },
     { "audio", "stereo",           1, 0,   1, GetStereoEnabled, SetStereoEnabled },
     { "controls", "player_config", 0, 0,   2, GetPlayerConfigSetting, SetPlayerConfigSetting },
     { "controls", "shock",         0, 0,   1, GetShockEnabledSetting, SetShockEnabledSetting },

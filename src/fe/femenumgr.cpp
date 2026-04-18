@@ -19,16 +19,22 @@
 // Global feMenuMgr pointer
 feMenuMgr* g_feMenuMgr = nullptr;
 
-// Slider maxValue is 65535 (PSX SPU range), but flags/settings use 0-125.
+// Slider maxValue is 65535 (PSX SPU range), but platform flags/settings use 0-100.
 static constexpr u32 SLIDER_MAX = 65535;
-static constexpr u32 FLAG_MAX = 125;
+static constexpr u32 FLAG_MAX = 100;
 
 static u32 SliderToFlag(u32 sliderVal) {
-    return sliderVal * FLAG_MAX / SLIDER_MAX;
+    if (sliderVal > SLIDER_MAX) {
+        sliderVal = SLIDER_MAX;
+    }
+    return (sliderVal * FLAG_MAX + (SLIDER_MAX / 2)) / SLIDER_MAX;
 }
 
 static u32 FlagToSlider(u32 flagVal) {
-    return flagVal * SLIDER_MAX / FLAG_MAX;
+    if (flagVal > FLAG_MAX) {
+        flagVal = FLAG_MAX;
+    }
+    return (flagVal * SLIDER_MAX + (FLAG_MAX / 2)) / FLAG_MAX;
 }
 
 // Screen hashes (from decompiled constructor and SelfInit)

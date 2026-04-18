@@ -205,8 +205,7 @@ void hdSndItemSelection::DecItem() {
 void hdSndItemSelection::SetValue(u32 val) {
     MARKFUNCTION(0x8005DBD4);
     currentValue = val;
-    if (stepSize > 0)
-        currentStep = (s16)(val / stepSize);
+    currentStep = (s16)(val / stepSize);
     UpdateShown();
 }
 
