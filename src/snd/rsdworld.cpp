@@ -152,16 +152,8 @@ s32 rsdWorld::PlayTransientPositional(u32 sampleId, void* posPtr, u16 volume, s1
         return 0;
     }
 
-    UpdateListenerInAudioEngine();
-
     AudioVoice v = AUDIO_VOICE_INVALID;
-    if (objPos != nullptr) {
-        // Use backend 3D placement while preserving PSX loudness from GetObjectVolumesPsx.
-        v = AudioEngine::PlaySample3D(s, *objPos, vol, false, false, 0.0f, 10000.0f);
-    }
-    else {
-        v = AudioEngine::PlaySample(s, vol, pcPan, false);
-    }
+    v = AudioEngine::PlaySample(s, vol, pcPan, false);
 
     if (v != AUDIO_VOICE_INVALID && pitchF != 1.0f) {
         AudioEngine::SetVoicePitch(v, pitchF);
@@ -241,15 +233,20 @@ rsdPersistent::rsdPersistent(u32 sampleId_, void* posPtr, u8 reverb, u16 volume_
     vol *= g_sound->effectsVolume;
     f32 pitchF = PsxPitchToFloat(pitch);
 
-    UpdateListenerInAudioEngine();
-
     AudioVoice v = AUDIO_VOICE_INVALID;
+    f32 pcPan = 0.0f;
     if (this->posPtr != nullptr) {
-        v = AudioEngine::PlaySample3D(s, *this->posPtr, vol, true, false, 0.0f, 10000.0f);
+        u16 volL = 0;
+        u16 volR = 0;
+        GetObjectVolumesPsx(volume_, this->posPtr, volL, volR, flags);
+        const f32 fVolL = PsxVolToFloat(volL);
+        const f32 fVolR = PsxVolToFloat(volR);
+        if (fVolL + fVolR > 0.0f) {
+            pcPan = (fVolR - fVolL) / (fVolL + fVolR);
+        }
     }
-    else {
-        v = AudioEngine::PlaySample(s, vol, 0.0f, true);
-    }
+
+    v = AudioEngine::PlaySample(s, vol, pcPan, true);
 
     if (v != AUDIO_VOICE_INVALID) {
         if (pitchF != 1.0f) {
@@ -299,21 +296,25 @@ void rsdPersistent::UpdateSpatial() {
     if (voiceHandle) {
         AudioVoice v = static_cast<AudioVoice>(reinterpret_cast<uintptr_t>(voiceHandle));
 
-        if (posPtr != nullptr) {
-            AudioEngine::SetVoicePosition(v, *posPtr);
-        }
-
         u16 volL = volume;
         u16 volR = volume;
         if (posPtr != nullptr) {
             GetObjectVolumesPsx(volume, posPtr, volL, volR, spatialFlags);
         }
 
-        f32 vol = (PsxVolToFloat(volL) + PsxVolToFloat(volR)) * 0.5f;
+        const f32 fVolL = PsxVolToFloat(volL);
+        const f32 fVolR = PsxVolToFloat(volR);
+        f32 vol = (fVolL + fVolR) * 0.5f;
+        f32 pcPan = 0.0f;
+        if (fVolL + fVolR > 0.0f) {
+            pcPan = (fVolR - fVolL) / (fVolL + fVolR);
+        }
+
         if (g_sound) {
             vol *= g_sound->effectsVolume;
         }
         AudioEngine::SetVoiceVolume(v, vol);
+        AudioEngine::SetVoicePan(v, pcPan);
     }
 }
 

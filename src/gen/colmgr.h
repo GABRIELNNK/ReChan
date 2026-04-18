@@ -23,6 +23,7 @@ extern s32 g_filledWallCount;         // gp+4172: number of walls in g_wallPtrAr
 extern s32 g_maxWallIterations;       // gp+2836: max correction iterations per frame
 extern s32 g_wallHitCounter;          // gp+2840: incremented on wall hit in combat
 extern s32 g_floorSearchMargin;       // gp+2844: floor AABB search expansion
+extern s32 g_climbSearchRadius;       // gp+2848: climb state search radius
 extern s32 g_floorYSearchOffset;      // gp+2852: vertical offset for floor search
 extern s32 g_floorStandingTol;        // gp+2856: landing detection tolerance
 extern s32 g_colDefaultHeight;        // gp+2904: default humanoid collision height

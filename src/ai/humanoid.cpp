@@ -803,6 +803,55 @@ void Humanoid::SetActionState(u32 state, s32 param) {
                 m->SetAnim(HUMANOID_ANIM_LEDGE_PULLUP, 0, 0, 0);
             }
             break;
+        case AS_LADDER_CLIMB_DOWN:
+        {
+            // PSX case 25 (loc_800665C4): top latch entry, anim 0x122.
+            const bool clearLatchBits = ((flags2 & 0x10) == 0) || ((flags2 & 0x20) != 0 && (flags2 & 0x40) != 0);
+            if (clearLatchBits) {
+                flags2 = (flags2 | 0x10) & ~0x60;
+                field516 = 0;
+                field520 = 0;
+                field524 = 0;
+            }
+            stateDispatch = SD_LADDER_LATCH_TOP;
+            if (model) {
+                Model* m = static_cast<Model*>(model);
+                m->SetAnim(0x122, 0, 0, 0);
+            }
+            break;
+        }
+        case AS_LADDER_CLIMB_UP:
+            // PSX case 26 (loc_80066644): latch-on state, anim 0x123.
+            stateDispatch = SD_LADDER_LATCH;
+            if (model) {
+                Model* m = static_cast<Model*>(model);
+                m->SetAnim(0x123, 0, 0, 0);
+            }
+            break;
+        case AS_LADDER_CLIMBING:
+        {
+            // PSX case 27 (loc_80066668): active climb.
+            stateDispatch = SD_CLIMB_LADDER;
+            if (model) {
+                Model* m = static_cast<Model*>(model);
+                m->SetAnim(0x123, 0, 0, 0);
+            }
+            flags &= ~TF_DYNAMIC;
+            velocity = {};
+            contactForce = {};
+            DropPickup(1, 1);
+            break;
+        }
+        case AS_LADDER_DISMOUNT:
+            // PSX case 28 (loc_800666E8): dismount, anim 0x126.
+            stateDispatch = SD_LADDER_DISMOUNT;
+            flags2 &= ~0x70;
+            flags |= TF_DYNAMIC;
+            if (model) {
+                Model* m = static_cast<Model*>(model);
+                m->SetAnim(0x126, 0, 0, 0);
+            }
+            break;
         case AS_SLOPE_SLIDE:       stateDispatch = SD_STRAFE; break;
         case AS_PUNCH_ATTACK:      stateDispatch = SD_THROW; break;
         case AS_KICK_ATTACK:       stateDispatch = SD_THROW; break;
@@ -870,6 +919,10 @@ void Humanoid::ProcessAction() {
         case SD_PICKUP:       _Pickup(); break;
         case SD_LEDGE_LATCH:  _LedgeLatch(); break;
         case SD_LEDGE_PULLUP: _LedgePullup(); break;
+        case SD_LADDER_LATCH_TOP: _LadderLatchTop(); break;
+        case SD_LADDER_LATCH: _LadderLatch(); break;
+        case SD_CLIMB_LADDER: _ClimbLadder(); break;
+        case SD_LADDER_DISMOUNT: _LadderDismount(); break;
         default: break;
     }
 }
@@ -1747,6 +1800,50 @@ void Humanoid::_Pickup() {
     }
 }
 
+// PSX: _LadderLatchTop__8Humanoid (HUMANOID.CPP:6362, 0x80069B94)
+void Humanoid::_LadderLatchTop() {
+    MARKFUNCTION(0x80069B94);
+
+    velocity = {};
+    contactForce = {};
+    maxFallDivisor = 0;
+
+    if (!model) {
+        return;
+    }
+
+    Model* m = static_cast<Model*>(model);
+    AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+    if (anim && anim->loopCount > 0) {
+        SetActionState(AS_LADDER_CLIMBING, 0);
+        RestorePositionFromBip01();
+    }
+}
+
+// PSX: _LadderLatch__8Humanoid (HUMANOID.CPP:6393, 0x80069C2C)
+void Humanoid::_LadderLatch() {
+    MARKFUNCTION(0x80069C2C);
+
+    const u32 f368 = static_cast<u32>(field368);
+    velocity = {};
+    contactForce = {};
+    maxFallDivisor = 0;
+
+    if (((f368 >> 1) & 1u) == 0) {
+        SetActionState(AS_LADDER_DISMOUNT, 0);
+    }
+
+    if (!model) {
+        return;
+    }
+
+    Model* m = static_cast<Model*>(model);
+    AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+    if (anim && anim->loopCount > 0) {
+        SetActionState(AS_LADDER_CLIMBING, 0);
+    }
+}
+
 // PSX: LadderDismount__8Humanoid (HUMANOID.CPP:6426, 0x80069CC8)
 void Humanoid::_LadderDismount() {
     MARKFUNCTION(0x80069CC8);
@@ -1994,7 +2091,9 @@ void Humanoid::_Throw() {
         if (frame >= 8) {
             if (flags2 & 0x0001) {
                 // PSX: carrying flag set - release with direction
-                // PSX: PlayDialog(84, 10) if this == thePlayer
+                if (this == (Humanoid*)Player::s_player) {
+                    PlayDialog(84, 10);
+                }
                 rightHandObj = nullptr;
                 flags2 &= ~0x0001;
             }
@@ -2199,7 +2298,7 @@ void Humanoid::_Collapse() {
         return;
     }
 
-    // PSX: LoadDialog(1, 50) - groan sound (dialog system not reversed)
+    LoadDialog(1, 50);
 
     // PSX: vtable+260 = TestAndSetRisingAttack
     TestAndSetRisingAttack();
@@ -2302,7 +2401,7 @@ cleanup:
         }
     }
 
-    // PSX: KillDialog(0, 0, 512) - dialog system not reversed
+    KillDialog(0, 0, 512);
 }
 
 // PSX: LoadDialog__8HumanoidUll (HUMANOID.CPP, 0x8006CB54)
@@ -2331,6 +2430,67 @@ s32 Humanoid::PlayDialog(u32 dialogID, s32 priority) {
     soundHandle = 0;
     soundParam = 0;
     return 1;
+}
+
+// PSX: PlayDialogBasedOnPriority__8Humanoidll (HUMANOID.CPP, 0x8006CC38)
+s32 Humanoid::PlayDialogBasedOnPriority(s32 minPriority, s32 maxPriority) {
+    MARKFUNCTION(0x8006CC38);
+
+    if (!soundHandle) {
+        soundHandle = 0;
+        soundParam = 0;
+        return 0;
+    }
+
+    if (!jcsValidateHandle(soundHandle)) {
+        soundHandle = 0;
+        soundParam = 0;
+        return 0;
+    }
+
+    s32 dialogPriority = jcsQueryDialogPriority(soundHandle);
+    if (dialogPriority >= minPriority) {
+        if (maxPriority >= dialogPriority) {
+            if (rsEvent(RS_PLAY_DIALOG, soundHandle, (s32)(intptr_t)&pos, 30) != 0) {
+                return 1;
+            }
+            rsEvent(RS_KILL_DIALOG, soundHandle, 0, 0);
+            soundHandle = 0;
+            soundParam = 0;
+            return 0;
+        }
+    }
+
+    return 0;
+}
+
+// PSX: KillDialog__8Humanoidill (HUMANOID.CPP, 0x8006CCF8)
+s32 Humanoid::KillDialog(s32 force, s32 minPriority, s32 maxPriority) {
+    MARKFUNCTION(0x8006CCF8);
+
+    if (!soundHandle) {
+        soundHandle = 0;
+        soundParam = 0;
+        return 1;
+    }
+
+    if (!jcsValidateHandle(soundHandle)) {
+        soundHandle = 0;
+        soundParam = 0;
+        return 1;
+    }
+
+    s32 dialogPriority = jcsQueryDialogPriority(soundHandle);
+    if (dialogPriority >= minPriority && maxPriority >= dialogPriority) {
+        if (!jcsIsPlaying(soundHandle) || force) {
+            rsEvent(RS_KILL_DIALOG, soundHandle, 0, 0);
+            soundHandle = 0;
+            soundParam = 0;
+            return 1;
+        }
+    }
+
+    return 0;
 }
 
 // PSX: EnterCombatCombo__8Humanoid (HUMANOID.CPP, 0x80065ECC)

@@ -1231,41 +1231,56 @@ void Director::Process() {
                 break;
 
             case DirectorOpcode::LoadDialogA:
-                // PSX: jcsLoadDialog(char, dialog, flags), stores handle
-                g_dialogHandle = 0;
+                g_dialogHandle = rsEvent(RS_LOAD_DIALOG, scriptPtr[1], scriptPtr[2], 0x40000100);
                 directorDialogCounter = 0;
                 scriptPtr += 3;
                 break;
 
             case DirectorOpcode::LoadDialogB:
-                // PSX: jcsLoadDialog(char, dialog, flags) with 4 params
-                g_dialogHandle = 0;
+                g_dialogHandle = rsEvent(RS_LOAD_DIALOG, scriptPtr[1], scriptPtr[2], scriptPtr[3]);
                 directorDialogCounter = 0;
                 scriptPtr += 4;
                 break;
 
             case DirectorOpcode::WaitDialogPlayable:
-                // PSX: increments dialog counter, checks if dialog is playable
-                // If not playable and under limit, block. Otherwise continue.
                 directorDialogCounter++;
-                scriptPtr += 1;
-                // PSX would block here if dialog not ready.
-                // Without dialog system, just continue.
+                if (g_dialogHandle && jcsValidateHandle(g_dialogHandle)
+                    && directorDialogCounter < directorDialogLimit) {
+                    if (!jcsIsPlayable(g_dialogHandle)) {
+                        field68 = 1;
+                        break;
+                    }
+                }
                 field68 = 0;
+                scriptPtr += 1;
                 break;
 
             case DirectorOpcode::PlayDialogNear:
-                // PSX: jcsPlayDialog(handle, playerPtr+28, 64)
+                if (g_dialogHandle && jcsValidateHandle(g_dialogHandle)) {
+                    s32 posArg = 0;
+                    if (Player::s_player) {
+                        posArg = (s32)(intptr_t)&Player::s_player->pos;
+                    }
+                    rsEvent(RS_PLAY_DIALOG, g_dialogHandle, posArg, 64);
+                }
                 scriptPtr += 1;
                 break;
 
             case DirectorOpcode::PlayDialogFar:
-                // PSX: jcsPlayDialog(handle, playerPtr+28, 100)
+                if (g_dialogHandle && jcsValidateHandle(g_dialogHandle)) {
+                    s32 posArg = 0;
+                    if (Player::s_player) {
+                        posArg = (s32)(intptr_t)&Player::s_player->pos;
+                    }
+                    rsEvent(RS_PLAY_DIALOG, g_dialogHandle, posArg, 100);
+                }
                 scriptPtr += 1;
                 break;
 
             case DirectorOpcode::PlayPriorityDialog:
-                // PSX: PlayDialogBasedOnPriority(player, 255, 1073742080)
+                if (Player::s_player) {
+                    Player::s_player->PlayDialogBasedOnPriority(255, 1073742080);
+                }
                 scriptPtr += 1;
                 break;
 

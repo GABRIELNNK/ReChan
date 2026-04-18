@@ -49,3 +49,18 @@ extern s32 g_currentSoundLocation;
 
 // Returns non-zero if the dialog handle is still valid.
 s32 jcsValidateHandle(s32 handle);
+
+// Returns non-zero if the loaded dialog handle is currently playable.
+s32 jcsIsPlayable(s32 handle);
+
+// Returns non-zero if the loaded dialog handle is currently playing.
+s32 jcsIsPlaying(s32 handle);
+
+// Queries dialog priority for currently active dialog.
+s32 jcsQueryDialogPriority();
+
+// Queries dialog priority for a specific dialog handle.
+s32 jcsQueryDialogPriority(s32 handle);
+
+// Initializes dialog runtime state for a fresh load.
+void jcsStartDialog();

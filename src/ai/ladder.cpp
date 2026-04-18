@@ -5,9 +5,13 @@
 #include "ai/player.h"
 #include "gen/ai.h"
 #include "gen/database.h"
+#include "gen/colsect.h"
+#include "gen/colmgr.h"
 #include "gen/director.h"
 #include "gen/game.h"
 #include "gen/world.h"
+
+static constexpr s32 LADDER_LEDGE_CLEARANCE = 1022;
 
 Ladder::Ladder(const LVector* pos, u16 type) : Obstacle(pos, type) {
     MARKFUNCTION(0x80089CA4);
@@ -244,8 +248,9 @@ void Ladder::HandleHumanoidCollision(Humanoid* hum) {
 
     LVector savedHomePos = hum->homePos;
 
-    s32 topY = pos.y + (s32)collBox.minY;
-    s32 bottomY = pos.y + (s32)collBox.maxY;
+    // PSX naming in disasm: s1=pos.y+collBox.minY, s2=pos.y+collBox.maxY.
+    s32 minY = pos.y + (s32)collBox.minY;
+    s32 maxY = pos.y + (s32)collBox.maxY;
     s32 maxZ = pos.z + (s32)collBox.maxZ;
 
     s32 as = hum->actionState;
@@ -270,29 +275,30 @@ void Ladder::HandleHumanoidCollision(Humanoid* hum) {
             }
         }
 
-        // PSX 0x8008A390: if above top, clamp Y and restore homePos
-        if (savedHomePos.y < topY) {
-            savedHomePos.y = topY;
+        // PSX 0x8008A390: clamp below-ladder Y to minY.
+        if (savedHomePos.y < minY) {
+            savedHomePos.y = minY;
             hum->homePos = savedHomePos;
             PutHumanoidOnLadder(hum);
             return;
         }
 
-        // PSX 0x8008A3AC: if near bottom (savedHomePos.y > bottomY)
-        if (bottomY < savedHomePos.y) {
+        // PSX 0x8008A3AC: near ladder top while climbing.
+        if ((maxY - g_climbSearchRadius) < savedHomePos.y) {
             if ((hum->commandBits >> 2) & 1) {
-                savedHomePos.y = bottomY;
                 if (hatchThing) {
-                    // PSX calls Ladder::CheckForLedges here (not implemented on PC)
-                    // Without it, fall through to restore path
-                    hum->homePos = savedHomePos;
-                    PutHumanoidOnLadder(hum);
-                    return;
+                    LVector ledgeNormal = {};
+                    LVector ledgePos = {};
+                    if (CheckForLedges(ledgeNormal, ledgePos)) {
+                        hum->PrepareLedgeLatch(ledgePos, ledgeNormal);
+                        hum->SetActionState(AS_LEDGE_PULLUP, 0);
+                        return;
+                    }
                 }
             }
         }
 
-        // PSX: middle section or near-bottom without ledge â€” no homePos restore
+        // PSX: keep avatar aligned to ladder while still climbing.
         PutHumanoidOnLadder(hum);
         return;
     }
@@ -310,17 +316,23 @@ void Ladder::HandleHumanoidCollision(Humanoid* hum) {
     }
     if (!grabButton) return;
 
-    // PSX 0x8008A490: top approach check uses pos.y
-    if (hum->pos.y > bottomY - 256) {
+    // PSX 0x8008A490: top-approach check uses current pos.y.
+    if (hum->pos.y > (maxY - 256 - g_floorYSearchOffset)) {
         if (hum != (Humanoid*)Player::s_player) return;
-        // PSX calls Ladder::CheckForLedges here (not implemented on PC)
-        // Without it, top-approach climb-down is disabled
+        LVector ledgeNormal = {};
+        LVector ledgePos = {};
+        if (!CheckForLedges(ledgeNormal, ledgePos)) {
+            return;
+        }
+        hum->homePos = ledgePos;
+        PutHumanoidOnLadder(hum);
+        hum->SetActionState(AS_LADDER_CLIMB_DOWN, 0);
         return;
     }
 
-    // PSX 0x8008A50C: bottom approach uses pos.y
-    if (hum->pos.y < topY) return;
-    if (savedHomePos.z > maxZ - 384) return;
+    // PSX 0x8008A50C: bottom approach uses current pos.y.
+    if (hum->pos.y < minY) return;
+    if (savedHomePos.z >= maxZ - 384) return;
 
     PutHumanoidOnLadder(hum);
     hum->SetActionState(AS_LADDER_CLIMB_UP, 0);
@@ -335,4 +347,28 @@ void Ladder::PutHumanoidOnLadder(Humanoid* hum) {
     // PSX: set hum X/Z to ladder X/Z, keep hum Y
     hum->homePos.x = pos.x;
     hum->homePos.z = pos.z;
+}
+
+// PSX: CheckForLedges__6LadderR9_RMVECT16R10tagLVector (0x8008A5DC)
+bool Ladder::CheckForLedges(LVector& outNormal, LVector& outCorrectionPos) {
+    LVector startPos = pos;
+    LVector endPos = startPos;
+
+    endPos.x += (s32)(((s64)rmSin16(orientation.y) * (s64)g_floorStandingTol) >> 16);
+    endPos.z += (s32)(((s64)rmSin16((s16)(orientation.y + 0x4000)) * (s64)g_floorStandingTol) >> 16);
+
+    const s32 ledgeBaseY = startPos.y + (s32)collBox.maxY;
+    const s32 ledgeMinY = ledgeBaseY - g_climbSearchRadius;
+    const s32 ledgeMaxY = ledgeBaseY + g_climbSearchRadius;
+
+    u16 ledgeMaterial = 0;
+    return CollisionSector::LedgePrototype(
+        startPos,
+        endPos,
+        ledgeMinY,
+        ledgeMaxY,
+        outNormal,
+        outCorrectionPos,
+        ledgeMaterial,
+        LADDER_LEDGE_CLEARANCE);
 }

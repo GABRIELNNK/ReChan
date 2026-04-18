@@ -1,5 +1,6 @@
 #include "ai/fevolume.h"
 #include "ai/humanoid.h"
+#include "ai/player.h"
 #include "fe/femenumgr.h"
 #include "fe/hud.h"
 #include "gen/config.h"
@@ -7,10 +8,7 @@
 #include "gen/database.h"
 #include "gen/display.h"
 #include "gen/camera.h"
-#include "gen/game.h"
 #include "gen/world.h"
-#include "ai/player.h"
-#include "pc/log.h"
 
 FrontEndVolume::FrontEndVolume(const LVector* pos, u16 type) : Obstacle(pos, type) {
     MARKFUNCTION(0x8001A758);
@@ -78,21 +76,16 @@ void FrontEndVolume::HandleHumanoidCollision(Humanoid* hum) {
     MARKFUNCTION(0x8001A920);
 
     if (levelCode >= 10) {
-        if (g_feMenuMgr) {
-            g_feMenuMgr->ShowLevel(this, hum);
-        }
+        g_feMenuMgr->ShowLevel(this, hum);
+        return;
     }
-    else {
-        if (g_hud) {
-            if (g_hud->destSelect.currentLevel != levelCode) {
-                if (Player::s_player) {
-                    g_hud->DisplayTake(Player::s_player->livesLeft, levelCode < 1);
-                }
-                g_arrowInside = levelCode > 0 ? 1 : 0;
-                g_hud->destSelect.ShowLevel(levelCode);
-            }
-        }
+
+    if (g_hud->destSelect.currentLevel != levelCode) {
+        g_hud->DisplayTake(Player::s_player->livesLeft, 1);
+        g_arrowInside = (u8)(levelCode > 0);
     }
+
+    g_hud->destSelect.ShowLevel(levelCode);
 }
 
 void FrontEndVolume::HandleVolumeExit(Humanoid* hum) {

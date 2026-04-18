@@ -1021,7 +1021,7 @@ bool Game::gsQueueLevelLoad(Game* game) {
     game->SetState(GameState::PrePlay);
 
     // PSX: jcsStartDialog() - initialize dialog/subtitle system
-    // TODO: jcsStartDialog not yet reversed
+    jcsStartDialog();
 
     return true;
 }
@@ -1070,7 +1070,7 @@ bool Game::gsQueuePetalLoad(Game* game) {
     game->SetState(GameState::PrePlay);
 
     // PSX: jcsStartDialog()
-    // TODO: not yet reversed
+    jcsStartDialog();
 
     return true;
 }
@@ -1100,7 +1100,7 @@ bool Game::gsQueueLevelPetalLoad(Game* game) {
     }
 
     // PSX: jcsStartDialog()
-    // TODO: not yet reversed
+    jcsStartDialog();
 
     return true;
 }

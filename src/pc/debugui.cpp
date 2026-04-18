@@ -274,9 +274,6 @@ void DebugUI::Draw() {
                 if (ImGui::Button("Unlock All Levels")) {
                     g_scoreManager->OpenAllLevels();
                     g_scoreManager->GiveAllDragons();
-                    if (g_feMenuMgr) {
-                        g_feMenuMgr->OpenDoors();
-                    }
                 }
                 ImGui::SameLine();
                 if (ImGui::Button("Lock All Levels")) {

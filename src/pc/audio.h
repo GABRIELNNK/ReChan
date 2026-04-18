@@ -36,6 +36,7 @@ public:
     static void StopAllVoices();
     static bool IsVoicePlaying(AudioVoice voice);
     static void SetVoiceVolume(AudioVoice voice, f32 volume);
+    static void FadeVoiceVolume(AudioVoice voice, f32 targetVolume, u32 fadeMs);
     static void SetVoicePan(AudioVoice voice, f32 pan);
     static void SetVoicePitch(AudioVoice voice, f32 pitch);
     static void SetVoicePosition(AudioVoice voice, const LVector& position);

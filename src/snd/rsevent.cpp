@@ -2,6 +2,405 @@
 #include "snd/rsevent.h"
 #include "snd/sound.h"
 #include "snd/rsdworld.h"
+#include "snd/adpcm.h"
+#include "p3d/p3dmath.h"
+#include "xclib/xcfile.h"
+
+static constexpr u32 DIALOG_SECTOR_SIZE = 2048;
+static constexpr u32 DIALOG_RATE = 11025;
+
+static std::vector<u8> g_dialogFileData;
+static std::vector<u8> g_dialogHeader;
+static u32 g_dialogHeaderSize = 0;
+static u32 g_dialogDataBaseOffset = 0;
+static u16 g_lastDialogChoiceOffset = 0;
+
+static u8 DialogHeaderU8(u32 offset) {
+    if (offset >= g_dialogHeader.size()) {
+        return 0;
+    }
+    return g_dialogHeader[offset];
+}
+
+static u16 DialogHeaderU16(u32 offset) {
+    if (offset + 1 >= g_dialogHeader.size()) {
+        return 0;
+    }
+    return (u16)((u16)g_dialogHeader[offset] | ((u16)g_dialogHeader[offset + 1] << 8));
+}
+
+static void ResetDialogHeaderState() {
+    if (g_dialogHeaderSize == 0 || g_dialogFileData.size() < g_dialogHeaderSize) {
+        g_dialogHeader.clear();
+        return;
+    }
+
+    g_dialogHeader.assign(g_dialogFileData.begin(), g_dialogFileData.begin() + g_dialogHeaderSize);
+    g_lastDialogChoiceOffset = 0;
+}
+
+static bool EnsureDialogDataLoaded() {
+    if (!g_dialogFileData.empty() && !g_dialogHeader.empty()) {
+        return true;
+    }
+
+    u8* raw = nullptr;
+    u32 size = 0;
+    if (!xcReadFileLow("SOUND/DIALOG/RSDIALOG.DLG", &raw, &size) || !raw || size < 6) {
+        if (raw) {
+            delete[] raw;
+        }
+        return false;
+    }
+
+    g_dialogFileData.assign(raw, raw + size);
+    delete[] raw;
+
+    g_dialogHeaderSize = (u32)((u16)g_dialogFileData[0] | ((u16)g_dialogFileData[1] << 8));
+    if (g_dialogHeaderSize == 0 || g_dialogHeaderSize > g_dialogFileData.size()) {
+        g_dialogFileData.clear();
+        g_dialogHeader.clear();
+        g_dialogHeaderSize = 0;
+        return false;
+    }
+
+    g_dialogDataBaseOffset = (g_dialogHeaderSize + (DIALOG_SECTOR_SIZE - 1)) & ~(DIALOG_SECTOR_SIZE - 1);
+    if (g_dialogDataBaseOffset >= g_dialogFileData.size()) {
+        g_dialogFileData.clear();
+        g_dialogHeader.clear();
+        g_dialogHeaderSize = 0;
+        g_dialogDataBaseOffset = 0;
+        return false;
+    }
+
+    ResetDialogHeaderState();
+    return !g_dialogHeader.empty();
+}
+
+static bool SelectDialogClipOffset(s32 character, s32 dialogID, u32* outStart, u32* outEnd, u16* outChoiceOffset) {
+    if (!outStart || !outEnd || !outChoiceOffset) {
+        return false;
+    }
+
+    if (!EnsureDialogDataLoaded()) {
+        return false;
+    }
+
+    const u32 charTableOffset = 4;
+    const u32 charEntryOffset = charTableOffset + ((u32)(u16)character * 2);
+    if (charEntryOffset + 1 >= g_dialogHeaderSize) {
+        return false;
+    }
+
+    const u16 charInfoOffset = DialogHeaderU16(charEntryOffset);
+    if (charInfoOffset >= g_dialogHeaderSize) {
+        return false;
+    }
+
+    const u8 dialogCount = DialogHeaderU8(charInfoOffset);
+    if (dialogCount == 0) {
+        return false;
+    }
+
+    const u32 dialogListOffset = (u32)charInfoOffset + 1;
+    const u32 streamTableOffset = dialogListOffset + (u32)dialogCount;
+    const u32 clipInfoTableOffset = streamTableOffset + ((u32)dialogCount * 2);
+    if (clipInfoTableOffset + ((u32)dialogCount * 2) > g_dialogHeaderSize) {
+        return false;
+    }
+
+    s32 dialogIndex = -1;
+    for (u32 i = 0; i < (u32)dialogCount; ++i) {
+        if ((s32)DialogHeaderU8(dialogListOffset + i) == dialogID) {
+            dialogIndex = (s32)i;
+            break;
+        }
+    }
+    if (dialogIndex < 0) {
+        return false;
+    }
+
+    const u32 streamSectors = (u32)DialogHeaderU16(streamTableOffset + ((u32)dialogIndex * 2));
+    u32 streamStart = g_dialogDataBaseOffset + streamSectors * DIALOG_SECTOR_SIZE;
+
+    const u16 clipInfoOffset = DialogHeaderU16(clipInfoTableOffset + ((u32)dialogIndex * 2));
+    if (clipInfoOffset >= g_dialogHeaderSize) {
+        return false;
+    }
+
+    const u8 clipCount = DialogHeaderU8(clipInfoOffset);
+    if (clipCount == 0) {
+        return false;
+    }
+
+    const u32 clipSizeTableOffset = (u32)clipInfoOffset + 1;
+    if (clipSizeTableOffset + clipCount > g_dialogHeaderSize) {
+        return false;
+    }
+
+    u8 available[256] = {};
+    u32 availableCount = 0;
+    for (u32 i = 0; i < (u32)clipCount; ++i) {
+        const u8 flags = DialogHeaderU8(clipSizeTableOffset + i);
+        if ((flags & 0xC0) == 0) {
+            available[availableCount++] = (u8)i;
+        }
+    }
+
+    if (availableCount == 0) {
+        for (u32 i = 0; i < (u32)clipCount; ++i) {
+            const u32 off = clipSizeTableOffset + i;
+            const u8 flags = DialogHeaderU8(off);
+            if ((flags & 0x80) != 0 && (flags & 0x40) == 0) {
+                g_dialogHeader[off] = (u8)(flags & 0x3F);
+            }
+        }
+
+        for (u32 i = 0; i < (u32)clipCount; ++i) {
+            const u8 flags = DialogHeaderU8(clipSizeTableOffset + i);
+            if ((flags & 0xC0) == 0) {
+                available[availableCount++] = (u8)i;
+            }
+        }
+    }
+
+    if (availableCount == 0) {
+        return false;
+    }
+
+    u32 selectedSlot = (u32)rmRangedRandom((s32)availableCount);
+    u32 selected = (u32)available[selectedSlot];
+    u16 choiceOffset = (u16)(clipSizeTableOffset + selected);
+
+    // PSX avoids immediate repeats when multiple variants are available,
+    // but it does not fail dialog playback if only one choice exists.
+    if (availableCount > 1 && choiceOffset == g_lastDialogChoiceOffset) {
+        for (u32 i = 1; i < availableCount; ++i) {
+            const u32 trySlot = (selectedSlot + i) % availableCount;
+            const u32 trySelected = (u32)available[trySlot];
+            const u16 tryOffset = (u16)(clipSizeTableOffset + trySelected);
+            if (tryOffset != g_lastDialogChoiceOffset) {
+                selectedSlot = trySlot;
+                selected = trySelected;
+                choiceOffset = tryOffset;
+                break;
+            }
+        }
+    }
+
+    for (u32 i = 0; i < selected; ++i) {
+        const u32 clipSectors = (u32)(DialogHeaderU8(clipSizeTableOffset + i) & 0x3F);
+        streamStart += clipSectors * DIALOG_SECTOR_SIZE;
+    }
+
+    const u32 selectedSectors = (u32)(DialogHeaderU8(choiceOffset) & 0x3F);
+    const u32 clipSize = selectedSectors * DIALOG_SECTOR_SIZE;
+    if (clipSize == 0) {
+        return false;
+    }
+
+    const u32 clipEnd = streamStart + clipSize;
+    if (streamStart >= g_dialogFileData.size() || clipEnd > g_dialogFileData.size()) {
+        return false;
+    }
+
+    *outStart = streamStart;
+    *outEnd = clipEnd;
+    *outChoiceOffset = choiceOffset;
+    return true;
+}
+
+static AudioSample LoadDialogSample(s32 character, s32 dialogID) {
+    u32 start = 0;
+    u32 end = 0;
+    u16 choiceOffset = 0;
+    if (!SelectDialogClipOffset(character, dialogID, &start, &end, &choiceOffset)) {
+        return AUDIO_SAMPLE_INVALID;
+    }
+
+    const u8* clipData = &g_dialogFileData[start];
+    const u32 clipSize = end - start;
+    std::vector<s16> pcm = SpuAdpcm::Decode(clipData, clipSize, true);
+    if (pcm.empty()) {
+        return AUDIO_SAMPLE_INVALID;
+    }
+
+    AudioSample sample = AudioEngine::LoadSample(pcm.data(), (u32)pcm.size(), DIALOG_RATE, 1);
+    if (sample == AUDIO_SAMPLE_INVALID) {
+        return AUDIO_SAMPLE_INVALID;
+    }
+
+    g_dialogHeader[choiceOffset] = (u8)(g_dialogHeader[choiceOffset] | 0x80);
+    g_lastDialogChoiceOffset = choiceOffset;
+    return sample;
+}
+
+struct DialogEntry {
+    s32 handle;
+    s32 character;
+    s32 dialogId;
+    s32 priority;
+    AudioSample sample;
+    AudioVoice voice;
+    bool valid;
+};
+
+static constexpr s32 DIALOG_ENTRY_COUNT = 64;
+static DialogEntry g_dialogEntries[DIALOG_ENTRY_COUNT] = {};
+static s32 g_nextDialogHandle = 1;
+
+static DialogEntry* FindDialogEntry(s32 handle) {
+    if (handle == 0) {
+        return nullptr;
+    }
+
+    for (s32 i = 0; i < DIALOG_ENTRY_COUNT; ++i) {
+        if (g_dialogEntries[i].valid && g_dialogEntries[i].handle == handle) {
+            return &g_dialogEntries[i];
+        }
+    }
+
+    return nullptr;
+}
+
+static DialogEntry* AllocateDialogEntry() {
+    for (s32 i = 0; i < DIALOG_ENTRY_COUNT; ++i) {
+        if (!g_dialogEntries[i].valid) {
+            g_dialogEntries[i].handle = g_nextDialogHandle++;
+            if (g_nextDialogHandle <= 0) {
+                g_nextDialogHandle = 1;
+            }
+            g_dialogEntries[i].sample = AUDIO_SAMPLE_INVALID;
+            g_dialogEntries[i].voice = AUDIO_VOICE_INVALID;
+            g_dialogEntries[i].valid = true;
+            return &g_dialogEntries[i];
+        }
+    }
+
+    DialogEntry* entry = &g_dialogEntries[0];
+    if (entry->voice != AUDIO_VOICE_INVALID) {
+        AudioEngine::StopVoice(entry->voice);
+    }
+    if (entry->sample != AUDIO_SAMPLE_INVALID) {
+        AudioEngine::UnloadSample(entry->sample);
+    }
+    entry->handle = g_nextDialogHandle++;
+    if (g_nextDialogHandle <= 0) {
+        g_nextDialogHandle = 1;
+    }
+    entry->sample = AUDIO_SAMPLE_INVALID;
+    entry->voice = AUDIO_VOICE_INVALID;
+    entry->valid = true;
+    return entry;
+}
+
+static s32 PlayDialogHandle(DialogEntry* entry, u32 distanceHint) {
+    if (!entry || !entry->valid || !g_sound) {
+        return 0;
+    }
+
+    if (entry->sample == AUDIO_SAMPLE_INVALID) {
+        return 0;
+    }
+
+    if (entry->voice != AUDIO_VOICE_INVALID) {
+        AudioEngine::StopVoice(entry->voice);
+    }
+
+    entry->voice = AudioEngine::PlaySample(entry->sample, g_sound->dialogVolume, 0.0f, false);
+    if (entry->voice == AUDIO_VOICE_INVALID) {
+        return 0;
+    }
+
+    if (distanceHint != 0) {
+        const f32 maxDistance = (f32)distanceHint * 100.0f;
+        AudioEngine::SetVoiceDistanceRange(entry->voice, 0.0f, maxDistance);
+    }
+
+    return 1;
+}
+
+// PSX: rsDialogEvent (RSEVENT.CPP:82, 0x8003470C)
+static s32 rsDialogEvent(s32 event, s32 param1, s32 param2, s32 param3) {
+    switch (event) {
+        case RS_LOAD_DIALOG:
+        {
+            DialogEntry* entry = AllocateDialogEntry();
+            if (!entry) {
+                return 0;
+            }
+            entry->character = param1;
+            entry->dialogId = param2;
+            entry->priority = param3;
+            entry->sample = LoadDialogSample(param1, param2);
+            if (entry->sample == AUDIO_SAMPLE_INVALID) {
+                entry->valid = false;
+                return 0;
+            }
+            return entry->handle;
+        }
+
+        case RS_PLAY_DIALOG:
+        {
+            DialogEntry* entry = FindDialogEntry(param1);
+            return PlayDialogHandle(entry, (u32)param3);
+        }
+
+        case RS_STOP_DIALOG:
+        {
+            for (s32 i = 0; i < DIALOG_ENTRY_COUNT; ++i) {
+                DialogEntry& entry = g_dialogEntries[i];
+                if (!entry.valid) {
+                    continue;
+                }
+                if (entry.voice != AUDIO_VOICE_INVALID) {
+                    AudioEngine::StopVoice(entry.voice);
+                    entry.voice = AUDIO_VOICE_INVALID;
+                }
+                if (entry.sample != AUDIO_SAMPLE_INVALID) {
+                    AudioEngine::UnloadSample(entry.sample);
+                    entry.sample = AUDIO_SAMPLE_INVALID;
+                }
+            }
+            return 0;
+        }
+
+        case RS_KILL_DIALOG:
+        {
+            DialogEntry* entry = FindDialogEntry(param1);
+            if (!entry) {
+                return 0;
+            }
+            if (entry->voice != AUDIO_VOICE_INVALID) {
+                AudioEngine::StopVoice(entry->voice);
+                entry->voice = AUDIO_VOICE_INVALID;
+            }
+            if (entry->sample != AUDIO_SAMPLE_INVALID) {
+                AudioEngine::UnloadSample(entry->sample);
+                entry->sample = AUDIO_SAMPLE_INVALID;
+            }
+            entry->valid = false;
+            return 1;
+        }
+
+        case RS_LOAD_AND_PLAY_DIALOG:
+        {
+            const s32 handle = rsDialogEvent(RS_LOAD_DIALOG, param1, param2, 255);
+            if (!handle) {
+                return 0;
+            }
+            return rsDialogEvent(RS_PLAY_DIALOG, handle, param3, 360);
+        }
+
+        case RS_QUERY_DIALOG_PRIORITY:
+            return jcsQueryDialogPriority();
+
+        default:
+            break;
+    }
+
+    return 0;
+}
 
 // PSX: gp+544 - global sound enabled flag (0 = enabled, nonzero = disabled)
 static s32 g_soundDisabled = 0;
@@ -59,9 +458,7 @@ s32 rsEvent(s32 event, s32 param1, s32 param2, s32 param3) {
     // Events 26-31 -> rsDialogEvent
     // Events 1-23  -> jcsHandleControlEvent
     if (event >= 26 && event <= 31) {
-        // rsDialogEvent - dialog playback (not implemented yet)
-        LOG("[rsEvent] Dialog event %d (param1=%d)", event, param1);
-        return 0;
+        return rsDialogEvent(event, param1, param2, param3);
     }
 
     if (event >= 1 && event <= 23) {
@@ -99,6 +496,10 @@ s32 jcsHandleControlEvent(s32 event, s32 param1, s32 param2, s32 param3) {
             // Mapping: location 0-20 -> bank 0-20, location 21+ -> bank 21.
             if (g_sound) {
                 g_sound->activeSfxBank = (param1 < 21) ? param1 : 21;
+            }
+            // PSX resets dialog header selection flags when switching level/location.
+            if (EnsureDialogDataLoaded()) {
+                ResetDialogHeaderState();
             }
             break;
 
@@ -308,7 +709,65 @@ void jcsFadeOutEngine(u32 flags) {
 }
 
 // PSX: jcsValidateHandle (JCSDLG.CPP:1639, 0x800434D8)
-// Dialog system not fully reversed - always returns 0 (handle invalid).
-s32 jcsValidateHandle(s32 /*handle*/) {
-    return 0;
+s32 jcsValidateHandle(s32 handle) {
+    return FindDialogEntry(handle) != nullptr;
+}
+
+// PSX: jcsIsPlayable (JCSDLG.CPP:428, 0x80042908)
+s32 jcsIsPlayable(s32 handle) {
+    return jcsValidateHandle(handle);
+}
+
+// PSX: jcsIsPlaying(handle) (JCSDLG.CPP:506, 0x800429CC)
+s32 jcsIsPlaying(s32 handle) {
+    DialogEntry* entry = FindDialogEntry(handle);
+    if (!entry || entry->voice == AUDIO_VOICE_INVALID) {
+        return 0;
+    }
+
+    return AudioEngine::IsVoicePlaying(entry->voice) ? 1 : 0;
+}
+
+// PSX: jcsQueryDialogPriority() (JCSDLG.CPP:1285, 0x80043218)
+s32 jcsQueryDialogPriority() {
+    s32 bestPriority = 0;
+
+    for (s32 i = 0; i < DIALOG_ENTRY_COUNT; ++i) {
+        DialogEntry& entry = g_dialogEntries[i];
+        if (!entry.valid) {
+            continue;
+        }
+        if (entry.voice != AUDIO_VOICE_INVALID && AudioEngine::IsVoicePlaying(entry.voice)) {
+            if (entry.priority > bestPriority) {
+                bestPriority = entry.priority;
+            }
+        }
+    }
+
+    return bestPriority;
+}
+
+// PSX: jcsQueryDialogPriority(handle) (JCSDLG.CPP:1312, 0x80043254)
+s32 jcsQueryDialogPriority(s32 handle) {
+    DialogEntry* entry = FindDialogEntry(handle);
+    if (!entry) {
+        return 0;
+    }
+    return entry->priority;
+}
+
+// PSX: jcsStartDialog__Fv (JCSDLG.CPP:1648, 0x800434F0)
+void jcsStartDialog() {
+    for (s32 i = 0; i < DIALOG_ENTRY_COUNT; ++i) {
+        DialogEntry& entry = g_dialogEntries[i];
+        if (entry.voice != AUDIO_VOICE_INVALID) {
+            AudioEngine::StopVoice(entry.voice);
+        }
+        if (entry.sample != AUDIO_SAMPLE_INVALID) {
+            AudioEngine::UnloadSample(entry.sample);
+        }
+        entry = {};
+    }
+
+    g_nextDialogHandle = 1;
 }

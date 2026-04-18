@@ -35,4 +35,5 @@ public:
     void CloseHatch();
     s32 DeathCheck();
     void PutHumanoidOnLadder(Humanoid* hum);
+    bool CheckForLedges(LVector& outNormal, LVector& outCorrectionPos);
 };

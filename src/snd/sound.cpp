@@ -11,6 +11,7 @@ Sound* g_sound = nullptr;
 // SPU pitch 0x0400 = 11025 Hz (SFX), SPU pitch 0x0800 = 22050 Hz (music)
 static constexpr u32 PSX_SFX_RATE = 11025;
 static constexpr u32 PSX_MUSIC_RATE = 22050;
+static constexpr u32 PSX_MUSIC_FADE_MS = 300;
 
 // Helper: read entire file into memory
 static u8* ReadFileBytes(const char* path, u32& outSize) {
@@ -193,7 +194,7 @@ void Sound::StopMusic() {
 void Sound::SetMusicVolume(f32 volume) {
     musicVolume = volume;
     if (musicVoice != AUDIO_VOICE_INVALID) {
-        AudioEngine::SetVoiceVolume(musicVoice, volume);
+        AudioEngine::SetVoiceVolume(musicVoice, musicMuted ? 0.0f : volume);
     }
 }
 
@@ -208,14 +209,14 @@ void Sound::SetDialogVolume(f32 volume) {
 void Sound::MuteMusic() {
     musicMuted = true;
     if (musicVoice != AUDIO_VOICE_INVALID) {
-        AudioEngine::SetVoiceVolume(musicVoice, 0.0f);
+        AudioEngine::FadeVoiceVolume(musicVoice, 0.0f, PSX_MUSIC_FADE_MS);
     }
 }
 
 void Sound::UnmuteMusic() {
     musicMuted = false;
     if (musicVoice != AUDIO_VOICE_INVALID) {
-        AudioEngine::SetVoiceVolume(musicVoice, musicVolume);
+        AudioEngine::FadeVoiceVolume(musicVoice, musicVolume, PSX_MUSIC_FADE_MS);
     }
 }
 

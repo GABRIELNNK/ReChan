@@ -91,6 +91,8 @@ enum StateDispatch : u16 {
     SD_PUSH_OBJECT = 254,
     SD_TABLE_ROLL = 255,
     SD_DO_STAND = 258,
+    SD_LADDER_LATCH_TOP = 259,
+    SD_LADDER_LATCH = 260,
 };
 
 // Humanoid - DynamicThing with combat, animation, and AI state
@@ -353,6 +355,8 @@ public:
     bool TestIdleAnimation();
     s32 LoadDialog(u32 dialogID, s32 priority);
     s32 PlayDialog(u32 dialogID, s32 priority);
+    s32 PlayDialogBasedOnPriority(s32 minPriority, s32 maxPriority);
+    s32 KillDialog(s32 force, s32 minPriority, s32 maxPriority);
     s32 EnterCombatCombo();
     void PrepareLedgeLatch(const LVector& correctionPos, const LVector& normal);
     bool CheckForLedges();
@@ -384,6 +388,8 @@ public:
     virtual void _Pickup();
     virtual void _LedgeLatch();
     virtual void _LedgePullup();
+    virtual void _LadderLatchTop();
+    virtual void _LadderLatch();
     virtual void _LadderDismount();
     virtual void _ClimbLadder();
     virtual void CreateSound();

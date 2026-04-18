@@ -18,6 +18,10 @@ struct InternalVoice {
     AudioSample sample = AUDIO_SAMPLE_INVALID;
     f64 positionF = 0.0; // fractional frame position (for sample rate conversion)
     f32 volume = 1.0f;
+    f32 fadeStartVolume = 1.0f;
+    f32 fadeTargetVolume = 1.0f;
+    u32 fadeFramesTotal = 0;
+    u32 fadeFramesRemaining = 0;
     f32 pan = 0.0f;
     f32 pitch = 1.0f;
     LVector worldPos = {};
@@ -206,7 +210,6 @@ static void audioCallback(ma_device* device, void* output, const void* /*input*/
                 continue;
             }
 
-            f32 vol = voice.volume * g_masterVolume;
             f32 gains[8] = {};
 
             if (voice.spatial) {
@@ -229,6 +232,18 @@ static void audioCallback(ma_device* device, void* output, const void* /*input*/
             f64 advance = rateRatio * (f64)voice.pitch;
 
             for (u32 i = 0; i < frameCount; i++) {
+                if (voice.fadeFramesRemaining > 0) {
+                    const u32 step = voice.fadeFramesTotal - voice.fadeFramesRemaining + 1;
+                    const f32 t = (f32)step / (f32)voice.fadeFramesTotal;
+                    voice.volume = voice.fadeStartVolume + (voice.fadeTargetVolume - voice.fadeStartVolume) * t;
+                    voice.fadeFramesRemaining--;
+                    if (voice.fadeFramesRemaining == 0) {
+                        voice.volume = voice.fadeTargetVolume;
+                    }
+                }
+
+                const f32 vol = voice.volume * g_masterVolume;
+
                 u32 pos = (u32)voice.positionF;
                 if (pos >= smp.numFrames) {
                     if (voice.loop) {
@@ -447,6 +462,10 @@ AudioVoice AudioEngine::PlaySample(AudioSample sample, f32 volume, f32 pan, bool
             g_voices[i].sample = sample;
             g_voices[i].positionF = 0.0;
             g_voices[i].volume = volume;
+            g_voices[i].fadeStartVolume = volume;
+            g_voices[i].fadeTargetVolume = volume;
+            g_voices[i].fadeFramesTotal = 0;
+            g_voices[i].fadeFramesRemaining = 0;
             g_voices[i].pan = pan;
             g_voices[i].pitch = 1.0f;
             g_voices[i].worldPos = {};
@@ -481,6 +500,10 @@ AudioVoice AudioEngine::PlaySample3D(
             g_voices[i].sample = sample;
             g_voices[i].positionF = 0.0;
             g_voices[i].volume = volume;
+            g_voices[i].fadeStartVolume = volume;
+            g_voices[i].fadeTargetVolume = volume;
+            g_voices[i].fadeFramesTotal = 0;
+            g_voices[i].fadeFramesRemaining = 0;
             g_voices[i].pan = 0.0f;
             g_voices[i].pitch = 1.0f;
             g_voices[i].worldPos = position;
@@ -521,6 +544,40 @@ void AudioEngine::SetVoiceVolume(AudioVoice voice, f32 volume) {
     if (voice == AUDIO_VOICE_INVALID || voice > MAX_VOICES) return;
     std::lock_guard<std::mutex> lock(g_voiceMutex);
     g_voices[voice - 1].volume = volume;
+    g_voices[voice - 1].fadeStartVolume = volume;
+    g_voices[voice - 1].fadeTargetVolume = volume;
+    g_voices[voice - 1].fadeFramesTotal = 0;
+    g_voices[voice - 1].fadeFramesRemaining = 0;
+}
+
+void AudioEngine::FadeVoiceVolume(AudioVoice voice, f32 targetVolume, u32 fadeMs) {
+    if (voice == AUDIO_VOICE_INVALID || voice > MAX_VOICES) return;
+
+    std::lock_guard<std::mutex> lock(g_voiceMutex);
+    InternalVoice& v = g_voices[voice - 1];
+    if (!v.active) {
+        return;
+    }
+
+    const f32 clampedTarget = clampf(targetVolume, 0.0f, 1.0f);
+    if (fadeMs == 0) {
+        v.volume = clampedTarget;
+        v.fadeStartVolume = clampedTarget;
+        v.fadeTargetVolume = clampedTarget;
+        v.fadeFramesTotal = 0;
+        v.fadeFramesRemaining = 0;
+        return;
+    }
+
+    u32 fadeFrames = (g_deviceSampleRate * fadeMs) / 1000;
+    if (fadeFrames == 0) {
+        fadeFrames = 1;
+    }
+
+    v.fadeStartVolume = v.volume;
+    v.fadeTargetVolume = clampedTarget;
+    v.fadeFramesTotal = fadeFrames;
+    v.fadeFramesRemaining = fadeFrames;
 }
 
 void AudioEngine::SetVoicePan(AudioVoice voice, f32 pan) {

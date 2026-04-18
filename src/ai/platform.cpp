@@ -1611,8 +1611,8 @@ void Platform::TriggerByName(Thing* source, const char* name, const char* param)
 
     const u16 sourceType = source->thingType;
 
-    // PSX: non-player sources require bit 25 (0x2000000)
-    if (sourceType != 0 && !(platformFlags & 0x2000000)) {
+    // PSX 0x80023AB8: for non-zero source type, require platformFlags bit 0.
+    if (sourceType != 0 && !(platformFlags & 0x1)) {
         return;
     }
 

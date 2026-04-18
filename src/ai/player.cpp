@@ -53,6 +53,8 @@ static const s32 s_standingJumpHold[3] = { 150,   4096,  25 };  // 0x96,  0x1000
 // PSX: gp+492 - hard-fall velocity threshold (velocity.y must be <= this to trigger)
 static constexpr s32 g_hardFallThreshold = -8192;
 
+static s32 GetWeaponPickupDialog(s32 weaponType);
+
 // PSX: playerStraif animation data at 0x800D91E0
 // Array of [animIndex, loopType] pairs for strafe animations based on movement direction
 // Angle difference = orientation.y - faceAngle determines which animation plays
@@ -825,8 +827,14 @@ void Player::SetActionState(u32 state, s32 param) {
         }
         case AS_PICKUP:
         {
-            // PSX case 44: pickup object - stateDispatch=-1, Pickup handler
-            // TODO: full pickup system with GetPickupMove, WeaponPickupDialog
+            // PSX case 44: pickup object - play weapon pickup dialog when present.
+            if (rightHandObj) {
+                s32 dialogID = GetWeaponPickupDialog((s32)rightHandObj->thingType);
+                if (dialogID != 0 && LoadDialog((u32)dialogID, 0x33) != 0) {
+                    PlayDialog((u32)dialogID, 0x3C);
+                }
+            }
+
             field344 = 0;
             stateDispatch = SD_PICKUP;
             actionState = (s32)state;
@@ -834,8 +842,9 @@ void Player::SetActionState(u32 state, s32 param) {
         }
         case AS_THROW_PICKUP:
         {
-            // PSX case 45: throw object - stateDispatch=-1, Throw handler
-            // TODO: full throw system with GetThrowMove, target finding
+            // PSX case 45: preload throw voice line for throw release timing.
+            LoadDialog(84, 0x33);
+
             field344 = 0;
             stateDispatch = SD_THROW;
             actionState = (s32)state;
@@ -1112,6 +1121,20 @@ void Player::SetLivesLeft(s32 lives) {
     livesLeft = lives;
 }
 
+// PSX: GetWeaponPickupDialog__Fl (0x80030388)
+static s32 GetWeaponPickupDialog(s32 weaponType) {
+    MARKFUNCTION(0x80030388);
+
+    if (weaponType == 308) {
+        return 100;
+    }
+    if (weaponType == 325) {
+        return 99;
+    }
+
+    return 0;
+}
+
 // PSX: GetWeaponFinalBlowDialog__Fl (0x80034338)
 // Returns dialog ID for weapon final blow based on weapon thingType.
 static s32 GetWeaponFinalBlowDialog(s32 weaponType) {
@@ -1379,7 +1402,7 @@ void Player::_InactiveIdle() {
         // Animation callback triggered - play the stored animation
         animCallbackData = 0;
         m->ApplyAnimToModel(0, currentAnimEnum, ANIM_RUN_TO_LAST, 0, 0);
-        // PSX: PlayDialogBasedOnPriority(54, 54) - dialog system not reversed
+        PlayDialogBasedOnPriority(54, 54);
     }
     else if (animLoadState == 2 && anim) {
         // Check if animation enum matches and has completed a loop

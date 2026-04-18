@@ -219,12 +219,10 @@ void Door::Trigger() {
                 u16 targetType = targetThing->thingType;
                 LOG("[Door::Trigger] hub chain: targetCRC=0x%08X targetType=%u name=%s",
                     targetCRC, targetType, target->GetName() ? target->GetName() : "null");
-                if (targetType == 470) {
-                    // Target is a Door - trigger it
+                if (targetType == AITypes::TT_LADDER) {
                     Obstacle* obs = static_cast<Obstacle*>(targetThing);
                     obs->Trigger();
-                } else if (targetType == 201) {
-                    // Target is a Teleporter - TriggerByName with g_player
+                } else if (targetType == AITypes::TT_PLATFORM) {
                     Obstacle* obs = static_cast<Obstacle*>(targetThing);
                     obs->TriggerByName(Player::s_player, nullptr, nullptr);
                 }
