@@ -567,8 +567,7 @@ s32 jcsHandleControlEvent(s32 event, s32 param1, s32 param2, s32 param3) {
         case RS_SET_MUSIC_VOL: // 16
         {
             // PSX: 80 * param / 100 -> SPU vol (0-100 range out of 127)
-            // PC: scale 0-125 slider to 0.0-0.80 float
-            f32 vol = (f32)param1 * 0.8f / 125.0f;
+            f32 vol = (f32)param1 * 0.8f / 100.0f;
             LOG("[rsEvent] SetMusicVol(%d -> %.2f)", param1, vol);
             g_sound->SetMusicVolume(vol);
             break;
@@ -584,8 +583,7 @@ s32 jcsHandleControlEvent(s32 event, s32 param1, s32 param2, s32 param3) {
         case RS_SET_EFFECTS_VOL: // 18
         {
             // PSX: stores raw value as effects vol
-            // PC: scale 0-125 slider to 0.0-1.0 float
-            f32 vol = (f32)param1 / 125.0f;
+            f32 vol = (f32)param1 / 100.0f;
             LOG("[rsEvent] SetEffectsVol(%d -> %.2f)", param1, vol);
             g_sound->SetEffectsVolume(vol);
             break;
@@ -594,8 +592,7 @@ s32 jcsHandleControlEvent(s32 event, s32 param1, s32 param2, s32 param3) {
         case RS_SET_DIALOG_VOL: // 19
         {
             // PSX: 83 * param / 100 -> SPU vol
-            // PC: scale 0-125 slider to 0.0-0.83 float
-            f32 vol = (f32)param1 * 0.83f / 125.0f;
+            f32 vol = (f32)param1 * 0.83f / 100.0f;
             LOG("[rsEvent] SetDialogVol(%d -> %.2f)", param1, vol);
             g_sound->SetDialogVolume(vol);
             break;
