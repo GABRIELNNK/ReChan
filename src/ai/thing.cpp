@@ -23,43 +23,6 @@ static s32 LerpS32(s32 a, s32 b, f32 alpha) {
     return (s32)(af + (bf - af) * t);
 }
 
-#if INTERPOLATED_RENDERING
-static s32 LerpAngle16(s32 a, s32 b, f32 alpha) {
-    s32 a16 = (s16)(a & 0xFFFF);
-    s32 b16 = (s16)(b & 0xFFFF);
-    s32 delta = b16 - a16;
-
-    if (delta > 32767) {
-        delta -= 65536;
-    }
-    else if (delta < -32768) {
-        delta += 65536;
-    }
-
-    return a16 + (s32)((f64)delta * (f64)alpha);
-}
-
-static bool IsRenderTeleport(const LVector& prevPos, const LVector& currPos) {
-    constexpr s32 teleportThreshold = 4096;
-
-    s32 dx = currPos.x - prevPos.x;
-    s32 dy = currPos.y - prevPos.y;
-    s32 dz = currPos.z - prevPos.z;
-
-    if (dx < 0) {
-        dx = -dx;
-    }
-    if (dy < 0) {
-        dy = -dy;
-    }
-    if (dz < 0) {
-        dz = -dz;
-    }
-
-    return (dx > teleportThreshold) || (dy > teleportThreshold) || (dz > teleportThreshold);
-}
-#endif
-
 // PSX: __6TicketP5ThingP12DynamicThing (THING.CPP:1312)
 Ticket::Ticket(Thing* iss, DynamicThing* pass) {
     issuer = iss;
@@ -212,10 +175,6 @@ void Thing::Reset() {
     health = maxHealth;
     // PSX: flags2 &= 1 (keep only bit 0)
     flags2 &= TF2_KILLED;
-
-#if INTERPOLATED_RENDERING
-    renderSnapshotInit = false;
-#endif
 }
 
 // PSX: UpdatePosition__5Thing (THING.HPP:440)

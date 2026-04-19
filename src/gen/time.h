@@ -15,11 +15,6 @@ public:
     f32 deltaTime = 1.0f / 30.0f;
     f32 fps = 30.0f;
 
-#if INTERPOLATED_RENDERING
-    // Fractional progress to next 30Hz logic tick, used for render interpolation.
-    f32 renderAlpha = 1.0f;
-#endif
-
     // PSX: __4Time (TIME.CPP, 0x80044950)
     Time();
 

@@ -11,8 +11,7 @@
 #include "p3d/input.h"
 #include "p3d/context.h"
 #include "pc/debugui.h"
-#include <cstdlib>
-#include <cmath>
+#include "gen/time.h"
 
 // PSX math helpers
 
@@ -507,10 +506,8 @@ void Camera::DebugCam() {
     if (!DebugUI::IsDebugCameraInputAllowed()) {
         return;
     }
-    static bool sTeleportPressedPrev = false;
 
-    bool teleportPressed = p3d::input && p3d::input->IsKeyDown(KEY_ENTER);
-    if (teleportPressed && !sTeleportPressedPrev) {
+    if (p3d::input->IsKeyTriggered(KEY_ENTER)) {
         if (Player::s_player) {
             Player::s_player->pos = position;
             Player::s_player->homePos = position;
@@ -518,21 +515,20 @@ void Camera::DebugCam() {
             Player::s_player->contactForce = {};
         }
     }
-    sTeleportPressedPrev = teleportPressed;
 
     // PC debug camera: mouse look + WASD movement + Q/E vertical + Shift speed
     double mdx = 0, mdy = 0;
     p3d::input->GetMouseDelta(mdx, mdy);
 
-    static constexpr s32 MOUSE_SENSITIVITY = 10;
+    static constexpr s32 MOUSE_SENSITIVITY = 20;
     if (p3d::input->IsMouseButtonDown(MOUSE_LEFT)) {
         camAngleY += (s32)(mdx * MOUSE_SENSITIVITY);
         camAngleX -= (s32)(mdy * MOUSE_SENSITIVITY);
     }
 
-    s32 speed = 50;
+    s32 speed = 4000;
     if (p3d::input->IsKeyDown(KEY_LEFT_SHIFT)) {
-        speed = 200;
+        speed = 14000;
     }
 
     s32 ddx = 0;
@@ -540,22 +536,22 @@ void Camera::DebugCam() {
     s32 ddz = 0;
 
     if (p3d::input->IsKeyDown(KEY_W)) {
-        ddz += speed;
+        ddz += speed * g_time->GetDeltaTime();
     }
     if (p3d::input->IsKeyDown(KEY_S)) {
-        ddz -= speed;
+        ddz -= speed * g_time->GetDeltaTime();
     }
     if (p3d::input->IsKeyDown(KEY_A)) {
-        ddx -= speed;
+        ddx -= speed * g_time->GetDeltaTime();
     }
     if (p3d::input->IsKeyDown(KEY_D)) {
-        ddx += speed;
+        ddx += speed * g_time->GetDeltaTime();
     }
     if (p3d::input->IsKeyDown(KEY_E)) {
-        ddy += speed;
+        ddy += speed * g_time->GetDeltaTime();
     }
     if (p3d::input->IsKeyDown(KEY_Q)) {
-        ddy -= speed;
+        ddy -= speed * g_time->GetDeltaTime();
     }
 
     if (ddx != 0 || ddy != 0 || ddz != 0) {
