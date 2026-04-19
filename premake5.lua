@@ -14,9 +14,9 @@ project "rechan"
     language "C++"
     cppdialect "C++20"
     staticruntime "on"
-    targetdir "assets"
+    targetdir "bin"
     objdir    ("%{wks.location}/obj/" .. outputdir .. "/%{prj.name}")
-    debugdir  "assets"
+    debugdir  "bin"
     multiprocessorcompile "on"
 
     files {
