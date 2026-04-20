@@ -55,12 +55,13 @@ void Teleporter::AnalyzeMesh(DBRoot* root) {
 
 void Teleporter::CreateModel(const char* name) {
     MARKFUNCTION(0x800AA618);
-    Thing::CreateModel(name);
+    (void)name;
+    flags |= TF_MODEL_CREATED;
 }
 
 void Teleporter::DeleteModel() {
     MARKFUNCTION(0x800AA62C);
-    Thing::DeleteModel();
+    flags &= ~TF_MODEL_CREATED;
 }
 
 void Teleporter::Reset() {
