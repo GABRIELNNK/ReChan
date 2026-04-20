@@ -1746,16 +1746,16 @@ void Player::_Flip() {
     }
 
 handleLanding:
-    // PSX: call HandleLand
-    HandleLand(0);
+    // PSX: vtable+204 = CheckForLanding
+    CheckForLanding();
 
-    // PSX: check TF_ON_GROUND (flags bit 12)
+    // PSX: if still airborne, set flip gravity and test ledges.
     if (flags & TF_ON_GROUND) {
         gravity = 0x8000;
     }
     else {
         gravity = 4999;
-        CheckForLanding();
+        CheckForLedges();
     }
 }
 

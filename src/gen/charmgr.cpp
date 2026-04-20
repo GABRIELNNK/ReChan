@@ -211,15 +211,24 @@ CharFile::CharFile(u32 type) {
         return;
     }
 
-    // PSX: rrLoadHeaderOnly - reads first 2048 bytes (or file size if smaller)
-    // The header is an array of RREntry (8 bytes each)
-    // PSX reads up to min(fileSize, 2048) bytes
     s32 fileSize = fileHandle->GetLength();
-
-    s32 headerSize = (fileSize < 2048) ? fileSize : 2048;
-    rrHeader = (RREntry*)std::malloc(headerSize);
+    s32 probeSize = (fileSize < (s32)(2 * sizeof(RREntry))) ? fileSize : (s32)(2 * sizeof(RREntry));
+    rrHeader = (RREntry*)std::malloc(probeSize);
     fileHandle->Seek(0, ccFile::SEEK_FROM_START);
-    fileHandle->Read(rrHeader, (u32)headerSize);
+    fileHandle->Read(rrHeader, (u32)probeSize);
+
+    s32 headerSize = probeSize;
+    if (probeSize >= (s32)(2 * sizeof(RREntry))) {
+        s32 fullHeaderSize = rrOffset(rrHeader, 1);
+        if (fullHeaderSize > probeSize && fullHeaderSize <= fileSize && (fullHeaderSize % (s32)sizeof(RREntry)) == 0) {
+            RREntry* fullHeader = (RREntry*)std::malloc(fullHeaderSize);
+            fileHandle->Seek(0, ccFile::SEEK_FROM_START);
+            fileHandle->Read(fullHeader, (u32)fullHeaderSize);
+            std::free(rrHeader);
+            rrHeader = fullHeader;
+            headerSize = fullHeaderSize;
+        }
+    }
     rrHeaderEntries = headerSize / (s32)sizeof(RREntry);
 
     // Read resource 1 (the animation hash data section)

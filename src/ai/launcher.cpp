@@ -9,13 +9,11 @@
 #include "gen/colvol.h"
 #include "gen/database.h"
 #include "gen/model.h"
-#include "pc/inputaction.h"
 #include "p3d/flip.h"
 #include "p3d/p3dmath.h"
 #include "snd/snddrct.h"
 
 static constexpr s32 LAUNCHER_AWNING_LAUNCH_FRAME = 8;       // gp+0xc28
-static constexpr s32 LAUNCHER_MAX_JUMP_BUTTON_HELD_COUNT = 3; // gp+0xc2c
 static constexpr s32 LAUNCHER_FORCE_VECTOR = 12000;           // gp+0xc30
 static constexpr s32 LAUNCHER_LAST_FUDGE_FRAME = 20;          // gp+0xc34
 static constexpr s32 LAUNCHER_BOUNCE_RESET_FRAME = 0;         // gp+0xc38
@@ -250,12 +248,16 @@ void Launcher::HandleHumanoidCollision(Humanoid* hum) {
                     hum->velocity.y = 0;
                 }
 
+                // Launcher-top hold uses the flip handler, not normal grounded landing.
+                hum->flags &= ~TF_ON_GROUND;
+
                 // Trigger bounce animation
                 animPlaying = 1;
-                // PSX reads animStruct->endFrame without null check (reads garbage from addr 0x46 on PSX).
-                // The animFrame != 0 guard below makes the garbage value irrelevant.
                 s32 endFrameInt = animStruct ? (s16)(animStruct->endFrame >> 16) : 0;
                 if (animFrame < endFrameInt && animFrame < LAUNCHER_LAST_FUDGE_FRAME && animFrame != 0) {
+                    if (hum->thingType == AITypes::TT_PLAYER && hum->actionState != AS_FLIP_VARIANT) {
+                        hum->SetActionState(AS_FLIP_VARIANT, 0);
+                    }
                     // Animation in progress, within fudge window - skip reset
                     collision = true;
                     goto collision_check;
@@ -264,8 +266,8 @@ void Launcher::HandleHumanoidCollision(Humanoid* hum) {
                 // Reset animation frame
                 animFrame = 0;
 
-                if (hum->actionState != 0x11) {
-                    hum->SetActionState(0x11, 0);
+                if (hum->actionState != AS_FLIP_VARIANT) {
+                    hum->SetActionState(AS_FLIP_VARIANT, 0);
                 }
                 else {
                     // Already in launcher state: check if model anim has looped
@@ -300,7 +302,9 @@ void Launcher::HandleHumanoidCollision(Humanoid* hum) {
     }
 
 collision_check:
-    if (!collision) return;
+    if (!collision) {
+        return;
+    }
 
     bool doLaunch = false;
 
@@ -323,24 +327,9 @@ collision_check:
         doLaunch = true;
     }
     else {
-        // Check if jump button is held (for player) or jump command (for NPCs)
+        // Check if jump was requested during the bounce window.
         if (hum->thingType == 0) {
-            // Player: check jump button duration
-            s16 dur = 0;
-            if (g_inputManager) {
-                Button* btn = g_inputManager->GetButtonForBit(0, 6);
-                if (btn) {
-                    dur = btn->duration;
-                }
-            }
-
-            // PC port fallback: ActionInput drives gameplay command bits, while
-            // the legacy InputManager button durations are not always updated.
-            if (dur == 0 && g_actionInput) {
-                dur = g_actionInput->GetDuration(ACTION_JUMP);
-            }
-
-            if (dur != 0 && dur <= LAUNCHER_MAX_JUMP_BUTTON_HELD_COUNT) {
+            if (hum->HasJump() || hum->HasJumpDirectional()) {
                 flags |= TF_ON_GROUND;
                 doLaunch = true;
             }
