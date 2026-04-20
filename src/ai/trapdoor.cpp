@@ -20,21 +20,16 @@ TrapDoor::~TrapDoor() {
 }
 
 static s32 TrapDoorAttribToAngle(s32 value) {
-    s32 x = value << 16;
-    s64 prod = (s64)x * 0xB60B60B7LL;
-    s32 hi = (s32)(prod >> 32);
-    s32 result = (hi + x) >> 8;
-    result -= (x >> 31);
-    return result;
+    return (value << 16) / 360;
 }
 
 void TrapDoor::AnalyzeMesh(DBRoot* root) {
     MARKFUNCTION(0x80017054);
     Obstacle::AnalyzeMesh(root);
 
-    field7C.x = root->pos.x;
-    field7C.y = root->pos.y;
-    field7C.z = root->pos.z;
+    field7C.x = root->field40;
+    field7C.y = root->field44;
+    field7C.z = root->field48;
 
     while (field7C.y > 0xFF49) {
         field7C.y -= 0x10000;
@@ -46,10 +41,7 @@ void TrapDoor::AnalyzeMesh(DBRoot* root) {
     field88 = field7C;
     orientation = field7C;
 
-    DBVolume* vol = dynamic_cast<DBVolume*>(root);
-    if (vol) {
-        FillCollisionBox(field94, *vol);
-    }
+    ObstacleFillCollisionBox(field94, root, 5);
 
     SetCollisionBox(field94);
     SetupCollisionBox();
