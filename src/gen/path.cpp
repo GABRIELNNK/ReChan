@@ -145,7 +145,7 @@ Path::~Path() {
 // PSX: Flip__4Path (PATH.CPP:182)
 // Reverses the order of points and their attributes.
 void Path::Flip() {
-    s32 half = (numPoints - 1) / 2;
+    s32 half = numPoints / 2;
     for (s32 i = 0; i < half; i++) {
         s32 j = numPoints - 1 - i;
 
@@ -382,13 +382,13 @@ s32 LinearPath::Move(s32 speed) {
 
         // PSX crossing test uses the remaining-vector sign:
         //   toEnd = current - nextPoint
-        //   crossing when dot(toEnd, velocity) >= 0
+        //   crossing only after the endpoint is strictly passed
         // (negative while approaching, positive once passed).
         s64 dot = (s64)toEndX * (s64)velocity.x
             + (s64)toEndY * (s64)velocity.y
             + (s64)toEndZ * (s64)velocity.z;
 
-        if (dot >= 0) {
+        if (dot > 0) {
             // Passed/reached endpoint, advance segment.
             crossed = 1;
             currentSegment++;
@@ -594,8 +594,8 @@ s32 SplinePath::Move(s32 speed) {
     // Advance parametric position
     t += dt;
 
-    // Check for segment crossing (t >= 1.0 in 16.16)
-    while (t >= FIX16_ONE) {
+    // Check for segment crossing only after t strictly exceeds 1.0 in 16.16
+    while (t > FIX16_ONE) {
         t -= FIX16_ONE;
         currentSegment++;
         crossed = 1;
