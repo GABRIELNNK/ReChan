@@ -57,13 +57,14 @@ static s32 GetWeaponPickupDialog(s32 weaponType);
 
 // PSX: playerStraif animation data at 0x800D91E0
 // Array of [animIndex, loopType] pairs for strafe animations based on movement direction
-// Angle difference = orientation.y - faceAngle determines which animation plays
+// Angle difference = ClipAngle360(orientation.y - faceAngle) determines which animation plays
+// loopType 0 = ANIM_LOOP (forward), loopType 1 = ANIM_LOOP_REVERSE (backward playback)
 static s32 s_playerStraif[] = {
-    22, 0,  // [0,1]: idle when not moving (PLAYER_ANIM_IDLE_UNARMED)
-    51, 0,  // [2,3]: forward strafe 0-45° or 315-360° (PLAYER_ANIM_STRAFE_FORWARD_BACKWARD)
-    51, 0,  // [6,7]: backward strafe 225-315° (PLAYER_ANIM_STRAFE_FORWARD_BACKWARD)
-    52, 0,  // [4,5]: back-side strafe 135-225° (PLAYER_ANIM_STRAFE_LEFT_RIGHT)
-    52, 0   // [8,9]: side strafe 45-135° (PLAYER_ANIM_STRAFE_LEFT_RIGHT)
+    22, 0,  // [0,1]: idle when not moving
+    51, 0,  // [2,3]: forward strafe 0-45° or 315-360°
+    51, 1,  // [4,5]: back-side strafe 135-225° (anim 51 played in reverse)
+    52, 0,  // [6,7]: backward strafe 225-315°
+    52, 1   // [8,9]: side strafe 45-135° (anim 52 played in reverse)
 };
 
 static bool DetectObstacleAboveLedge(const LVector& /*normal*/, const LVector& /*ledgePos*/) {

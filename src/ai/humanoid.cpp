@@ -1540,15 +1540,37 @@ void Humanoid::_Run() {
 }
 
 // PSX: _Straif__8Humanoid (HUMANOID.CPP:4307)
-// Complex: targeting, angle-based animation, movement.
 void Humanoid::_Straif() {
     MARKFUNCTION(0x80067610);
+
+    // PSX: capture orientation.y and faceAngle at function entry.
+    // FaceThingDesired/FaceAngleY modify these fields later, but the captured
+    // values are used for movement direction and animation selection.
+    s32 savedOrientY = orientation.y;
+    s32 savedFaceAngle = faceAngle;
+
+    // PSX: SVector direction = {0, 0, savedFaceAngle, 0} for AddForce
+    SVector dir;
+    dir.x = 0;
+    dir.y = 0;
+    dir.z = (s16)(savedFaceAngle & 0xFFFF);
+    dir.pad = (s16)((u32)savedFaceAngle >> 16);
+
+    // PSX: flags bit 17 -> slope slide
+    if ((flags >> 17) & 1) {
+        SetActionState(AS_SLOPE_SLIDE, 0);
+        return;
+    }
 
     s32 sd = commandBits;
 
     // Attack punch group (bits 8,10,12,20)
     if ((sd >> 8) & 1 || (sd >> 10) & 1 || (sd >> 12) & 1 || (sd >> 20) & 1) {
-        faceAngle = orientation.y;
+        // PSX: remap back-punch (bit 10) to punch (bit 8)
+        if ((sd >> 10) & 1) {
+            commandBits = (sd & 0xFFFFFAFF) | 0x100;
+        }
+        faceAngle = savedOrientY;
         ReleaseTarget();
         SetActionState(AS_PUNCH_ATTACK, 0);
         return;
@@ -1556,29 +1578,32 @@ void Humanoid::_Straif() {
 
     // Attack kick group (bits 9,11,13,14)
     if ((sd >> 9) & 1 || (sd >> 11) & 1 || (sd >> 13) & 1 || (sd >> 14) & 1) {
-        faceAngle = orientation.y;
+        // PSX: remap back-kick (bit 11) to kick (bit 9)
+        if ((sd >> 11) & 1) {
+            commandBits = (sd & 0xFFFFF5FF) | 0x200;
+        }
+        faceAngle = savedOrientY;
         ReleaseTarget();
         SetActionState(AS_KICK_ATTACK, 0);
         return;
     }
 
-    // Multi-hit combat (bits 7,19,15,16,17,18) -> pickup/throw or combat idle
+    // Grab/combat (bits 7,19,15,16,17,18)
     if ((sd >> 7) & 1 || (sd >> 19) & 1 || (sd >> 15) & 1
         || (sd >> 16) & 1 || (sd >> 17) & 1 || (sd >> 18) & 1) {
-        if (rightHandObj != 0 || leftHandObj != 0) {
-            if (rightHandObj != 0 && field316 != 0) {
-                ReleaseTarget();
-                SetActionState(AS_COMBAT_IDLE, 0);
-            }
-            else {
+        if (rightHandObj || leftHandObj) {
+            if (!((s32*)rightHandObj)[79]) {
                 ReleaseTarget();
                 SetActionState(AS_THROW_PICKUP, 0);
+                return;
             }
         }
-        else {
+        else if (CheckForPickup() == 1) {
             ReleaseTarget();
-            SetActionState(AS_COMBAT_IDLE, 0);
+            return;
         }
+        ReleaseTarget();
+        SetActionState(AS_COMBAT_IDLE, 0);
         return;
     }
 
@@ -1598,14 +1623,15 @@ void Humanoid::_Straif() {
 
     // Guard release (bit 1)
     if (sd & 0x0002) {
-        faceAngle = orientation.y;
+        faceAngle = savedOrientY;
         ReleaseTarget();
         SetActionState(AS_STAND, 0);
+        SetIdleAnimation(0, 0);
         return;
     }
 
     // Dive roll (bit 21)
-    if (sd  & 0x200000) {
+    if (sd & 0x200000) {
         ReleaseTarget();
         SetActionState(AS_DIVE_ROLL, 0);
         return;
@@ -1627,7 +1653,7 @@ void Humanoid::_Straif() {
 
     // Kick (bit 2) -> face + run
     if (sd & 0x0004) {
-        faceAngle = orientation.y;
+        faceAngle = savedOrientY;
         ReleaseTarget();
         SetActionState(AS_RUN, 0);
         return;
@@ -1641,84 +1667,73 @@ void Humanoid::_Straif() {
         return;
     }
 
-    // PSX: No commands -> strafe movement
-    // PSX: if has target, face it. Otherwise use stored enemy.
+    // PSX: resolve faceAngleData - use rightHandObj's if available (weapon strafe anims)
+    s32* animArray;
+    if (!rightHandObj || !(animArray = (s32*)(*(void**)((u8*)rightHandObj + 220)))) {
+        animArray = (s32*)faceAngleData;
+    }
+
+    // PSX: face target if present
     Humanoid* target = (Humanoid*)(intptr_t)field256;
     if (target) {
-        // PSX: FaceThingDesired to compute angle toward target
         FaceThingDesired(target);
         FaceAngleY(faceAngle, 1);
-
-        // PSX: if target dead (actionState 72), release
         if (target->actionState == AS_DEAD) {
             ReleaseTarget();
         }
     }
 
-    // PSX: apply movement force in faceAngle direction (from stick input OR target lock)
-    // orientation.y = current facing, faceAngle = desired movement direction
+    // PSX: model and animStructure (loaded unconditionally on PSX)
+    Model* m = static_cast<Model*>(model);
+    AnimStructure* animStruct = m ? (AnimStructure*)m->animStructure : nullptr;
+
     if (attackRange != 0) {
-        SVector dir;
-        dir.x = 0;
-        dir.y = 0;
-        dir.z = (s16)(faceAngle & 0xFFFF);
-        dir.pad = 0;
+        // PSX: movement force uses captured faceAngle direction
         AddForce(attackRange, &dir);
 
-        // PSX: select strafe animation based on angle difference
-        if (model && faceAngleData) {
-            Model* m = static_cast<Model*>(model);
-            s32* animArray = (s32*)faceAngleData;
-            
-            // PSX: angle difference = orientation.y - faceAngle (inverted from movement direction)
-            s32 angleDiff = orientation.y - faceAngle;
-            
-            // Select animation pair based on angle ranges (PSX exact logic)
-            // Ranges: forward (0-8193), side (8193-24577), back-side (24577-40960), back (40960-57344), forward (57344+)
-            s32 animIndex = 0;
-            s32 loopType = 0;
-            
-            s32 absAngle = (angleDiff >= 0) ? angleDiff : -angleDiff;
-            
-            if (absAngle >= 24577 && absAngle <= 40960) {
-                // 135-225 degrees: back-side strafe (left/right animations)
-                animIndex = animArray[4];
-                loopType = animArray[5];
-            }
-            else if (absAngle >= 8193 && absAngle < 24577) {
-                // 45-135 degrees: side strafe (left/right animations)
-                animIndex = animArray[8];
-                loopType = animArray[9];
-            }
-            else if (absAngle > 40960 && absAngle <= 57344) {
-                // 225-315 degrees: backward strafe (forward/backward animations)
-                animIndex = animArray[6];
-                loopType = animArray[7];
-            }
-            else {
-                // 0-45 degrees or 315-360 degrees: forward strafe (forward/backward animations)
-                animIndex = animArray[2];
-                loopType = animArray[3];
-            }
-            
+        // PSX: ClipAngle360 = mask to 16-bit unsigned [0, 65535]
+        s32 angleDiff = (s32)((u32)(savedOrientY - savedFaceAngle) & 0xFFFFu);
+
+        // PSX: select strafe animation based on clipped angle ranges
+        s32 animIndex;
+        s32 loopType;
+
+        if (angleDiff >= 24577 && angleDiff <= 40959) {
+            // 135-225 degrees: back-side strafe
+            animIndex = animArray[4];
+            loopType = animArray[5];
+        }
+        else if (angleDiff >= 8193 && angleDiff < 24576) {
+            // 45-135 degrees: side strafe
+            animIndex = animArray[8];
+            loopType = animArray[9];
+        }
+        else if (angleDiff > 40960 && angleDiff <= 57343) {
+            // 225-315 degrees: backward strafe
+            animIndex = animArray[6];
+            loopType = animArray[7];
+        }
+        else {
+            // 0-45 degrees or 315-360 degrees: forward strafe
+            animIndex = animArray[2];
+            loopType = animArray[3];
+        }
+
+        if (m) {
             m->SetAnim(animIndex, 0, 0, 0);
-            
-            if (m->animStructure) {
-                AnimStructure* anim = (AnimStructure*)m->animStructure;
-                anim->SetLoopType(loopType, 0);
-            }
+        }
+        if (animStruct) {
+            animStruct->SetLoopType(loopType, 0);
         }
     }
     else {
-        // PSX: no movement - play idle if not already playing
-        if (model && faceAngleData) {
-            Model* m = static_cast<Model*>(model);
-            s32* animArray = (s32*)faceAngleData;
-            
-            if (m->animStructure) {
-                AnimStructure* anim = (AnimStructure*)m->animStructure;
-                bool atEnd = (s16)((u32)anim->currentFrame >> 16) == anim->endFrame;
-                if (anim->animEnum != animArray[0] || atEnd) {
+        // PSX: no movement - play idle when strafe anim loops back to start
+        if (animStruct) {
+            // PSX: *(__int16*)(animStruct + 62) == *(__int16*)(animStruct + 66)
+            // = currentFrame.hi == startFrame.hi (animation looped back to start)
+            bool looped = (s16)((u32)animStruct->currentFrame >> 16) == (s16)((u32)animStruct->startFrame >> 16);
+            if (animStruct->animEnum != animArray[0] && looped) {
+                if (m) {
                     m->SetAnim(animArray[0], 3, 0, 0);
                 }
             }
