@@ -263,6 +263,18 @@ void SModel::Show(u32 flags) {
 
     p3d::context->SetWorldMatrix(world);
 
+    if (animStructure) {
+        AnimStructure* anim = static_cast<AnimStructure*>(animStructure);
+        if (anim->flip && anim->flip->dirty) {
+            s32 frame = anim->currentFrame;
+            if (frame < 0) {
+                frame = 0;
+            }
+            anim->flip->SetFrameReal(frame);
+            anim->flip->UpdateJoints();
+        }
+    }
+
     // PSX: calls drawable->Display(flags) through vtable
     drawable->Display(flags);
 }

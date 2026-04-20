@@ -779,8 +779,15 @@ void DynamicThing::AddForce(s32 magnitude, const SVector* direction) {
 // PSX: Land__12DynamicThing (THING.CPP:794)
 void DynamicThing::Land() {
     MARKFUNCTION(0x80061C78);
+
+    const LVector landedForce = force;
+
+    force = {};
     flags |= TF_ON_GROUND;
-    velocity.y = 0;
+
+    velocity.x -= landedForce.x;
+    velocity.y -= landedForce.y;
+    velocity.z -= landedForce.z;
 }
 
 // PSX: DisembarkObstacle__12DynamicThingRC10tagLVector (THING.CPP:810)

@@ -795,6 +795,14 @@ void Player::SetActionState(u32 state, s32 param) {
         case AS_LEDGE_LATCH:
         {
             // PSX case 23: ledge latch setup.
+            // PSX calls model->Animate() first to finalize the previous animation
+            // before switching, preventing a one-frame position glitch.
+            if (model) {
+                Model* m = static_cast<Model*>(model);
+                if (m->drawable && (m->drawable->displayFlag & 1)) {
+                    m->Animate();
+                }
+            }
             field344 = 0;
             stateDispatch = SD_LEDGE_LATCH;
             field348 = 8;
@@ -2482,9 +2490,9 @@ void Player::_LedgeLatch() {
         return;
     }
 
-    // PSX: increment field616, wait at least 4 frames
+    // PSX: increment field616, check pre-increment value >= 4 (wait 5 calls)
     field616++;
-    if (field616 < 4) {
+    if (field616 <= 4) {
         return;
     }
 
@@ -2565,8 +2573,8 @@ void Player::_LedgePullup() {
     if (anim->loopCount > 0) {
         _DoStand();
 
-        if (homePos.y < 0) {
-            homePos.y = 0;
+        if (collBboxMin.y < 0) {
+            collBboxMin.y = 0;
         }
     }
 }

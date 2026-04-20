@@ -463,6 +463,7 @@ void Humanoid::PrepareLedgeLatch(const LVector& correctionPos, const LVector& no
 
     velocity = {};
     contactForce = {};
+    DropPickup(1, 1);
 
     s32 facingAngle = 0;
     if (normal.x != 0) {
@@ -1991,21 +1992,14 @@ void Humanoid::_LedgeLatch() {
 void Humanoid::_LedgePullup() {
     MARKFUNCTION(0x8006A538);
 
-    if (!model) {
-        if (homePos.y < 0) {
-            homePos.y = 0;
-        }
-        return;
-    }
-
     Model* m = static_cast<Model*>(model);
-    AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+    AnimStructure* anim = m ? static_cast<AnimStructure*>(m->animStructure) : nullptr;
     if (anim && anim->loopCount > 0) {
         SetActionState(AS_STAND, 0);
     }
 
-    if (homePos.y < 0) {
-        homePos.y = 0;
+    if (collBboxMin.y < 0) {
+        collBboxMin.y = 0;
     }
 }
 
