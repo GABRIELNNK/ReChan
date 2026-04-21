@@ -18,6 +18,16 @@ Database* g_database = nullptr;
 // PSX: GetAttribString__C8DBAttrib (DATABASE.CPP:297)
 // Returns the string pointer (value reinterpreted as char* on PSX).
 
+const char* DBAttrib::GetAttribString() const {
+    if (type == 0) {
+        return strValue;
+    }
+
+    static char numericValueBuf[16];
+    std::snprintf(numericValueBuf, sizeof(numericValueBuf), "%d", (s32)value);
+    return numericValueBuf;
+}
+
 // PSX: SetAttribString__8DBAttribUlPCc (DATABASE.CPP:303)
 // Allocates a copy of the string and stores it.
 

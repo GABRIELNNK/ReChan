@@ -187,6 +187,7 @@ public:
     void SetFloorHeight(s32 height);
 
     void GetObjectToWorldSpaceVector(const SVector& in, SVector& out);
+	void GetObjectToWorldSpaceVector(const LVector& in, LVector& out);
     s32 DistanceFromPointXZ(const LVector& point) const;
     s32 DistanceFromPoint(const LVector& point) const;
 };

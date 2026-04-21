@@ -11,7 +11,10 @@
 #include "gen/game.h"
 #include "gen/world.h"
 
-static constexpr s32 LADDER_LEDGE_CLEARANCE = 1022;
+static constexpr s32 LADDER_TOP = 0x358; // 856 - top-zone tolerance & ledge probe Y range
+static constexpr s32 TOP_OF_LADDER_GRASP_OFFSET_Y_FUDGE = 0x50;  // 80  - bottom-vs-top approach Y threshold
+static constexpr s32 LADDER_LEDGE_LOOKAHEAD = 0x118; // 280 - horizontal ledge probe distance
+static constexpr s32 LADDER_LEDGE_CLEARANCE = 1024;  // PSX: 8th arg to LedgePrototype
 
 Ladder::Ladder(const LVector* pos, u16 type) : Obstacle(pos, type) {
     MARKFUNCTION(0x80089CA4);
@@ -46,15 +49,6 @@ void Ladder::AnalyzeMesh(DBRoot* root) {
     orientation.z = root->field48;
 
     DBVolume* vol = dynamic_cast<DBVolume*>(root);
-    if (!vol && g_database) {
-        for (DBVolume* dbv = g_database->GetFirstVolume(); dbv; dbv = static_cast<DBVolume*>(dbv->next)) {
-            if (dbv->nameCRC == root->nameCRC) {
-                vol = dbv;
-                break;
-            }
-        }
-    }
-
     if (vol) {
         tagCollisionBox box = {};
         FillCollisionBox(box, *vol);
@@ -79,26 +73,38 @@ void Ladder::AnalyzeMesh(DBRoot* root) {
     //   attrib 11 -> hatchCloseCRC
     const DBAttrib* a8 = root->FindAttrib(8);
     deathCheckCRC = 0;
-    if (a8 && a8->strValue) {
-        deathCheckCRC = (s32)p3dHash(a8->strValue);
+    if (a8) {
+        const char* attrString = a8->GetAttribString();
+        if (attrString && attrString[0] != '\0') {
+            deathCheckCRC = (s32)p3dHash(attrString);
+        }
     }
 
     const DBAttrib* a9 = root->FindAttrib(9);
     hatchTriggerCRC = 0;
-    if (a9 && a9->strValue) {
-        hatchTriggerCRC = (s32)p3dHash(a9->strValue);
+    if (a9) {
+        const char* attrString = a9->GetAttribString();
+        if (attrString && attrString[0] != '\0') {
+            hatchTriggerCRC = (s32)p3dHash(attrString);
+        }
     }
 
     const DBAttrib* a10 = root->FindAttrib(10);
     teleportTargetCRC = 0;
-    if (a10 && a10->strValue) {
-        teleportTargetCRC = (s32)p3dHash(a10->strValue);
+    if (a10) {
+        const char* attrString = a10->GetAttribString();
+        if (attrString && attrString[0] != '\0') {
+            teleportTargetCRC = (s32)p3dHash(attrString);
+        }
     }
 
     const DBAttrib* a11 = root->FindAttrib(11);
     hatchCloseCRC = 0;
-    if (a11 && a11->strValue) {
-        hatchCloseCRC = (s32)p3dHash(a11->strValue);
+    if (a11) {
+        const char* attrString = a11->GetAttribString();
+        if (attrString && attrString[0] != '\0') {
+            hatchCloseCRC = (s32)p3dHash(attrString);
+        }
     }
 
     const DBAttrib* a12 = root->FindAttrib(12);
@@ -215,7 +221,7 @@ s32 Ladder::DeathCheck() {
     MARKFUNCTION(0x8008A070);
 
     if (!deathThing && deathCheckCRC != 0 && g_ai) {
-        ccNode* n = g_ai->moveList.FindNodeCRC((u32)deathCheckCRC);
+        ccNode* n = g_ai->activeZoneList.FindNodeCRC((u32)deathCheckCRC);
         if (n) {
             deathThing = static_cast<Thing*>(n);
         }
@@ -224,7 +230,7 @@ s32 Ladder::DeathCheck() {
     if (!deathThing || !(deathThing->flags & TF_ACTIVATED)) {
         deathCountdown--;
         if (deathCountdown <= 0) {
-            Kill();
+            Trigger();
         }
     }
     else {
@@ -255,6 +261,11 @@ void Ladder::HandleHumanoidCollision(Humanoid* hum) {
 
     s32 as = hum->actionState;
 
+    // Keep ledge transition states from being re-captured by ladder top-approach logic.
+    if (as == AS_LEDGE_LATCH || as == AS_LEDGE_PULLUP) {
+        return;
+    }
+
     // PSX 0x8008A2E4-0x8008A338: states 25/26 just set flag and return
     if (as == AS_LADDER_CLIMB_UP || as == AS_LADDER_CLIMB_DOWN) {
         hum->field368 |= 2;
@@ -284,17 +295,25 @@ void Ladder::HandleHumanoidCollision(Humanoid* hum) {
         }
 
         // PSX 0x8008A3AC: near ladder top while climbing.
-        if ((maxY - g_climbSearchRadius) < savedHomePos.y) {
+        // gp[2432] = ladderTop = 856 (NOT g_climbSearchRadius=128).
+        if ((maxY - LADDER_TOP) < savedHomePos.y) {
             if ((hum->commandBits >> 2) & 1) {
-                if (hatchThing) {
-                    LVector ledgeNormal = {};
-                    LVector ledgePos = {};
-                    if (CheckForLedges(ledgeNormal, ledgePos)) {
-                        hum->PrepareLedgeLatch(ledgePos, ledgeNormal);
-                        hum->SetActionState(AS_LEDGE_PULLUP, 0);
-                        return;
-                    }
+                // PSX checks hatchTriggerCRC or hatchEnabled at this point.
+                if (!hatchEnabled) {
+                    PutHumanoidOnLadder(hum);
+                    return;
                 }
+
+                savedHomePos.y = maxY - LADDER_TOP;
+                LVector ledgeNormal = {};
+                LVector ledgePos = {};
+                if (CheckForLedges(ledgeNormal, ledgePos)) {
+                    hum->PrepareLedgeLatch(ledgePos, ledgeNormal);
+                    hum->SetActionState(AS_LEDGE_PULLUP, 0);
+                    return;
+                }
+
+                hum->homePos = savedHomePos;
             }
         }
 
@@ -306,7 +325,7 @@ void Ladder::HandleHumanoidCollision(Humanoid* hum) {
     // PSX state 73 (0x49): return
     if (as == 73) return;
 
-    // Default: player approaching ladder â€” check for grab input
+    // Default: player approaching ladder check for grab input
     hum->field368 |= 2;
 
     s32 grabButton = 0;
@@ -317,13 +336,15 @@ void Ladder::HandleHumanoidCollision(Humanoid* hum) {
     if (!grabButton) return;
 
     // PSX 0x8008A490: top-approach check uses current pos.y.
-    if (hum->pos.y > (maxY - 256 - g_floorYSearchOffset)) {
+    // gp[2436] = TOP_OF_LADDER_GRASP_OFFSET_Y_FUDGE = 80 (NOT g_floorYSearchOffset=384).
+    if (hum->pos.y > (maxY - 256 - TOP_OF_LADDER_GRASP_OFFSET_Y_FUDGE)) {
         if (hum != (Humanoid*)Player::s_player) return;
         LVector ledgeNormal = {};
         LVector ledgePos = {};
         if (!CheckForLedges(ledgeNormal, ledgePos)) {
             return;
         }
+
         hum->homePos = ledgePos;
         PutHumanoidOnLadder(hum);
         hum->SetActionState(AS_LADDER_CLIMB_DOWN, 0);
@@ -354,15 +375,16 @@ bool Ladder::CheckForLedges(LVector& outNormal, LVector& outCorrectionPos) {
     LVector startPos = pos;
     LVector endPos = startPos;
 
-    endPos.x += (s32)(((s64)rmSin16(orientation.y) * (s64)g_floorStandingTol) >> 16);
-    endPos.z += (s32)(((s64)rmSin16((s16)(orientation.y + 0x4000)) * (s64)g_floorStandingTol) >> 16);
+    const s16 probeAngle = (s16)orientation.y;
+    endPos.x += (s32)(((s64)rmSin16(probeAngle) * (s64)LADDER_LEDGE_LOOKAHEAD) >> 16);
+    endPos.z += (s32)(((s64)rmSin16((s16)(probeAngle + 0x4000)) * (s64)LADDER_LEDGE_LOOKAHEAD) >> 16);
 
     const s32 ledgeBaseY = startPos.y + (s32)collBox.maxY;
-    const s32 ledgeMinY = ledgeBaseY - g_climbSearchRadius;
-    const s32 ledgeMaxY = ledgeBaseY + g_climbSearchRadius;
+    const s32 ledgeMinY = ledgeBaseY - LADDER_TOP;
+    const s32 ledgeMaxY = ledgeBaseY + LADDER_TOP;
 
     u16 ledgeMaterial = 0;
-    return CollisionSector::LedgePrototype(
+    bool ok = CollisionSector::LedgePrototype(
         startPos,
         endPos,
         ledgeMinY,
@@ -371,4 +393,5 @@ bool Ladder::CheckForLedges(LVector& outNormal, LVector& outCorrectionPos) {
         outCorrectionPos,
         ledgeMaterial,
         LADDER_LEDGE_CLEARANCE);
+    return ok;
 }

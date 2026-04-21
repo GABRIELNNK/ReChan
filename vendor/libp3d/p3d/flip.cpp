@@ -145,6 +145,16 @@ void TransformFlip::UpdateJoints() {
         return;
     }
 
+    for (u32 i = 0; i < tree->numJoints; i++) {
+        STreeJoint& joint = tree->joints[i];
+        joint.translationX = joint.bindTranslationX;
+        joint.translationY = joint.bindTranslationY;
+        joint.translationZ = joint.bindTranslationZ;
+        joint.rotationX = joint.bindRotationX;
+        joint.rotationY = joint.bindRotationY;
+        joint.rotationZ = joint.bindRotationZ;
+    }
+
     // Process translation channels
     for (s32 i = 0; i < anim->numTransChannels; i++) {
         const TransformAnim::Channel& ch = anim->transChannels[i];

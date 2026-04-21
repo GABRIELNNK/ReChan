@@ -510,10 +510,10 @@ void AI::MoveThings() {
     HandleThingEnvironmentCollisions(humanoidList);
     HandleThingEnvironmentCollisions(pickupList);
 
-    // 7. Clear collision state on humanoids (PSX: thing[88] = 0 -> flags2)
+    // 7. Clear humanoid command bits
     for (ccMinNode* n = humanoidList.head; n; n = n->next) {
-        Thing* thing = static_cast<Thing*>(n);
-        thing->flags2 = 0;
+        Humanoid* humanoid = static_cast<Humanoid*>(n);
+        humanoid->commandBits = 0;
     }
 
     // 8. Pickup deactivation: move deactivated pickups from pickupList to inactivePickupList

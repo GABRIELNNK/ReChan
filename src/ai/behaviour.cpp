@@ -33,7 +33,7 @@ static void SetAttackRangeFromAnimConfig(Behaviour* b) {
         return;
     }
 
-    b->owner->attackRange = *(s16*)((u8*)b->animConfigPtr + 44);
+    b->owner->moveSpeed = *(s16*)((u8*)b->animConfigPtr + 44);
 }
 
 static bool IsPointInOrientedBox(const LVector& boxPos, const tagCollisionBox& box, s32 boxAngle, const LVector& testPos) {
@@ -129,7 +129,7 @@ void Behaviour::PlayerUserControl(Behaviour* self) {
     }
 
     // Read movement from ActionInput (works for both keyboard and gamepad)
-    s32 analogX = (s16)g_actionInput->GetMoveX();
+    s32 analogX = g_actionInput->GetMoveX();
     s32 analogY = g_actionInput->GetMoveY();
     s32 stickX = g_actionInput->GetMoveX();
     s32 stickY = g_actionInput->GetMoveY();
@@ -139,9 +139,9 @@ void Behaviour::PlayerUserControl(Behaviour* self) {
     s32 ownerAngle = owner->orientation.y;
     s32 targetAngle = ownerAngle;
 
-    owner->attackRange = 0;
+    owner->moveSpeed = 0;
 
-    if (analogX || (analogY << 16)) {
+    if (analogX || analogY) {
         Camera& cam = g_game->GetCamera();
         s32 cameraAngle = cam.GetOrientY();
 
@@ -189,10 +189,10 @@ void Behaviour::PlayerUserControl(Behaviour* self) {
 
         s32 range = (s32)(((s64)(maxAxis << 16) * (s64)rmDiv16i(g_maxAttackRange << 16, STICK_MAX_FP)) >> 16) >> 16;
         if (range) {
-            owner->attackRange = range;
+            owner->moveSpeed = range;
         }
         else {
-            owner->attackRange = 0;
+            owner->moveSpeed = 0;
         }
     }
 
@@ -224,10 +224,10 @@ s32 Behaviour::MoveToDestinationPoint(u32 threshold) {
         // Far from destination - run
         owner->FacePointDesired(destPoint);
         owner->RequestAction(2);  // GA_RUN
-        // PSX: sets owner->attackRange from animConfigPtr speed data
+        // PSX: sets owner->moveSpeed from animConfigPtr speed data
         if (animConfigPtr) {
             s16 spd = *(s16*)((u8*)animConfigPtr + 44);
-            owner->attackRange = spd;
+            owner->moveSpeed = spd;
         }
         return 0;
     }
@@ -236,10 +236,10 @@ s32 Behaviour::MoveToDestinationPoint(u32 threshold) {
         // Close to destination - walk (half speed)
         owner->FacePointDesired(destPoint);
         owner->RequestAction(6);  // GA_WALK
-        // PSX: sets owner->attackRange to half of speed
+        // PSX: sets owner->moveSpeed to half of speed
         if (animConfigPtr) {
             s16 spd = *(s16*)((u8*)animConfigPtr + 44);
-            owner->attackRange = (spd + ((u16)spd >> 15)) >> 1;
+            owner->moveSpeed = (spd + ((u16)spd >> 15)) >> 1;
         }
         return 0;
     }
@@ -266,7 +266,7 @@ void Behaviour::NDMS(Behaviour* b) {
         return;
     }
 
-    b->owner->attackRange = 0;
+    b->owner->moveSpeed = 0;
     b->owner->FaceThingDesired(nullptr);
 }
 

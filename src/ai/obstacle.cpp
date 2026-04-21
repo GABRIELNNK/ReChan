@@ -63,6 +63,13 @@ static bool CollisionBoxLooksValid(const tagCollisionBox& box) {
     return box.minX <= box.maxX && box.minY <= box.maxY && box.minZ <= box.maxZ;
 }
 
+static constexpr s32 OBSTACLE_LEDGE_MIN_SPAN = 640;
+static constexpr s32 OBSTACLE_LEDGE_HAND_Y_TOL = 100;
+static constexpr s32 OBSTACLE_LEDGE_FLOOR_MIN_HEIGHT = 1022;
+static constexpr s32 OBSTACLE_DETECT_OBSTACLE_OFFSET_XZ = 0x100;
+static constexpr s32 OBSTACLE_DETECT_OBSTACLE_OFFSET_Y = 0x100;
+static constexpr s32 OBSTACLE_DETECT_OBSTACLE_RADIUS = 0x20;
+
 Obstacle::Obstacle(const LVector* pos, u16 type) : Thing(pos, type) {
     MARKFUNCTION(0x8007CA08);
     collBox = { 0x7FFF, 0x7FFF, 0x7FFF, -0x7FFF, -0x7FFF, -0x7FFF, -0x7FFF, 0 };
@@ -187,6 +194,154 @@ s32 Obstacle::GetObstacleFloorHeight(const LVector& pos) const {
     MARKFUNCTION(0x8007D0CC);
     // PSX: return this->pos.y + (s32)(s16)collBox.maxY
     return this->pos.y + (s32)collBox.maxY;
+}
+
+bool Obstacle::LedgeCheck(const tagCollisionBox& box, const LVector& normal, const LVector& correctionPos, Humanoid* hum) const {
+    MARKFUNCTION(0x8007BE84);
+
+    if (!hum) {
+        return false;
+    }
+
+    const s32 actionState = hum->actionState;
+    if (actionState == 32 || actionState == 34 || actionState == 35) {
+        return false;
+    }
+
+    bool hasWideTop = false;
+    if ((s32)box.maxX - (s32)box.minX >= OBSTACLE_LEDGE_MIN_SPAN) {
+        hasWideTop = ((s32)box.maxZ - (s32)box.minZ) >= OBSTACLE_LEDGE_MIN_SPAN;
+    }
+
+    LVector facing = {};
+    facing.x = rmSin16((s16)hum->orientation.y);
+    facing.z = rmSin16((s16)(hum->orientation.y + 0x4000));
+
+    const bool facingObstacleFront = rmV3Dot(&normal, &facing) < 0;
+
+    HumanoidModel* model = hum->model ? static_cast<HumanoidModel*>(hum->model) : nullptr;
+    if (!model || !model->animMatrices) {
+        return false;
+    }
+
+    s32* leftHandMatrix = AnimationMatrices::GetMatrix(model->animMatrices, 1);
+    s32* rightHandMatrix = AnimationMatrices::GetMatrix(model->animMatrices, 2);
+    if (!leftHandMatrix || !rightHandMatrix) {
+        return false;
+    }
+
+    const s32 avgHandY = (leftHandMatrix[6] + rightHandMatrix[6]) / 2;
+    const bool nearHands = correctionPos.y >= avgHandY - OBSTACLE_LEDGE_HAND_Y_TOL
+        && correctionPos.y <= avgHandY + OBSTACLE_LEDGE_HAND_Y_TOL;
+
+    ModelFloorHeightState* floorState = model->field36
+        ? static_cast<ModelFloorHeightState*>(model->field36)
+        : nullptr;
+    if (!floorState || floorState->current == (s32)0x80000001) {
+        return false;
+    }
+
+    if (!hasWideTop || !facingObstacleFront || !nearHands) {
+        return false;
+    }
+
+    return correctionPos.y >= floorState->current + OBSTACLE_LEDGE_FLOOR_MIN_HEIGHT;
+}
+
+// PSX: DetectObstacleAboveLedge__8ObstacleRC9_RMVECT16RC10tagLVector (OBSTACLE.CPP:1576)
+bool Obstacle::DetectObstacleAboveLedge(const LVector& normal, const LVector& ledgePos) {
+    MARKFUNCTION(0x8007C6DC);
+
+    const s32 offsetX = MulShift16(normal.x, OBSTACLE_DETECT_OBSTACLE_OFFSET_XZ);
+    const s32 offsetZ = MulShift16(normal.z, OBSTACLE_DETECT_OBSTACLE_OFFSET_XZ);
+
+    LVector startPos = {};
+    startPos.x = ledgePos.x + offsetX;
+    startPos.y = ledgePos.y + OBSTACLE_DETECT_OBSTACLE_OFFSET_Y;
+    startPos.z = ledgePos.z + offsetZ;
+
+    LVector endPos = {};
+    endPos.x = ledgePos.x - offsetX;
+    endPos.y = ledgePos.y + OBSTACLE_DETECT_OBSTACLE_OFFSET_Y;
+    endPos.z = ledgePos.z - offsetZ;
+
+    return DetectObstacle(startPos, endPos, OBSTACLE_DETECT_OBSTACLE_RADIUS);
+}
+
+// PSX: DetectObstacle__8ObstacleRC10tagLVectorT1l (OBSTACLE.CPP:1611)
+bool Obstacle::DetectObstacle(const LVector& startPos, const LVector& endPos, s32 radius) {
+    MARKFUNCTION(0x8007C7B0);
+
+    if (!g_ai) {
+        return false;
+    }
+
+    const s32 midX = (startPos.x + endPos.x) / 2;
+    const s32 midY = (startPos.y + endPos.y) / 2;
+    const s32 midZ = (startPos.z + endPos.z) / 2;
+    const u32 searchExtent = rmMag2(endPos.x - startPos.x, endPos.z - startPos.z);
+
+    for (ccMinNode* node = g_ai->moveList.head; node; node = node->next) {
+        Obstacle* obs = static_cast<Obstacle*>(static_cast<Thing*>(node));
+        if ((obs->flags & TF_MODEL_CREATED) == 0) {
+            continue;
+        }
+        if (!obs->GetPhysical()) {
+            continue;
+        }
+
+        s32 threshold = (s32)obs->collBox.extent + (s32)searchExtent + radius;
+
+        s32 deltaX = midX - obs->pos.x;
+        if (deltaX < 0) {
+            deltaX = -deltaX;
+        }
+        if (deltaX >= threshold) {
+            continue;
+        }
+
+        s32 deltaZ = midZ - obs->pos.z;
+        if (deltaZ < 0) {
+            deltaZ = -deltaZ;
+        }
+        if (deltaZ >= threshold) {
+            continue;
+        }
+
+        s32 deltaY = endPos.y - startPos.y;
+        if (deltaY < 0) {
+            deltaY = -deltaY;
+        }
+
+        if (midY + deltaY + radius < obs->pos.y + (s32)obs->collBox.minY) {
+            continue;
+        }
+        if (obs->pos.y + (s32)obs->collBox.maxY < midY - deltaY - radius) {
+            continue;
+        }
+
+        LVector outPos = {};
+        LVector outNormal = {};
+        LVector outPushedPos = {};
+        if (CorrectThingPositionObstacle(
+                obs->pos,
+                obs->pos,
+                obs->orientation.y,
+                obs->orientation.y,
+                obs->collBox,
+                startPos,
+                endPos,
+                radius,
+                -radius,
+                radius,
+                outPos,
+                outNormal,
+                outPushedPos)) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 s32 Obstacle::GetPhysical() const {

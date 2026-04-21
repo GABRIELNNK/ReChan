@@ -529,6 +529,18 @@ void Thing::GetObjectToWorldSpaceVector(const SVector& in, SVector& out) {
     out.pad = 0;
 }
 
+void Thing::GetObjectToWorldSpaceVector(const LVector& in, LVector& out) {
+    MARKFUNCTION(0x80062874);
+    Mat4 rot;
+    p3dBuildRotMatrixYZX(orientation.x, orientation.y, orientation.z, rot);
+
+    Vec3 v((f32)in.x, (f32)in.y, (f32)in.z);
+    Vec3 result = p3dVecTimesRotMatrix(v, rot);
+    out.x = (s32)result.x;
+    out.y = (s32)result.y;
+    out.z = (s32)result.z;
+}
+
 // PSX: __12DynamicThingPC10tagLVectorUs (THING.CPP:840)
 DynamicThing::DynamicThing(const LVector* initialPos, u16 type)
     : Thing(initialPos, type) {

@@ -16,7 +16,7 @@
 static constexpr s32 LAUNCHER_AWNING_LAUNCH_FRAME = 8;       // gp+0xc28
 static constexpr s32 LAUNCHER_FORCE_VECTOR = 12000;           // gp+0xc30
 static constexpr s32 LAUNCHER_LAST_FUDGE_FRAME = 20;          // gp+0xc34
-static constexpr s32 LAUNCHER_BOUNCE_RESET_FRAME = 0;         // gp+0xc38
+static constexpr s32 LAUNCHER_BOUNCE_RESET_FRAME = 2;         // gp+0xc38
 static constexpr s32 LAUNCHER_BOX_YMAX = 300;                 // gp+0xc3c
 
 // PSX: __ct__8LauncherPC10tagLVectorUs (0x8001FE34)
@@ -274,8 +274,8 @@ void Launcher::HandleHumanoidCollision(Humanoid* hum) {
                     Model* humModel = static_cast<Model*>(hum->model);
                     if (humModel) {
                         AnimStructure* humAnim = static_cast<AnimStructure*>(humModel->animStructure);
-                        if (humAnim && humAnim->loopCount > 0) {
-                            humModel->SetAnim(0x128, LAUNCHER_BOUNCE_RESET_FRAME, 1, 0);
+                        if (humAnim) {
+                            humModel->SetAnim(PLAYER_ANIM_ID_296, LAUNCHER_BOUNCE_RESET_FRAME, 1, 0);
                         }
                         else {
                             collision = true;

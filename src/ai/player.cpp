@@ -1,5 +1,6 @@
 #include "ai/player.h"
 #include "ai/colfight.h"
+#include "ai/obstacle.h"
 #include "gen/model.h"
 #include "gen/animmat.h"
 #include "gen/animstruct.h"
@@ -31,12 +32,12 @@ static constexpr s32 CB_GRAB_FWD = (1 << GA_GRAB_FORWARD);  // bit 15: grab forw
 // to runSpeed. AddForce accumulates into DynamicThing::force (80% damped per frame).
 static constexpr s32 PLAYER_RUN_FORCE = 3000;  // per-frame AddForce magnitude
 static constexpr s32 PLAYER_JUMP_FORCE = 17000;  // upward contactForce on jump (gp+460, PSX 0x4268)
-static constexpr s32 PLAYER_RUNNING_JUMP_BONUS = -1500; // running jump Y offset (gp+464, PSX 0xFFFFFA24)
+static constexpr s32 PLAYER_RUNNING_JUMP_BONUS = 1500; // running jump Y offset (gp+464, PSX 0xFFFFFA24)
 static constexpr s32 PLAYER_RUNNING_JUMP_BURST = 2500; // initial horizontal burst (runJumpHold[0], PSX 0x9C4)
 static constexpr s16 TABLE_ROLL_HANGTIME_START = 0;
 static constexpr s16 TABLE_ROLL_HANGTIME_END = 100;
 static constexpr s32 TABLE_LOOK_AHEAD_DISTANCE = 200;
-static constexpr s32 STRAFE_MULTIPLIER = 0x10000;
+static constexpr s32 STRAFE_MOVE_SPEED = 0x10000;
 static constexpr s32 WALL_JUMP_TRACE_DISTANCE = 256;
 static constexpr s32 WALL_JUMP_COLLISION_RADIUS = 16;
 static constexpr s32 WALL_JUMP_COLLISION_HEIGHT = 500;
@@ -66,25 +67,6 @@ static s32 s_playerStraif[] = {
     52, 0,  // [6,7]: backward strafe 225-315°
     52, 1   // [8,9]: side strafe 45-135° (anim 52 played in reverse)
 };
-
-static bool DetectObstacleAboveLedge(const LVector& /*normal*/, const LVector& /*ledgePos*/) {
-    // Obstacle ledge system is not reversed yet in this repo.
-    return false;
-}
-
-static s32 GetTrackedFloorHeight(const Player* player) {
-    if (!player || !player->model) {
-        return (s32)0x80000001;
-    }
-
-    const Model* m = static_cast<const Model*>(player->model);
-    if (!m->field36) {
-        return (s32)0x80000001;
-    }
-
-    const ModelFloorHeightState* floorState = static_cast<const ModelFloorHeightState*>(m->field36);
-    return floorState->current;
-}
 
 static s32 CheckWallCollisionForJump(
     const Player* player,
@@ -235,57 +217,6 @@ static s32 CheckWallConstraintForJump(
     return 1;
 }
 
-// All animation IDs routed through PlayerModel::SetAnim or referenced by Player handlers.
-// IDs named ANIM_ID_X are placeholders for anims not yet identified.
-enum PlayerAnimEnum : s32 {
-    PLAYER_ANIM_INACTIVE_IDLE = 1,
-    PLAYER_ANIM_RUN = 2,
-    PLAYER_ANIM_ID_3 = 3,
-    PLAYER_ANIM_STUN = 4,
-    PLAYER_ANIM_ID_17 = 17,
-    PLAYER_ANIM_ID_21 = 21,
-    PLAYER_ANIM_IDLE_UNARMED = 22,
-    PLAYER_ANIM_STRAFE = 24,
-    PLAYER_ANIM_FORWARD_ROLL = 27,
-    PLAYER_ANIM_BACKFLIP = 29,
-    PLAYER_ANIM_LEDGE_PULLUP = 30,
-    PLAYER_ANIM_LEDGE_LATCH = 31,
-    PLAYER_ANIM_WALL_JUMP_START = 32,
-    PLAYER_ANIM_WALL_JUMP_LAUNCH = 33,
-    PLAYER_ANIM_ID_34 = 34,
-    PLAYER_ANIM_ID_35 = 35,
-    PLAYER_ANIM_ID_36 = 36,
-    PLAYER_ANIM_ID_37 = 37,
-    PLAYER_ANIM_ID_38 = 38,
-    PLAYER_ANIM_FALL = 39,
-    PLAYER_ANIM_HARD_FALL = 40,
-    PLAYER_ANIM_ID_41 = 41,
-    PLAYER_ANIM_ID_42 = 42,
-    PLAYER_ANIM_DIVE_ROLL_TURN = 46,
-    PLAYER_ANIM_TAUNT_IDLE = 47,
-    PLAYER_ANIM_ID_48 = 48,
-    PLAYER_ANIM_STRAFE_FORWARD_BACKWARD = 51,
-    PLAYER_ANIM_STRAFE_LEFT_RIGHT = 52,
-    PLAYER_ANIM_TABLE_ROLL = 86,
-    PLAYER_ANIM_TABLE_ROLL_END = 87,
-    PLAYER_ANIM_ID_152 = 152,
-    PLAYER_ANIM_ID_189 = 189,
-    PLAYER_ANIM_ID_206 = 206,
-    PLAYER_ANIM_ID_220 = 220,
-    PLAYER_ANIM_ID_231 = 231,
-    PLAYER_ANIM_ID_244 = 244,
-    PLAYER_ANIM_ID_254 = 254,
-    PLAYER_ANIM_ID_261 = 261,
-    PLAYER_ANIM_ID_281 = 281,
-    PLAYER_ANIM_ID_282 = 282,
-    PLAYER_ANIM_POLE_SWING_BACK = 285,
-    PLAYER_ANIM_POLE_SWING_FWD = 286,
-    PLAYER_ANIM_FORWARD_FLIP = 287,
-    PLAYER_ANIM_TURNING_FLIP = 288,
-    PLAYER_ANIM_FLIP_VARIANT = 295,
-    PLAYER_ANIM_ID_296 = 296,
-};
-
 static bool EnsurePlayerAnimationLoaded(s32 animEnum) {
     if (!g_characterManager || animEnum < 0) {
         return false;
@@ -307,7 +238,7 @@ Player::Player(const LVector* initialPos)
     MARKFUNCTION(0x8002FA80);
 
     maxHealth = 200;
-    attackRange = 3000;
+    moveSpeed = 3000;
     comboCount = 1;
 
     // PSX: set faceAngleData to playerStraif array for strafe animations
@@ -1559,7 +1490,15 @@ void Player::_Stand() {
 
     // PSX: not on ground -> fall off ledge
     if (!(flags & TF_ON_GROUND)) {
-        s32 floorHeight = GetTrackedFloorHeight(this);
+        s32 floorHeight = (s32)0x80000001;
+        if (model) {
+            const Model* trackedModel = static_cast<const Model*>(model);
+            if (trackedModel->field36) {
+                const ModelFloorHeightState* floorState =
+                    static_cast<const ModelFloorHeightState*>(trackedModel->field36);
+                floorHeight = floorState->current;
+            }
+        }
         if (floorHeight != (s32)0x80000001 && pos.y - floorHeight < 129) {
             homePos.y = floorHeight;
         }
@@ -1782,7 +1721,12 @@ void Player::_Jump() {
         }
 
         if (wantsWallJump && ((flags & TF_ON_GROUND) == 0)) {
-            s32 floorHeight = GetTrackedFloorHeight(this);
+            s32 floorHeight = (s32)0x80000001;
+            if (m && m->field36) {
+                const ModelFloorHeightState* floorState =
+                    static_cast<const ModelFloorHeightState*>(m->field36);
+                floorHeight = floorState->current;
+            }
             if (floorHeight == (s32)0x80000001 || (pos.y - floorHeight) > WALL_JUMP_MIN_HEIGHT_ABOVE_FLOOR) {
                 s32 wallAngle = 0;
                 LVector wallPos = {};
@@ -1825,7 +1769,12 @@ void Player::_Jump() {
                 if (jumpHeld) {
                     s16 frame = anim ? (s16)((u32)anim->currentFrame >> 16) : 0;
                     if (frame >= 6) {
-                        s32 floorHeight = GetTrackedFloorHeight(this);
+                        s32 floorHeight = (s32)0x80000001;
+                        if (m && m->field36) {
+                            const ModelFloorHeightState* floorState =
+                                static_cast<const ModelFloorHeightState*>(m->field36);
+                            floorHeight = floorState->current;
+                        }
                         if (floorHeight == (s32)0x80000001 || (pos.y - floorHeight) >= 1024) {
                             field700 = 1;
                         }
@@ -2082,7 +2031,7 @@ void Player::_Run() {
         if (CheckForLedges2(ledgeNormal, ledgePos, 200)) {
             s32 ledgeDelta = ledgePos.y - pos.y - 365;
             if ((u32)ledgeDelta < 0x4F) {
-                if (!DetectObstacleAboveLedge(ledgeNormal, ledgePos)) {
+                if (!Obstacle::DetectObstacleAboveLedge(ledgeNormal, ledgePos)) {
                     SetActionState(AS_TABLE_ROLL, 0);
                     return;
                 }
@@ -2099,7 +2048,15 @@ void Player::_Run() {
 
     // PSX: if NOT on ground, check for falling off ledge
     if (!(flags & TF_ON_GROUND)) {
-        s32 floorHeight = GetTrackedFloorHeight(this);
+        s32 floorHeight = (s32)0x80000001;
+        if (model) {
+            const Model* trackedModel = static_cast<const Model*>(model);
+            if (trackedModel->field36) {
+                const ModelFloorHeightState* floorState =
+                    static_cast<const ModelFloorHeightState*>(trackedModel->field36);
+                floorHeight = floorState->current;
+            }
+        }
         if (floorHeight != (s32)0x80000001 && pos.y - floorHeight < 129) {
             pos.y = floorHeight;
         }
@@ -2683,7 +2640,7 @@ void Player::_SlopeSlide() {
 }
 // PSX: _Straif__6Player (PLAYER.CPP:4606, 0x80033FF8)
 // Player override of Humanoid::_Straif. Finds target if none,
-// checks flag transitions, scales attackRange by strafe multiplier.
+// checks flag transitions, scales moveSpeed by strafe multiplier.
 void Player::_Straif() {
     MARKFUNCTION(0x80033FF8);
 
@@ -2716,7 +2673,7 @@ void Player::_Straif() {
     }
 
     // PSX: a1[52] = (gp+532 * a1[52]) >> 16
-    attackRange = (s32)(((s64)STRAFE_MULTIPLIER * (u32)attackRange) >> 16);
+    moveSpeed *= STRAFE_MOVE_SPEED >> 16;
 
     // Delegate to base Humanoid strafe logic
     Humanoid::_Straif();

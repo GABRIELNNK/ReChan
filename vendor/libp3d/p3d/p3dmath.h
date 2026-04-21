@@ -312,6 +312,13 @@ inline void rmV3Normalize(LVector* out, const LVector* in) {
     out->z = (s32)(((s64)in->z << 16) / mag);
 }
 
+// rmV3Dot - integer 3D dot product
+inline s32 rmV3Dot(const LVector* a, const LVector* b) {
+    return (s32)((s64)a->x * (s64)b->x
+        + (s64)a->y * (s64)b->y
+        + (s64)a->z * (s64)b->z);
+}
+
 // rmV3Scale - scale vector by 16.16 fixed-point scalar
 // PSX: 0x8009346C
 // Source: C:\chan\devsys\psx\radlib\SOURCE\MATH\VECTOR\VECT3D.CPP

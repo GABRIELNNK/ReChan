@@ -1372,10 +1372,21 @@ void Platform::HandleHumanoidCollision(Humanoid* hum) {
 
         // PSX: bit 21 -> LedgeCheck (OBSTACLE.CPP:1124)
         if (platformFlags & 0x200000) {
-            // TODO: Obstacle::LedgeCheck(box, outNormal, outPushedPos, hum) not yet reversed
-            // PSX: if LedgeCheck returns true and hum is the player:
-            //   SetActionState(AS_LEDGE_LATCH, 0), PrepareLedgeLatch(outPushedPos, outNormal)
-            //   Play Grab sound, set onTop=true, setFloor=0, skip to ACTIVATION_LOGIC
+            if (LedgeCheck(box, outNormal, outPushedPos, hum)) {
+                if (hum == (Humanoid*)Player::s_player) {
+                    if (hum->actionState != (s32)AS_LEDGE_LATCH) {
+                        hum->SetActionState(AS_LEDGE_LATCH, 0);
+                        hum->PrepareLedgeLatch(outPushedPos, outNormal);
+                        if (hum->humanoidSound) {
+                            hum->humanoidSound->Grab((CSoundMaterial)GetFloorMaterial());
+                        }
+                    }
+
+                    onTop = true;
+                    setFloor = 0;
+                }
+                goto NEAR_END;
+            }
             goto DO_SQUASH_CHECK;
         }
 
@@ -1692,8 +1703,8 @@ void Platform::TriggerByName(Thing* source, const char* name, const char* param)
 
     flags |= 0x30;
     isActive = 1;
-    // PSX: null-name trigger sets bit 10 (0x400), not bit 26.
-    platformFlags |= 0x400;
+    // PSX: null-name trigger sets bit 26 (0x04000000).
+    platformFlags |= 0x04000000;
 
     if (moveState != 0) {
         LOG("[Platform::TriggerByName NULL] moveState=%d already running, skipping countdown init", moveState);

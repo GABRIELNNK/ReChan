@@ -56,19 +56,21 @@ void Door::AnalyzeMesh(DBRoot* root) {
     // PSX: copy localBox to closedBox (always, even if INVALID)
     closedBox = localBox;
 
-    // PSX: attrib 6 â†’ openSpeed (degrees â†’ binary angle per frame)
+    // PSX: attrib 6 openSpeed
     const DBAttrib* a6 = root->FindAttrib(6);
     if (a6) {
         openSpeed = ((s32)a6->value << 16) / 360;
-    } else {
+    }
+    else {
         openSpeed = 1638;
     }
 
-    // PSX: attrib 7 â†’ direction flag (0=subtract, nonzero=add)
+    // PSX: attrib 7 direction flag (0=subtract, nonzero=add)
     const DBAttrib* a7 = root->FindAttrib(7);
     if (a7) {
         direction = (s32)a7->value;
-    } else {
+    }
+    else {
         direction = 0;
     }
 
@@ -76,43 +78,48 @@ void Door::AnalyzeMesh(DBRoot* root) {
     ApplyDoorStandingZExtent(localBox);
     SetCollisionBox(localBox);
 
-    // PSX: attrib 8 â†’ killThingsCRC (hash of string name)
+    // PSX: attrib 8 killThingsCRC (hash of string name)
     const DBAttrib* a8 = root->FindAttrib(8);
     if (a8 && a8->strValue) {
         killThingsCRC = (s32)p3dHash(a8->strValue);
-    } else {
+    }
+    else {
         killThingsCRC = 0;
     }
 
-    // PSX: attrib 9 â†’ maxOpenDist (degrees â†’ binary angle)
+    // PSX: attrib 9 maxOpenDist (degrees binary angle)
     const DBAttrib* a9 = root->FindAttrib(9);
     if (a9) {
         maxOpenDist = ((s32)a9->value << 16) / 360;
-    } else {
+    }
+    else {
         maxOpenDist = 16384;
     }
 
-    // PSX: attrib 10 â†’ targetCRC (hash of string name)
+    // PSX: attrib 10 targetCRC (hash of string name)
     const DBAttrib* a10 = root->FindAttrib(10);
     if (a10 && a10->strValue) {
         targetCRC = (u32)p3dHash(a10->strValue);
-    } else {
+    }
+    else {
         targetCRC = 0;
     }
 
-    // PSX: attrib 11 â†’ secondaryModelHash (hash of string name)
+    // PSX: attrib 11 secondaryModelHash (hash of string name)
     const DBAttrib* a11 = root->FindAttrib(11);
     if (a11 && a11->strValue) {
         secondaryModelHash = (s32)p3dHash(a11->strValue);
-    } else {
+    }
+    else {
         secondaryModelHash = 0;
     }
 
-    // PSX: attrib 12 â†’ tertiaryModelHash (hash of string name)
+    // PSX: attrib 12 tertiaryModelHash (hash of string name)
     const DBAttrib* a12 = root->FindAttrib(12);
     if (a12 && a12->strValue) {
         tertiaryModelHash = (s32)p3dHash(a12->strValue);
-    } else {
+    }
+    else {
         tertiaryModelHash = 0;
     }
 }
@@ -130,12 +137,13 @@ void Door::DeleteModel() {
 void Door::Reset() {
     MARKFUNCTION(0x8001AEC8);
 
-    // PSX: hub level (7) â†’ state 5, else â†’ state 0
+    // PSX: hub level (7) state 5, else  state 0
     World* world = g_game ? g_game->GetWorld() : nullptr;
     s32 levelID = world ? world->GetCurLevelID() : 0;
     if (levelID == 7) {
         doorState = 5;
-    } else {
+    }
+    else {
         doorState = 0;
     }
 
@@ -222,7 +230,8 @@ void Door::Trigger() {
                 if (targetType == AITypes::TT_LADDER) {
                     Obstacle* obs = static_cast<Obstacle*>(targetThing);
                     obs->Trigger();
-                } else if (targetType == AITypes::TT_PLATFORM) {
+                }
+                else if (targetType == AITypes::TT_PLATFORM) {
                     Obstacle* obs = static_cast<Obstacle*>(targetThing);
                     obs->TriggerByName(Player::s_player, nullptr, nullptr);
                 }
@@ -230,7 +239,8 @@ void Door::Trigger() {
         }
         // PSX: also manages secondary model via FWEffect::Find/Continue
         // Not yet implemented on PC
-    } else {
+    }
+    else {
         // Non-hub: play door open sound
         CSoundDirect::PlayTransient(156, static_cast<void*>(&pos), 0, 0);
     }
@@ -254,7 +264,8 @@ void Door::Move() {
             currentOpen = maxOpenDist;
             doorState = 3; // Fully open
         }
-    } else if (doorState == 4) {
+    }
+    else if (doorState == 4) {
         // Closing: decrease currentOpen toward 0
         currentOpen -= openSpeed;
         if (currentOpen <= 0) {
@@ -272,7 +283,8 @@ void Door::Move() {
     // PSX: update drawRotY based on direction flag
     if (direction != 0) {
         drawRot.y = baseRotY + currentOpen;
-    } else {
+    }
+    else {
         drawRot.y = baseRotY - currentOpen;
     }
 }
@@ -312,7 +324,7 @@ void Door::HandleHumanoidCollision(Humanoid* hum) {
     }
 
     if (isValidPlayer && doorState == 1) {
-        // PSX: state 1 + valid player â†’ trigger door cutscene via Director
+        // PSX: state 1 + valid player  trigger door cutscene via Director
         if (g_director) {
             // PSX: if killTarget exists, use NISdoor1WithDialog; else NISdoor1
             s32* doorScript = killTarget
@@ -368,7 +380,8 @@ void Door::TeleportPlayer() {
                 target->GetName() ? target->GetName() : "null");
             Obstacle* obs = static_cast<Obstacle*>(tt);
             obs->HandleHumanoidCollision(Player::s_player);
-        } else {
+        }
+        else {
             LOG("[Door::TeleportPlayer] target NOT FOUND for CRC 0x%08X", targetCRC);
         }
     }
@@ -388,9 +401,10 @@ void Door::DeathCheck() {
             killTarget = static_cast<Thing*>(g_ai->activeZoneList.FindNodeCRC((u32)killThingsCRC));
         }
         if (!killTarget) {
-            isDead = 1; // Target not found â†’ consider dead
+            isDead = 1; // Target not found  consider dead
         }
-    } else {
+    }
+    else {
         // PSX: check if ActiveZone still has thinking (alive) members
         // 0x800A6E30 = ActiveZone::GetNumberOfThinkingMembers
         ActiveZone* az = static_cast<ActiveZone*>(static_cast<ccNode*>(killTarget));
@@ -404,7 +418,8 @@ void Door::DeathCheck() {
         if (thinkingCount > 0) {
             // Still alive - reset countdown
             deathCountdown = 3;
-        } else {
+        }
+        else {
             // No thinking members - decrement countdown
             deathCountdown--;
             if (deathCountdown <= 0) {
@@ -419,7 +434,8 @@ void Door::DeathCheck() {
         s32 levelID = deathWorld ? deathWorld->GetCurLevelID() : 0;
         if (levelID == 6) {
             Open();
-        } else {
+        }
+        else {
             doorState = 1;
             CSoundDirect::PlayTransient(158, static_cast<void*>(&pos), 0, 0);
         }

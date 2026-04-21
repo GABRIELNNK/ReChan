@@ -249,6 +249,16 @@ void SModel::Show(u32 flags) {
     // Mark as visible + drawn
     modelFlags |= 0x50;
 
+    AnimStructure* anim = static_cast<AnimStructure*>(animStructure);
+    if (anim && anim->flip && anim->flip->dirty) {
+        s32 frame = anim->currentFrame;
+        if (frame < 0) {
+            frame = 0;
+        }
+        anim->flip->SetFrameReal(frame);
+        anim->flip->UpdateJoints();
+    }
+
     // Build world matrix from position + rotation + scale
     // PSX: TransMatrix, RotMatrixZYXAndLights, ScaleMatrix (from MIPS LST)
     Mat4 world;
@@ -261,19 +271,35 @@ void SModel::Show(u32 flags) {
     // Translation
     world.SetTranslation((f32)posX, (f32)posY, (f32)posZ);
 
-    p3d::context->SetWorldMatrix(world);
+    Humanoid* humanoid = dynamic_cast<Humanoid*>(backPtr);
+    const bool compensateLadderRoot = humanoid && (humanoid->flags2 & TF2_NIS_ENTER) != 0;
 
-    if (animStructure) {
-        AnimStructure* anim = static_cast<AnimStructure*>(animStructure);
-        if (anim->flip && anim->flip->dirty) {
-            s32 frame = anim->currentFrame;
-            if (frame < 0) {
-                frame = 0;
+    if (compensateLadderRoot) {
+        OriginalSTree* original = drawable->GetOriginalSTree();
+        STreeData* skeleton = original ? original->skeleton : nullptr;
+        if (skeleton && skeleton->joints && skeleton->jointOrderMap && skeleton->numMapEntries > 0) {
+            u32 jointIndex = skeleton->jointOrderMap[0];
+            if (jointIndex < skeleton->numJoints) {
+                const STreeJoint& joint = skeleton->joints[jointIndex];
+                f32 rootWorldX = 0.0f;
+                f32 rootWorldY = 0.0f;
+                f32 rootWorldZ = 0.0f;
+                Mat4TransformDir(world,
+                    (f32)joint.translationX,
+                    (f32)joint.translationY,
+                    (f32)joint.translationZ,
+                    rootWorldX,
+                    rootWorldY,
+                    rootWorldZ);
+                world.SetTranslation(
+                    (f32)posX - rootWorldX,
+                    (f32)posY - rootWorldY,
+                    (f32)posZ - rootWorldZ);
             }
-            anim->flip->SetFrameReal(frame);
-            anim->flip->UpdateJoints();
         }
     }
+
+    p3d::context->SetWorldMatrix(world);
 
     // PSX: calls drawable->Display(flags) through vtable
     drawable->Display(flags);
@@ -461,8 +487,8 @@ void EModel::Show(u32 flags) {
 
 // PSX: SetAnim__13HumanoidModelllil (MHUMAN.CPP:166, 0x8006E248)
 // Routes anims to ApplyAnimToModel. Transition anims (37-38) get
-// special blend-from-current-frame handling. Most others go straight
-// through to ApplyAnimToModel with the Thing's type.
+// special blend-from-current-frame handling. High enum anims default to
+// RunToLast unless explicitly routed to Loop/HoldFirst by the PSX tree.
 void HumanoidModel::SetAnim(s32 animEnum, s32 a3, s32 force, s32 extra) {
     MARKFUNCTION(0x8006E248);
 
@@ -475,13 +501,21 @@ void HumanoidModel::SetAnim(s32 animEnum, s32 a3, s32 force, s32 extra) {
     // PSX: reads thingType from backPtr + 24 (Thing::thingType)
     s32 thingType = backPtr->thingType;
 
+    if (animEnum == 0) {
+        ApplyAnimToModel(thingType, animEnum, ANIM_HOLD_FIRST, a3, extra);
+        return;
+    }
+
+    if (animEnum == 1 || animEnum == 2 || animEnum == 4 || animEnum == 15 || animEnum == 22
+        || animEnum == 43 || animEnum == 45 || animEnum == 49 || animEnum == 50
+        || animEnum == 314 || animEnum == 315) {
+        ApplyAnimToModel(thingType, animEnum, ANIM_LOOP, a3, extra);
+        return;
+    }
+
     // PSX: anims 37-38 are transition anims with blend from current frame
     if (animEnum >= 37 && animEnum <= 38) {
         // PSX: ApplyAnimToModel using current frame as start, loopType=2
-        s32 currentFrame = 0;
-        if (as) {
-            currentFrame = as->currentFrame >> 16;
-        }
         ApplyAnimToModel(thingType, animEnum, 2, a3, extra);
         // PSX: sets humanoidCB blend data {4063232, 8}
         as = (AnimStructure*)animStructure;
@@ -493,11 +527,8 @@ void HumanoidModel::SetAnim(s32 animEnum, s32 a3, s32 force, s32 extra) {
         return;
     }
 
-    // PSX: anims 39-50 (combat/hit), 43, 45, 49-50, 314-315 go to default
-    // PSX: anims 4, 1, 2, 15, 22 go to default
-    // PSX: anim 17 special: uses current frame offset
-    // All others: LABEL_30 default play
-    ApplyAnimToModel(thingType, animEnum, a3, 0, extra);
+    // PSX default path uses RunToLast for all remaining humanoid anims.
+    ApplyAnimToModel(thingType, animEnum, ANIM_RUN_TO_LAST, a3, extra);
 }
 
 // PSX: _13HumanoidModel (MHUMAN.CPP:45, 0x8006E020)

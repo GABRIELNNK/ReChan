@@ -5,6 +5,8 @@
 #include "pc/inputaction.h"
 #include "snd/hmndsnd.h"
 
+struct FightingComboNode;
+
 // Action state IDs for Humanoid::SetActionState
 // PSX: 74-case switch at 0x80065680. IDs confirmed from handler transitions.
 enum ActionState : u32 {
@@ -104,7 +106,7 @@ public:
     s32 prevAttackJointIndex = -1;
 
     // PSX +208 (s32): facing range / attack range
-    s32 attackRange = 0;
+    s32 moveSpeed = 0;
 
     // PSX +212 (s32): run speed for AddForce
     s32 runSpeed = 0;
@@ -332,6 +334,7 @@ public:
     void Activate() override;
     void Deactivate() override;
     void Move() override;
+    s32 HandleAnimationControl();
     void CreateModel(const char* name) override;
     void DeleteModel() override;
     void HandleCollision(Thing* other, s32 damage) override;
@@ -358,6 +361,8 @@ public:
     s32 PlayDialogBasedOnPriority(s32 minPriority, s32 maxPriority);
     s32 KillDialog(s32 force, s32 minPriority, s32 maxPriority);
     s32 EnterCombatCombo();
+    s32 FindSiblingWithRequestedCommand(const FightingComboNode* root, u32 requestedBits);
+    s32 FindSiblingWithRequestedCommand(const FightingComboNode* root, u32 requestedBits, s32 frame);
     void PrepareLedgeLatch(const LVector& correctionPos, const LVector& normal);
     bool CheckForLedges();
     bool CheckForLedges2(LVector& outNormal, LVector& outCorrectionPos, s32 clearance);

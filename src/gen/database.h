@@ -9,6 +9,8 @@ struct DBAttrib {
     u16 type;
     u32 value;
     const char* strValue;
+
+    const char* GetAttribString() const;
 };
 
 // DBRoot - base class for all database objects (60 bytes on PSX)

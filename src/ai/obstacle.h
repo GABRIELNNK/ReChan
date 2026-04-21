@@ -46,6 +46,9 @@ public:
     virtual void HandleAttack(Humanoid* attacker, s32 damageType, s32 damage);
     virtual s32 GetFloorMaterial() const;
     virtual s32 GetObstacleFloorHeight(const LVector& pos) const;
+    bool LedgeCheck(const tagCollisionBox& box, const LVector& normal, const LVector& correctionPos, Humanoid* hum) const;
+    static bool DetectObstacleAboveLedge(const LVector& normal, const LVector& ledgePos);
+    static bool DetectObstacle(const LVector& startPos, const LVector& endPos, s32 radius);
 
     s32 GetPhysical() const;
     void SetCollisionBox(const tagCollisionBox& box);

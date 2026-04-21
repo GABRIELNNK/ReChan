@@ -1,4 +1,5 @@
 #include "ai/humanoid.h"
+#include "ai/obstacle.h"
 #include "ai/player.h"
 #include "ai/colfight.h"
 #include "gen/common.h"
@@ -29,24 +30,6 @@ static constexpr s32 LEDGE_TRACE_MAX_Y = 750;
 static constexpr s32 LEDGE_TRACE_CLEARANCE = 1024;
 static constexpr s32 LEDGE_FLOOR_MIN_HEIGHT = 1022;
 
-static bool DetectObstacleAboveLedge(const LVector& /*normal*/, const LVector& /*ledgePos*/) {
-    return false;
-}
-
-static s32 GetTrackedFloorHeight(const Humanoid* humanoid) {
-    if (!humanoid || !humanoid->model) {
-        return (s32)0x80000001;
-    }
-
-    const Model* m = static_cast<const Model*>(humanoid->model);
-    if (!m->field36) {
-        return (s32)0x80000001;
-    }
-
-    const ModelFloorHeightState* floorState = static_cast<const ModelFloorHeightState*>(m->field36);
-    return floorState->current;
-}
-
 struct FightingComboNode {
     u8 requestedCommand = 0;
     s8 minFrame = 0;
@@ -58,7 +41,10 @@ struct FightingComboNode {
     FightingComboNode* sibling = nullptr;
 };
 
-static s32 FindSiblingWithRequestedCommand(const FightingComboNode* root, u32 requestedBits) {
+// PSX: FindSiblingWithRequestedCommand__8HumanoidPC17FightingComboNodel (HUMANOID.CPP:7713)
+s32 Humanoid::FindSiblingWithRequestedCommand(const FightingComboNode* root, u32 requestedBits) {
+    MARKFUNCTION(0x8006B5A8);
+
     const FightingComboNode* node = root;
     while (node) {
         if (((requestedBits >> node->requestedCommand) & 1u) != 0) {
@@ -69,98 +55,99 @@ static s32 FindSiblingWithRequestedCommand(const FightingComboNode* root, u32 re
     return 0;
 }
 
-static s32 HandleAnimationControl(Humanoid* humanoid) {
-    if (!humanoid) {
+// PSX: FindSiblingWithRequestedCommand__8HumanoidPC17FightingComboNodell (HUMANOID.CPP:7741)
+s32 Humanoid::FindSiblingWithRequestedCommand(
+    const FightingComboNode* root, u32 requestedBits, s32 frame) {
+    MARKFUNCTION(0x8006B5EC);
+
+    const FightingComboNode* node = root;
+    while (node) {
+        if (((requestedBits >> node->requestedCommand) & 1u) != 0
+            && frame >= node->minFrame
+            && node->maxFrame >= frame) {
+            return static_cast<s32>(reinterpret_cast<intptr_t>(node));
+        }
+        node = node->sibling;
+    }
+    return 0;
+}
+
+// PSX: HandleAnimationControl__8Humanoid (HUMANOID.CPP:1590)
+s32 Humanoid::HandleAnimationControl() {
+    MARKFUNCTION(0x80064194);
+
+    if ((flags2 & TF2_NIS_ENTER) == 0) {
         return 0;
     }
 
-    if ((humanoid->flags2 & TF2_NIS_ENTER) == 0) {
+    if (!model) {
         return 0;
     }
 
-    if (!humanoid->model) {
+    Model* m = static_cast<Model*>(model);
+    if (!m->drawable) {
         return 0;
     }
 
-    Model* m = static_cast<Model*>(humanoid->model);
     AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
     if (!anim) {
         return 0;
     }
 
-    SVector localOffset = {};
-    bool hasLocalOffset = false;
-
-    HumanoidModel* hm = static_cast<HumanoidModel*>(humanoid->model);
-    if (hm && hm->animMatrices) {
-        const s32* rootMat = hm->animMatrices->GetMatrix(0);
-        if (rootMat) {
-            localOffset.x = static_cast<s16>(rootMat[5]);
-            localOffset.y = static_cast<s16>(rootMat[6]);
-            localOffset.z = static_cast<s16>(rootMat[7]);
-            hasLocalOffset = true;
-        }
+    OriginalSTree* source = m->drawable->GetAlternateSTree();
+    if (!source) {
+        source = m->drawable->GetOriginalSTree();
     }
-
-    // Fallback when animation matrices are unavailable: use the Bip01 bind/translation.
-    if (!hasLocalOffset && m->drawable) {
-        OriginalSTree* source = m->drawable->GetAlternateSTree();
-        if (!source) {
-            source = m->drawable->GetOriginalSTree();
-        }
-        if (source && source->skeleton && source->skeleton->joints && source->skeleton->numJoints > 1) {
-            const STreeJoint& bip01 = source->skeleton->joints[1];
-            s32 lx = bip01.bindTranslationX;
-            s32 ly = bip01.bindTranslationY;
-            s32 lz = bip01.bindTranslationZ;
-            if (lx == 0 && ly == 0 && lz == 0) {
-                lx = bip01.translationX;
-                ly = bip01.translationY;
-                lz = bip01.translationZ;
-            }
-            localOffset.x = static_cast<s16>(lx);
-            localOffset.y = static_cast<s16>(ly);
-            localOffset.z = static_cast<s16>(lz);
-            hasLocalOffset = true;
-        }
-    }
-
-    if (!hasLocalOffset) {
+    STreeData* skeleton = source ? source->skeleton : nullptr;
+    if (!skeleton || !skeleton->joints || skeleton->numJoints <= 0
+        || !skeleton->jointOrderMap || skeleton->numMapEntries <= 0) {
         return 0;
     }
 
-    LVector nextHome = humanoid->homePos;
+    u32 jointIndex = skeleton->jointOrderMap[0];
+    if (jointIndex >= skeleton->numJoints) {
+        return 0;
+    }
+
+    const STreeJoint& joint = skeleton->joints[jointIndex];
+
+    LVector nextHome = homePos;
+    SVector localOffset = {};
+    localOffset.x = static_cast<s16>(joint.translationX);
+    localOffset.y = static_cast<s16>(joint.translationY);
+    localOffset.z = static_cast<s16>(joint.translationZ);
+
     SVector worldOffset = {};
-    humanoid->GetObjectToWorldSpaceVector(localOffset, worldOffset);
+    GetObjectToWorldSpaceVector(localOffset, worldOffset);
 
     const s16 frame = static_cast<s16>((u32)anim->currentFrame >> 16);
     const s32 loopCount = anim->loopCount;
     if (loopCount > 0 && frame == 0) {
-        humanoid->field516 = worldOffset.x;
-        humanoid->field520 = worldOffset.y;
-        humanoid->field524 = worldOffset.z;
+        field516 = worldOffset.x;
+        field520 = worldOffset.y;
+        field524 = worldOffset.z;
     }
 
-    if ((humanoid->flags2 & TF2_NIS_FROZEN) == 0) {
-        nextHome.y += static_cast<s32>(worldOffset.y) - humanoid->field520;
+    if ((flags2 & TF2_NIS_FROZEN) == 0) {
+        nextHome.y += (s32)worldOffset.y - field520;
     }
 
-    if (((humanoid->flags2 >> 6) & 1) == 0) {
-        nextHome.z += static_cast<s32>(worldOffset.z) - humanoid->field524;
-        nextHome.x += static_cast<s32>(worldOffset.x) - humanoid->field516;
+    if (((flags2 >> 6) & 1) == 0) {
+        nextHome.z += (s32)worldOffset.z - field524;
+        nextHome.x += (s32)worldOffset.x - field516;
     }
 
-    humanoid->field516 = worldOffset.x;
-    humanoid->field520 = worldOffset.y;
-    humanoid->field524 = worldOffset.z;
+    field516 = worldOffset.x;
+    field520 = worldOffset.y;
+    field524 = worldOffset.z;
 
     if (loopCount == 0 && frame == 0) {
-        if (humanoid->actionState == 59) {
-            humanoid->pos.y = nextHome.y;
+        if (actionState == 59) {
+            pos.y = nextHome.y;
         }
     }
 
-    humanoid->homePos = nextHome;
+    homePos = nextHome;
     return 1;
 }
 
@@ -189,7 +176,7 @@ Humanoid::Humanoid(const LVector* initialPos, u16 type)
     comboCount = 1;
     animControl = 0;
     field528 = 0;
-    attackRange = 3000; // PSX: set in constructor
+    moveSpeed = 3000; // PSX: set in constructor
     spawnCount = 1;
     field408 = -1;
     field484 = 0;
@@ -266,8 +253,8 @@ void Humanoid::Think() {
     ProcessControl();
 
     // PSX step 8: delta time computation (fixed-point 16.16 multiply)
-    // result = (attackRange * deltaTime) >> 16
-    s64 dt = (s64)attackRange * (s64)deltaTime;
+    // result = (moveSpeed * deltaTime) >> 16
+    s64 dt = (s64)moveSpeed * (s64)deltaTime;
     s32 scaledRange = (s32)((u64)dt >> 16);
     (void)scaledRange; // stored to PSX +212 (animation speed field, not yet wired)
     deltaTime = FIX16_ONE; // reset to 1.0
@@ -311,7 +298,10 @@ void Humanoid::Draw() {
         // PC: populate AnimationMatrices with world-space bone positions.
         // Replaces PSX GTE callback mechanism (SetupModelCallbacks/CopyMatrix).
         if (hm->animMatrices && m->drawable) {
-            OriginalSTree* ost = m->drawable->GetOriginalSTree();
+            OriginalSTree* ost = m->drawable->GetAlternateSTree();
+            if (!ost) {
+                ost = m->drawable->GetOriginalSTree();
+            }
             if (ost && ost->skeleton) {
                 // Build world matrix matching Show(): RotMatrixZYX * Scale * Translation
                 Mat4 world;
@@ -372,7 +362,7 @@ void Humanoid::Deactivate() {
 void Humanoid::Move() {
     MARKFUNCTION(0x80064100);
     DynamicThing::Move();
-    HandleAnimationControl(this);
+    HandleAnimationControl();
     // PSX: CheckSwitches for trigger volumes (world system not yet implemented)
 }
 
@@ -385,6 +375,14 @@ s32 Humanoid::RestorePositionFromBip01() {
     }
 
     Model* m = static_cast<Model*>(model);
+    AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+    if (!anim || !anim->flip) {
+        return 0;
+    }
+
+    anim->flip->SetFrame(0);
+    anim->flip->UpdateJoints();
+
     if (!m->drawable) {
         return 0;
     }
@@ -393,24 +391,23 @@ s32 Humanoid::RestorePositionFromBip01() {
     if (!source) {
         source = m->drawable->GetOriginalSTree();
     }
-    if (!source || !source->skeleton || !source->skeleton->joints || source->skeleton->numJoints <= 1) {
+    STreeData* skeleton = source ? source->skeleton : nullptr;
+    if (!skeleton || !skeleton->joints || skeleton->numJoints <= 0
+        || !skeleton->jointOrderMap || skeleton->numMapEntries <= 0) {
         return 0;
     }
 
-    const STreeJoint& bip01 = source->skeleton->joints[1];
-    s32 localX = bip01.bindTranslationX;
-    s32 localY = bip01.bindTranslationY;
-    s32 localZ = bip01.bindTranslationZ;
-    if (localX == 0 && localY == 0 && localZ == 0) {
-        localX = bip01.translationX;
-        localY = bip01.translationY;
-        localZ = bip01.translationZ;
+    u32 jointIndex = skeleton->jointOrderMap[0];
+    if (jointIndex >= skeleton->numJoints) {
+        return 0;
     }
 
+    const STreeJoint& joint = skeleton->joints[jointIndex];
+
     SVector local = {};
-    local.x = (s16)localX;
-    local.y = (s16)localY;
-    local.z = (s16)localZ;
+    local.x = (s16)joint.translationX;
+    local.y = (s16)joint.translationY;
+    local.z = (s16)joint.translationZ;
 
     SVector worldOffset = {};
     GetObjectToWorldSpaceVector(local, worldOffset);
@@ -517,14 +514,18 @@ bool Humanoid::CheckForLedges() {
         return false;
     }
 
-    if (DetectObstacleAboveLedge(ledgeNormal, ledgePos)) {
+    if (Obstacle::DetectObstacleAboveLedge(ledgeNormal, ledgePos)) {
         return false;
     }
 
     s32 floorDelta = 0x2000;
-    s32 floorHeight = GetTrackedFloorHeight(this);
-    if (floorHeight != (s32)0x80000001) {
-        floorDelta = ledgePos.y - floorHeight;
+    Model* trackedModel = model ? static_cast<Model*>(model) : nullptr;
+    if (trackedModel && trackedModel->field36) {
+        const ModelFloorHeightState* floorState =
+            static_cast<const ModelFloorHeightState*>(trackedModel->field36);
+        if (floorState->current != (s32)0x80000001) {
+            floorDelta = ledgePos.y - floorState->current;
+        }
     }
 
     if (floorDelta < LEDGE_FLOOR_MIN_HEIGHT) {
@@ -798,7 +799,9 @@ void Humanoid::SetActionState(u32 state, s32 param) {
             break;
         case AS_LEDGE_PULLUP:
             flags2 &= ~0x70;
+            field344 = 0;
             stateDispatch = SD_LEDGE_PULLUP;
+            field348 = 8;
             if (model) {
                 Model* m = static_cast<Model*>(model);
                 m->SetAnim(HUMANOID_ANIM_LEDGE_PULLUP, 0, 0, 0);
@@ -1688,9 +1691,9 @@ void Humanoid::_Straif() {
     Model* m = static_cast<Model*>(model);
     AnimStructure* animStruct = m ? (AnimStructure*)m->animStructure : nullptr;
 
-    if (attackRange != 0) {
+    if (moveSpeed != 0) {
         // PSX: movement force uses captured faceAngle direction
-        AddForce(attackRange, &dir);
+        AddForce(moveSpeed, &dir);
 
         // PSX: ClipAngle360 = mask to 16-bit unsigned [0, 65535]
         s32 angleDiff = (s32)((u32)(savedOrientY - savedFaceAngle) & 0xFFFFu);
@@ -1831,6 +1834,7 @@ void Humanoid::_LadderLatchTop() {
     Model* m = static_cast<Model*>(model);
     AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
     if (anim && anim->loopCount > 0) {
+        flags2 &= ~0x70;
         SetActionState(AS_LADDER_CLIMBING, 0);
         RestorePositionFromBip01();
     }
@@ -1929,7 +1933,6 @@ void Humanoid::_ClimbLadder() {
         if (anim->animEnum != 292) {
             m->SetAnim(292, 0, 0, 0);
             anim->SetLoopType(ANIM_BLEND, 1);
-            // clear bits 4,5,6 then set bits 4,6 (0x50)
             flags2 = (flags2 & ~0x70) | 0x50;
             field516 = 0;
             field520 = 0;
@@ -1945,6 +1948,7 @@ void Humanoid::_ClimbLadder() {
                 humanoidSound->Footstep(CSoundMaterial(2));
             }
         }
+
     }
     else if (slideDown) {
         // begin slide sound
