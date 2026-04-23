@@ -44,6 +44,25 @@ static void UpdateListenerInAudioEngine() {
 static std::vector<rsdPersistent*> g_persistentSounds;
 static std::mutex g_persistentMutex;
 
+void rsdWorld::StopAllPersistentSounds() {
+    std::lock_guard<std::mutex> lock(g_persistentMutex);
+    for (rsdPersistent* snd : g_persistentSounds) {
+        if (!snd) {
+            continue;
+        }
+
+        if (snd->voiceHandle) {
+            AudioVoice v = static_cast<AudioVoice>(reinterpret_cast<uintptr_t>(snd->voiceHandle));
+            AudioEngine::StopVoice(v);
+            snd->voiceHandle = nullptr;
+        }
+
+        snd->posPtr = nullptr;
+    }
+
+    g_persistentSounds.clear();
+}
+
 static void GetObjectVolumesPsx(u16 baseVol, const LVector* objPos, u16& outVolL, u16& outVolR, u32 extraRange) {
     // PSX defaults from rsd init globals.
     static constexpr s32 MIN_AUDIBLE_DIST = 0;
@@ -269,6 +288,8 @@ void rsdPersistent::End() {
         AudioEngine::StopVoice(v);
         voiceHandle = nullptr;
     }
+
+    posPtr = nullptr;
 
     std::lock_guard<std::mutex> lock(g_persistentMutex);
     auto it = std::remove(g_persistentSounds.begin(), g_persistentSounds.end(), this);

@@ -8,13 +8,18 @@
 #include "gen/display.h"
 #include "gen/director.h"
 #include "gen/game.h"
+#include "gen/blockmgr.h"
 #include "gen/geometry.h"
 #include "gen/geffect.h"
 #include "gen/levelmgr.h"
 #include "gen/model.h"
+#include "gen/mplayer.h"
+#include "gen/switch.h"
 #include "gen/skeleton.h"
 #include "gen/animmgr.h"
+#include "gen/scoremgr.h"
 #include "snd/rsevent.h"
+#include "snd/snddrct.h"
 #include "fe/hdmenu.h"
 #include "fe/hud.h"
 #include "fe/loadanim.h"
@@ -31,6 +36,7 @@
 
 #include <fstream>
 #include <filesystem>
+#include <cstring>
 #include <unordered_map>
 
 // Global block manager pointer (PSX: gp scope, set by World)
@@ -283,6 +289,598 @@ static void LoadPermMiscAnimations(const u8* permData, u32 permSize, u8 animType
     if (loadedCount > 0) {
         LOG("[World] Loaded %d misc anims from perm stream (type=%u)", loadedCount, (u32)animType);
     }
+}
+
+static bool SwitchStringEqualsNoCase(const char* lhs, const char* rhs) {
+    if (!lhs || !rhs) {
+        return false;
+    }
+
+    while (*lhs && *rhs) {
+        unsigned char left = (unsigned char)*lhs++;
+        unsigned char right = (unsigned char)*rhs++;
+
+        if (left >= 'A' && left <= 'Z') {
+            left = (unsigned char)(left + ('a' - 'A'));
+        }
+        if (right >= 'A' && right <= 'Z') {
+            right = (unsigned char)(right + ('a' - 'A'));
+        }
+
+        if (left != right) {
+            return false;
+        }
+    }
+
+    return *lhs == '\0' && *rhs == '\0';
+}
+
+static s32 SwitchBehaviorTrigger(Thing* /*thing*/, u32 /*argc*/, const char** /*argv*/) {
+    return 1;
+}
+
+static s32 SwitchSoundAmbiantSpace(Thing* thing, u32 argc, const char** argv) {
+    MARKFUNCTION(0x80093E68);
+
+    if (!thing || thing->thingType != AITypes::TT_PLAYER) {
+        return 1;
+    }
+
+    if (argc == 0 || !argv || !argv[0]) {
+        return 1;
+    }
+
+    const s32 ambienceSpace = atol(argv[0]);
+    const s32 crossFade = (argc == 2 && argv[1]) ? atol(argv[1]) : 0;
+    rsEvent(20, ambienceSpace, crossFade, 0);
+    return 1;
+}
+
+static s32 SwitchEnemyObstacleDeathVol(Thing* thing, u32 /*argc*/, const char** /*argv*/) {
+    if (!thing) {
+        return 0;
+    }
+
+    if (g_scoreManager && thing->thingType >= AITypes::TT_HUMANOID_FIRST
+        && thing->thingType <= AITypes::TT_HUMANOID_LAST) {
+        g_scoreManager->AddStylePoints(100);
+    }
+
+    thing->Kill();
+    return 0;
+}
+
+static Humanoid* ResolveSwitchDialogTarget(Thing* thing, s32 targetPlayer) {
+    if (targetPlayer != 0) {
+        return Player::s_player;
+    }
+
+    return thing ? static_cast<Humanoid*>(thing) : nullptr;
+}
+
+static s32 SwitchLoadDialog(Thing* thing, u32 argc, const char** argv) {
+    if (argc != 3 || !argv) {
+        return 0;
+    }
+
+    s32 targetPlayer = argv[0] ? atol(argv[0]) : 0;
+    u32 dialogID = argv[1] ? (u32)atol(argv[1]) : 0;
+    s32 priority = argv[2] ? atol(argv[2]) : 0;
+
+    Humanoid* target = ResolveSwitchDialogTarget(thing, targetPlayer);
+    if (!target) {
+        return 0;
+    }
+
+    target->LoadDialog(dialogID, priority);
+    return 1;
+}
+
+static s32 SwitchPlayDialog(Thing* thing, u32 argc, const char** argv) {
+    if (argc != 3 || !argv) {
+        return 0;
+    }
+
+    s32 targetPlayer = argv[0] ? atol(argv[0]) : 0;
+    u32 dialogID = argv[1] ? (u32)atol(argv[1]) : 0;
+    s32 priority = argv[2] ? atol(argv[2]) : 0;
+
+    Humanoid* target = ResolveSwitchDialogTarget(thing, targetPlayer);
+    if (!target) {
+        return 0;
+    }
+
+    target->PlayDialog(dialogID, priority);
+    return 1;
+}
+
+static s32 SwitchCheckpoint(Thing* /*thing*/, u32 argc, const char** argv) {
+    if (!Player::s_player) {
+        return 0;
+    }
+
+    Player::s_player->OnCheckpoint();
+
+    if (argc < 2 || !argv) {
+        Player::s_player->checkpoint.field44 = 0;
+        Player::s_player->checkpoint.field48 = 0;
+    }
+    else {
+        Player::s_player->checkpoint.field44 = (s32)p3dHash(argv[1]);
+        Player::s_player->checkpoint.field48 = (argc < 3) ? 0 : (s32)p3dHash(argv[2]);
+    }
+
+    return 1;
+}
+
+struct PendingCharModelLoad {
+    s32 oldType;
+    s32 newType;
+};
+
+static std::vector<PendingCharModelLoad> g_pendingCharModelLoads;
+
+static bool IsSwitchCharModelType(s32 thingType) {
+    return (u32)(thingType - 1) < 0x1C;
+}
+
+static void ClearPendingCharModelLoads() {
+    g_pendingCharModelLoads.clear();
+}
+
+static void SwitchUnloadLoadCharModel(s32 oldType, s32 newType) {
+    if (!g_characterManager) {
+        return;
+    }
+
+    if (IsSwitchCharModelType(oldType)) {
+        g_characterManager->UnloadAnimation((u32)oldType, 0, 0x188);
+        g_characterManager->UnloadCharacter((u32)oldType);
+    }
+
+    if (IsSwitchCharModelType(newType)) {
+        g_characterManager->LoadCharacter((u32)newType, nullptr);
+        g_characterManager->LoadAnimation((u32)newType, 0, 0x7C, nullptr);
+    }
+}
+
+static void QueuePendingCharModelLoad(s32 oldType, s32 newType) {
+    g_pendingCharModelLoads.push_back({ oldType, newType });
+}
+
+static u32 g_switchLoadGroupHash[2] = {};
+static s32 g_switchLoadGroupIndex = 0;
+// PSX: directorGOTO (0x800DD6E8)
+static s32 g_directorGOTO = 0;
+
+static void PurgeSwitchLoadGroups() {
+    if (g_characterManager) {
+        for (s32 index = 0; index < 2; index++) {
+            if (g_switchLoadGroupHash[index] != 0) {
+                g_characterManager->UnloadAnimation(AITypes::TT_PLAYER, g_switchLoadGroupHash[index]);
+            }
+        }
+    }
+
+    for (s32 index = 0; index < 2; index++) {
+        g_switchLoadGroupHash[index] = 0;
+        g_switchLoadGroupIndex = index;
+    }
+}
+
+static void LoadSwitchLoadGroup(const char* name, u32 hash) {
+    if (!g_characterManager || !name) {
+        return;
+    }
+
+    const s32 slot = g_switchLoadGroupIndex;
+    if (g_switchLoadGroupHash[slot] != 0) {
+        g_characterManager->UnloadAnimation(AITypes::TT_PLAYER, g_switchLoadGroupHash[slot]);
+    }
+
+    g_switchLoadGroupHash[slot] = 0;
+
+    if (hash != 0) {
+        g_switchLoadGroupHash[slot] = hash;
+        g_characterManager->LoadAnimation(AITypes::TT_PLAYER, hash, nullptr);
+    }
+
+    g_switchLoadGroupIndex = (slot == 0) ? 1 : 0;
+}
+
+static PlayerModel* ResolveSwitchPlayerModel(Thing* thing) {
+    if (!thing || !thing->model) {
+        return nullptr;
+    }
+
+    Model* model = static_cast<Model*>(thing->model);
+    return dynamic_cast<PlayerModel*>(model);
+}
+
+static s32 SwitchAsyncLoadGroup(Thing* /*thing*/, u32 argc, const char** argv) {
+    if (argc == 0 || !argv || !SwitchStringEqualsNoCase(argv[0], "keep")) {
+        PurgeSwitchLoadGroups();
+    }
+
+    u32 argIndex = 0;
+    if (argc > 0 && argv && SwitchStringEqualsNoCase(argv[0], "keep")) {
+        argIndex = 1;
+
+        if (argIndex < argc && argv[argIndex]) {
+            const u32 keepHash = p3dHash(argv[argIndex]);
+            for (s32 index = 0; index < 2; index++) {
+                if (g_switchLoadGroupHash[index] == keepHash) {
+                    g_switchLoadGroupIndex = (index == 0) ? 1 : 0;
+                    break;
+                }
+            }
+            argIndex++;
+        }
+    }
+
+    while (argIndex < argc) {
+        const char* name = argv[argIndex++];
+        if (!name) {
+            continue;
+        }
+
+        LoadSwitchLoadGroup(name, p3dHash(name));
+    }
+
+    return 1;
+}
+
+// PSX: gfAsyncLoadNIS__FP5ThingUlPPCc (SWITCH.CPP:884, 0x80094684)
+static s32 SwitchAsyncLoadNIS(Thing* thing, u32 argc, const char** argv) {
+    MARKFUNCTION(0x80094684);
+
+    u32 loadArgc = argc;
+    if (argc == 0 || !argv || !argv[argc - 1]
+        || !SwitchStringEqualsNoCase(argv[argc - 1], "nopurge")) {
+        PurgeSwitchLoadGroups();
+    }
+    else {
+        loadArgc--;
+    }
+
+    PlayerModel* playerModel = ResolveSwitchPlayerModel(thing);
+    if (playerModel && argv && loadArgc > 0) {
+        playerModel->LoadNIS(loadArgc, argv, 1, 0);
+    }
+
+    g_directorGOTO = 0;
+    return 1;
+}
+
+// PSX: gfAsyncLoadNISGOTO__FP5ThingUlPPCc (SWITCH.CPP:912, 0x80094714)
+static s32 SwitchAsyncLoadNISGOTO(Thing* thing, u32 argc, const char** argv) {
+    MARKFUNCTION(0x80094714);
+
+    if (g_directorGOTO != 0) {
+        g_directorGOTO = 0;
+
+        u32 loadArgc = argc;
+        if (argc == 0 || !argv || !argv[argc - 1]
+            || !SwitchStringEqualsNoCase(argv[argc - 1], "nopurge")) {
+            PurgeSwitchLoadGroups();
+        }
+        else {
+            loadArgc--;
+        }
+
+        PlayerModel* playerModel = ResolveSwitchPlayerModel(thing);
+        if (playerModel && argv && loadArgc > 0) {
+            playerModel->LoadNIS(loadArgc, argv, 1, 0);
+        }
+    }
+
+    return 1;
+}
+
+static s32 SwitchCharModelLoad(Thing* /*thing*/, u32 argc, const char** argv) {
+    if (argc < 2 || !argv) {
+        return 0;
+    }
+
+    const s32 oldType = argv[0] ? atol(argv[0]) : 0;
+    const s32 newType = argv[1] ? atol(argv[1]) : 0;
+
+    s32 killedAny = 0;
+    if (IsSwitchCharModelType(oldType) && g_ai) {
+        for (ccMinNode* node = g_ai->humanoidList.head; node; node = node->next) {
+            Humanoid* humanoid = static_cast<Humanoid*>(node);
+            if (humanoid->thingType == (u16)oldType) {
+                killedAny = 1;
+                humanoid->Kill();
+            }
+        }
+    }
+
+    if (killedAny != 0) {
+        QueuePendingCharModelLoad(oldType, newType);
+    }
+    else {
+        SwitchUnloadLoadCharModel(oldType, newType);
+    }
+
+    return 1;
+}
+
+static void PlayThingDeathVolSound(s32 deathVolType) {
+    if (deathVolType == 0 && g_game && g_game->GetWorld()) {
+        const s32 levelID = g_game->GetWorld()->GetCurLevelID();
+        deathVolType = ((levelID >= 2) && (levelID < 4)) ? 2 : 1;
+    }
+
+    u16 soundID = 0;
+    if (deathVolType == 1) {
+        soundID = 8;
+    }
+    else if (deathVolType == 2) {
+        soundID = 25;
+    }
+    else {
+        return;
+    }
+
+    CSoundDirect::PlayTransient(soundID, nullptr, 0, 0);
+}
+
+static s32 SwitchPlayerDeathVol(Thing* thing, u32 argc, const char** argv) {
+    if (!thing) {
+        return 0;
+    }
+
+    thing->flags |= TF_NEEDS_ACTIVATION;
+
+    s32 deathType = -1;
+    if (argc > 0 && argv && argv[0]) {
+        deathType = atol(argv[0]);
+    }
+
+    if (thing->thingType != AITypes::TT_PLAYER) {
+        if (deathType >= 0) {
+            PlayThingDeathVolSound(deathType);
+        }
+        return SwitchEnemyObstacleDeathVol(thing, argc, argv);
+    }
+
+    if (g_blockManager) {
+        g_blockManager->SetDeathVolumeFlag(0);
+    }
+
+    if (g_director && g_director->TriggerDeathVolume(deathType)) {
+        if (deathType == 4) {
+            thing->health = 1;
+        }
+    }
+
+    return 1;
+}
+
+// PSX: gfDirectorVol__FP5ThingUlPPCc (SWITCH.CPP:500, 0x800940D4)
+static s32 SwitchDirectorVol(Thing* thing, u32 argc, const char** argv) {
+    MARKFUNCTION(0x800940D4);
+
+    if (!g_director || argc == 0 || !argv || !argv[0]) {
+        return 0;
+    }
+
+    const s32 scriptIndex = atol(argv[0]);
+    s32* script = Director::GetGlobalScriptByIndex(scriptIndex);
+    if (!script) {
+        return 0;
+    }
+
+    g_director->SetCodeSnip(script, thing);
+    return 1;
+}
+
+static s32 SwitchGoToVol(Thing* thing, u32 argc, const char** argv) {
+    if (argc < 3 || !argv || !g_director) {
+        return 0;
+    }
+
+    const s32 x = argv[0] ? atol(argv[0]) : 0;
+    const s32 y = argv[1] ? atol(argv[1]) : 0;
+    const s32 z = argv[2] ? atol(argv[2]) : 0;
+
+    g_director->TriggerGotoPoint(x, y, z, thing);
+    return 1;
+}
+
+static bool IsLevelCompleteHumanoidType(u16 thingType) {
+    // PSX switch table at 0x800D382C accepts only these thing types.
+    return thingType == 10 || thingType == 12 || thingType == 13 ||
+        thingType == 15 || thingType == 17;
+}
+
+// PSX: gfLevelComplete__FP5ThingUlPPCc (SWITCH.CPP:1096, 0x80094964)
+static s32 SwitchLevelComplete(Thing* thing, u32 argc, const char** argv) {
+    MARKFUNCTION(0x80094964);
+
+    if (Player::s_player) {
+        Player::s_player->encounterState = 3;
+    }
+
+    if (!g_ai || !g_director) {
+        return 0;
+    }
+
+    for (u32 index = 0; index < argc; index++) {
+        if (!argv || !argv[index]) {
+            return 0;
+        }
+
+        const u32 crc = p3dHash(argv[index]);
+        if (index == 0) {
+            g_director->victoryBossCRC = crc;
+        }
+
+        ccNode* humNode = g_ai->humanoidList.FindNodeCRC(crc);
+        if (humNode) {
+            Humanoid* hum = static_cast<Humanoid*>(static_cast<Thing*>(humNode));
+            if (!IsLevelCompleteHumanoidType(hum->thingType)) {
+                return 0;
+            }
+            if (hum->actionState != AS_DEAD) {
+                return 0;
+            }
+            continue;
+        }
+
+        ccNode* moveNode = g_ai->moveList.FindNodeCRC(crc);
+        if (moveNode) {
+            const u8* base = reinterpret_cast<const u8*>(moveNode);
+
+            s32 lhs = 0;
+            s32 rhs = 0;
+            std::memcpy(&lhs, base + 192, sizeof(lhs));
+            std::memcpy(&rhs, base + 200, sizeof(rhs));
+            if (lhs < rhs) {
+                return 0;
+            }
+
+            const void* ptr284 = nullptr;
+            std::memcpy(&ptr284, base + 284, sizeof(ptr284));
+            if (ptr284) {
+                u8 loopCount = 0;
+                std::memcpy(&loopCount, reinterpret_cast<const u8*>(ptr284) + 84, sizeof(loopCount));
+                if (loopCount != 0) {
+                    return 0;
+                }
+            }
+        }
+    }
+
+    s32* levelEnd = Director::GetLevelEndScript();
+    if (g_director->codeSnipPtr != levelEnd) {
+        g_director->SetCodeSnip(levelEnd, thing);
+    }
+
+    return 1;
+}
+
+static s32 SwitchResetPlayer(Thing* /*thing*/, u32 /*argc*/, const char** /*argv*/) {
+    MARKFUNCTION(0x800941DC);
+
+    Player::s_player->Reset();
+    g_display->GetCamera()->Reset();
+    return 1;
+}
+
+static s32 SwitchBossVol(Thing* /*thing*/, u32 /*argc*/, const char** /*argv*/) {
+    MARKFUNCTION(0x80094BBC);
+    return 1;
+}
+
+static s32 SwitchGateCleanupVol(Thing* /*thing*/, u32 /*argc*/, const char** /*argv*/) {
+    MARKFUNCTION(0x800942B8);
+
+    if (!g_ai || !g_blockManager || g_blockManager->GetNumBlocks() == 0) {
+        return 1;
+    }
+
+    const Block* loadedBlocks = g_blockManager->GetBlocks();
+    u16 blockThreshold = BLOCK_UNASSIGNED;
+
+    for (u32 index = 0; index < g_blockManager->GetNumBlocks(); index++) {
+        const u16 blockNum = loadedBlocks[index].blockNum;
+        if (blockNum < blockThreshold) {
+            blockThreshold = blockNum;
+        }
+    }
+
+    if (blockThreshold == BLOCK_UNASSIGNED) {
+        return 1;
+    }
+
+    s32 cleanedCount = 0;
+
+    for (ccMinNode* node = g_ai->humanoidList.head; node;) {
+        Thing* current = static_cast<Thing*>(node);
+        node = node->next;
+
+        if (current->blockNum < blockThreshold) {
+            cleanedCount++;
+            current->Reset();
+        }
+    }
+
+    for (ccMinNode* node = g_ai->moveList.head; node;) {
+        Thing* current = static_cast<Thing*>(node);
+        node = node->next;
+
+        if (current->blockNum < blockThreshold) {
+            cleanedCount++;
+            current->Reset();
+        }
+    }
+
+    LOG("[Switch] GateCleanupVol cleaned %d", cleanedCount);
+    return 1;
+}
+
+static s32 SwitchExitTest(Thing* /*thing*/, u32 /*argc*/, const char** /*argv*/) {
+    return 1;
+}
+
+struct SwitchGameFuncEntry {
+    const char* name;
+    SwitchGameFunc func;
+    u32 bucket;
+};
+
+// PSX _9WDBSwitch_gameFuncs at 0x800D9778 (SWITCH.CPP)
+// SoundAmbiantSpace, SwitchEntryTest, PlayerDeathVol, EnemyObstDeathVol,
+// DirectorVol, GoToVol, SwitchExitTest, ResetPlayer, DeathState,
+// BehaviorTrigger, ProximityEvent, GateCleanupVol, AsyncLoadNIS,
+// AsyncLoadNISGOTO, AsyncLoadGroup, LevelComplete, Checkpoint,
+// CharacterModelLoad, BossVol, PlayerLoadDialog, PlayerPlayDialog,
+// EnemyLoadDialog, EnemyPlayDialog.
+// Missing host handlers: DeathState.
+static const SwitchGameFuncEntry kSwitchGameFuncs[] = {
+    { "SoundAmbiantSpace", SwitchSoundAmbiantSpace, 1 },
+    { "SwitchEntryTest", SwitchPlayerDeathVol, 1 },
+    { "PlayerDeathVol", SwitchPlayerDeathVol, 0 },
+    { "EnemyObstDeathVol", SwitchEnemyObstacleDeathVol, 2 },
+    { "DirectorVol", SwitchDirectorVol, 1 },
+    { "GoToVol", SwitchGoToVol, 1 },
+    { "SwitchExitTest", SwitchExitTest, 1 },
+    { "ResetPlayer", SwitchResetPlayer, 1 },
+    { "BehaviorTrigger", SwitchBehaviorTrigger, 1 },
+    { "ProximityEvent", SwitchBehaviorTrigger, 1 },
+    { "GateCleanupVol", SwitchGateCleanupVol, 1 },
+    { "AsyncLoadNIS", SwitchAsyncLoadNIS, 1 },
+    { "AsyncLoadNISGOTO", SwitchAsyncLoadNISGOTO, 1 },
+    { "AsyncLoadGroup", SwitchAsyncLoadGroup, 1 },
+    { "LevelComplete", SwitchLevelComplete, 1 },
+    { "Checkpoint", SwitchCheckpoint, 1 },
+    { "CharacterModelLoad", SwitchCharModelLoad, 1 },
+    { "BossVol", SwitchBossVol, 1 },
+    { "PlayerLoadDialog", SwitchLoadDialog, 1 },
+    { "PlayerPlayDialog", SwitchPlayDialog, 1 },
+    { "EnemyLoadDialog", SwitchLoadDialog, 2 },
+    { "EnemyPlayDialog", SwitchPlayDialog, 2 },
+    { nullptr, nullptr, 0 },
+};
+
+static bool ResolveSwitchGameFuncByName(const char* funcName, SwitchGameFunc& outFunc, u32& outBucket) {
+    if (!funcName) {
+        return false;
+    }
+
+    for (const SwitchGameFuncEntry* entry = kSwitchGameFuncs; entry->name; entry++) {
+        if (!SwitchStringEqualsNoCase(funcName, entry->name)) {
+            continue;
+        }
+
+        outFunc = entry->func;
+        outBucket = entry->bucket;
+        return true;
+    }
+
+    return false;
 }
 
 struct GeoMaterialInfo {
@@ -918,6 +1516,91 @@ World::~World() {
     }
 }
 
+void World::PurgeSwitches() {
+    ClearPendingCharModelLoads();
+
+    for (ccList& list : switchLists) {
+        while (ccMinNode* node = list.RemHead()) {
+            delete node;
+        }
+    }
+}
+
+void World::ProcessPendingSwitchActions() {
+    if (g_pendingCharModelLoads.empty()) {
+        return;
+    }
+
+    for (const PendingCharModelLoad& request : g_pendingCharModelLoads) {
+        SwitchUnloadLoadCharModel(request.oldType, request.newType);
+    }
+
+    g_pendingCharModelLoads.clear();
+}
+
+void World::ProcessSwitches() {
+    PurgeSwitches();
+
+    if (!g_database) {
+        return;
+    }
+
+    for (DBRoot* root = static_cast<DBRoot*>(g_database->GetFirstVolume()); root;
+         root = static_cast<DBRoot*>(root->next)) {
+        if (root->type != 9 || root->subType != 0x9B) {
+            continue;
+        }
+
+        WDBVolumeSwitch* sw = new WDBVolumeSwitch();
+        if (!sw->Setup(root) || !sw->Bind(ResolveSwitchGameFuncByName)) {
+            delete sw;
+            continue;
+        }
+
+        sw->SetVolume(static_cast<DBVolume*>(root));
+        if (sw->listBucket < 4) {
+            switchLists[sw->listBucket].AddNode(switchLists[sw->listBucket].tail, sw);
+        }
+        else {
+            delete sw;
+        }
+    }
+}
+
+void World::CheckSwitchList(ccList& list, Thing* thing) {
+    if (!thing) {
+        return;
+    }
+
+    for (ccMinNode* node = list.head; node;) {
+        WDBSwitch* sw = static_cast<WDBSwitch*>(node);
+        node = node->next;
+
+        if (sw->IsInside(thing->pos)) {
+            sw->Execute(thing);
+            if (sw->persistent == 0) {
+                list.RemNode(sw);
+                delete sw;
+            }
+        }
+        else {
+            sw->Reject(thing);
+        }
+    }
+}
+
+void World::CheckThingSwitches(Thing* thing) {
+    if (!thing) {
+        return;
+    }
+
+    CheckSwitchList(switchLists[0], thing);
+    CheckSwitchList(switchLists[3], thing);
+
+    u32 bucket = (thing->thingType != 0) ? 2u : 1u;
+    CheckSwitchList(switchLists[bucket], thing);
+}
+
 // Simple tokenizer matching PSX GetNextToken__4Game
 static bool GetNextToken(char* out, char** cursor, const char* delims) {
     char* p = *cursor;
@@ -1060,13 +1743,13 @@ void World::LoadPermanent() {
         // PSX spins: while (!callback->done) rDoTaskList(rMainTaskList, 0);
         // PC: LoadCharacter is synchronous, callback already fired
 
-        // PSX: LoadAnimation(type=0, animEnum=0, hash=124, callback), spin until done
+        // PSX: LoadAnimation(type=0, animEnum=0, count=124, callback), spin until done
         callback->done = 0;
         g_characterManager->LoadAnimation(0, 0, 124, callback);
         // PSX spins again - PC is synchronous
 
-        // PSX: LoadAnimation(type=0, animEnum=0, hash=124, nullptr) - fire and forget
-        g_characterManager->LoadAnimation(0, 0, 124, nullptr);
+        // PSX queues the same load again asynchronously here. In the host sync port,
+        // reissuing it would repeat the full 124-animation traversal on the main thread.
 
         // PSX: EnableCache(type=0, 0), delete callback
         g_characterManager->EnableCache(0, 0);
@@ -1172,7 +1855,7 @@ bool World::LoadLevelIndex(u32 levelIndex) {
     }
 
     // PSX: SetupModelAmbientLighting, ProcessSwitches
-    // TODO: not yet reversed
+    ProcessSwitches();
 
     // PSX: Close__8Database(0)
     // TODO: database close not yet implemented
@@ -1812,6 +2495,7 @@ void World::OffsetToPreventSeams(LVector& pos, const LVector& playerPos) {
 void World::Unload() {
     UnloadUVPrimData();
     UnloadCBVPrimData();
+    PurgeSwitches();
 
     blockMgr.InternalClose();
     if (g_ai) {
@@ -1831,6 +2515,7 @@ void World::UnloadPetal() {
     // PSX: Unload__10UVPrimData, Unload__11CBVPrimData (0x80045F90, 0x80045F98)
     UnloadUVPrimData();
     UnloadCBVPrimData();
+    PurgeSwitches();
 
     // Unload current blocks (collision sectors, geometry)
     blockMgr.InternalClose();
@@ -1901,6 +2586,7 @@ void World::LoadPetal(u32 petalIndex) {
         LOG("[World] LoadPetal %u: entries %u-%u", pi, petalStart, petalEnd - 1);
 
         // Scan this petal's WDB
+        PurgeSwitches();
         g_database->Close();
         for (u32 i = petalStart; i < petalEnd; i++) {
             if (strncmp(entries[i].magic, ".WDB", 4) != 0) continue;

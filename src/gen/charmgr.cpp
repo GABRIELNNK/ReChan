@@ -13,6 +13,7 @@
 #include "p3d/context.h"
 #include "p3d/flip.h"
 #include "gen/ccfile.h"
+#include "gen/paramanim.h"
 #include <algorithm>
 
 // PSX: CharDataLoadCallback loads character textures into PSX VRAM via P3DLoad.
@@ -75,6 +76,57 @@ CharFile* g_charFileList = nullptr;
 // PSX: gp+3468 - mesh type for reload
 static s32 g_playerMeshType = 0;
 
+struct AnimGroupEntry {
+    s32 startEnum;
+    u32 count;
+};
+
+// PSX: CharacterManager::g_AnimGroupTable at 0x800D68F4.
+constexpr AnimGroupEntry kAnimGroupTable[] = {
+    { 0x000, 0x7C },
+    { 0x07C, 0x09 },
+    { 0x085, 0x04 },
+    { 0x089, 0x02 },
+    { 0x08B, 0x02 },
+    { 0x08D, 0x02 },
+    { 0x08F, 0x05 },
+    { 0x094, 0x0D },
+    { 0x0A1, 0x07 },
+    { 0x0A8, 0x07 },
+    { 0x0AF, 0x07 },
+    { 0x0B6, 0x07 },
+    { 0x0BD, 0x0E },
+    { 0x0CB, 0x0E },
+    { 0x0D9, 0x0E },
+    { 0x0E7, 0x0A },
+    { 0x0F1, 0x0A },
+    { 0x0FB, 0x0A },
+    { 0x105, 0x0F },
+    { 0x114, 0x05 },
+    { 0x119, 0x04 },
+    { 0x11D, 0x04 },
+    { 0x121, 0x06 },
+    { 0x127, 0x02 },
+    { 0x129, 0x05 },
+    { 0x12E, 0x04 },
+    { 0x132, 0x02 },
+    { 0x134, 0x08 },
+    { 0x13C, 0x32 },
+    { -1, 0 },
+};
+
+static const AnimGroupEntry* FindAnimGroupEntry(s32 startEnum) {
+    for (const AnimGroupEntry& entry : kAnimGroupTable) {
+        if (entry.startEnum < 0) {
+            return nullptr;
+        }
+        if (entry.startEnum == startEnum) {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
 // PSX: 0x800D6880 - character name table indexed by ThingType
 // 29 entries (0-28), index 29 is EMPTY_SENTINEL
 const char* g_charNameTable[] = {
@@ -114,7 +166,12 @@ const char* g_charNameTable[] = {
 // PSX: FreeAnimMemory (CHARMGR.CPP:201, 0x800395F8)
 void FreeAnimMemory(void* ptr) {
     MARKFUNCTION(0x800395F8);
-    delete (TransformAnim*)ptr;
+    if (IsCameraParamAnim(ptr)) {
+        delete static_cast<CameraParamAnim*>(ptr);
+        return;
+    }
+
+    delete static_cast<TransformAnim*>(ptr);
 }
 
 // PSX: GetCompositeAnimationNameHash (CHARMGR.CPP:267, 0x80039624)
@@ -168,7 +225,7 @@ void AnimCallback::Callback() {
     animEnumCounter++;
     remainingCount--;
 
-    if (remainingCount != 0) {
+    if (remainingCount > 0) {
         // More to load - chain next animation
         if (g_characterManager) {
             g_characterManager->LoadAnimationBatch(thingType, animEnumCounter, this);
@@ -711,25 +768,38 @@ void CharacterManager::EnableCache(u32 type, s32 enable) {
 void CharacterManager::LoadAnimation(u32 type, u32 hash, CharMgrCallback* callback) {
     MARKFUNCTION(0x8003A240);
 
-    // TODO: look up hash in animHashTable (0x800D68F4) to get animEnum
-    // Table format: { u32 hash, s32 animEnum } terminated by hash==-1
-    s32 animEnum = -1;
-    (void)hash;
-
-    if (animEnum < 0) {
-        if (callback) callback->Callback();
+    const s32 idx = FindSlot(type);
+    if (idx < 0) {
         return;
     }
 
-    LoadAnimation(type, animEnum, hash, callback);
+    CharFile* cf = slots[idx].charFile;
+    if (!cf) {
+        return;
+    }
+
+    const s32 startEnum = cf->FindAnim(hash);
+    const AnimGroupEntry* entry = FindAnimGroupEntry(startEnum);
+    if (!entry) {
+        return;
+    }
+
+    LoadAnimation(type, entry->startEnum, entry->count, callback);
 }
 
-// PSX: LoadAnimation (enum+hash overload) (CHARMGR.CPP:1383, 0x8003A328)
+// PSX: LoadAnimation (enum+count overload) (CHARMGR.CPP:1383, 0x8003A328)
 // PSX: creates AnimCallback, delegates to LoadAnimationBatch.
-void CharacterManager::LoadAnimation(u32 type, s32 animEnum, u32 hash, CharMgrCallback* callback) {
+void CharacterManager::LoadAnimation(u32 type, s32 animEnum, u32 count, CharMgrCallback* callback) {
     MARKFUNCTION(0x8003A328);
 
-    AnimCallback* ac = new AnimCallback(type, animEnum, hash, callback);
+    if (count == 0) {
+        if (callback) {
+            callback->Callback();
+        }
+        return;
+    }
+
+    AnimCallback* ac = new AnimCallback(type, animEnum, count, callback);
     LoadAnimationBatch(type, animEnum, ac);
 }
 
@@ -796,7 +866,6 @@ void CharacterManager::LoadAnimationBatch(u32 type, s32 animEnum, CharMgrCallbac
     if (p3dBuf) {
         // PSX: AnimLoadCallback creates loaders, calls P3DLoad for textures
         P3DLoadTextures(p3dBuf, p3dSize);
-        std::free(p3dBuf);
     }
 
     // TODO: parse the raw animation data (animBuf) into tCompositeAnim/tSequenceAnim
@@ -808,12 +877,17 @@ void CharacterManager::LoadAnimationBatch(u32 type, s32 animEnum, CharMgrCallbac
             animPtrs[handleIdx] = ta;
         }
         else {
+            CameraParamAnim* cameraAnim = ParseCameraParamAnim(animBuf, (u32)animSize, p3dBuf, (u32)p3dSize);
             std::free(animBuf);
-            animPtrs[handleIdx] = nullptr;
+            animPtrs[handleIdx] = cameraAnim;
         }
     }
     else {
-        animPtrs[handleIdx] = nullptr;
+        animPtrs[handleIdx] = ParseCameraParamAnim(nullptr, 0, p3dBuf, (u32)p3dSize);
+    }
+
+    if (p3dBuf) {
+        std::free(p3dBuf);
     }
 
     // Store handle in slot's anim table
@@ -831,16 +905,23 @@ void CharacterManager::LoadAnimationBatch(u32 type, s32 animEnum, CharMgrCallbac
 void CharacterManager::UnloadAnimation(u32 type, u32 hash) {
     MARKFUNCTION(0x8003A7E8);
 
-    // TODO: look up hash in animHashTable to get animEnum
-    s32 animEnum = -1;
-    (void)hash;
+    const s32 idx = FindSlot(type);
+    if (idx < 0) {
+        return;
+    }
 
-    if (animEnum < 0) return;
+    CharFile* cf = slots[idx].charFile;
+    if (!cf) {
+        return;
+    }
 
-    s32 idx = FindSlot(type);
-    if (idx < 0) return;
+    const s32 startEnum = cf->FindAnim(hash);
+    const AnimGroupEntry* entry = FindAnimGroupEntry(startEnum);
+    if (!entry) {
+        return;
+    }
 
-    UnloadAnimationBatch(type, animEnum);
+    UnloadAnimation(type, entry->startEnum, entry->count);
 }
 
 // PSX: UnloadAnimation (enum+hash batch range) (CHARMGR.CPP:1813, 0x8003A8C0)

@@ -3,55 +3,16 @@
 #include "ai/humanoid.h"
 #include "ai/obstacle.h"
 #include "ai/thing.h"
+#include "gen/director.h"
 #include "gen/game.h"
 #include "gen/camera.h"
 #include "pc/inputaction.h"
 #include "pc/debugui.h"
 #include "p3d/p3dmath.h"
-#include "pc/log.h"
 
 // PSX binary angle constants
 static constexpr s32 ANGLE_FULL_ROTATION = 0xFFFF;
 static constexpr s32 ANGLE_QUARTER_TURN = 0x4000;
-
-static s32 ClipAngle360Local(s32 angle) {
-    return (s32)((u32)angle & 0xFFFFu);
-}
-
-static void SetNDMSState(Behaviour* b) {
-    if (!b) {
-        return;
-    }
-
-    b->handlerThisOffset = 0;
-    b->handlerDispatch = -1;
-    b->handler = Behaviour::NDMS;
-}
-
-static void SetAttackRangeFromAnimConfig(Behaviour* b) {
-    if (!b || !b->owner || !b->animConfigPtr) {
-        return;
-    }
-
-    b->owner->moveSpeed = *(s16*)((u8*)b->animConfigPtr + 44);
-}
-
-static bool IsPointInOrientedBox(const LVector& boxPos, const tagCollisionBox& box, s32 boxAngle, const LVector& testPos) {
-    LVector delta = {};
-    delta.x = testPos.x - boxPos.x;
-    delta.y = testPos.y - boxPos.y;
-    delta.z = testPos.z - boxPos.z;
-
-    const s32 sinV = rmSin16(boxAngle);
-    const s32 cosV = rmSin16(boxAngle + 0x4000);
-
-    const s32 localX = (s32)(((s64)cosV * delta.x) >> 16) + (s32)((-(s64)sinV * delta.z) >> 16);
-    const s32 localZ = (s32)(((s64)sinV * delta.x) >> 16) + (s32)(((s64)cosV * delta.z) >> 16);
-
-    return localX >= box.minX && localX <= box.maxX
-        && delta.y >= box.minY && delta.y <= box.maxY
-        && localZ >= box.minZ && localZ <= box.maxZ;
-}
 
 // Direction classification thresholds (PSX angle ranges)
 // angleDiff = ownerAngle - targetAngle, wrapped to [0, 0xFFFF]
@@ -74,6 +35,8 @@ static constexpr s32 DIR_LEFT = 8;  // angleDiff near 90 - pushing to character'
 
 // Fixed-point 127 << 16
 static constexpr s32 STICK_MAX_FP = 0x7F0000;
+
+extern s32 g_directorActive;
 
 Behaviour::Behaviour(Humanoid* ownerHumanoid, u32 handlerType, s32 /*aiParam*/) {
     MARKFUNCTION(0x80069CB0);
@@ -128,11 +91,16 @@ void Behaviour::PlayerUserControl(Behaviour* self) {
         return;
     }
 
+    const bool gameplayInputEnabled = (self->behaviourFlags & Behaviour::BF_INPUT_PROCESSING) != 0;
+    if (!gameplayInputEnabled) {
+        self->behaviourFlags |= Behaviour::BF_INPUT_PROCESSING;
+    }
+
     // Read movement from ActionInput (works for both keyboard and gamepad)
-    s32 analogX = g_actionInput->GetMoveX();
-    s32 analogY = g_actionInput->GetMoveY();
-    s32 stickX = g_actionInput->GetMoveX();
-    s32 stickY = g_actionInput->GetMoveY();
+    s32 analogX = gameplayInputEnabled ? g_actionInput->GetMoveX() : 0;
+    s32 analogY = gameplayInputEnabled ? g_actionInput->GetMoveY() : 0;
+    s32 stickX = gameplayInputEnabled ? g_actionInput->GetMoveX() : 0;
+    s32 stickY = gameplayInputEnabled ? g_actionInput->GetMoveY() : 0;
     s32 direction = 0;
 
     // Direction classification
@@ -196,8 +164,10 @@ void Behaviour::PlayerUserControl(Behaviour* self) {
         }
     }
 
-    // Resolve combat action from ActionInput state + direction
-    s32 actionReq = g_actionInput->ResolveGameAction(direction);
+    // PSX clears Behaviour bit 0 each frame while Director input is disabled.
+    // PlayerUserControl then ignores the current pad sample and re-arms the bit.
+    s32 actionReq = gameplayInputEnabled ? g_actionInput->ResolveGameAction(direction)
+                                         : GA_GUARD_RELEASE;
 
     // Set faceAngle for movement/direction-based actions
     if ((u32)(actionReq - 2) < 3
@@ -250,8 +220,10 @@ s32 Behaviour::MoveToDestinationPoint(u32 threshold) {
 
 // PSX: NisControl__9Behaviour (BEHAVIOU.CPP:1774, 0x800753C4)
 void Behaviour::NisControl(Behaviour* b) {
+    MARKFUNCTION(0x800753C4);
     if (b->MoveToDestinationPoint(0x4B) != 0) {
         // Reached destination - restore normal player control
+        b->owner->FaceThingDesired(nullptr);
         b->handlerThisOffset = 0;
         b->handlerDispatch = -1;
         b->handler = PlayerUserControl;
@@ -280,13 +252,17 @@ void Behaviour::SubwayDodgeRight(Behaviour* b) {
 
     Obstacle* issuer = dynamic_cast<Obstacle*>(b->owner->GetTicketIssuer());
     if (!issuer) {
-        SetNDMSState(b);
+        b->handlerThisOffset = 0;
+        b->handlerDispatch = -1;
+        b->handler = Behaviour::NDMS;
         return;
     }
 
-    const s32 facingCheck = ClipAngle360Local(issuer->orientation.y + 0x8000 - b->owner->orientation.y);
+    const s32 facingCheck = (s32)((u32)(issuer->orientation.y + 0x8000 - b->owner->orientation.y) & 0xFFFFu);
     if ((u32)(facingCheck - 0x4000) <= 0x8000u) {
-        SetNDMSState(b);
+        b->handlerThisOffset = 0;
+        b->handlerDispatch = -1;
+        b->handler = Behaviour::NDMS;
         return;
     }
 
@@ -298,15 +274,31 @@ void Behaviour::SubwayDodgeRight(Behaviour* b) {
     testBox.maxY = (s16)(testBox.maxY - 100);
     testBox.maxZ = (s16)(testBox.maxZ - 100);
 
+    LVector delta = {};
+    delta.x = b->owner->pos.x - issuer->pos.x;
+    delta.y = b->owner->pos.y - issuer->pos.y;
+    delta.z = b->owner->pos.z - issuer->pos.z;
+
+    const s32 sinV = rmSin16(issuer->orientation.y);
+    const s32 cosV = rmSin16(issuer->orientation.y + 0x4000);
+    const s32 localX = (s32)(((s64)cosV * delta.x) >> 16) + (s32)((-(s64)sinV * delta.z) >> 16);
+    const s32 localZ = (s32)(((s64)sinV * delta.x) >> 16) + (s32)(((s64)cosV * delta.z) >> 16);
+
     if (testBox.minX > testBox.maxX || testBox.minY > testBox.maxY || testBox.minZ > testBox.maxZ
-        || !IsPointInOrientedBox(issuer->pos, testBox, issuer->orientation.y, b->owner->pos)) {
-        SetNDMSState(b);
+        || localX < testBox.minX || localX > testBox.maxX
+        || delta.y < testBox.minY || delta.y > testBox.maxY
+        || localZ < testBox.minZ || localZ > testBox.maxZ) {
+        b->handlerThisOffset = 0;
+        b->handlerDispatch = -1;
+        b->handler = Behaviour::NDMS;
         return;
     }
 
     b->owner->FaceThingDesired(nullptr);
     b->owner->FaceAngleY(b->owner->faceAngle, 0);
-    SetAttackRangeFromAnimConfig(b);
+    if (b->animConfigPtr) {
+        b->owner->moveSpeed = *(s16*)((u8*)b->animConfigPtr + 44);
+    }
     b->owner->SetDesiredMoveDirection(b->owner->faceAngle + 0x4000);
     b->owner->SetTarget(nullptr);
     b->owner->RequestAction(6);
@@ -322,13 +314,17 @@ void Behaviour::SubwayDodgeLeft(Behaviour* b) {
 
     Obstacle* issuer = dynamic_cast<Obstacle*>(b->owner->GetTicketIssuer());
     if (!issuer) {
-        SetNDMSState(b);
+        b->handlerThisOffset = 0;
+        b->handlerDispatch = -1;
+        b->handler = Behaviour::NDMS;
         return;
     }
 
-    const s32 facingCheck = ClipAngle360Local(issuer->orientation.y + 0x8000 - b->owner->orientation.y);
+    const s32 facingCheck = (s32)((u32)(issuer->orientation.y + 0x8000 - b->owner->orientation.y) & 0xFFFFu);
     if ((u32)(facingCheck - 0x4000) <= 0x8000u) {
-        SetNDMSState(b);
+        b->handlerThisOffset = 0;
+        b->handlerDispatch = -1;
+        b->handler = Behaviour::NDMS;
         return;
     }
 
@@ -340,15 +336,31 @@ void Behaviour::SubwayDodgeLeft(Behaviour* b) {
     testBox.maxY = (s16)(testBox.maxY - 100);
     testBox.maxZ = (s16)(testBox.maxZ - 100);
 
+    LVector delta = {};
+    delta.x = b->owner->pos.x - issuer->pos.x;
+    delta.y = b->owner->pos.y - issuer->pos.y;
+    delta.z = b->owner->pos.z - issuer->pos.z;
+
+    const s32 sinV = rmSin16(issuer->orientation.y);
+    const s32 cosV = rmSin16(issuer->orientation.y + 0x4000);
+    const s32 localX = (s32)(((s64)cosV * delta.x) >> 16) + (s32)((-(s64)sinV * delta.z) >> 16);
+    const s32 localZ = (s32)(((s64)sinV * delta.x) >> 16) + (s32)(((s64)cosV * delta.z) >> 16);
+
     if (testBox.minX > testBox.maxX || testBox.minY > testBox.maxY || testBox.minZ > testBox.maxZ
-        || !IsPointInOrientedBox(issuer->pos, testBox, issuer->orientation.y, b->owner->pos)) {
-        SetNDMSState(b);
+        || localX < testBox.minX || localX > testBox.maxX
+        || delta.y < testBox.minY || delta.y > testBox.maxY
+        || localZ < testBox.minZ || localZ > testBox.maxZ) {
+        b->handlerThisOffset = 0;
+        b->handlerDispatch = -1;
+        b->handler = Behaviour::NDMS;
         return;
     }
 
     b->owner->FaceThingDesired(nullptr);
     b->owner->FaceAngleY(b->owner->faceAngle, 0);
-    SetAttackRangeFromAnimConfig(b);
+    if (b->animConfigPtr) {
+        b->owner->moveSpeed = *(s16*)((u8*)b->animConfigPtr + 44);
+    }
     b->owner->SetDesiredMoveDirection(b->owner->faceAngle - 0x4000);
     b->owner->SetTarget(nullptr);
     b->owner->RequestAction(6);
@@ -364,22 +376,30 @@ void Behaviour::SubwayDodgeJump(Behaviour* b) {
 
     Thing* issuer = b->owner->GetTicketIssuer();
     if (!issuer) {
-        SetNDMSState(b);
+        b->handlerThisOffset = 0;
+        b->handlerDispatch = -1;
+        b->handler = Behaviour::NDMS;
         return;
     }
 
-    const s32 facingCheck = ClipAngle360Local(issuer->orientation.y + 0x8000 - b->owner->orientation.y);
+    const s32 facingCheck = (s32)((u32)(issuer->orientation.y + 0x8000 - b->owner->orientation.y) & 0xFFFFu);
     if ((u32)(facingCheck - 9102) <= 0xB8E3u) {
-        SetNDMSState(b);
+        b->handlerThisOffset = 0;
+        b->handlerDispatch = -1;
+        b->handler = Behaviour::NDMS;
         return;
     }
 
-    SetAttackRangeFromAnimConfig(b);
+    if (b->animConfigPtr) {
+        b->owner->moveSpeed = *(s16*)((u8*)b->animConfigPtr + 44);
+    }
     b->owner->RequestAction(3);
 
     b->nextHandlerThisOffset = 0;
     b->nextHandlerDispatch = -1;
     b->nextHandler = NDMS;
 
-    SetNDMSState(b);
+    b->handlerThisOffset = 0;
+    b->handlerDispatch = -1;
+    b->handler = Behaviour::NDMS;
 }

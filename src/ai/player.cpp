@@ -2,6 +2,7 @@
 #include "ai/colfight.h"
 #include "ai/obstacle.h"
 #include "gen/model.h"
+#include "gen/mplayer.h"
 #include "gen/animmat.h"
 #include "gen/animstruct.h"
 #include "gen/charmgr.h"

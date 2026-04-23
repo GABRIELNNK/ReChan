@@ -84,7 +84,7 @@ struct AnimCallback : public CharMgrCallback {
     s32 remainingCount = 0;           // PSX +16
     CharMgrCallback* userCallback = nullptr; // PSX +20
 
-    AnimCallback(u32 type, s32 animEnum, u32 hash, CharMgrCallback* cb);
+    AnimCallback(u32 type, s32 animEnum, u32 count, CharMgrCallback* cb);
     ~AnimCallback() override;
 
     void Callback() override;
@@ -120,11 +120,11 @@ public:
     void EnableCache(u32 type, s32 enable);
 
     void LoadAnimation(u32 type, u32 hash, CharMgrCallback* callback = nullptr);
-    void LoadAnimation(u32 type, s32 animEnum, u32 hash, CharMgrCallback* callback = nullptr);
+    void LoadAnimation(u32 type, s32 animEnum, u32 count, CharMgrCallback* callback = nullptr);
     void LoadAnimationBatch(u32 type, s32 animEnum, CharMgrCallback* callback = nullptr);
 
     void UnloadAnimation(u32 type, u32 hash);
-    void UnloadAnimation(u32 type, s32 animEnum, u32 hash);
+    void UnloadAnimation(u32 type, s32 animEnum, u32 count);
     void UnloadAnimationBatch(u32 type, s32 animEnum);
 
     void* GetAnimation(u32 type, s32 animEnum);

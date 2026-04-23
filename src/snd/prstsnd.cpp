@@ -82,10 +82,6 @@ s32 CGenericPersistentSound::End() {
         return -3001;
     }
 
-    if (!rsdPersistent::ObjectExists(persist)) {
-        return -3001;
-    }
-
     delete persist;
     persist = nullptr;
     return 0;

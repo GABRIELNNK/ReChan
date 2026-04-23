@@ -4,17 +4,14 @@
 #include "p3d/matrix.h"
 #include "p3d/hash.h"
 
-namespace {
-    void BuildPsxIdentityMatrix(s32* matrixData) {
-        std::memset(matrixData, 0, sizeof(s32) * 8);
+static void BuildPsxIdentityMatrix(s32* matrixData) {
+    std::memset(matrixData, 0, sizeof(s32) * 8);
 
-        // PSX MATRIX rotation is Q12 fixed-point shorts at [0..8].
-        s16* rot = reinterpret_cast<s16*>(matrixData);
-        rot[0] = 0x1000;
-        rot[4] = 0x1000;
-        rot[8] = 0x1000;
-    }
-
+    // PSX MATRIX rotation is Q12 fixed-point shorts at [0..8].
+    s16* rot = reinterpret_cast<s16*>(matrixData);
+    rot[0] = 0x1000;
+    rot[4] = 0x1000;
+    rot[8] = 0x1000;
 }
 
 // PSX: _17AnimationMatrices (ANIMMAT.CPP:550, 0x80078880)

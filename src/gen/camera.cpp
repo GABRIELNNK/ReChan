@@ -12,6 +12,7 @@
 #include "p3d/context.h"
 #include "pc/debugui.h"
 #include "gen/time.h"
+#include "gen/paramanim.h"
 
 // PSX math helpers
 
@@ -178,6 +179,9 @@ void Camera::Think() {
         if (hasCollision != 0) {
             Move();
         }
+    }
+    else {
+        UpdateAnim();
     }
 
     // Camera shake
@@ -926,6 +930,14 @@ void Camera::UpdateAnim() {
         // PSX: ExecuteHandler(cameraAnim, 1) - advances camera animation frame
         cameraAnim->ExecuteHandler(1);
 
+        if (IsCameraParamAnim(cameraAnim->GetAnimation())) {
+            EvaluateCameraParamAnim(
+                reinterpret_cast<const CameraParamAnim*>(cameraAnim->GetAnimation()),
+                cameraAnim->GetCurrentFrame(),
+                &G_2ptcam);
+            return;
+        }
+
         // PSX: gets view position from targetThing via vtable+72 (GetViewSpot)
         // and stores into prevTargetPos, copies to targetPos, then LookAtTarget.
         if (targetThing) {
@@ -987,19 +999,25 @@ void Camera::LoadAsyncAnim(s32 animEnum) {
 void Camera::PlayAsyncAnim() {
     MARKFUNCTION(0x8004A0F0);
 
-    if (!asyncAnim) {
+    if (!asyncAnim || !IsCameraParamAnim(asyncAnim)) {
         return;
+    }
+
+    if (cameraAnim) {
+        delete cameraAnim;
+        cameraAnim = nullptr;
     }
 
     // PSX: cameraAnim = new AnimStructure(3, asyncAnim, 4, nullptr, nullptr)
     cameraAnim = new AnimStructure(3, asyncAnim, 4, nullptr, nullptr);
+    if (!cameraAnim) {
+        return;
+    }
 
-    // PSX: GetAnimationType on anim, then Attach t2PointCamFlip to G_2ptcam
-    // t2PointCamFlip is created inside the AnimStructure constructor for mode 3.
-    // The Attach call connects the flip to G_2ptcam so camera pos/target
-    // are updated during ExecuteHandler. Since we don't have the full
-    // Pure3D flip pipeline yet, the camera animation data won't actually
-    // drive position. This will work once tParamFlip is reversed.
+    EvaluateCameraParamAnim(
+        reinterpret_cast<const CameraParamAnim*>(asyncAnim),
+        cameraAnim->GetCurrentFrame(),
+        &G_2ptcam);
 }
 
 

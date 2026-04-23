@@ -7,6 +7,7 @@
 #include <string>
 
 class hdMenuItem;
+class Thing;
 
 // PSX globals used by front-end destination selection return flow.
 extern LVector g_destSelectReturnPos;
@@ -53,10 +54,13 @@ public:
     void LoadPetal(u32 petalIndex);
     void LoadLevelNames();
     void LoadPermanent();
+    void ProcessSwitches();
     void Render(const LVector* playerPos);
     void Unload();
     void UnloadPetal();
     void ResetLevel();
+    void CheckThingSwitches(Thing* thing);
+    void ProcessPendingSwitchActions();
 
     u32 GetCurrentLevelIndex() const { return currentLevelIndex; }
     u32 GetTargetLevelIndex() const { return targetLevelIndex; }
@@ -139,8 +143,11 @@ private:
     u32 currentPetalIndex = 0;
     u32 targetPetalIndex = 0;
     u32 previousLevelIndex = 0xFFFFFFFF;
+    ccList switchLists[4];
 
     void LoadTPGTextures(const u8* lcfData, u32 lcfSize);
+    void PurgeSwitches();
+    void CheckSwitchList(ccList& list, Thing* thing);
 
     // DrawEverythingHandler (GAME.CPP:2211) - sorting + rendering pipeline
     void DrawEverythingHandler(const LVector* playerPos);  // 0x8002A98C

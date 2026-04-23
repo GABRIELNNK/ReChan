@@ -8,7 +8,9 @@
 #include "gen/animmat.h"
 #include "gen/animstruct.h"
 #include "gen/director.h"
+#include "gen/game.h"
 #include "gen/colsect.h"
+#include "gen/world.h"
 #include "snd/rsevent.h"
 #include "snd/hmndsnd.h"
 #include "snd/sndfact.h"
@@ -363,7 +365,11 @@ void Humanoid::Move() {
     MARKFUNCTION(0x80064100);
     DynamicThing::Move();
     HandleAnimationControl();
-    // PSX: CheckSwitches for trigger volumes (world system not yet implemented)
+
+    World* world = g_game ? g_game->GetWorld() : nullptr;
+    if (world) {
+        world->CheckThingSwitches(this);
+    }
 }
 
 // PSX: RestorePositionFromBip01__8Humanoid (HUMANOID.CPP:1681)
@@ -882,6 +888,11 @@ void Humanoid::SetActionState(u32 state, s32 param) {
         case AS_FLYING_BACK_CHECK: stateDispatch = SD_FLYING_BACK; break;
         case AS_SPIN_BACK_RECOVER: stateDispatch = SD_STAND; break;
         case AS_DEAD:              stateDispatch = SD_DEAD; break;
+        case AS_HOTFOOT:
+            field344 = 0;
+            stateDispatch = SD_HOTFOOT;
+            field348 = 8;
+            break;
         case AS_HIT_EXPLOSION:     stateDispatch = SD_GOT_HIT_HIGH; break;
         case AS_HIT_ENVIRONMENT:   stateDispatch = SD_GOT_HIT_HIGH; break;
         default:
@@ -927,6 +938,7 @@ void Humanoid::ProcessAction() {
         case SD_LADDER_LATCH: _LadderLatch(); break;
         case SD_CLIMB_LADDER: _ClimbLadder(); break;
         case SD_LADDER_DISMOUNT: _LadderDismount(); break;
+        case SD_HOTFOOT:      _Hotfoot(); break;
         default: break;
     }
 }
@@ -1816,6 +1828,52 @@ void Humanoid::_Pickup() {
     // PSX: if animation complete, return to stand
     if (stateTimer > 20) {
         SetActionState(AS_STAND, 0);
+    }
+}
+
+// PSX: Hotfoot__8Humanoid (HUMANOID.CPP:4644, 0x80067F54)
+void Humanoid::_Hotfoot() {
+    MARKFUNCTION(0x80067F54);
+
+    FaceAngleY(faceAngle, 1);
+
+    SVector dir = {};
+    dir.x = (s16)orientation.x;
+    dir.y = 0;
+    dir.z = (s16)orientation.y;
+    dir.pad = 0;
+
+    if (((u32)commandBits >> 2) & 1u) {
+        AddForce(runSpeed, &dir);
+    }
+
+    if (((u32)commandBits >> 6) & 1u) {
+        AddForce(runSpeed, &dir);
+    }
+
+    if (((u32)commandBits >> 4) & 1u) {
+        SetActionState(AS_PAUSE, 0);
+    }
+
+    if (((u32)commandBits >> 3) & 1u) {
+        SetActionState(AS_JUMP, 0);
+    }
+
+    const bool nisActive = (flags2 & TF2_NIS_MASK) != 0;
+    if (!nisActive && (((u32)field368 >> 3) & 1u) == 0) {
+        SetActionState(AS_RUN, 0);
+    }
+
+    if (model) {
+        Model* m = static_cast<Model*>(model);
+        AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+        if (anim && anim->loopCount > 0) {
+            SetActionState(AS_STAND, 0);
+        }
+    }
+
+    if (health == 0) {
+        SetActionState(AS_DEAD, 0);
     }
 }
 

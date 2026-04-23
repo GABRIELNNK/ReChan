@@ -6,17 +6,14 @@
 #include "gen/model.h"
 #include "ai/obstacle.h"
 
-namespace {
-    // OriginalBasic fields accessed via proper struct methods now.
-    // PSX access patterns use +16 (u16 list type) and +19 (s8 store ID).
-    static u16 GetOriginalListType(const OriginalBasic* original) {
-        return original->GetType();
-    }
+// OriginalBasic fields accessed via proper struct methods now.
+// PSX access patterns use +16 (u16 list type) and +19 (s8 store ID).
+static u16 GetOriginalListType(const OriginalBasic* original) {
+    return original->GetType();
+}
 
-    static s8 GetOriginalStoreID(const OriginalBasic* node) {
-        return node->GetStoreID();
-    }
-
+static s8 GetOriginalStoreID(const OriginalBasic* node) {
+    return node->GetStoreID();
 }
 
 // PSX: gp+0xEE8

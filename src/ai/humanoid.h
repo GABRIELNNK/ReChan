@@ -48,6 +48,7 @@ enum ActionState : u32 {
     AS_FLYING_BACK_CHECK = 70,
     AS_SPIN_BACK_RECOVER = 71,
     AS_DEAD = 72,
+    AS_HOTFOOT = 73,
     AS_HIT_EXPLOSION = 74,
     AS_HIT_ENVIRONMENT = 75,
     AS_COUNT = 76,
@@ -85,6 +86,7 @@ enum StateDispatch : u16 {
     SD_DEAD_PLAYER = 48,   // PSX case 72: player death
     SD_CLIMB_LADDER = 49,   // PSX case 27: climb ladder
     SD_LADDER_DISMOUNT = 50,   // PSX case 28: ladder dismount
+    SD_HOTFOOT = 51,   // PSX case 73: Hotfoot
     // Player-specific dispatch via direct function pointer (stateDispatch = -1 on PSX)
     SD_HARDFALL = 250,
     SD_HARDLAND = 251,
@@ -397,6 +399,7 @@ public:
     virtual void _LadderLatch();
     virtual void _LadderDismount();
     virtual void _ClimbLadder();
+    virtual void _Hotfoot();
     virtual void CreateSound();
     virtual void ReleaseSound();
     virtual void _DoStand();

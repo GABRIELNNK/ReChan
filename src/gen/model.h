@@ -330,15 +330,3 @@ public:
     void HandleLoop(AnimStructure* anim) override;
 };
 
-// PlayerModel - player-specific model (136 bytes, same as HumanoidModel)
-class PlayerModel : public HumanoidModel {
-public:
-    PlayerModel();
-    ~PlayerModel() override;
-
-    void ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 p4, s32 p5) override;
-    void SetAnim(s32 animEnum, s32 a3, s32 force, s32 extra) override;
-    void HandleLoop(AnimStructure* anim) override;
-    void HandleRunToLast(AnimStructure* anim) override;
-    void HandleIncFrame(AnimStructure* anim) override;
-};

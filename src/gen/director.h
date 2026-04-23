@@ -230,6 +230,8 @@ public:
     void LevelReset();
     void SetScript();
     void SetCodeSnip(s32* snip, Thing* thing);
+    bool TriggerDeathVolume(s32 deathType);
+    void TriggerGotoPoint(s32 x, s32 y, s32 z, Thing* thing);
 
     // Main script interpreter - dispatches script opcodes.
     void Process();
@@ -263,6 +265,9 @@ public:
     static s32* GetNISDoor1Script();
     static s32* GetNISDoor1WithDialogScript();
     static s32* GetNISLadder1Script();
+    static s32* GetDeathScript();
+    static s32* GetLevelEndScript();
+    static s32* GetGlobalScriptByIndex(s32 index);
 };
 
 void runDirector(Handler* h);

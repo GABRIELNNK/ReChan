@@ -173,4 +173,5 @@ private:
 
 // Global game pointer (PSX: accessible through gp-relative)
 extern Game* g_game;
+extern s32 g_directorActive;
 

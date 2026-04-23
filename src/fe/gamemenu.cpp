@@ -1,3 +1,4 @@
+#include "gen/common.h"
 #include "fe/gamemenu.h"
 #include "fe/hdmenuitems.h"
 #include "gen/game.h"
@@ -8,7 +9,6 @@
 #include "snd/sound.h"
 #include "pc/settings.h"
 #include "xclib/xclib.h"
-#include <cstdio>
 
 // Global gameMenu pointer
 gameMenu* g_gameMenu = nullptr;
@@ -238,6 +238,7 @@ static void InstallSoundMenu(hdMenu* menu) {
 // PSX: ExitGame__8gameMenuP10hdMenuItem (0x80037924)
 static s32 ExitGameCallback(hdMenuItem* item) {
     if (item->itemFlags) {
+        LOG("[GameMenu] ExitGameCallback choice=yes");
         if (g_scoreManager) {
             g_scoreManager->HandleLevelAbort();
         }
@@ -247,6 +248,8 @@ static s32 ExitGameCallback(hdMenuItem* item) {
         }
         return 4;
     }
+
+    LOG("[GameMenu] ExitGameCallback choice=no");
     return 8;
 }
 

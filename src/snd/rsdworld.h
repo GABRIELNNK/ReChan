@@ -24,6 +24,7 @@ namespace rsdWorld {
     s32 PlayTransientNonPositional(u32 sampleId, u16 volL, u16 volR, s16 pitch, u16 pan);
 
     void UpdateSpatialAudioState();
+    void StopAllPersistentSounds();
 
 } // namespace rsdWorld
 

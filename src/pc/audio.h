@@ -47,8 +47,10 @@ public:
 
     // Streaming music (reads from file, decoded on the fly)
     static bool PlayMusic(const char* path, f32 volume = 1.0f, bool loop = true);
+    static bool PlayMusicSample(AudioSample sample, f32 volume = 1.0f, bool loop = true);
     static void StopMusic();
     static void SetMusicVolume(f32 volume);
+    static void FadeMusicVolume(f32 targetVolume, u32 fadeMs);
     static bool IsMusicPlaying();
 
     // Master volume

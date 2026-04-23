@@ -481,11 +481,13 @@ s32 jcsHandleControlEvent(s32 event, s32 param1, s32 param2, s32 param3) {
 
         case RS_TERMINATE: // 2
             LOG("[rsEvent] Terminate");
+            rsdWorld::StopAllPersistentSounds();
             g_sound->StopMusic();
             break;
 
         case RS_UNLOAD_LEVEL: // 3 - stop all sounds
             LOG("[rsEvent] UnloadLevel - stop all");
+            rsdWorld::StopAllPersistentSounds();
             g_sound->StopMusic();
             break;
 
@@ -702,6 +704,7 @@ void jcsFadeOutEngine(u32 flags) {
     // PSX: bit 3 -> rsdPersistent::FadeOutAll(1500) + save reverb + set reverb(0)
     if (flags & 0x08) {
         LOG("[jcsFadeOutEngine] FadeOut persistent + reverb (flags=0x%X)", flags);
+        rsdWorld::StopAllPersistentSounds();
     }
 }
 

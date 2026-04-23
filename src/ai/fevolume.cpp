@@ -8,6 +8,7 @@
 #include "gen/database.h"
 #include "gen/display.h"
 #include "gen/camera.h"
+#include "gen/game.h"
 #include "gen/world.h"
 
 FrontEndVolume::FrontEndVolume(const LVector* pos, u16 type) : Obstacle(pos, type) {
@@ -74,6 +75,11 @@ void FrontEndVolume::AnalyzeMesh(DBRoot* root) {
 
 void FrontEndVolume::HandleHumanoidCollision(Humanoid* hum) {
     MARKFUNCTION(0x8001A920);
+
+    World* world = g_game ? g_game->GetWorld() : nullptr;
+    if (hum != Player::s_player || !world || world->GetCurLevelID() != 7) {
+        return;
+    }
 
     if (levelCode >= 10) {
         g_feMenuMgr->ShowLevel(this, hum);

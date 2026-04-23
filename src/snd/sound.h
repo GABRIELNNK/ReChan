@@ -34,7 +34,7 @@ public:
     // Set by RS_SET_LOCATION event. Location 0-20 -> bank 0-20, 21+ -> bank 21.
     s32 activeSfxBank = -1;
 
-    // PC: music sample (decoded FAG loaded as one big sample)
+    // PC: music sample (decoded FAG loaded as one big sample for dedicated music mix)
     AudioSample musicSample = AUDIO_SAMPLE_INVALID;
     AudioVoice musicVoice = AUDIO_VOICE_INVALID;
     bool musicPlaying = false;

@@ -1,5 +1,6 @@
 #include "gen/ai.h"
 #include "gen/game.h"
+#include "gen/world.h"
 #include "gen/database.h"
 #include "gen/charmgr.h"
 #include "gen/blockmgr.h"
@@ -22,6 +23,8 @@
 #include "ai/trapdoor.h"
 #include "ai/platform.h"
 #include "ai/teleporter.h"
+#include "ai/trigger.h"
+
 
 AI* g_ai = nullptr;
 
@@ -243,6 +246,9 @@ void AI::AddThingNoTagList(const char* name, u16 type,
             }
             else if (type == AITypes::TT_LAUNCHER) {
                 thing = new Launcher(pos, type);
+            }
+            else if (type == AITypes::TT_TRIGGERTHING) {
+                thing = new TriggerThing(pos, type);
             }
             else if (type == AITypes::TT_DOOR) {
                 Door* d = new Door(pos, type);
@@ -490,6 +496,12 @@ void AI::MoveThings() {
     // 1. Drain thingList (death staging) - delete completed deaths
     while (ccMinNode* n = thingList.RemHead()) {
         delete static_cast<Thing*>(n);
+    }
+
+    if (g_game) {
+        if (World* world = g_game->GetWorld()) {
+            world->ProcessPendingSwitchActions();
+        }
     }
 
     // 2. Clear floor heights for humanoids

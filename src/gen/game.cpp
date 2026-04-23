@@ -273,24 +273,25 @@ void Game::InternalReset() {
 
 // PSX: ProcessHandlers__4Game (GAME.CPP:2756, 0x8002B4F0)
 // Iterates both handler sets and calls each handler's funcPtr
+static void ProcessHandlerList(ccMinList& list) {
+    for (ccMinNode* n = list.head; n; ) {
+        ccMinNode* next = n->next;
+        Handler* h = static_cast<Handler*>(n);
+        if (h->funcPtr) {
+            h->funcPtr(h);
+        }
+        n = next;
+    }
+}
+
 void Game::ProcessHandlers() {
     MARKFUNCTION(0x8002B4F0);
 
     // Process handlerSet1 (think/logic handlers)
-    for (ccMinNode* n = handlerSet1.handlerList.head; n; ) {
-        ccMinNode* next = n->next;
-        Handler* h = static_cast<Handler*>(n);
-        if (h->funcPtr) h->funcPtr(h);
-        n = next;
-    }
+    ProcessHandlerList(handlerSet1.handlerList);
 
     // Process handlerSet2 (draw/render handlers)
-    for (ccMinNode* n = handlerSet2.handlerList.head; n; ) {
-        ccMinNode* next = n->next;
-        Handler* h = static_cast<Handler*>(n);
-        if (h->funcPtr) h->funcPtr(h);
-        n = next;
-    }
+    ProcessHandlerList(handlerSet2.handlerList);
 }
 
 Camera& Game::GetCamera() {
@@ -728,11 +729,6 @@ bool Game::gsPrePlayState(Game* game) {
         // PSX: LoadOverlay(0) - load normal overlay
     }
 
-    // PSX: Director->DetermineLevelIntro() (vtable dispatch)
-    if (g_director) {
-        g_director->DetermineLevelIntro();
-    }
-
     // PSX: rsEvent(21, player+28, cameraManager+384, 0) - set 3D audio listener
     // The args are pointers to player position and camera matrix for 3D audio.
     // On PC we pass zeros - audio spatialization not yet wired.
@@ -774,16 +770,10 @@ bool Game::gsPrePlayState(Game* game) {
 bool Game::gsPlayState(Game* game) {
     MARKFUNCTION(0x80029C6C); // gsPlayState
 
-    // PSX: check g_directorActive (gp+20). If active, Director runs the
-    // intro script and we skip normal gameplay processing.
+    // PSX: if g_directorActive != 0, it calls Director::Process() directly.
+    // PC still relies on the full handler path here for camera/display updates.
     if (g_directorActive) {
-        if (g_director) {
-            g_director->Process();
-        }
-        // PSX: VBlank interrupt handles display/camera updates automatically.
-        // PC: we must still run ProcessHandlers so draw handlers fire each frame.
         game->ProcessHandlers();
-
         rsEvent(21, 0, 0, 0);
         return true;
     }
@@ -798,9 +788,9 @@ bool Game::gsPlayState(Game* game) {
     if (game->state == GameState::Play) {
         s32 canPause = (!g_director || g_director->scriptState == 0);
         if (canPause && g_actionInput && g_actionInput->JustPressed(ACTION_OPEN_CLOSE_MENU)) {
+            LOG("[Game] Pause requested from Play");
             game->SetState(GameState::Menu);
-            // PSX: Shock(18) - controller vibration on pause
-            // TODO: Shock not yet reversed
+            Shock(ShockEnum::SHOCK_CLEAR);
         }
     }
 
@@ -880,6 +870,9 @@ bool Game::gsMenuState(Game* game) {
 
     // PSX: result = MenuDraw(menuMgr)
     s32 result = MenuDraw(menuMgr);
+    if (result == 4 || result == 8) {
+        LOG("[Game] Pause menu result=%d", result);
+    }
 
     // PSX: result 8 = resume game (back to Play)
     if (result == 8) {

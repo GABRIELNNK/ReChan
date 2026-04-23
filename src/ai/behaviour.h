@@ -8,6 +8,7 @@ class Humanoid;
 // PSX: 280 bytes. Controls enemy actions, patrol, combat decisions.
 struct Behaviour {
     using AIHandler = void (*)(Behaviour*);
+    static constexpr u32 BF_INPUT_PROCESSING = 1u;
 
     // PSX +24: owning Humanoid pointer.
     Humanoid* owner = nullptr;
@@ -48,6 +49,7 @@ struct Behaviour {
     s32 MoveToDestinationPoint(u32 threshold);
     virtual void Process();
     virtual ~Behaviour() = default;
+    void DisableInputProcessing() { behaviourFlags &= ~BF_INPUT_PROCESSING; }
 
     static void PlayerUserControl(Behaviour* behaviour);
     static void NisControl(Behaviour* behaviour);

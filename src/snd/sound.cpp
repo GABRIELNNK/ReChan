@@ -139,7 +139,7 @@ AudioSample Sound::GetBankSample(u32 bankIndex, u32 sampleIndex) const {
     return banks[bankIndex].samples[sampleIndex];
 }
 
-// PC: music - decode FAG to mono PCM, load as AudioSample, play via voice mixer
+// PC: music - decode FAG to PCM, load as AudioSample, play through the dedicated music mix
 bool Sound::PlayMusicTrack(const char* fagPath, f32 volume) {
     u32 fileSize = 0;
     u8* fileData = ReadFileBytes(fagPath, fileSize);
@@ -167,18 +167,20 @@ bool Sound::PlayMusicTrack(const char* fagPath, f32 volume) {
         return false;
     }
 
-    // Play looped through the voice mixer
+    // Route music through the dedicated music mixer so gameplay voices cannot steal it.
     musicVolume = volume;
     f32 playVol = musicMuted ? 0.0f : volume;
-    musicVoice = AudioEngine::PlaySample(musicSample, playVol, 0.0f, true);
-    musicPlaying = (musicVoice != AUDIO_VOICE_INVALID);
+    musicVoice = AUDIO_VOICE_INVALID;
+    musicPlaying = AudioEngine::PlayMusicSample(musicSample, playVol, true);
 
-    LOG("Sound: playing music '%s' (%u frames, %u ch @ %u Hz, sample=%u, voice=%u)",
-        fagPath, track.numFrames, track.channels, PSX_MUSIC_RATE, musicSample, musicVoice);
+    LOG("Sound: playing music '%s' (%u frames, %u ch @ %u Hz, sample=%u, dedicated=%d)",
+        fagPath, track.numFrames, track.channels, PSX_MUSIC_RATE, musicSample, musicPlaying ? 1 : 0);
     return musicPlaying;
 }
 
 void Sound::StopMusic() {
+    AudioEngine::StopMusic();
+
     if (musicVoice != AUDIO_VOICE_INVALID) {
         AudioEngine::StopVoice(musicVoice);
         musicVoice = AUDIO_VOICE_INVALID;
@@ -193,9 +195,7 @@ void Sound::StopMusic() {
 
 void Sound::SetMusicVolume(f32 volume) {
     musicVolume = volume;
-    if (musicVoice != AUDIO_VOICE_INVALID) {
-        AudioEngine::SetVoiceVolume(musicVoice, musicMuted ? 0.0f : volume);
-    }
+    AudioEngine::SetMusicVolume(musicMuted ? 0.0f : volume);
 }
 
 void Sound::SetEffectsVolume(f32 volume) {
@@ -208,15 +208,11 @@ void Sound::SetDialogVolume(f32 volume) {
 
 void Sound::MuteMusic() {
     musicMuted = true;
-    if (musicVoice != AUDIO_VOICE_INVALID) {
-        AudioEngine::FadeVoiceVolume(musicVoice, 0.0f, PSX_MUSIC_FADE_MS);
-    }
+    AudioEngine::FadeMusicVolume(0.0f, PSX_MUSIC_FADE_MS);
 }
 
 void Sound::UnmuteMusic() {
     musicMuted = false;
-    if (musicVoice != AUDIO_VOICE_INVALID) {
-        AudioEngine::FadeVoiceVolume(musicVoice, musicVolume, PSX_MUSIC_FADE_MS);
-    }
+    AudioEngine::FadeMusicVolume(musicVolume, PSX_MUSIC_FADE_MS);
 }
 

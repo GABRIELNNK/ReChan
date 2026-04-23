@@ -57,6 +57,9 @@ public:
 
     u32 GetNumBlocks() const { return totalBlocks; }
 
+    // PSX player death-volume handling clears BlockManager +0x8C before queuing death.
+    void SetDeathVolumeFlag(s32 value) { flag3 = (u32)value; }
+
     // Block array access (for rendering iteration)
     Block* GetBlocks() { return blocks.data(); }
     const Block* GetBlocks() const { return blocks.data(); }

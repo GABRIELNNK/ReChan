@@ -63,17 +63,38 @@ static std::mutex g_voiceMutex;
 static ListenerState g_listener;
 static std::mutex g_listenerMutex;
 
-// Music stream state
+// Music state
 static ma_decoder g_musicDecoder;
 static bool g_musicActive = false;
+static AudioSample g_musicSample = AUDIO_SAMPLE_INVALID;
+static bool g_musicSampleActive = false;
 static bool g_musicLoop = false;
+static f64 g_musicPositionF = 0.0;
 static f32 g_musicVolume = 1.0f;
+static f32 g_musicFadeStartVolume = 1.0f;
+static f32 g_musicFadeTargetVolume = 1.0f;
+static u32 g_musicFadeFramesTotal = 0;
+static u32 g_musicFadeFramesRemaining = 0;
 static std::mutex g_musicMutex;
 
 static inline f32 clampf(f32 v, f32 lo, f32 hi) {
     if (v < lo) return lo;
     if (v > hi) return hi;
     return v;
+}
+
+static inline void StepMusicFade() {
+    if (g_musicFadeFramesRemaining == 0) {
+        return;
+    }
+
+    const u32 step = g_musicFadeFramesTotal - g_musicFadeFramesRemaining + 1;
+    const f32 t = (f32)step / (f32)g_musicFadeFramesTotal;
+    g_musicVolume = g_musicFadeStartVolume + (g_musicFadeTargetVolume - g_musicFadeStartVolume) * t;
+    g_musicFadeFramesRemaining--;
+    if (g_musicFadeFramesRemaining == 0) {
+        g_musicVolume = g_musicFadeTargetVolume;
+    }
 }
 
 static void ComputeSpatialGains(
@@ -291,7 +312,57 @@ static void audioCallback(ma_device* device, void* output, const void* /*input*/
     // Mix music
     {
         std::lock_guard<std::mutex> lock(g_musicMutex);
-        if (g_musicActive) {
+        if (g_musicSampleActive) {
+            if (g_musicSample == AUDIO_SAMPLE_INVALID || g_musicSample > MAX_SAMPLES) {
+                g_musicSampleActive = false;
+            }
+            else {
+                InternalSample& smp = g_samples[g_musicSample - 1];
+                if (!smp.data) {
+                    g_musicSampleActive = false;
+                }
+                else {
+                    const f64 rateRatio = (f64)smp.sampleRate / (f64)g_deviceSampleRate;
+                    for (u32 i = 0; i < frameCount; i++) {
+                        StepMusicFade();
+
+                        u32 pos = (u32)g_musicPositionF;
+                        if (pos >= smp.numFrames) {
+                            if (g_musicLoop) {
+                                g_musicPositionF = 0.0;
+                                pos = 0;
+                            }
+                            else {
+                                g_musicSampleActive = false;
+                                break;
+                            }
+                        }
+
+                        const f32 mvol = g_musicVolume * g_masterVolume;
+                        const f32 left =
+                            (smp.channels >= 2)
+                            ? (smp.data[pos * 2] / 32768.0f)
+                            : (smp.data[pos] / 32768.0f);
+                        const f32 right =
+                            (smp.channels >= 2)
+                            ? (smp.data[pos * 2 + 1] / 32768.0f)
+                            : left;
+
+                        if (outChannels == 1) {
+                            out[i] += 0.5f * (left + right) * mvol;
+                        }
+                        else {
+                            const u32 dst = i * outChannels;
+                            out[dst] += left * mvol;
+                            out[dst + 1] += right * mvol;
+                        }
+
+                        g_musicPositionF += rateRatio;
+                    }
+                }
+            }
+        }
+        else if (g_musicActive) {
             // Read into temp buffer as f32
             f32 temp[4096];
             u32 remaining = frameCount;
@@ -311,8 +382,9 @@ static void audioCallback(ma_device* device, void* output, const void* /*input*/
                         break;
                     }
                 }
-                f32 mvol = g_musicVolume * g_masterVolume;
                 for (u32 i = 0; i < (u32)framesRead; i++) {
+                    StepMusicFade();
+                    const f32 mvol = g_musicVolume * g_masterVolume;
                     const f32 l = temp[i * MUSIC_CHANNELS] * mvol;
                     const f32 r = temp[i * MUSIC_CHANNELS + 1] * mvol;
 
@@ -365,6 +437,15 @@ bool AudioEngine::Init() {
     g_outputMono = false;
     g_outputChannels = DEFAULT_MIX_CHANNELS;
     g_musicActive = false;
+    g_musicSample = AUDIO_SAMPLE_INVALID;
+    g_musicSampleActive = false;
+    g_musicPositionF = 0.0;
+    g_musicLoop = false;
+    g_musicVolume = 1.0f;
+    g_musicFadeStartVolume = 1.0f;
+    g_musicFadeTargetVolume = 1.0f;
+    g_musicFadeFramesTotal = 0;
+    g_musicFadeFramesRemaining = 0;
     g_listener = {};
     g_listener.valid = false;
 
@@ -628,10 +709,39 @@ bool AudioEngine::PlayMusic(const char* path, f32 volume, bool loop) {
     }
 
     g_musicVolume = volume;
+    g_musicFadeStartVolume = volume;
+    g_musicFadeTargetVolume = volume;
+    g_musicFadeFramesTotal = 0;
+    g_musicFadeFramesRemaining = 0;
     g_musicLoop = loop;
     g_musicActive = true;
 
     LOG("AudioEngine: playing music '%s'", path);
+    return true;
+}
+
+bool AudioEngine::PlayMusicSample(AudioSample sample, f32 volume, bool loop) {
+    if (!g_initialized || sample == AUDIO_SAMPLE_INVALID || sample > MAX_SAMPLES) {
+        return false;
+    }
+
+    StopMusic();
+
+    std::lock_guard<std::mutex> lock(g_musicMutex);
+    InternalSample& smp = g_samples[sample - 1];
+    if (!smp.data || smp.numFrames == 0) {
+        return false;
+    }
+
+    g_musicSample = sample;
+    g_musicSampleActive = true;
+    g_musicPositionF = 0.0;
+    g_musicLoop = loop;
+    g_musicVolume = volume;
+    g_musicFadeStartVolume = volume;
+    g_musicFadeTargetVolume = volume;
+    g_musicFadeFramesTotal = 0;
+    g_musicFadeFramesRemaining = 0;
     return true;
 }
 
@@ -641,16 +751,56 @@ void AudioEngine::StopMusic() {
         g_musicActive = false;
         ma_decoder_uninit(&g_musicDecoder);
     }
+    g_musicSample = AUDIO_SAMPLE_INVALID;
+    g_musicSampleActive = false;
+    g_musicPositionF = 0.0;
+    g_musicFadeFramesTotal = 0;
+    g_musicFadeFramesRemaining = 0;
 }
 
 void AudioEngine::SetMusicVolume(f32 volume) {
     std::lock_guard<std::mutex> lock(g_musicMutex);
     g_musicVolume = volume;
+    g_musicFadeStartVolume = volume;
+    g_musicFadeTargetVolume = volume;
+    g_musicFadeFramesTotal = 0;
+    g_musicFadeFramesRemaining = 0;
+}
+
+void AudioEngine::FadeMusicVolume(f32 targetVolume, u32 fadeMs) {
+    std::lock_guard<std::mutex> lock(g_musicMutex);
+    if (!g_musicActive && !g_musicSampleActive) {
+        return;
+    }
+
+    if (fadeMs == 0) {
+        g_musicVolume = targetVolume;
+        g_musicFadeStartVolume = targetVolume;
+        g_musicFadeTargetVolume = targetVolume;
+        g_musicFadeFramesTotal = 0;
+        g_musicFadeFramesRemaining = 0;
+        return;
+    }
+
+    const u32 frames = (u32)(((u64)fadeMs * (u64)g_deviceSampleRate) / 1000u);
+    if (frames == 0) {
+        g_musicVolume = targetVolume;
+        g_musicFadeStartVolume = targetVolume;
+        g_musicFadeTargetVolume = targetVolume;
+        g_musicFadeFramesTotal = 0;
+        g_musicFadeFramesRemaining = 0;
+        return;
+    }
+
+    g_musicFadeStartVolume = g_musicVolume;
+    g_musicFadeTargetVolume = targetVolume;
+    g_musicFadeFramesTotal = frames;
+    g_musicFadeFramesRemaining = frames;
 }
 
 bool AudioEngine::IsMusicPlaying() {
     std::lock_guard<std::mutex> lock(g_musicMutex);
-    return g_musicActive;
+    return g_musicActive || g_musicSampleActive;
 }
 
 void AudioEngine::SetMasterVolume(f32 volume) {
