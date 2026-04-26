@@ -28,7 +28,7 @@ namespace Tim {
     tTexture* CreateTexture(const TimImage* img);
 }
 
-// 2D overlay drawing - all coordinates in normalized 0..1 range.
+// 2D overlay drawing
 // Creates/caches an internal shader on first use.
 namespace ScreenDraw {
     // Draw a texture filling the entire screen (opaque, no alpha).
@@ -49,7 +49,6 @@ namespace ScreenDraw {
     void DrawColoredQuad(u8 r, u8 g, u8 b, u8 a);
 
     // Draw a Gouraud-shaded quad with 4 per-vertex colors (PSX POLYG4).
-    // Coords in normalized 0-1 screen space (Y-up).
     void DrawGouraudQuad(f32 x0, f32 y0, u8 r0, u8 g0, u8 b0, u8 a0,
                          f32 x1, f32 y1, u8 r1, u8 g1, u8 b1, u8 a1,
                          f32 x2, f32 y2, u8 r2, u8 g2, u8 b2, u8 a2,

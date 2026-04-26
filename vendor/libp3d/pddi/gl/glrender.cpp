@@ -866,13 +866,16 @@ void glContext::DrawQuad(pddiBaseShader* shader,
     glUniformMatrix4fv(glGetUniformLocation(s->GetProgram(), "uProj"),
                        1, GL_FALSE, projection.Data());
 
+    const float yTop = y;
+    const float yBottom = y + h;
+
     float verts[] = {
-        x,     y,     u0, v1,
-        x + w, y,     u1, v1,
-        x + w, y + h, u1, v0,
-        x,     y,     u0, v1,
-        x + w, y + h, u1, v0,
-        x,     y + h, u0, v0,
+        x,     yBottom, u0, v1,
+        x + w, yBottom, u1, v1,
+        x + w, yTop,    u1, v0,
+        x,     yBottom, u0, v1,
+        x + w, yTop,    u1, v0,
+        x,     yTop,    u0, v0,
     };
 
     glBindVertexArray(quadVAO);

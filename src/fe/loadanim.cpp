@@ -43,10 +43,10 @@ static void DrawLoadingScreen(u8 fill) {
     if (fill > 100)
         fill = 100;
 
-    f32 nx = kBarLeftX / DEFAULT_SCREEN_WIDTH;
-    f32 ny = 1.0f - (kBarY + kBarH) / DEFAULT_SCREEN_HEIGHT;
-    f32 nw = kBarMaxW * (fill / 100.0f) / DEFAULT_SCREEN_WIDTH;
-    f32 nh = kBarH / DEFAULT_SCREEN_HEIGHT;
+    f32 nx = SCALE_AND_CENTER_X(kBarLeftX);
+    f32 ny = SCREEN_SCALE_Y(kBarY);
+    f32 nw = SCREEN_SCALE_X(kBarMaxW * (fill / 100.0f));
+    f32 nh = SCREEN_SCALE_Y(kBarH);
 
     u8 r8 = s_pulseR << 3;
     ScreenDraw::DrawColoredRect(nx, ny, nw, nh, r8, 0, 0, 255);

@@ -647,10 +647,10 @@ static constexpr u32 HASH_LEVEL_EXECUTE = 0x893DA6B2;
 
 // Overlay and text object hashes for the level select screen
 static constexpr u32 HASH_LOCATION_OVERLAY = 42519405;   // Menu_Location overlay
-static constexpr u32 HASH_TEXT_LEVELNAME   = 0x39AA5899;  // LevelName text
-static constexpr u32 HASH_TEXT_DRAGONBAR   = 0x3E799456;  // dragon bar text
-static constexpr u32 HASH_TEXT_GOLDDRAGON  = 0x07C775B9;  // gold dragon text
-static constexpr u32 HASH_TEXT_LEVELGRADE  = 0x6E7FDFDB;  // LevelGrade text
+static constexpr u32 HASH_TEXT_LEVELNAME = 0x39AA5899;  // LevelName text
+static constexpr u32 HASH_TEXT_DRAGONBAR = 0x3E799456;  // dragon bar text
+static constexpr u32 HASH_TEXT_GOLDDRAGON = 0x07C775B9;  // gold dragon text
+static constexpr u32 HASH_TEXT_LEVELGRADE = 0x6E7FDFDB;  // LevelGrade text
 
 void feMenuMgr::InitLevelMenu() {
     MARKFUNCTION(0x80011260);
@@ -694,7 +694,8 @@ void feMenuMgr::InitLevelMenu() {
                 dragonBarText->hdr.subtype = 5;
                 goldDragonText->fontHash = font ? xcHash("Gold_dr") : goldDragonText->fontHash;
                 goldDragonText->hdr.subtype = 5;
-            } else {
+            }
+            else {
                 levelNameText->paletteIdx = (u8)subLevel;
                 dragonBarText->hdr.subtype = 4;
                 goldDragonText->hdr.subtype = 4;
@@ -726,7 +727,8 @@ void feMenuMgr::InitLevelMenu() {
                         s32 pos = v13 + v15;
                         if (v13 >= collectCount) {
                             dragonBarStr[pos] = '0';
-                        } else {
+                        }
+                        else {
                             dragonBarStr[pos] = '1';
                         }
                         v13++;
@@ -743,7 +745,8 @@ void feMenuMgr::InitLevelMenu() {
                 if (goldDragonStr) {
                     if (g_scoreManager && g_scoreManager->CalcGDrags(collectCount)) {
                         goldDragonStr[0] = '1';
-                    } else {
+                    }
+                    else {
                         goldDragonStr[0] = '0';
                     }
                 }

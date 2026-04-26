@@ -40,8 +40,6 @@ void hdTtlive::SetTtlive(s32 frames) {
     SetVisible(1);
 }
 
-// ---- hdHealth ----
-
 hdHealth::hdHealth() {
     MARKFUNCTION(0x8008ED00);
 }
@@ -118,8 +116,6 @@ void hdHealth::Update() {
     }
 }
 
-// ---- hdTextOvl ----
-
 hdTextOvl::hdTextOvl() {
     MARKFUNCTION(0x8008F2A0);
     numberBuf[0] = 0;
@@ -142,8 +138,6 @@ void hdTextOvl::SetNumber(s32 num) {
     MARKFUNCTION(0x8008F334);
     sprintf(numberBuf, "%d", num);
 }
-
-// ---- hdAnimTextOvl ----
 
 hdAnimTextOvl::hdAnimTextOvl() {
     MARKFUNCTION(0x8008F360);
@@ -293,8 +287,6 @@ void hdAnimTextOvl::SetPauseState(s32 state, s32 arg) {
     pauseFlag = state;
 }
 
-// ---- hdDragon ----
-
 hdDragon::hdDragon() {
     MARKFUNCTION(0x8008F84C);
     dragonCount = 0;
@@ -329,8 +321,6 @@ void hdDragon::SetGoldDragons(s16 flag) {
         }
     }
 }
-
-// ---- hdHits ----
 
 hdHits::hdHits() {
     MARKFUNCTION(0x80090DC4);
@@ -414,8 +404,6 @@ void hdHits::SetVisible(s32 /*vis*/) {
         overlay->visibility = 0;
     }
 }
-
-// ---- hdTally ----
 
 hdTally::hdTally() {
     MARKFUNCTION(0x8008FDB4);
@@ -524,7 +512,6 @@ void hdTally::DoDoneStuff() {
     }
 }
 
-// ---- hdDestSelect ----
 hdDestSelect::hdDestSelect() {
     MARKFUNCTION(0x8008EFA4);
 }

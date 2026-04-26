@@ -185,53 +185,7 @@ static Mat4 BeginOverlay() {
     EnsureShader();
     Mat4 prev = p3d::context->GetProjectionMatrix();
 
-    f32 left = 0.0f, right = 1.0f, bottom = 0.0f, top = 1.0f;
-
-    int winW = p3d::display->GetWidth();
-    int winH = p3d::display->GetHeight();
-
-#if FIX_ASPECT_RATIO
-    if (winW > 0 && winH > 0) {
-        f32 windowAspect = (f32)winW / (f32)winH;
-        f32 contentAspect = 4.0f / 3.0f;
-        if (windowAspect > contentAspect) {
-            // Pillarbox - window wider than 4:3
-            f32 scale = contentAspect / windowAspect;
-            f32 range = 1.0f / scale;
-            f32 offset = (range - 1.0f) * 0.5f;
-            left = -offset;
-            right = 1.0f + offset;
-        }
-        else if (windowAspect < contentAspect) {
-            // Letterbox - window taller than 4:3
-            f32 scale = windowAspect / contentAspect;
-            f32 range = 1.0f / scale;
-            f32 offset = (range - 1.0f) * 0.5f;
-            bottom = -offset;
-            top = 1.0f + offset;
-        }
-    }
-
-    // Clip overlay rendering to the 4:3 content area.
-    // PSX screen is 512x240 - elements pushed off-screen by GoToMinPos etc.
-    // must not bleed into the widescreen pillarbox/letterbox area.
-    if (winW > 0 && winH > 0) {
-        f32 windowAspect = (f32)winW / (f32)winH;
-        f32 contentAspect = 4.0f / 3.0f;
-        int cx = 0, cy = 0, cw = winW, ch = winH;
-        if (windowAspect > contentAspect) {
-            cw = (int)(winH * contentAspect);
-            cx = (winW - cw) / 2;
-        }
-        else if (windowAspect < contentAspect) {
-            ch = (int)(winW / contentAspect);
-            cy = (winH - ch) / 2;
-        }
-        p3d::context->SetScissor(cx, cy, cw, ch);
-    }
-#endif
-
-    p3d::context->SetProjectionMatrix(Ortho(left, right, bottom, top, -1.0f, 1.0f));
+    p3d::context->SetProjectionMatrix(Ortho(0.0f, SCREEN_WIDTH, SCREEN_HEIGHT, 0.0f, -1.0f, 1.0f));
     p3d::context->EnableZBuffer(false);
     p3d::context->SetCullMode(PDDI_CULL_NONE);
 
@@ -243,13 +197,6 @@ static void EndOverlay(const Mat4& prev) {
     p3d::context->SetProjectionMatrix(prev);
     p3d::context->EnableZBuffer(true);
     p3d::context->SetBlendMode(PDDI_BLEND_NONE);
-
-#if FIX_ASPECT_RATIO
-    // Restore full-window scissor
-    int winW = p3d::display->GetWidth();
-    int winH = p3d::display->GetHeight();
-    p3d::context->SetScissor(0, 0, winW, winH);
-#endif
 }
 
 void ScreenDraw::DrawFullscreen(tTexture* tex) {
@@ -259,7 +206,7 @@ void ScreenDraw::DrawFullscreen(tTexture* tex) {
 
     s_screenShader->SetTexture(0, tex->GetTexture());
     s_screenShader->SetColour(0, pddiColour(128, 128, 128, 255));
-    p3d::context->DrawQuad(s_screenShader, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f);
+    p3d::context->DrawQuad(s_screenShader, SCALE_AND_CENTER_X(0.0f), 0.0f, SCREEN_SCALE_X(DEFAULT_SCREEN_WIDTH), SCREEN_HEIGHT, 0.0f, 0.0f, 1.0f, 1.0f);
 
     EndOverlay(prev);
 }
@@ -279,7 +226,7 @@ void ScreenDraw::DrawQuad(tTexture* tex, f32 x, f32 y, f32 w, f32 h,
 }
 
 void ScreenDraw::DrawColoredQuad(u8 r, u8 g, u8 b, u8 a) {
-    DrawColoredRect(0.0f, 0.0f, 1.0f, 1.0f, r, g, b, a);
+    DrawColoredRect(0.0f, 0.0f, (f32)SCREEN_WIDTH, (f32)SCREEN_HEIGHT, r, g, b, a);
 }
 
 void ScreenDraw::DrawColoredRect(f32 x, f32 y, f32 w, f32 h,

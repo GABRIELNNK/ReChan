@@ -50,6 +50,8 @@ public:
     s32 numTextures = 0;
     s32* texWidths = nullptr;
     s32* texHeights = nullptr;
+    float scaleX = 1.0f;
+    float scaleY = 1.0f;
 
     xcFont(const u8* rawData);
     ~xcFont();
@@ -57,12 +59,12 @@ public:
     const xcSpriteLetter* FindLetter(u8 ch) const;
     const xcSpriteLetter* FindLetter(u16 ch) const;
 
-    // PC: Draw text at 512x240 overlay position with xcJustify flags
-    void DrawText(const char* text, s32 screenX, s32 screenY,
+    void SetScale(float x, float y);
+    void DrawText(const char* text, f32 screenX, f32 screenY,
                   u32 color = 0xFFFFFFFF, u8 justify = 0, s32 lineSpacing = 0) const;
 
     // PC: Measure text width in 512-space pixels
-    s32 MeasureText(const char* text) const;
+    f32 MeasureText(const char* text) const;
 
 private:
     // PC: decode PSX raw image+palette data to RGBA texture

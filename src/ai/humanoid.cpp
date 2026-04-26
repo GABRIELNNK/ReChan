@@ -949,7 +949,7 @@ void Humanoid::SetActionState(u32 state, s32 param) {
         case AS_FLYING_BACK_CHECK: stateDispatch = SD_FLYING_BACK; break;
         case AS_SPIN_BACK_RECOVER: stateDispatch = SD_STAND; break;
         case AS_DEAD:              stateDispatch = SD_DEAD; break;
-        case AS_HOTFOOT:
+        case AS_NIS_MODE:
             field344 = 0;
             stateDispatch = SD_NIS_MODE;
             field348 = 8;

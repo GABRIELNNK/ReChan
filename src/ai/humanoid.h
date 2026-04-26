@@ -49,7 +49,7 @@ enum ActionState : u32 {
     AS_FLYING_BACK_CHECK = 70,
     AS_SPIN_BACK_RECOVER = 71,
     AS_DEAD = 72,
-    AS_HOTFOOT = 73,
+    AS_NIS_MODE = 73,
     AS_HIT_EXPLOSION = 74,
     AS_HIT_ENVIRONMENT = 75,
     AS_COUNT = 76,

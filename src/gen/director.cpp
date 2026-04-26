@@ -715,8 +715,8 @@ Director::Director() {
     wsBarCurrent = 0;
     wsBarTarget = 0;
     wsBarStep = 0;
-    wsMode = 0;
-    wsAlphaStep = 0;
+    wsMode = 2;
+    wsAlphaStep = 10;
     wsAlphaCurrent = 0;
     wsAlphaTarget = 0;
     field68 = 0;
@@ -759,6 +759,10 @@ void Director::InternalReset() {
     returnAddressIndex = 0;
     wsBarTarget = 0;
     wsBarCurrent = 0;
+    wsMode = 2;
+    wsAlphaStep = 10;
+    wsAlphaCurrent = 0;
+    wsAlphaTarget = 0;
 
     handlerSetB.PurgeHandlers();
     enableInput = 1;
@@ -1922,7 +1926,7 @@ void Director::ProcessHumanoidFunc() {
                         humanoid->actionState,
                         static_cast<u32>(humanoid->flags2));
                     humanoid->flags2 &= ~0x70u;
-                    humanoid->SetActionState(AS_HOTFOOT, 0);
+                    humanoid->SetActionState(AS_NIS_MODE, 0);
                     humanoid->flags &= ~0x800u;
                     humanoid->orientation.y = 0;
                     humanoid->SetDesiredMoveDirection(0);
@@ -1993,7 +1997,7 @@ void Director::ProcessHumanoidFunc() {
 
             case DirectorHumanoidCmd::SetStandState:
                 if (humanoid) {
-                    humanoid->SetActionState(AS_HOTFOOT, 0);
+                    humanoid->SetActionState(AS_NIS_MODE, 0);
                     humanoid->flags &= ~0x800u;
                 }
                 break;
@@ -2599,40 +2603,32 @@ void Director::HandleWideScreen() {
 void Director::DrawWideScreenPolys() {
     MARKFUNCTION(0x8003ED90);
 
-    if (wsBarCurrent == 0) {
+    if (wsBarCurrent == 0 || wsAlphaCurrent == 0) {
         return;
     }
-
-    if (wsAlphaCurrent == 0) {
-        return;
-    }
-
-    // PSX renders at 512x240 resolution. Bar height is wsBarCurrent scanlines
-    // from the top and bottom edges. Color is wsAlphaCurrent for semitrans bars,
-    // or black/white for full-alpha bars depending on wsMode.
 
     const f32 barFrac = static_cast<f32>(wsBarCurrent) / 240.0f;
+    f32 drawFrac = barFrac;
+    u8 alpha = static_cast<u8>((wsAlphaCurrent < 255) ? wsAlphaCurrent : 255);
 
-    if (wsAlphaCurrent < 255) {
-        // Semi-transparent bars - PSX uses SetSemiTrans with alpha = wsAlphaCurrent
-        const u8 alpha = static_cast<u8>(wsAlphaCurrent);
-        // Top bar
-        ScreenDraw::DrawColoredRect(0.0f, 0.0f, 1.0f, barFrac,
-                                    alpha, alpha, alpha, 255);
-        // Bottom bar
-        ScreenDraw::DrawColoredRect(0.0f, 1.0f - barFrac, 1.0f, barFrac,
-                                    alpha, alpha, alpha, 255);
+#if DIRECTOR_WIDESCREEN_SLIDE_BARS
+    const f32 alphaTarget = (wsAlphaTarget > 0) ? static_cast<f32>(wsAlphaTarget) : 255.0f;
+    const f32 slideProgress = Clamp(static_cast<f32>(wsAlphaCurrent) / alphaTarget, 0.0f, 1.0f);
+    drawFrac *= slideProgress;
+    alpha = 255;
+#endif
+
+    const f32 barHeight = drawFrac * SCREEN_HEIGHT;
+    if (barHeight <= 0.0f) {
+        return;
     }
-    else {
-        // Full opacity bars - PSX: mode 2 = black, other = white
-        u8 c = (wsMode == 2) ? 0 : 255;
-        // Top bar
-        ScreenDraw::DrawColoredRect(0.0f, 0.0f, 1.0f, barFrac,
-                                    c, c, c, 255);
-        // Bottom bar
-        ScreenDraw::DrawColoredRect(0.0f, 1.0f - barFrac, 1.0f, barFrac,
-                                    c, c, c, 255);
-    }
+
+    // Top bar
+    ScreenDraw::DrawColoredRect(0.0f, 0.0f, SCREEN_WIDTH, barHeight,
+                                0, 0, 0, alpha);
+    // Bottom bar
+    ScreenDraw::DrawColoredRect(0.0f, SCREEN_HEIGHT - barHeight, SCREEN_WIDTH, barHeight,
+                                0, 0, 0, alpha);
 }
 
 // PSX: PurgeAnims__8Director (DIRECTOR.CPP:4662, 0x8003F0E4)

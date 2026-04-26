@@ -80,6 +80,10 @@ void Display::BeginFrame() {
         if (height > 0) {
             cameraAspect = (f32)width / (f32)height;
         }
+
+        screenWidth = width;
+        screenHeight = height;
+        aspectRatio = cameraAspect;
     }
 #endif
 

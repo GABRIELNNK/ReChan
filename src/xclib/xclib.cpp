@@ -574,10 +574,10 @@ void xcSection::DrawPrimObj(u8* primData) {
             s16 x0, y0, x1, y1;
             prim->GetBounds(x0, y0, x1, y1);
 
-            f32 nx = SCALE_NORM_X(x0);
-            f32 ny = 1.0f - SCALE_NORM_Y(y1);
-            f32 nw = SCALE_NORM_X(x1 - x0);
-            f32 nh = SCALE_NORM_Y(y1 - y0);
+            f32 nx = SCALE_AND_CENTER_X((f32)x0);
+            f32 ny = SCREEN_SCALE_Y((f32)y0);
+            f32 nw = SCREEN_SCALE_X((f32)(x1 - x0));
+            f32 nh = SCREEN_SCALE_Y((f32)(y1 - y0));
 
             u8 alpha = (prim->code & 0x02) ? 128 : 255;
             if (prim->r == 0 && prim->g == 0 && prim->b == 0 && hdr->subtype == 0) {
@@ -597,10 +597,10 @@ void xcSection::DrawPrimObj(u8* primData) {
             }
 
             ScreenDraw::DrawGouraudQuad(
-                SCALE_NORM_X(prim->x0), 1.0f - SCALE_NORM_Y(prim->y0), prim->r0, prim->g0, prim->b0, alpha,
-                SCALE_NORM_X(prim->x1), 1.0f - SCALE_NORM_Y(prim->y1), prim->r1, prim->g1, prim->b1, alpha,
-                SCALE_NORM_X(prim->x2), 1.0f - SCALE_NORM_Y(prim->y2), prim->r2, prim->g2, prim->b2, alpha,
-                SCALE_NORM_X(prim->x3), 1.0f - SCALE_NORM_Y(prim->y3), prim->r3, prim->g3, prim->b3, alpha);
+                SCALE_AND_CENTER_X(prim->x0), SCREEN_SCALE_Y(prim->y0), prim->r0, prim->g0, prim->b0, alpha,
+                SCALE_AND_CENTER_X(prim->x1), SCREEN_SCALE_Y(prim->y1), prim->r1, prim->g1, prim->b1, alpha,
+                SCALE_AND_CENTER_X(prim->x2), SCREEN_SCALE_Y(prim->y2), prim->r2, prim->g2, prim->b2, alpha,
+                SCALE_AND_CENTER_X(prim->x3), SCREEN_SCALE_Y(prim->y3), prim->r3, prim->g3, prim->b3, alpha);
             break;
         }
         case XC_PRIM_SPRITE:
@@ -618,10 +618,10 @@ void xcSection::DrawPrimObj(u8* primData) {
 
             s32 sx = prim->mtx.GetX();
             s32 sy = prim->mtx.GetY();
-            f32 nx = SCALE_NORM_X(sx);
-            f32 ny = 1.0f - SCALE_NORM_Y(sy + cell->height);
-            f32 nw = SCALE_NORM_X(cell->width);
-            f32 nh = SCALE_NORM_Y(cell->height);
+            f32 nx = SCALE_AND_CENTER_X((f32)sx);
+            f32 ny = SCREEN_SCALE_Y((f32)sy);
+            f32 nw = SCREEN_SCALE_X((f32)cell->width);
+            f32 nh = SCREEN_SCALE_Y((f32)cell->height);
 
             ScreenDraw::DrawQuad(tex, nx, ny, nw, nh,
                                  0.0f, 0.0f, 1.0f, 1.0f,
@@ -646,9 +646,10 @@ void xcSection::DrawPrimObj(u8* primData) {
             if (sectionMan) font = sectionMan->FindFont(prim->fontHash);
             if (!font) break;
 
-            s32 posX = prim->mtx.GetX();
-            s32 posY = prim->mtx.GetY();
+            s32 posX = SCALE_AND_CENTER_X(prim->mtx.GetX());
+            s32 posY = SCREEN_SCALE_Y(prim->mtx.GetY());
 
+            font->SetScale(SCREEN_SCALE_X(1.0f), SCREEN_SCALE_Y(1.0f));
             font->DrawText(str, posX, posY, prim->GetColor(),
                            prim->hdr.flags, (s32)prim->lineSpacing);
             break;

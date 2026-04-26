@@ -9,7 +9,10 @@
 #define IMPROVED_DEBUG_CAM 1
 
 // Skip initial intros and goes straight into title screen
-#define SKIP_INTRO 0
+#define SKIP_INTRO 1
 
 // Adds support to any aspect ratio, fixes ui and camera.
 #define FIX_ASPECT_RATIO 1
+
+// Director cutscene bars: 0 = PSX-like alpha fade, 1 = slide in/out using alpha as progress.
+#define DIRECTOR_WIDESCREEN_SLIDE_BARS 1
