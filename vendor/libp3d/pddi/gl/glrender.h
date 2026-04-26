@@ -172,6 +172,9 @@ public:
     void BeginFrame() override;
     void EndFrame() override;
 
+    void SetCameraAspect(float aspect) override { cameraAspect = aspect; }
+    float GetCameraAspect() const override { return cameraAspect; }
+
     void SetClearColour(pddiColour c) override;
     void Clear(int flags) override;
 
@@ -207,6 +210,7 @@ public:
 
 private:
     glDisplay* display;
+    float cameraAspect = 0.0f;
     pddiColour clearColour;
     Mat4 projection;
     Mat4 viewMatrix;

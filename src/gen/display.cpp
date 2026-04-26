@@ -1,5 +1,6 @@
 #include "gen/display.h"
 #include "gen/camera.h"
+#include "gen/config.h"
 #include "p3d/context.h"
 #include "p3d/camera.h"
 #include "pddi/pddi.h"
@@ -70,6 +71,19 @@ void Display::InternalReset() {
 void Display::BeginFrame() {
     MARKFUNCTION(0x80026CA0);
     // PSX: P3D::BeginFrame() + save prim ptr + tView::BeginRender(view0)
+
+    f32 cameraAspect = 4.0f / 3.0f;
+#if FIX_ASPECT_RATIO
+    if (p3d::display) {
+        s32 width = p3d::display->GetWidth();
+        s32 height = p3d::display->GetHeight();
+        if (height > 0) {
+            cameraAspect = (f32)width / (f32)height;
+        }
+    }
+#endif
+
+    p3d::context->SetCameraAspect(cameraAspect);
     p3d::context->BeginFrame();
     p3d::context->Clear(PDDI_BUFFER_ALL);
     view.BeginRender();

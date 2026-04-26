@@ -24,7 +24,7 @@ ActionInput::ActionInput() {
     bindings[ACTION_GRAB] = { KEY_L, MouseBtn::Middle, GpBtn::B, GpBtn::NONE, GpAxis::NONE, 0 };
     bindings[ACTION_DIVE_ROLL] = { KEY_LEFT_CONTROL, MouseBtn::NONE, GpBtn::RB, GpBtn::NONE, GpAxis::NONE, 0 };
     bindings[ACTION_STRAFE] = { KEY_LEFT_SHIFT, MouseBtn::NONE, GpBtn::NONE, GpBtn::NONE, GpAxis::RTrigger, 0.5f };
-    bindings[ACTION_COUNTER] = { KEY_TAB, MouseBtn::NONE, GpBtn::LB, GpBtn::NONE, GpAxis::NONE, 0 };
+    bindings[ACTION_COUNTER] = { KEY_TAB, MouseBtn::NONE, GpBtn::NONE, GpBtn::NONE, GpAxis::LTrigger, 0.5f };
 
     bindings[ACTION_MOVE_UP] = { KEY_W, MouseBtn::NONE, GpBtn::NONE, GpBtn::DpadUp, GpAxis::LeftY, -0.3f };
     bindings[ACTION_MOVE_DOWN] = { KEY_S, MouseBtn::NONE, GpBtn::NONE, GpBtn::DpadDown, GpAxis::LeftY, 0.3f };

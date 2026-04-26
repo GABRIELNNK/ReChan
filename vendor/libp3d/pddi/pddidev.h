@@ -148,6 +148,10 @@ public:
     virtual void BeginFrame() = 0;
     virtual void EndFrame() = 0;
 
+    // Camera projection override.
+    virtual void SetCameraAspect(float aspect) = 0;
+    virtual float GetCameraAspect() const = 0;
+
     // Clear
     virtual void SetClearColour(pddiColour c) = 0;
     virtual void Clear(int flags) = 0;

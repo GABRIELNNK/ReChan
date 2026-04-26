@@ -9,8 +9,7 @@
 #define IMPROVED_DEBUG_CAM 1
 
 // Skip initial intros and goes straight into title screen
-#define SKIP_INTRO 1
+#define SKIP_INTRO 0
 
-// Scale 2D UI to maintain 4:3 aspect ratio instead of stretching to
-// fill the window. Adds pillarbox/letterbox bars when needed.
-#define CORRECT_UI_ASPECT 1
+// Adds support to any aspect ratio, fixes ui and camera.
+#define FIX_ASPECT_RATIO 1

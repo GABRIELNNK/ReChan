@@ -48,22 +48,32 @@ void tCamera::SetState() {
     f32 vfov_rad = 2.0f * std::atan(FIX16_TO_FLOAT(fovB));
     if (vfov_rad < 0.01f) vfov_rad = 0.7f; // safety fallback
 
-    // Use display aspect ratio
+    // Use the aspect selected by the game for this frame when provided.
     f32 aspect = 4.0f / 3.0f;
-    if (p3d::display) {
+    if (p3d::context) {
+        f32 overrideAspect = p3d::context->GetCameraAspect();
+        if (overrideAspect > 0.0f) {
+            aspect = overrideAspect;
+        }
+        else if (p3d::display) {
+            int w = p3d::display->GetWidth();
+            int h = p3d::display->GetHeight();
+            if (h > 0) aspect = (f32)w / (f32)h;
+        }
+    }
+    else if (p3d::display) {
         int w = p3d::display->GetWidth();
         int h = p3d::display->GetHeight();
         if (h > 0) aspect = (f32)w / (f32)h;
     }
 
     Mat4 proj = Perspective(vfov_rad, aspect, nearPlaneF, farPlaneF);
+
     // Standard GL perspective (looks along -Z). The Z-negate in the view
     // matrix (SetCameraMatrix) converts PSX +Z forward to GL -Z forward,
     // so no handedness hack is needed in the projection.
     p3d::context->SetProjectionMatrix(proj);
 }
-
-// --- tMatrixCamera (TMATRIXCAM.CPP) ---
 
 // PSX: _13tMatrixCameraP6MATRIX (0x8009D5E8)
 tMatrixCamera::tMatrixCamera(const Mat4* initialMatrix) {

@@ -190,7 +190,7 @@ static Mat4 BeginOverlay() {
     int winW = p3d::display->GetWidth();
     int winH = p3d::display->GetHeight();
 
-#if CORRECT_UI_ASPECT
+#if FIX_ASPECT_RATIO
     if (winW > 0 && winH > 0) {
         f32 windowAspect = (f32)winW / (f32)winH;
         f32 contentAspect = 4.0f / 3.0f;
@@ -211,11 +211,6 @@ static Mat4 BeginOverlay() {
             top = 1.0f + offset;
         }
     }
-#endif
-
-    p3d::context->SetProjectionMatrix(Ortho(left, right, bottom, top, -1.0f, 1.0f));
-    p3d::context->EnableZBuffer(false);
-    p3d::context->SetCullMode(PDDI_CULL_NONE);
 
     // Clip overlay rendering to the 4:3 content area.
     // PSX screen is 512x240 - elements pushed off-screen by GoToMinPos etc.
@@ -227,12 +222,18 @@ static Mat4 BeginOverlay() {
         if (windowAspect > contentAspect) {
             cw = (int)(winH * contentAspect);
             cx = (winW - cw) / 2;
-        } else if (windowAspect < contentAspect) {
+        }
+        else if (windowAspect < contentAspect) {
             ch = (int)(winW / contentAspect);
             cy = (winH - ch) / 2;
         }
         p3d::context->SetScissor(cx, cy, cw, ch);
     }
+#endif
+
+    p3d::context->SetProjectionMatrix(Ortho(left, right, bottom, top, -1.0f, 1.0f));
+    p3d::context->EnableZBuffer(false);
+    p3d::context->SetCullMode(PDDI_CULL_NONE);
 
     return prev;
 }
@@ -243,10 +244,12 @@ static void EndOverlay(const Mat4& prev) {
     p3d::context->EnableZBuffer(true);
     p3d::context->SetBlendMode(PDDI_BLEND_NONE);
 
+#if FIX_ASPECT_RATIO
     // Restore full-window scissor
     int winW = p3d::display->GetWidth();
     int winH = p3d::display->GetHeight();
     p3d::context->SetScissor(0, 0, winW, winH);
+#endif
 }
 
 void ScreenDraw::DrawFullscreen(tTexture* tex) {
