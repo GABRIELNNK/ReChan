@@ -6,6 +6,27 @@
 class Humanoid;
 struct DBVolume;
 
+// PSX: BehaviourAttrib (56 bytes) - parsed from scr\behave.txt and stored in AI::behaviourList.
+struct BehaviourAttrib : public ccNode {
+    u16 aggression = 50;      // +24
+    u16 circling = 75;        // +26
+    u16 distancing = 80;      // +28
+    u16 comboCount = 0;       // +30
+    u16* comboChances = nullptr; // +32
+    char** comboStrings = nullptr; // +36
+    u16 attackFreq = 0;       // +40
+    u16 minThink = 5;         // +42
+    u16 runningSpeed = 4000;  // +44
+    u16 strafingSpeed = 1250; // +46
+    u16 punch = 60;           // +48
+    u16 kick = 40;            // +50
+    u16 throwChance = 0;      // +52
+    u16 maxThink = 50;        // +54
+
+    BehaviourAttrib();
+    ~BehaviourAttrib() override;
+};
+
 // AI (116 bytes on PSX) - inherits Manager
 // PSX layout:
 //   +0:  Manager base (28 bytes)

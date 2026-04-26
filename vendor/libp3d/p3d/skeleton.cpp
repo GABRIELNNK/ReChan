@@ -53,8 +53,71 @@ STreeData::~STreeData() {
     }
 }
 
-void STreeData::ComputeWorldMatrices(Mat4* outMatrices) const {
-    if (!joints || numJoints == 0) {
+STreeData* CloneSTreeData(const STreeData* source) {
+    if (!source) {
+        return nullptr;
+    }
+
+    STreeData* clone = new STreeData();
+    clone->numJoints = source->numJoints;
+    clone->numMapEntries = source->numMapEntries;
+
+    if (source->jointOrderMap && source->numMapEntries > 0) {
+        clone->jointOrderMap = static_cast<u32*>(std::malloc(sizeof(u32) * source->numMapEntries));
+        if (!clone->jointOrderMap) {
+            delete clone;
+            return nullptr;
+        }
+        std::memcpy(clone->jointOrderMap, source->jointOrderMap, sizeof(u32) * source->numMapEntries);
+    }
+
+    if (source->joints && source->numJoints > 0) {
+        clone->joints = static_cast<STreeJoint*>(std::malloc(sizeof(STreeJoint) * source->numJoints));
+        if (!clone->joints) {
+            delete clone;
+            return nullptr;
+        }
+
+        for (u32 i = 0; i < source->numJoints; i++) {
+            clone->joints[i] = source->joints[i];
+            clone->joints[i].callbackData = nullptr;
+            clone->joints[i].preCallback = nullptr;
+            clone->joints[i].postCallback = nullptr;
+            clone->joints[i].flags &= ~(STF_PRE_CALLBACK_MASK | STF_POST_CALLBACK_MASK);
+            clone->joints[i].useOverrideMatrix = false;
+            clone->joints[i].meshBuffer = nullptr;
+        }
+    }
+
+    return clone;
+}
+
+STreeJoint* STreeData::GetJoint(s32 index) {
+    return const_cast<STreeJoint*>(static_cast<const STreeData*>(this)->GetJoint(index));
+}
+
+const STreeJoint* STreeData::GetJoint(s32 index) const {
+    if (index < 0 || !joints || numJoints == 0) {
+        return nullptr;
+    }
+
+    u32 jointIndex = static_cast<u32>(index);
+    if (jointOrderMap) {
+        if (jointIndex >= numMapEntries) {
+            return nullptr;
+        }
+        jointIndex = jointOrderMap[jointIndex];
+    }
+
+    if (jointIndex >= numJoints) {
+        return nullptr;
+    }
+
+    return &joints[jointIndex];
+}
+
+static void ComputeWorldMatricesInternal(STreeData* skeleton, Mat4* outMatrices, bool invokeCallbacks) {
+    if (!skeleton || !skeleton->joints || skeleton->numJoints == 0) {
         return;
     }
 
@@ -82,10 +145,32 @@ void STreeData::ComputeWorldMatrices(Mat4* outMatrices) const {
         return captureCount++;
     };
 
-    for (u32 i = 0; i < numJoints; i++) {
-        const STreeJoint& j = joints[i];
+    for (u32 i = 0; i < skeleton->numJoints; i++) {
+        STreeJoint& j = skeleton->joints[i];
+        const bool preserveJointState = invokeCallbacks
+            && ((j.flags & (STF_PRE_CALLBACK_MASK | STF_POST_CALLBACK_MASK)) != 0);
 
-        // PSX order: PUSH -> TRANSFORM -> CAPTURE -> LOAD -> OUTPUT -> POP/POP_ALT
+        u32 savedFlags = 0;
+        s32 savedTranslationX = 0;
+        s32 savedTranslationY = 0;
+        s32 savedTranslationZ = 0;
+        s16 savedRotationX = 0;
+        s16 savedRotationY = 0;
+        s16 savedRotationZ = 0;
+        bool savedUseOverrideMatrix = false;
+        Mat4 savedOverrideMatrix;
+
+        if (preserveJointState) {
+            savedFlags = j.flags;
+            savedTranslationX = j.translationX;
+            savedTranslationY = j.translationY;
+            savedTranslationZ = j.translationZ;
+            savedRotationX = j.rotationX;
+            savedRotationY = j.rotationY;
+            savedRotationZ = j.rotationZ;
+            savedUseOverrideMatrix = j.useOverrideMatrix;
+            savedOverrideMatrix = j.overrideMatrix;
+        }
 
         if (j.flags & STF_PUSH_MATRIX) {
             if (stackTop < 32) {
@@ -93,11 +178,23 @@ void STreeData::ComputeWorldMatrices(Mat4* outMatrices) const {
             }
         }
 
+        if (invokeCallbacks && (j.flags & STF_PRE_CALLBACK_MASK) && j.preCallback) {
+            j.preCallback(&j, i, current);
+        }
+
+        if ((j.flags & STF_MULT_MATRIX) && j.useOverrideMatrix) {
+            current = current * j.overrideMatrix;
+        }
+
         if (j.flags & STF_TRANSFORM) {
             Mat4 local;
             p3dBuildRotMatrixYZX(j.rotationX, j.rotationY, j.rotationZ, local);
             local.SetTranslation((f32)j.translationX, (f32)j.translationY, (f32)j.translationZ);
             current = current * local;
+        }
+
+        if (invokeCallbacks && (j.flags & STF_POST_CALLBACK_MASK) && j.postCallback) {
+            j.postCallback(&j, i, current);
         }
 
         if (j.flags & STF_CAPTURE_MATRIX) {
@@ -126,7 +223,28 @@ void STreeData::ComputeWorldMatrices(Mat4* outMatrices) const {
                 current = matStack[--stackTop];
             }
         }
+
+        if (preserveJointState) {
+            // PSX callbacks affect the matrix build for this draw only.
+            j.flags = savedFlags;
+            j.translationX = savedTranslationX;
+            j.translationY = savedTranslationY;
+            j.translationZ = savedTranslationZ;
+            j.rotationX = savedRotationX;
+            j.rotationY = savedRotationY;
+            j.rotationZ = savedRotationZ;
+            j.useOverrideMatrix = savedUseOverrideMatrix;
+            j.overrideMatrix = savedOverrideMatrix;
+        }
     }
+}
+
+void STreeData::ComputeWorldMatrices(Mat4* outMatrices) const {
+    ComputeWorldMatricesInternal(const_cast<STreeData*>(this), outMatrices, false);
+}
+
+void STreeData::ComputeWorldMatricesWithCallbacks(Mat4* outMatrices) {
+    ComputeWorldMatricesInternal(this, outMatrices, true);
 }
 
 // Parse a single 0x6121 joint sub-chunk
@@ -189,6 +307,10 @@ static bool ParseJointChunk(const u8* data, u32 dataSize, STreeJoint* out) {
     out->bindRotationX = 0;
     out->bindRotationY = 0;
     out->bindRotationZ = 0;
+    out->callbackData = nullptr;
+    out->preCallback = nullptr;
+    out->postCallback = nullptr;
+    out->useOverrideMatrix = false;
     out->meshBuffer = nullptr;
 
     // Optional 0x6125 rest-pose sub-chunk (single optional child in STLOAD AddJoint).

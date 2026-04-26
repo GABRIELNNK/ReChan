@@ -53,6 +53,17 @@ PlayerModel::PlayerModel() {
 
 PlayerModel::~PlayerModel() {}
 
+// PSX: SetupModelCallbacks__11PlayerModel (MPLAYER.CPP:361, 0x80077DF8)
+void PlayerModel::SetupModelCallbacks() {
+    MARKFUNCTION(0x80077DF8);
+    HumanoidModel::SetupModelCallbacks();
+}
+
+s32 PlayerModel::MirrorTree() {
+    MARKFUNCTION(0x80077F84);
+    return SModel::MirrorTree();
+}
+
 void PlayerModel::ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 p4, s32 p5) {
     Player* owner = (backPtr && backPtr->thingType == AITypes::TT_PLAYER)
         ? static_cast<Player*>(backPtr)

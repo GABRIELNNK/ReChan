@@ -242,7 +242,7 @@ void Door::Trigger() {
     }
     else {
         // Non-hub: play door open sound
-        CSoundDirect::PlayTransient(156, static_cast<void*>(&pos), 0, 0);
+        CSoundDirect::PlayTransient(156, nullptr, 0, 0);
     }
 }
 
@@ -250,7 +250,7 @@ void Door::Open() {
     MARKFUNCTION(0x8001B1D8);
     // PSX Open__4Door: doorState = 2 and transient SFX 156.
     doorState = 2;
-    CSoundDirect::PlayTransient(156, static_cast<void*>(&pos), 0, 0);
+    CSoundDirect::PlayTransient(156, nullptr, 0, 0);
 }
 
 void Door::Move() {
@@ -408,12 +408,7 @@ void Door::DeathCheck() {
         // PSX: check if ActiveZone still has thinking (alive) members
         // 0x800A6E30 = ActiveZone::GetNumberOfThinkingMembers
         ActiveZone* az = static_cast<ActiveZone*>(static_cast<ccNode*>(killTarget));
-        s32 thinkingCount = 0;
-        for (s32 i = 0; i < az->memberCount; i++) {
-            if (az->members[i] != nullptr) {
-                thinkingCount++;
-            }
-        }
+        s32 thinkingCount = az->GetNumberOfThinkingMembers();
 
         if (thinkingCount > 0) {
             // Still alive - reset countdown

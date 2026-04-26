@@ -3,6 +3,8 @@
 #include "p3d/p3dmath.h"
 
 class Humanoid;
+struct LinearPath;
+struct BehaviourAttrib;
 
 // Behaviour - AI decision-making for humanoid entities
 // PSX: 280 bytes. Controls enemy actions, patrol, combat decisions.
@@ -13,8 +15,19 @@ struct Behaviour {
     // PSX +24: owning Humanoid pointer.
     Humanoid* owner = nullptr;
 
-    // PSX +196 (s16): controller pad port index (0 or 1)
-    s16 padPort = 0;
+    // PSX +28: copied AI/thing type used by behaviour dispatch.
+    u32 aiType = 0;
+
+    // PSX +32/+36/+40: path-AI state.
+    LinearPath* currentPath = nullptr;
+    u32 field36 = 0;
+    u32 currentPathNodeIndex = 0;
+
+    // PSX +56: constructor AI parameter.
+    s32 aiParam = 0;
+
+    // PSX +196 (s16): controller pad port index.
+    s16 padPort = 1;
 
     // PSX +200..+203: action request state data (used by FindActionRequest)
     u32 actionRequestState[9] = {};
@@ -22,8 +35,8 @@ struct Behaviour {
     // PSX +204/+208/+212: destination point for MoveToDestinationPoint
     LVector destPoint = {};
 
-    // PSX +216 (ptr): animation/config data pointer (speed reference)
-    void* animConfigPtr = nullptr;
+    // PSX +216 (ptr): behaviour attrib / animation config data pointer
+    BehaviourAttrib* animConfigPtr = nullptr;
 
     // PSX +220/+222/+224: behaviour handler dispatch thunk.
     s16 handlerThisOffset = 0;
@@ -44,8 +57,12 @@ struct Behaviour {
     // PSX +272 (u32): previous controller mask cache.
     u32 previousButtons = 0;
 
+    // PSX +276 (u32): unmapped behaviour state used by AiFollowPath/Jumping.
+    u32 field276 = 0;
+
     Behaviour(Humanoid* ownerHumanoid, u32 handlerType, s32 aiParam);
     void SetAIHandler(u32 handlerType);
+    bool InActiveZone() const;
     s32 MoveToDestinationPoint(u32 threshold);
     virtual void Process();
     virtual ~Behaviour() = default;

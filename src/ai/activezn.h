@@ -51,5 +51,8 @@ public:
     void AddSubZoneVolume(SubZoneVolume* szv);
     void AddHumanoidToOverlordMembers(Humanoid* h);
     void RemoveHumanoidFromOverlordMembers(Humanoid* h);
+    s32 GetNumberOfThinkingMembers() const;
     bool IsInActiveZone(class Thing* thing) const;
+    bool IsPathNodeTerminator(LinearPath* path, s32 nodeIndex) const;
+    bool AllowBreakoffOfDestinationNode(LinearPath* path, s32 nodeIndex) const;
 };

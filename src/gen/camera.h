@@ -51,6 +51,7 @@ public:
     void PlayAsyncAnim();
     void DeleteAsyncAnim();
     LVector GetCameraVector() const;
+    bool HasAsyncAnimLoaded() const { return asyncAnim != nullptr; }
 
     // Accessors
     tMatrixCamera* GetP3DCamera() { return &p3dCamera; }

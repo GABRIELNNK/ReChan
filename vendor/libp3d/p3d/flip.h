@@ -52,8 +52,10 @@ struct TransformFlip {
     s32 frameReal;          // +0x24: current frame (16.16 fixed-point)
     s32 dirty;              // +0x28: needs re-evaluation flag
     bool additiveTranslation;// non-bind clips use translation offsets from bind pose
+    bool mirrored;
     TransformAnim* anim;    // +0x1C: animation data
     STreeData* tree;        // +0x34: target skeleton
+    const u32* mirroredJointOrderMap;
 
     TransformFlip();
     ~TransformFlip();

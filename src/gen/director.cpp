@@ -18,7 +18,10 @@
 #include "snd/drctrsnd.h"
 #include "snd/snddrct.h"
 #include "snd/sound.h"
+#include "p3d/context.h"
+#include "p3d/inventory.h"
 #include "p3d/p3dmath.h"
+#include "p3d/ramtexanim.h"
 #include "snd/rsevent.h"
 #include "pc/tim.h"
 #include "pc/inputaction.h"
@@ -27,11 +30,12 @@
 #include "gen/director_scripts_800d6f14.inc"
 
     // PSX globals used by DIRECTOR.CPP script control flow.
-    // Addresses from decomp notes:
-    // - directorTimeOut: gp+1068 (0x800DC960)
-    // - returnAddress:   gp+1056..1087 (0x800DFC84)
-    // - codeSnipThing:   gp+869 (stored in global, NOT in Director object)
-    static s32 directorTimeOut = 0;
+    // - g_directorActive (defined in GAME.CPP): gp+20 symbol `directorTimeOut` (0x800DC960)
+    //   used by gsPlayState to run Director-only frames.
+    // - directorElapsedFrames: gp+0x42C scratch value written each Process tick.
+    // - returnAddress: gp+0x420.. used by Call/Return.
+    // - codeSnipThing: gp+869 (stored in global, NOT in Director object)
+    static s32 directorElapsedFrames = 0;
     static s32 returnAddressIndex = 0;
     static s32 directorDialogCounter = -1;
     static s32 directorDialogLimit = 180;
@@ -41,6 +45,9 @@
     // the door/ladder from this global. SetCodeSnip stores the thing here via gp[869].
     static Thing*& g_selectedDoorOrLadder = g_codeSnipThing;
     static s32 g_dialogHandle = 0;          // PSX: gp[3496/4=874]
+
+    void runDirector(Handler* h);
+    void DrawDirectorOverlays(Handler* h);
 
     static s32 start_generic[26] = {
         9, 6, -1, 98, 102, 40, 103, 256, 100, 0,
@@ -559,6 +566,20 @@
         return nullptr;
     }
 
+    static void LogDirectorCommand(const char* streamName, const s32* commandPtr, const char* commandName, s32 commandValue) {
+        const u32 scriptAddress = commandPtr ? ToVirtualAddress(commandPtr) : 0;
+        LOG("[Director][%s] cmd=%s value=%d (0x%X) script=0x%08X",
+            streamName ? streamName : "Main",
+            commandName ? commandName : "Unknown",
+            commandValue,
+            static_cast<u32>(commandValue),
+            scriptAddress);
+    }
+
+    static void LogDirectorUnknownCommand(const char* streamName, const s32* commandPtr, s32 commandValue) {
+        LogDirectorCommand(streamName, commandPtr, "Unknown", commandValue);
+    }
+
     static s32 GetDirectorFrameCounter() {
         if (!g_time) {
             return 0;
@@ -630,6 +651,19 @@
         return dynamic_cast<Humanoid*>(thing);
     }
 
+    static Humanoid* FindHumanoidInHumanoidListByScriptRef(u32 ref) {
+        if (!g_ai) {
+            return nullptr;
+        }
+
+        Thing* thing = FindThingInListByScriptRef(g_ai->humanoidList, ref);
+        if (!thing) {
+            return nullptr;
+        }
+
+        return static_cast<Humanoid*>(thing);
+    }
+
     static Camera* GetGameCamera() {
         if (!g_display) {
             return nullptr;
@@ -652,22 +686,21 @@
         return g_game->GetWorld()->GetCurLevelID();
     }
 
-    // PSX: sets TF2_DIRECTOR_ACTIVE (0x200) on all humanoids during script processing.
-    // This prevents normal AI think/move for entities while the director runs.
+    // PSX: sets Thing::flags bit 0x200 on all humanoids during script processing.
     static void SetDirectorFlagsOnHumanoids() {
         if (!g_ai) return;
         for (ccMinNode* n = g_ai->humanoidList.head; n; n = n->next) {
             Thing* thing = static_cast<Thing*>(n);
-            thing->flags2 |= TF2_DIRECTOR_ACTIVE;
+            thing->flags |= TF_DIRECTOR_ACTIVE;
         }
     }
 
-    // PSX: clears TF2_DIRECTOR_ACTIVE (0x200) on all humanoids when script ends.
+    // PSX: clears Thing::flags bit 0x200 on all humanoids when script ends.
     static void ClearDirectorFlagsOnHumanoids() {
         if (!g_ai) return;
         for (ccMinNode* n = g_ai->humanoidList.head; n; n = n->next) {
             Thing* thing = static_cast<Thing*>(n);
-            thing->flags2 &= ~TF2_DIRECTOR_ACTIVE;
+            thing->flags &= ~TF_DIRECTOR_ACTIVE;
         }
     }
 
@@ -698,25 +731,25 @@ Director::~Director() {
 // PSX: InternalOpen__8Director (DIRECTOR.CPP:2704, 0x800CA2AC)
 void Director::InternalOpen() {
     MARKFUNCTION(0x800CA2AC);
-    // PSX: registers runDirector and DrawDirectorOverlays handlers
-    // into Game's handlerSets. Handlers wired in Game::InternalOpen instead.
+    if (g_game) {
+        runDirectorHandler = g_game->GetHandlerSet1().AddHandler(runDirector, 20);
+        overlayHandler = g_game->GetHandlerSet2().AddHandler(DrawDirectorOverlays, -31);
+    }
+
+    Manager::InternalOpen();
 }
 
 // PSX: InternalClose__8Director (DIRECTOR.CPP:2757, 0x8003C11C)
 void Director::InternalClose() {
     MARKFUNCTION(0x8003C11C);
-    PurgeAnims();
-    cleanUpTexAnim();
-    if (directorSound) {
-        delete directorSound;
-        directorSound = nullptr;
-    }
+    handlerSetA.PurgeHandlers();
+    handlerSetB.PurgeHandlers();
+    Manager::InternalClose();
 }
 
 // PSX: InternalReset__8Director (DIRECTOR.CPP:2736, 0x8003C04C)
 void Director::InternalReset() {
     MARKFUNCTION(0x8003C04C);
-    // PSX: clears script pointers, widescreen state, timer, purges handler lists
     scriptState = 0;
     timerTarget = 0;
     timerStart = 0;
@@ -726,17 +759,9 @@ void Director::InternalReset() {
     returnAddressIndex = 0;
     wsBarTarget = 0;
     wsBarCurrent = 0;
-    wsBarStep = 0;
-    wsMode = 0;
-    wsAlphaStep = 0;
-    wsAlphaCurrent = 0;
-    wsAlphaTarget = 0;
-    field68 = 0;
+
+    handlerSetB.PurgeHandlers();
     enableInput = 1;
-    // PSX: purges internal director handler lists at +100, +136
-    // PSX: sets enableInput=1 (a1[18]=1) and gp[3484/4=871]=1
-    PurgeAnims();
-    cleanUpTexAnim();
 }
 
 // PSX: LevelReset__8Director (DIRECTOR.CPP:2731, 0x8003C044)
@@ -749,10 +774,9 @@ void Director::LevelReset() {
 void Director::SetScript() {
     MARKFUNCTION(0x8003C234);
 
-    RegisterKnownDirectorScriptRegions();
-
+    // PSX: a1[0x1C] = a1[0x24] = defaultBeginScript; a1[0xA8] = 534;
+    //      gp[0x424] = -1; gp[0x420] = 0; gp[0x428] = 180.
     scriptPtr = defaultBeginScript;
-    RegisterRuntimeScriptRegion(scriptPtr);
     codeSnipPtr = defaultBeginScript;
     scriptState = 534;
 
@@ -766,6 +790,8 @@ void Director::SetCodeSnip(s32* snip, Thing* thing) {
     MARKFUNCTION(0x8003C268);
 
     RegisterKnownDirectorScriptRegions();
+
+    LOG("[Director][SetCodeSnip] script=0x%08X thing=%p", ToVirtualAddress(snip), thing);
 
     scriptState = 537;
 
@@ -783,12 +809,19 @@ void Director::SetCodeSnip(s32* snip, Thing* thing) {
 bool Director::TriggerDeathVolume(s32 newDeathType) {
     RegisterKnownDirectorScriptRegions();
 
+    LOG("[Director][TriggerDeathVolume] requestedType=%d currentCodeSnip=0x%08X deathVol=0x%08X",
+        newDeathType,
+        ToVirtualAddress(codeSnipPtr),
+        ToVirtualAddress(death_vol));
+
     if (codeSnipPtr == death_vol) {
+        LOG("[Director][TriggerDeathVolume] ignored (already in death_vol)");
         return false;
     }
 
     deathType = newDeathType;
     SetCodeSnip(death_vol, nullptr);
+    LOG("[Director][TriggerDeathVolume] activated deathType=%d", deathType);
     return true;
 }
 
@@ -805,15 +838,26 @@ void Director::TriggerGotoPoint(s32 x, s32 y, s32 z, Thing* thing) {
 void Director::Process() {
     MARKFUNCTION(0x8003C298);
 
-    extern s32 g_directorActive;
+    // PSX iterates the two internal handler chains BEFORE the scriptPtr null check.
+    // Each node: lw $v0, 0x18($a0) = funcPtr; lw $s0, 0($a0) = next; jalr $v0 (no args).
+    for (ccMinNode* node = handlerSetA.handlerList.head; node; ) {
+        Handler* handler = static_cast<Handler*>(node);
+        node = node->next;
+        if (handler->funcPtr) {
+            handler->funcPtr(handler);
+        }
+    }
 
-    RegisterKnownDirectorScriptRegions();
+    for (ccMinNode* node = handlerSetB.handlerList.head; node; ) {
+        Handler* handler = static_cast<Handler*>(node);
+        node = node->next;
+        if (handler->funcPtr) {
+            handler->funcPtr(handler);
+        }
+    }
 
-    // PSX: iterate internal director handler sets at +100 and +136.
-    // These contain NIS animation update callbacks. Not yet wired on PC.
-
+    // PSX: if scriptPtr (a1+0x1C) is null, return 1 with no further work.
     if (!scriptPtr) {
-        g_directorActive = 0;
         return;
     }
 
@@ -822,12 +866,12 @@ void Director::Process() {
         DisablePlayerInputProcessing();
     }
 
-    // PSX: set TF2_DIRECTOR_ACTIVE on all humanoids
+    // PSX: set Thing::flags bit 0x200 on all humanoids
     SetDirectorFlagsOnHumanoids();
 
-    // PSX: compute directorTimeOut = frameCounter - timerStart
+    // PSX: compute gp+0x42C scratch elapsed value = frameCounter - timerStart
     const s32 elapsed = GetDirectorFrameCounter() - timerStart;
-    directorTimeOut = (elapsed < 0) ? 0 : elapsed;
+    directorElapsedFrames = (elapsed < 0) ? 0 : elapsed;
 
     if (scriptBase && *scriptBase) {
         ProcessSoundScript();
@@ -842,12 +886,12 @@ void Director::Process() {
         }
 
         if (!scriptPtr) {
-            g_directorActive = 0;
             return;
         }
 
+        const s32* opcodePtr = scriptPtr;
         const DirectorOpcode opcode = static_cast<DirectorOpcode>(*scriptPtr);
-
+        LogDirectorCommand("Main", opcodePtr, CmdToString(opcode), static_cast<s32>(opcode));
         switch (opcode) {
             case DirectorOpcode::End:
                 // PSX: clear director state, clear NIS flags, destroy directorSound
@@ -858,11 +902,11 @@ void Director::Process() {
                     delete directorSound;
                     directorSound = nullptr;
                 }
-                g_directorActive = 0;
                 return;
 
             case DirectorOpcode::ResetTimeout:
-                directorTimeOut = 0;
+                // PSX: clears gp+20 (`directorTimeOut`) checked by gsPlayState.
+                g_directorActive = 0;
                 scriptPtr += 1;
                 break;
 
@@ -883,7 +927,6 @@ void Director::Process() {
                     delete directorSound;
                     directorSound = nullptr;
                 }
-                g_directorActive = 0;
                 return;
 
             case DirectorOpcode::Call:
@@ -902,6 +945,12 @@ void Director::Process() {
                 else {
                     scriptPtr = levelEnd;
                 }
+                break;
+
+            case DirectorOpcode::Yield:
+                // PSX opcode 5: consume one word and block script execution for this frame.
+                scriptPtr += 1;
+                field68 = 1;
                 break;
 
             case DirectorOpcode::Timer:
@@ -945,10 +994,13 @@ void Director::Process() {
                 const u32 thingRef = static_cast<u32>(scriptPtr[1]);
                 scriptPtr += 2;
 
-                Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
+                Humanoid* humanoid = FindHumanoidInHumanoidListByScriptRef(thingRef);
                 if (humanoid) {
-                    humanoid->FaceAngleY(humanoid->orientation.y, 0);
+                    humanoid->FaceThing(nullptr, 0);
+                    humanoid->SetDesiredMoveDirection(humanoid->orientation.y);
                 }
+                else
+                    ASSERT(false); // PSX: logs "Can't find thing to face" if lookup fails
                 break;
             }
 
@@ -957,10 +1009,18 @@ void Director::Process() {
                 // PSX: reads thingRef, calls vtable+232 (SetActionState)
                 const u32 thingRef = static_cast<u32>(scriptPtr[1]);
                 scriptPtr += 2;
-                Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
+                const s32 requestedState = *scriptPtr;
+                LOG("[Director][Main][SetHumanoidAction] targetRef=%u state=%d (0x%X)",
+                    thingRef,
+                    requestedState,
+                    static_cast<u32>(requestedState));
+                Humanoid* humanoid = FindHumanoidInHumanoidListByScriptRef(thingRef);
                 if (humanoid) {
-                    humanoid->SetActionState(static_cast<u32>(*scriptPtr), 0);
+                    humanoid->SetActionState(static_cast<u32>(requestedState), 0);
                 }
+                else
+                    ASSERT(false); // PSX: logs "Can't find thing to face" if lookup fails
+
                 scriptPtr += 1;
                 break;
             }
@@ -990,8 +1050,9 @@ void Director::Process() {
             case DirectorOpcode::WaitForNisControl:
             {
                 const u32 thingRef = static_cast<u32>(scriptPtr[1]);
-                Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
+                Humanoid* humanoid = FindHumanoidInHumanoidListByScriptRef(thingRef);
                 if (humanoid && humanoid->behaviour &&
+                    humanoid->behaviour->handlerDispatch == -1 &&
                     humanoid->behaviour->handler == Behaviour::NisControl) {
                     // Still walking to destination - block script
                     return;
@@ -1018,8 +1079,9 @@ void Director::Process() {
             {
                 const u32 thingRef = static_cast<u32>(scriptPtr[1]);
                 const s32 animEnumVal = scriptPtr[2];
+                LOG("[Director][Main][PlayThingDynamicAnim] targetRef=%u anim=%d", thingRef, animEnumVal);
                 scriptPtr += 3;
-                Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
+                Humanoid* humanoid = FindHumanoidInHumanoidListByScriptRef(thingRef);
                 if (humanoid && humanoid->model) {
                     SModel* sm = static_cast<SModel*>(humanoid->model);
                     sm->PlayDynamicAnim(animEnumVal);
@@ -1028,10 +1090,31 @@ void Director::Process() {
             }
 
             case DirectorOpcode::SetupFaceTextureAnim:
-                // PSX: looks up "TChanFace~G" and "CChanFace~G" animations,
-                // creates flipbooks, sets callback to p3dFwdCycle
+            {
+                if (p3d::inventory) {
+                    auto* texAnim = p3d::inventory->Find<tRAMTexAnim>("TChanFace~G");
+                    texAnimA = reinterpret_cast<uintptr_t>(texAnim);
+                    if (texAnim) {
+                        auto* flipbook = texAnim->MakePuppet();
+                        flipbook->SetCycleCallback(p3dFwdCycle);
+                        flipbookA = reinterpret_cast<uintptr_t>(flipbook);
+                    } else {
+                        flipbookA = 0;
+                    }
+
+                    texAnim = p3d::inventory->Find<tRAMTexAnim>("CChanFace~G");
+                    texAnimB = reinterpret_cast<uintptr_t>(texAnim);
+                    if (texAnim) {
+                        auto* flipbook = texAnim->MakePuppet();
+                        flipbook->SetCycleCallback(p3dFwdCycle);
+                        flipbookB = reinterpret_cast<uintptr_t>(flipbook);
+                    } else {
+                        flipbookB = 0;
+                    }
+                }
                 scriptPtr += 1;
                 break;
+            }
 
             case DirectorOpcode::CleanupFaceTextureAnim:
                 scriptPtr += 1;
@@ -1186,7 +1269,6 @@ void Director::Process() {
                 scriptPtr += 1;
                 if (Player::s_player) {
                     const LVector target = { nisPointX, nisPointY, nisPointZ };
-                    Player::s_player->FaceThingDesired(nullptr);
                     Player::s_player->FacePointDesired(target);
                     Behaviour* beh = Player::s_player->behaviour;
                     if (beh) {
@@ -1410,6 +1492,8 @@ void Director::Process() {
                 // PSX: unknown opcodes are silently skipped (continue)
                 // PSX doesn't terminate on unknown opcodes.
                 scriptPtr += 1;
+                LogDirectorUnknownCommand("Main", opcodePtr, static_cast<s32>(opcode));
+                ASSERT(false && "Unknown Director main opcode");
                 break;
         }
     }
@@ -1494,7 +1578,9 @@ void Director::SetDesiredWideScreen() {
             return;
         }
 
+        const s32* tokenPtr = scriptPtr;
         const DirectorWideScreenCmd token = static_cast<DirectorWideScreenCmd>(*scriptPtr);
+        LogDirectorCommand("WideScreen", tokenPtr, DirectorWideScreenCmdToString(token), static_cast<s32>(token));
         if (token == DirectorWideScreenCmd::End) {
             scriptPtr += 1;
             return;
@@ -1538,6 +1624,8 @@ void Director::SetDesiredWideScreen() {
             }
 
             default:
+                LogDirectorUnknownCommand("WideScreen", tokenPtr, static_cast<s32>(token));
+                ASSERT(false && "Unknown Director widescreen opcode");
                 break;
         }
     }
@@ -1553,8 +1641,10 @@ void Director::ProcessEdison() {
         return;
     }
 
+    const s32* opcodePtr = scriptPtr;
     const DirectorEdisonCmd opcode = static_cast<DirectorEdisonCmd>(*scriptPtr);
     scriptPtr += 1;
+    LogDirectorCommand("Edison", opcodePtr, DirectorEdisonCmdToString(opcode), static_cast<s32>(opcode));
 
     if (opcode == DirectorEdisonCmd::PlayTransient) {
         // PSX: reads u16 soundID, advances scriptPtr, calls CSoundDirect::PlayTransient(soundID, 0, 0, 0)
@@ -1570,11 +1660,21 @@ void Director::ProcessEdison() {
         LOG("[Director] Edison StopMusic opcode");
         rsEvent(RS_STOP_MUSIC, 0, 0, 0);
     }
+    else {
+        LogDirectorUnknownCommand("Edison", opcodePtr, static_cast<s32>(opcode));
+        ASSERT(false && "Unknown Director Edison opcode");
+    }
 }
 
 // PSX: ProcessModelFunc__8Director (DIRECTOR.CPP:3711, 0x8003D87C)
 void Director::ProcessModelFunc() {
     MARKFUNCTION(0x8003D87C);
+
+    if (!scriptPtr) {
+        return;
+    }
+
+    LogDirectorCommand("Model", scriptPtr, "RawModelToken", *scriptPtr);
 }
 
 // PSX: ProcessCameraFunc__8Director (DIRECTOR.CPP:3716, 0x8003D884)
@@ -1585,8 +1685,10 @@ void Director::ProcessCameraFunc() {
         return;
     }
 
+    const s32* opPtr = scriptPtr;
     const DirectorCameraCmd op = static_cast<DirectorCameraCmd>(*scriptPtr);
     scriptPtr += 1;
+    LogDirectorCommand("Camera", opPtr, DirectorCameraCmdToString(op), static_cast<s32>(op));
 
     Camera* camera = GetGameCamera();
 
@@ -1687,6 +1789,8 @@ void Director::ProcessCameraFunc() {
         }
 
         default:
+            LogDirectorUnknownCommand("Camera", opPtr, static_cast<s32>(op));
+            ASSERT(false && "Unknown Director camera opcode");
             break;
     }
 }
@@ -1699,8 +1803,10 @@ void Director::ProcessHudFunc() {
         return;
     }
 
+    const s32* opPtr = scriptPtr;
     const DirectorHudCmd op = static_cast<DirectorHudCmd>(*scriptPtr);
     scriptPtr += 1;
+    LogDirectorCommand("Hud", opPtr, DirectorHudCmdToString(op), static_cast<s32>(op));
 
     switch (op) {
         case DirectorHudCmd::HideHud:
@@ -1721,6 +1827,8 @@ void Director::ProcessHudFunc() {
             break;
 
         default:
+            LogDirectorUnknownCommand("Hud", opPtr, static_cast<s32>(op));
+            ASSERT(false && "Unknown Director HUD opcode");
             break;
     }
 }
@@ -1735,15 +1843,21 @@ void Director::ProcessHumanoidFunc() {
 
     const u32 thingRef = static_cast<u32>(*scriptPtr);
     scriptPtr += 1;
+    LOG("[Director][Humanoid] targetRef=%u (0x%X)", thingRef, thingRef);
 
-    Humanoid* humanoid = FindHumanoidByScriptRef(thingRef);
+    Humanoid* humanoid = FindHumanoidInHumanoidListByScriptRef(thingRef);
+    if (!humanoid) {
+        LOG("[Director][Humanoid] targetRef=%u not found", thingRef);
+    }
 
     for (s32 i = 0; i < 128; i++) {
         if (!scriptPtr) {
             return;
         }
 
+        const s32* opPtr = scriptPtr;
         const DirectorHumanoidCmd op = static_cast<DirectorHumanoidCmd>(*scriptPtr);
+        LogDirectorCommand("Humanoid", opPtr, DirectorHumanoidCmdToString(op), static_cast<s32>(op));
         if (op == DirectorHumanoidCmd::End) {
             scriptPtr += 1;
             return;
@@ -1797,6 +1911,16 @@ void Director::ProcessHumanoidFunc() {
 
             case DirectorHumanoidCmd::StandFacingZero:
                 if (humanoid) {
+                    LOG("[Director][Humanoid][StandFacingZero] ref=%u before pos=(%d,%d,%d) home=(%d,%d,%d) state=%d flags2=0x%X",
+                        thingRef,
+                        humanoid->pos.x,
+                        humanoid->pos.y,
+                        humanoid->pos.z,
+                        humanoid->homePos.x,
+                        humanoid->homePos.y,
+                        humanoid->homePos.z,
+                        humanoid->actionState,
+                        static_cast<u32>(humanoid->flags2));
                     humanoid->flags2 &= ~0x70u;
                     humanoid->SetActionState(AS_HOTFOOT, 0);
                     humanoid->flags &= ~0x800u;
@@ -1813,16 +1937,40 @@ void Director::ProcessHumanoidFunc() {
                     }
 
                     humanoid->flags |= 8u;
+
+                    LOG("[Director][Humanoid][StandFacingZero] ref=%u after pos=(%d,%d,%d) home=(%d,%d,%d) state=%d flags2=0x%X",
+                        thingRef,
+                        humanoid->pos.x,
+                        humanoid->pos.y,
+                        humanoid->pos.z,
+                        humanoid->homePos.x,
+                        humanoid->homePos.y,
+                        humanoid->homePos.z,
+                        humanoid->actionState,
+                        static_cast<u32>(humanoid->flags2));
                 }
                 break;
 
             case DirectorHumanoidCmd::SetPosition:
             {
                 const LVector position = { scriptPtr[0], scriptPtr[1], scriptPtr[2] };
+                LOG("[Director][Humanoid][SetPosition] ref=%u target=(%d,%d,%d)",
+                    thingRef,
+                    position.x,
+                    position.y,
+                    position.z);
                 scriptPtr += 3;
                 if (humanoid) {
                     humanoid->pos = position;
                     humanoid->homePos = position;
+                    LOG("[Director][Humanoid][SetPosition] ref=%u after pos=(%d,%d,%d) home=(%d,%d,%d)",
+                        thingRef,
+                        humanoid->pos.x,
+                        humanoid->pos.y,
+                        humanoid->pos.z,
+                        humanoid->homePos.x,
+                        humanoid->homePos.y,
+                        humanoid->homePos.z);
                 }
                 break;
             }
@@ -1830,6 +1978,11 @@ void Director::ProcessHumanoidFunc() {
             case DirectorHumanoidCmd::PlayDynamicAnim:
             {
                 const s32 animEnumVal = *scriptPtr;
+                LOG("[Director][Humanoid][PlayDynamicAnim] ref=%u anim=%d state=%d flags2=0x%X",
+                    thingRef,
+                    animEnumVal,
+                    humanoid ? humanoid->actionState : -1,
+                    humanoid ? static_cast<u32>(humanoid->flags2) : 0u);
                 scriptPtr += 1;
                 if (humanoid && humanoid->model) {
                     SModel* sm = static_cast<SModel*>(humanoid->model);
@@ -1855,6 +2008,8 @@ void Director::ProcessHumanoidFunc() {
                 break;
 
             default:
+                LogDirectorUnknownCommand("Humanoid", opPtr, static_cast<s32>(op));
+                ASSERT(false && "Unknown Director humanoid opcode");
                 break;
         }
     }
@@ -1871,7 +2026,9 @@ void Director::ProcessLadderFunc() {
     }
 
     for (s32 i = 0; i < 128; i++) {
+        const s32* opPtr = scriptPtr;
         const DirectorLadderCmd op = static_cast<DirectorLadderCmd>(*scriptPtr);
+        LogDirectorCommand("Ladder", opPtr, DirectorLadderCmdToString(op), static_cast<s32>(op));
         if (op == DirectorLadderCmd::End) {
             scriptPtr += 1;
             return;
@@ -1893,7 +2050,13 @@ void Director::ProcessLadderFunc() {
                     else {
                         target.z += 1024;
                     }
-                    Player::s_player->FacePoint(target, 1);
+                    Player::s_player->FacePointDesired(target);
+                    if (Player::s_player->behaviour) {
+                        Player::s_player->behaviour->destPoint = target;
+                        Player::s_player->behaviour->handlerThisOffset = 0;
+                        Player::s_player->behaviour->handlerDispatch = -1;
+                        Player::s_player->behaviour->handler = Behaviour::NisControl;
+                    }
                 }
                 break;
             }
@@ -1933,13 +2096,15 @@ void Director::ProcessLadderFunc() {
                     Player::s_player->FaceThingDesired(nullptr);
                     if (Player::s_player->behaviour) {
                         Player::s_player->behaviour->handlerThisOffset = 0;
-                        Player::s_player->behaviour->handlerDispatch = -1;
+                        Player::s_player->behaviour->handlerDispatch = 0;
                         Player::s_player->behaviour->handler = nullptr;
                     }
                 }
                 break;
 
             default:
+                LogDirectorUnknownCommand("Ladder", opPtr, static_cast<s32>(op));
+                ASSERT(false && "Unknown Director ladder opcode");
                 break;
         }
     }
@@ -1956,7 +2121,9 @@ void Director::ProcessDoorFunc() {
     }
 
     for (s32 i = 0; i < 128; i++) {
+        const s32* opPtr = scriptPtr;
         const DirectorDoorCmd op = static_cast<DirectorDoorCmd>(*scriptPtr);
+        LogDirectorCommand("Door", opPtr, DirectorDoorCmdToString(op), static_cast<s32>(op));
         if (op == DirectorDoorCmd::End) {
             scriptPtr += 1;
             return;
@@ -2080,6 +2247,8 @@ void Director::ProcessDoorFunc() {
             }
 
             default:
+                LogDirectorUnknownCommand("Door", opPtr, static_cast<s32>(op));
+                ASSERT(false && "Unknown Director door opcode");
                 break;
         }
     }
@@ -2157,7 +2326,7 @@ void Director::DetermineLevelIntro() {
 
     const bool visitedLevel = (levelID >= 0 && levelID < 31) ? ((visitedLevels & (1 << levelID)) != 0) : false;
     if (visitedLevel) {
-        directorTimeOut = 0;
+        g_directorActive = 0;
 
         switch (levelID) {
             case 8:
@@ -2191,13 +2360,13 @@ void Director::DetermineLevelIntro() {
                     introScript = start_frantic;
                 }
                 else {
-                    directorTimeOut = 0;
+                    g_directorActive = 0;
                     introScript = start_generic;
                 }
                 break;
 
             case 8:
-                directorTimeOut = 0;
+                g_directorActive = 0;
                 introScript = intro_all_dante;
                 break;
 
@@ -2218,7 +2387,7 @@ void Director::DetermineLevelIntro() {
                 break;
 
             default:
-                directorTimeOut = 0;
+                g_directorActive = 0;
                 introScript = start_generic;
                 break;
         }
@@ -2232,33 +2401,45 @@ void Director::DetermineDeath() {
     MARKFUNCTION(0x8003EA4C);
 
     s32* deathScript = death_generic;
+    const s32 levelID = GetCurrentWorldLevelID();
+    const char* deathScriptName = "death_generic";
 
     if (deathType <= 0) {
-        s32 levelID = GetCurrentWorldLevelID();
-
         if (levelID < 2 || levelID >= 4) {
             deathScript = death_fall_pavement;
+            deathScriptName = "death_fall_pavement";
         }
         else {
             deathScript = death_fall_water;
+            deathScriptName = "death_fall_water";
         }
     }
     else {
         switch (deathType) {
             case 1:
                 deathScript = death_fall_pavement;
+                deathScriptName = "death_fall_pavement";
                 break;
             case 2:
                 deathScript = death_fall_water;
+                deathScriptName = "death_fall_water";
                 break;
             case 4:
                 deathScript = death_fall_goo;
+                deathScriptName = "death_fall_goo";
                 break;
             default:
                 deathScript = death_generic;
+                deathScriptName = "death_generic";
                 break;
         }
     }
+
+    LOG("[Director][DetermineDeath] deathType=%d level=%d selected=%s script=0x%08X",
+        deathType,
+        levelID,
+        deathScriptName,
+        ToVirtualAddress(deathScript));
 
     PushScriptReturnAddress(this, deathScript);
 }
@@ -2274,14 +2455,15 @@ s32 Director::WaitAnimationDoneStep() {
 
     // PSX: FindNodeCRC(0x34=humanoidList, scriptPtr[1], 0)
     // then checks thing->model->animStructure->loopCount at +84.
-    Thing* thing = FindThingByScriptRef(static_cast<u32>(scriptPtr[1]));
-    if (thing && thing->model) {
-        Model* model = static_cast<Model*>(thing->model);
+    Humanoid* humanoid = FindHumanoidInHumanoidListByScriptRef(static_cast<u32>(scriptPtr[1]));
+    if (humanoid && humanoid->model) {
+        Model* model = static_cast<Model*>(humanoid->model);
         AnimStructure* anim = model ? static_cast<AnimStructure*>(model->animStructure) : nullptr;
         if (anim && anim->loopCount != 0) {
             scriptPtr += 2;
             return 1;
         }
+        return 0;
     }
 
     return 0;
@@ -2299,6 +2481,7 @@ void Director::ProcessDynamicAnimFunc() {
 
     s32* cmd = scriptPtr;
     const DirectorOpcode opcode = static_cast<DirectorOpcode>(cmd[0]);
+    LogDirectorCommand("DynamicAnim", cmd, CmdToString(opcode), static_cast<s32>(opcode));
 
     if (opcode == DirectorOpcode::DynamicAnimWaitLoaded) {
         const u32 thingType = static_cast<u32>(cmd[1]);
@@ -2329,8 +2512,14 @@ void Director::ProcessDynamicAnimFunc() {
     }
 
     if (opcode == DirectorOpcode::DynamicAnimWaitCamera) {
-        // PSX checks a global camera pointer and retries until it is valid.
-        if (g_display && g_display->GetView().GetCamera()) {
+        // PSX gates this on camera async animation data (camera+0x1D0),
+        // not just camera object existence.
+        Camera* camera = nullptr;
+        if (g_display) {
+            camera = g_display->GetCamera();
+        }
+
+        if (camera && camera->HasAsyncAnimLoaded()) {
             scriptPtr = cmd + 1;
             field68 = 0;
         }
@@ -2352,6 +2541,8 @@ void Director::ProcessDynamicAnimFunc() {
 
     scriptPtr = cmd + 1;
     field68 = 0;
+    LogDirectorUnknownCommand("DynamicAnim", cmd, static_cast<s32>(opcode));
+    ASSERT(false && "Unknown Director dynamic animation opcode");
 }
 
 // PSX: HandleWideScreen__8Director (DIRECTOR.CPP:4539, 0x8003ECD4)
@@ -2460,14 +2651,59 @@ bool Director::DoesLevelHaveExtraMem(s32 level) {
 void Director::updateVramAnims() {
     MARKFUNCTION(0x8003BB90);
 
-    // Flipbook interfaces are still pending.
+    bool updated = false;
+
+    if (flipbookA) {
+        reinterpret_cast<tFlipbook*>(flipbookA)->AdvanceFrame();
+        updated = true;
+    }
+    if (flipbookB) {
+        reinterpret_cast<tFlipbook*>(flipbookB)->AdvanceFrame();
+        updated = true;
+    }
+
+    if (updated && g_game && g_game->GetWorld()) {
+        g_game->GetWorld()->RefreshVRAMTexture();
+    }
 }
 
 // PSX: cleanUpTexAnim__8Director (DIRECTOR.CPP:2611, 0x8003BBE0)
 void Director::cleanUpTexAnim() {
     MARKFUNCTION(0x8003BBE0);
 
-    // Texture animation inventory wiring is still pending.
+    if (flipbookA) {
+        delete reinterpret_cast<tFlipbook*>(flipbookA);
+        flipbookA = 0;
+    }
+    if (texAnimA) {
+        auto* texAnim = reinterpret_cast<tRAMTexAnim*>(texAnimA);
+        if (p3d::inventory) {
+            for (s32 i = 0; i < texAnim->GetNumTextures(); ++i) {
+                if (tTexture* texture = texAnim->GetTexture(i)) {
+                    p3d::inventory->Remove(texture->GetName());
+                }
+            }
+            p3d::inventory->Remove(texAnim->GetName());
+        }
+        texAnimA = 0;
+    }
+
+    if (flipbookB) {
+        delete reinterpret_cast<tFlipbook*>(flipbookB);
+        flipbookB = 0;
+    }
+    if (texAnimB) {
+        auto* texAnim = reinterpret_cast<tRAMTexAnim*>(texAnimB);
+        if (p3d::inventory) {
+            for (s32 i = 0; i < texAnim->GetNumTextures(); ++i) {
+                if (tTexture* texture = texAnim->GetTexture(i)) {
+                    p3d::inventory->Remove(texture->GetName());
+                }
+            }
+            p3d::inventory->Remove(texAnim->GetName());
+        }
+        texAnimB = 0;
+    }
 }
 
 // Script accessor methods - provide access to file-local script arrays

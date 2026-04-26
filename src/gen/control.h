@@ -3,7 +3,7 @@
 #include "config.h"
 #include "gen/manager.h"
 
-class PlatformInput; // PC platform input (keyboard/mouse via GLFW)
+class ActionInput;
 
 // PSX game-side pad bits after ReadSonyPads byte-swap + NOT processing.
 // These are the bit positions in Control::rawButtons and GetControlVal() output.
@@ -103,6 +103,7 @@ public:
     ~InputManager() override;
 
     void ServiceInput(u32 buttons, u16 padIndex);
+    void ServiceHostPads(const ActionInput* actionInput);
     void Step();
 
     // Returns processed button bitmask for pad port (via Control::GetMask)

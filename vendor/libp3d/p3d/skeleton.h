@@ -8,6 +8,8 @@
 #include "p3d/matrix.h"
 
 class pddiPrimBuffer;
+struct STreeJoint;
+using STreeJointCallback = s32 (*)(STreeJoint* joint, u32 jointIndex, const Mat4& currentMatrix);
 
 // STreeJoint flag bits
 enum STreeFlag : u32 {
@@ -16,9 +18,11 @@ enum STreeFlag : u32 {
     STF_POP_MATRIX     = 0x04,  // restore saved matrix from stack
     STF_HAS_MESH       = 0x08,  // this joint has renderable geometry
     STF_LOAD_MATRIX    = 0x10,  // load a previously captured matrix
-    STF_POP_MATRIX_ALT = 0x20,  // restore saved matrix (alt)
+    STF_TREE_CALLBACK  = 0x20,  // tree callback after draw
     STF_MULT_MATRIX    = 0x40,  // multiply by static view matrix (rendering only)
     STF_CAPTURE_MATRIX = 0x80,  // save current matrix to joint buffer
+    STF_PRE_CALLBACK_MASK = 0x0F00,
+    STF_POST_CALLBACK_MASK = 0xF000,
 };
 
 // tSJoint - per-joint skeletal data (68 bytes on PSX).
@@ -46,6 +50,11 @@ struct STreeJoint {
     u16 primGeomCount;        // +54: number of vertices for this joint
     u16 polyStartIdx;         // +56: first polygon index
     s32 captureBufferIdx;      // STLOAD AddJoint matrix buffer dword offset
+    void* callbackData = nullptr;
+    STreeJointCallback preCallback = nullptr;
+    STreeJointCallback postCallback = nullptr;
+    Mat4 overrideMatrix;
+    bool useOverrideMatrix = false;
 
     // PC-only: per-joint pddiPrimBuffer
     pddiPrimBuffer* meshBuffer = nullptr;
@@ -61,10 +70,17 @@ struct STreeData {
     STreeData() = default;
     ~STreeData();
 
+    // PSX: GetJoint__6tSTreei resolves through jointOrderMap when present.
+    STreeJoint* GetJoint(s32 index);
+    const STreeJoint* GetJoint(s32 index) const;
+
     // Compute joint world matrices from current rotation/translation values.
     // Uses the flags-based traversal (push/pop/capture/load).
     void ComputeWorldMatrices(Mat4* outMatrices) const;
+    void ComputeWorldMatricesWithCallbacks(Mat4* outMatrices);
 };
+
+STreeData* CloneSTreeData(const STreeData* source);
 
 // Parse a 0x6122 (PSX_MAPPED_STREE) or 0x6120 (PSX_STREE) chunk.
 // chunkData points to the first byte AFTER the 6-byte chunk header.

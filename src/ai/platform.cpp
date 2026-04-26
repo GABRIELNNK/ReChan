@@ -1755,12 +1755,7 @@ void Platform::DeathCheck() {
     if (killTarget) {
         // PSX: check ActiveZone member count (like Door::DeathCheck)
         ActiveZone* az = static_cast<ActiveZone*>(static_cast<ccNode*>(killTarget));
-        s32 thinkingCount = 0;
-        for (s32 i = 0; i < az->memberCount; i++) {
-            if (az->members[i] != nullptr) {
-                thinkingCount++;
-            }
-        }
+        s32 thinkingCount = az->GetNumberOfThinkingMembers();
         if (thinkingCount > 0) {
             deathCountdown = 3;
         }

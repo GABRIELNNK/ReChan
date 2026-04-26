@@ -26,8 +26,17 @@
 #include "p3d/hash.h"
 #include "p3d/context.h"
 #include "p3d/stream.h"
+#include "p3d/texture.h"
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
+
+static void UploadRawTextureToWorldVRAM(s16 x, s16 y, s16 w, s16 h, const u8* raw) {
+    if (!g_game || !g_game->GetWorld()) {
+        return;
+    }
+
+    g_game->GetWorld()->UploadToVRAM(x, y, w, h, raw);
+}
 #include "ai/colfight.h"
 #include "pc/log.h"
 
@@ -1483,9 +1492,15 @@ void World::LoadTPGTextures(const u8* lcfData, u32 lcfSize) {
     LOG("[World] Uploaded raw VRAM as R16UI (1024x512, handle=%u)", vramHandle);
 }
 
-World::World() = default;
+World::World() {
+    p3d::rawTextureUploader = UploadRawTextureToWorldVRAM;
+}
 
 World::~World() {
+    if (p3d::rawTextureUploader == UploadRawTextureToWorldVRAM) {
+        p3d::rawTextureUploader = nullptr;
+    }
+
     Unload();
     // Free level table data
     if (levelList) { delete[] levelList; levelList = nullptr; }
@@ -1578,7 +1593,7 @@ void World::CheckSwitchList(ccList& list, Thing* thing) {
 
         if (sw->IsInside(thing->pos)) {
             sw->Execute(thing);
-            if (sw->persistent == 0) {
+            if (sw->persistent != 0) {
                 list.RemNode(sw);
                 delete sw;
             }

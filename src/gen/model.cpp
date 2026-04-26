@@ -2,6 +2,7 @@
 #include "gen/animmat.h"
 #include "gen/animstruct.h"
 #include "gen/charmgr.h"
+#include "gen/paramanim.h"
 #include "ai/player.h"
 #include "gen/skeleton.h"
 #include "p3d/context.h"
@@ -12,6 +13,58 @@
 #include "pc/log.h"
 #include <cstdlib>
 #include <vector>
+
+static const u8 kStreeMirrorSwapPairs[] = {
+    2, 6,
+    3, 7,
+    4, 8,
+    5, 9,
+    0, 0,
+};
+
+static DrawableSTree* GetDrawableSTree(Model* model) {
+    if (!model || model->drawableType != 2 || !model->drawable) {
+        return nullptr;
+    }
+    return static_cast<DrawableSTree*>(model->drawable);
+}
+
+static void UpdateFlipMirrorState(Model* model, AnimStructure* anim) {
+    if (!anim || !anim->flip) {
+        return;
+    }
+
+    DrawableSTree* drawable = GetDrawableSTree(model);
+    anim->flip->mirrored = drawable && ((drawable->mirrorFlags & 1) != 0);
+    anim->flip->mirroredJointOrderMap = drawable ? drawable->mirroredJointOrderMap : nullptr;
+}
+
+static TransformAnim* GetTransformAnimForModel(void* animation) {
+    if (!animation || IsCameraParamAnim(animation)) {
+        return nullptr;
+    }
+
+    return static_cast<TransformAnim*>(animation);
+}
+
+static OriginalSTree* CloneActiveSTree(const OriginalSTree* source) {
+    if (!source || !source->skeleton) {
+        return nullptr;
+    }
+
+    OriginalSTree* clone = new OriginalSTree();
+    clone->nameCRC = source->nameCRC;
+    clone->SetStoreID(source->GetStoreID());
+    clone->meshVertCount = source->meshVertCount;
+    clone->meshTriCount = source->meshTriCount;
+    clone->skeleton = CloneSTreeData(source->skeleton);
+    if (!clone->skeleton) {
+        delete clone;
+        return nullptr;
+    }
+
+    return clone;
+}
 
 // OriginalSTree
 OriginalSTree::OriginalSTree() {
@@ -60,28 +113,55 @@ DrawableBasic::~DrawableBasic() = default;
 // DrawableSTree
 DrawableSTree::DrawableSTree(OriginalSTree* orig) {
     original = orig;
-    alternate = nullptr;
+    if (orig && orig->skeleton && orig->activeTreeInUse) {
+        alternate = CloneActiveSTree(orig);
+    }
+
+    if (!alternate) {
+        alternate = orig;
+        if (orig) {
+            orig->activeTreeInUse = true;
+        }
+    }
+
+    mirrorFlags = 0;
+    mirroredJointOrderMap = nullptr;
 }
 
 DrawableSTree::~DrawableSTree() {
+    if (alternate && alternate != original) {
+        delete alternate;
+    }
+    else if (original) {
+        original->activeTreeInUse = false;
+    }
+
     original = nullptr;
     alternate = nullptr;
+    delete[] mirroredJointOrderMap;
+    mirroredJointOrderMap = nullptr;
 }
 
 // PSX: Display dispatches through vtable to OriginalSTree::Draw -> tPrimGeom::Display
 // PC: draws the skeleton mesh (per-joint transforms baked in) or flat fallback
 void DrawableSTree::Display(u32 /*flags*/) {
-    if (!original)
+    OriginalSTree* active = GetActiveSTree(this);
+    OriginalSTree* renderSource = original ? original : active;
+    if (!active || !renderSource) {
         return;
+    }
 
-    STreeData* skel = original->skeleton;
-    SkinData* skin = original->skinData;
+    STreeData* skel = active->skeleton;
+    SkinData* skin = renderSource->skinData;
+    STreeData* renderSkeleton = renderSource->skeleton;
+    pddiPrimBuffer* skinnedBuffer = (renderSkeleton && renderSkeleton->joints && renderSkeleton->numJoints > 0)
+        ? renderSkeleton->joints[0].meshBuffer
+        : nullptr;
 
     // Per-frame CPU skinning
-    if (skel && skin && skin->numVerts > 0 && skel->joints &&
-        skel->joints[0].meshBuffer) {
+    if (skel && skin && skin->numVerts > 0 && skel->joints && skinnedBuffer) {
         Mat4* jointMatrices = new Mat4[skel->numJoints];
-        skel->ComputeWorldMatrices(jointMatrices);
+        skel->ComputeWorldMatricesWithCallbacks(jointMatrices);
 
         std::vector<f32> vertData(skin->numVerts * 10);
         for (u32 i = 0; i < skin->numVerts; i++) {
@@ -101,20 +181,60 @@ void DrawableSTree::Display(u32 /*flags*/) {
             vertData[i * 10 + 9] = sv.cba;
         }
 
-        skel->joints[0].meshBuffer->SetVertexData(vertData.data(), skin->numVerts);
-        p3d::context->DrawPrimBuffer(skel->joints[0].meshBuffer);
+        skinnedBuffer->SetVertexData(vertData.data(), skin->numVerts);
+        p3d::context->DrawPrimBuffer(skinnedBuffer);
         delete[] jointMatrices;
         return;
     }
 
     // Fallback to flat mesh
-    STreeData* fallbackSkel = original->skeleton;
+    STreeData* fallbackSkel = renderSource->skeleton;
     if (fallbackSkel && fallbackSkel->joints && fallbackSkel->joints[0].meshBuffer) {
         p3d::context->DrawPrimBuffer(fallbackSkel->joints[0].meshBuffer);
     }
-    else if (original->meshBuffer) {
-        p3d::context->DrawPrimBuffer(original->meshBuffer);
+    else if (renderSource->meshBuffer) {
+        p3d::context->DrawPrimBuffer(renderSource->meshBuffer);
     }
+}
+
+s32 DrawableSTree::MirrorTree(SModel* model) {
+    MARKFUNCTION(0x8007170C);
+
+    OriginalSTree* active = GetActiveSTree(this);
+    if (!model || !active || !active->skeleton) {
+        return 0;
+    }
+
+    STreeData* skeleton = active->skeleton;
+    if (skeleton->jointOrderMap && skeleton->numMapEntries > 0 && !mirroredJointOrderMap) {
+        mirroredJointOrderMap = new u32[skeleton->numMapEntries];
+        for (u32 i = 0; i < skeleton->numMapEntries; i++) {
+            mirroredJointOrderMap[i] = skeleton->jointOrderMap[i];
+        }
+
+        for (u32 pairIndex = 0; kStreeMirrorSwapPairs[pairIndex] != 0; pairIndex += 2) {
+            const u32 lhs = kStreeMirrorSwapPairs[pairIndex];
+            const u32 rhs = kStreeMirrorSwapPairs[pairIndex + 1];
+            if (lhs < skeleton->numMapEntries && rhs < skeleton->numMapEntries) {
+                const u32 temp = mirroredJointOrderMap[lhs];
+                mirroredJointOrderMap[lhs] = mirroredJointOrderMap[rhs];
+                mirroredJointOrderMap[rhs] = temp;
+            }
+        }
+    }
+
+    mirrorFlags ^= 1u;
+
+    AnimStructure* anim = static_cast<AnimStructure*>(model->animStructure);
+    if (anim && anim->animation) {
+        model->ApplyAnimToModelBasic(anim->animation);
+        if (anim->flip) {
+            anim->flip->Reset();
+        }
+    }
+
+    model->SetupModelCallbacks();
+    return 1;
 }
 
 DrawableGeo::DrawableGeo(OriginalGeo* orig) {
@@ -249,16 +369,6 @@ void SModel::Show(u32 flags) {
     // Mark as visible + drawn
     modelFlags |= 0x50;
 
-    AnimStructure* anim = static_cast<AnimStructure*>(animStructure);
-    if (anim && anim->flip && anim->flip->dirty) {
-        s32 frame = anim->currentFrame;
-        if (frame < 0) {
-            frame = 0;
-        }
-        anim->flip->SetFrameReal(frame);
-        anim->flip->UpdateJoints();
-    }
-
     // Build world matrix from position + rotation + scale
     // PSX: TransMatrix, RotMatrixZYXAndLights, ScaleMatrix (from MIPS LST)
     Mat4 world;
@@ -270,41 +380,6 @@ void SModel::Show(u32 flags) {
 
     // Translation
     world.SetTranslation((f32)posX, (f32)posY, (f32)posZ);
-
-    Humanoid* humanoid = dynamic_cast<Humanoid*>(backPtr);
-    const bool compensateLadderRoot = humanoid
-        && (humanoid->flags2 & TF2_NIS_ENTER) != 0
-        && (humanoid->actionState == AS_LEDGE_LATCH
-            || humanoid->actionState == AS_LEDGE_PULLUP
-            || humanoid->actionState == AS_LADDER_CLIMB_DOWN
-            || humanoid->actionState == AS_LADDER_CLIMB_UP
-            || humanoid->actionState == AS_LADDER_CLIMBING
-            || humanoid->actionState == AS_LADDER_DISMOUNT);
-
-    if (compensateLadderRoot) {
-        OriginalSTree* original = drawable->GetOriginalSTree();
-        STreeData* skeleton = original ? original->skeleton : nullptr;
-        if (skeleton && skeleton->joints && skeleton->jointOrderMap && skeleton->numMapEntries > 0) {
-            u32 jointIndex = skeleton->jointOrderMap[0];
-            if (jointIndex < skeleton->numJoints) {
-                const STreeJoint& joint = skeleton->joints[jointIndex];
-                f32 rootWorldX = 0.0f;
-                f32 rootWorldY = 0.0f;
-                f32 rootWorldZ = 0.0f;
-                Mat4TransformDir(world,
-                    (f32)joint.translationX,
-                    (f32)joint.translationY,
-                    (f32)joint.translationZ,
-                    rootWorldX,
-                    rootWorldY,
-                    rootWorldZ);
-                world.SetTranslation(
-                    (f32)posX - rootWorldX,
-                    (f32)posY - rootWorldY,
-                    (f32)posZ - rootWorldZ);
-            }
-        }
-    }
 
     p3d::context->SetWorldMatrix(world);
 
@@ -324,40 +399,80 @@ void SModel::Animate() {
 // PSX: ApplyAnimToModel__6SModellllll (MODEL.CPP:1098, 0x8006EEAC)
 void SModel::ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 /*p4*/, s32 /*p5*/) {
     MARKFUNCTION(0x8006EEAC);
-    if (!g_characterManager) return;
+    if (!g_characterManager) {
+        return;
+    }
 
-    void* anim = g_characterManager->GetAnimation((u32)thingType, animEnum);
-    if (!anim) {
-        anim = g_characterManager->GetAnimation(0, animEnum);
-        if (!anim) {
-            LOG("[Model] ApplyAnimToModel: anim %d not found for type %d, lazy-loading", animEnum, thingType);
+    void* rawAnimation = g_characterManager->GetAnimation((u32)thingType, animEnum);
+    if (!rawAnimation) {
+        rawAnimation = g_characterManager->GetAnimation(0, animEnum);
+        if (!rawAnimation) {
             g_characterManager->LoadAnimationBatch(0, animEnum, nullptr);
-            anim = g_characterManager->GetAnimation(0, animEnum);
-            if (!anim) {
-                LOG("[Model] ApplyAnimToModel: anim %d STILL not found after load, falling back to 22", animEnum);
-                anim = g_characterManager->GetAnimation(0, 22);
-                animEnum = 22;
-            }
+            rawAnimation = g_characterManager->GetAnimation(0, animEnum);
+        }
+
+        if (!rawAnimation) {
+            rawAnimation = g_characterManager->GetAnimation(0, 22);
+            animEnum = 22;
         }
     }
 
-    if (!animStructure) {
-        animStructure = new AnimStructure(0, anim, loopType, this, drawable);
+    TransformAnim* animation = GetTransformAnimForModel(rawAnimation);
+    if (!animation) {
+        return;
     }
+
+    if (!animStructure) {
+        animStructure = new AnimStructure(0, animation, loopType, this, drawable);
+    }
+
+    ApplyAnimToModelBasic(animation);
 
     AnimStructure* as = (AnimStructure*)animStructure;
-    as->animEnum = animEnum;
-
-    // PSX: p4 == 0 path (normal apply)
-    as->animation = (TransformAnim*)anim;
-    if (as->flip) {
-        as->flip->anim = (TransformAnim*)anim;
-        as->flip->additiveTranslation = false;
-        as->flip->dirty = 1;
+    if (!as) {
+        return;
     }
-    as->ResetCountsToAnim();
+
+    as->animEnum = animEnum;
+    if (as->flip) {
+        as->flip->Reset();
+    }
     as->SetLoopType(loopType, 1);
+    if (as->flip) {
+        as->ForceFrame(0);
+    }
     as->humanoidCB = {};
+}
+
+void SModel::ApplyAnimToModelBasic(TransformAnim* animation) {
+    MARKFUNCTION(0x8006F068);
+
+    if (!animation) {
+        return;
+    }
+
+    AnimStructure* anim = static_cast<AnimStructure*>(animStructure);
+    if (!anim || anim->mode != 0 || !anim->flip) {
+        delete anim;
+        anim = new AnimStructure(0, animation, 0, this, drawable);
+        animStructure = anim;
+    }
+
+    if (!anim || !anim->flip) {
+        return;
+    }
+
+    anim->animation = animation;
+    anim->flip->anim = animation;
+    UpdateFlipMirrorState(this, anim);
+    anim->flip->dirty = 1;
+
+    anim->startFrame = 0;
+    anim->currentFrame = 0;
+    anim->endFrame = (animation->numFrames > 0) ? ((animation->numFrames - 1) << 16) : 0;
+    anim->prevFrame = 0;
+    anim->loopCount = 0;
+    anim->speed = FIX16_ONE;
 }
 
 // PSX: SetOriginalSTree__6SModelP13OriginalSTreeP10tAnimation (MODEL.CPP:1026, 0x8006EDD4)
@@ -366,6 +481,23 @@ void SModel::SetOriginalSTree(OriginalSTree* original) {
     DeleteDrawable();
     drawable = new DrawableSTree(original);
     drawableType = 2; // STree type
+    SetupModelCallbacks();
+}
+
+// PSX: SetupModelCallbacks__6SModel (MODEL.HPP:1097, 0x80072440)
+void SModel::SetupModelCallbacks() {
+    MARKFUNCTION(0x80072440);
+}
+
+s32 SModel::MirrorTree() {
+    MARKFUNCTION(0x8006FAD4);
+
+    DrawableSTree* drawableStree = GetDrawableSTree(this);
+    if (!drawableStree) {
+        return 0;
+    }
+
+    return drawableStree->MirrorTree(this);
 }
 
 // PSX: InitSemiTransMode__6SModel (MODEL.CPP:1045, 0x8006EE20)
@@ -545,13 +677,11 @@ HumanoidModel::HumanoidModel() {
     animMatrices = new AnimationMatrices();
     attackHandRadius = 100;
     attackFootRadius = 100;
-    field108 = 400;
-    field112 = 0;
-    field116 = 0;
+    field108 = 100;
+    field112 = 400;
+    field116 = 100;
     field120 = 0;
-    field124 = 0;
-    field128 = 0;
-    field132 = INVALID_HANDLE;
+    headTrackDir = { 0, 0, 0xFFFF };
 }
 
 // PSX: __13HumanoidModel (MHUMAN.CPP:56, 0x8006E0C8)
@@ -575,6 +705,21 @@ void HumanoidModel::Animate() {
             (u32)anim->animEnum,
             (u32)(s16)((u32)anim->currentFrame >> 16)
         );
+    }
+}
+
+// PSX: SetupModelCallbacks__13HumanoidModel (MHUMAN.CPP:69, 0x8006E114)
+void HumanoidModel::SetupModelCallbacks() {
+    MARKFUNCTION(0x8006E114);
+
+    if (!animMatrices) {
+        return;
+    }
+
+    animMatrices->SetupCallbacks(this);
+    animMatrices->SetHumanoid(backPtr);
+    if (!backPtr) {
+        animMatrices->SetupExtraCallbacks(this);
     }
 }
 

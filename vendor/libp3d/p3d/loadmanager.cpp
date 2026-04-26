@@ -3,6 +3,24 @@
 #include "p3d/chunkfile.h"
 #include "p3d/inventory.h"
 
+static bool IsP3DContainerChunk(u16 chunkID) {
+    return chunkID == ChunkID::TexturePage || chunkID == ChunkID::P3DContainer;
+}
+
+static void LoadChunkTree(tP3DFileHandler* handlerSet, tChunkFile* file, tInventory* store) {
+    while (file->ChunksRemaining()) {
+        const u16 id = file->BeginChunk();
+
+        if (tChunkHandler* handler = handlerSet->GetHandler(id)) {
+            handler->LoadChunk(file, store);
+        } else if (IsP3DContainerChunk(id)) {
+            LoadChunkTree(handlerSet, file, store);
+        }
+
+        file->EndChunk();
+    }
+}
+
 tP3DFileHandler::~tP3DFileHandler() {
     for (auto* h : handlers)
         delete h;
@@ -22,14 +40,5 @@ tChunkHandler* tP3DFileHandler::GetHandler(u16 chunkID) {
 
 void tP3DFileHandler::LoadFromMemory(const u8* data, u32 size, tInventory* store) {
     tChunkFile file(data, size);
-
-    while (file.ChunksRemaining()) {
-        u16 id = file.BeginChunk();
-
-        tChunkHandler* handler = GetHandler(id);
-        if (handler)
-            handler->LoadChunk(&file, store);
-
-        file.EndChunk();
-    }
+    LoadChunkTree(this, &file, store);
 }

@@ -12,6 +12,7 @@
 #include "p3d/inventory.h"
 #include "p3d/context.h"
 #include "p3d/flip.h"
+#include "p3d/ramtexanim.h"
 #include "gen/ccfile.h"
 #include "gen/paramanim.h"
 #include <algorithm>
@@ -65,6 +66,13 @@ static void P3DLoadTextures(const u8* data, u32 size) {
     }
 
     world->RefreshVRAMTexture();
+
+    if (p3d::inventory) {
+        tP3DFileHandler loader;
+        loader.AddHandler(new tTextureLoader());
+        loader.AddHandler(new tRAMTexAnimLoader());
+        loader.LoadFromMemory(data, size, p3d::inventory);
+    }
 }
 
 // Global singleton (PSX: gp+796)
@@ -583,9 +591,9 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
             s32 bufSize = rrSize(cf->rrHeader, rrIdx - 1);
 
             if (skeleton) {
-                // Read idle animation (animEnum 0) to apply bind pose to skeleton joints.
-                // PSX: animation is loaded separately via LoadAnimationBatch, but we need the
-                // bind pose before building the mesh. Resource index: 2*animEnum + 8 = 8.
+                // Seed the freshly loaded STree once from anim 0 / frame 0 so joints with
+                // no channels in the first active clip start from the same pose PSX has
+                // after the default character animation is attached.
                 s32 idleAnimSize = 0;
                 u8* idleAnimBuf = cf->ReadResource(8, &idleAnimSize);
                 if (idleAnimBuf) {
@@ -593,7 +601,6 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
                     std::free(idleAnimBuf);
                 }
 
-                // Build per-joint mesh with animation-applied transforms
                 original->skeleton = skeleton;
                 skeleton = nullptr; // ownership transferred
                 BuildPerJointMeshes(original, (const u8*)slot.dataBuffer, (u32)bufSize);

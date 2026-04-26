@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cassert>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -36,6 +37,10 @@ struct Fixed {
 
 // IDA address marker (no-op on PC)
 #define MARKFUNCTION(addr) ((void)0)
+
+#ifndef ASSERT
+#define ASSERT(expr) assert(expr)
+#endif
 
 // Math types = split into separate headers
 #include "p3d/vector.h"

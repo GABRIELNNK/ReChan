@@ -1,8 +1,11 @@
 #include "ai/humanoid.h"
+#include "ai/activezn.h"
+#include "ai/humndata.h"
 #include "ai/obstacle.h"
 #include "ai/player.h"
 #include "ai/colfight.h"
 #include "gen/common.h"
+#include "gen/database.h"
 #include "gen/model.h"
 #include "gen/ai.h"
 #include "gen/animmat.h"
@@ -14,6 +17,7 @@
 #include "snd/rsevent.h"
 #include "snd/hmndsnd.h"
 #include "snd/sndfact.h"
+#include "p3d/hash.h"
 #include "p3d/p3dmath.h"
 #include "p3d/skeleton.h"
 #include "pc/log.h"
@@ -96,30 +100,20 @@ s32 Humanoid::HandleAnimationControl() {
         return 0;
     }
 
-    OriginalSTree* source = m->drawable->GetAlternateSTree();
-    if (!source) {
-        source = m->drawable->GetOriginalSTree();
-    }
+    OriginalSTree* source = GetActiveSTree(m->drawable);
     STreeData* skeleton = source ? source->skeleton : nullptr;
-    if (!skeleton || !skeleton->joints || skeleton->numJoints <= 0
-        || !skeleton->jointOrderMap || skeleton->numMapEntries <= 0) {
+    const STreeJoint* joint = skeleton ? skeleton->GetJoint(0) : nullptr;
+    if (!joint) {
         return 0;
     }
-
-    u32 jointIndex = skeleton->jointOrderMap[0];
-    if (jointIndex >= skeleton->numJoints) {
-        return 0;
-    }
-
-    const STreeJoint& joint = skeleton->joints[jointIndex];
 
     LVector nextHome = homePos;
-    SVector localOffset = {};
-    localOffset.x = static_cast<s16>(joint.translationX);
-    localOffset.y = static_cast<s16>(joint.translationY);
-    localOffset.z = static_cast<s16>(joint.translationZ);
+    LVector localOffset = {};
+    localOffset.x = joint->translationX;
+    localOffset.y = joint->translationY;
+    localOffset.z = joint->translationZ;
 
-    SVector worldOffset = {};
+    LVector worldOffset = {};
     GetObjectToWorldSpaceVector(localOffset, worldOffset);
 
     const s16 frame = static_cast<s16>((u32)anim->currentFrame >> 16);
@@ -130,13 +124,13 @@ s32 Humanoid::HandleAnimationControl() {
         field524 = worldOffset.z;
     }
 
-    if ((flags2 & TF2_NIS_FROZEN) == 0) {
+    if (((flags2 >> 5) & 1) == 0) {
         nextHome.y += (s32)worldOffset.y - field520;
     }
 
     if (((flags2 >> 6) & 1) == 0) {
-        nextHome.z += (s32)worldOffset.z - field524;
         nextHome.x += (s32)worldOffset.x - field516;
+        nextHome.z += (s32)worldOffset.z - field524;
     }
 
     field516 = worldOffset.x;
@@ -150,6 +144,7 @@ s32 Humanoid::HandleAnimationControl() {
     }
 
     homePos = nextHome;
+
     return 1;
 }
 
@@ -189,7 +184,7 @@ Humanoid::Humanoid(const LVector* initialPos, u16 type)
     rightHandObj = nullptr;
     leftHandObj = nullptr;
     field496 = 0;
-    field532 = 0;
+    activeZone = nullptr;
     field384 = 0;
     field388 = 0;
     field392 = 0;
@@ -202,8 +197,9 @@ Humanoid::Humanoid(const LVector* initialPos, u16 type)
     field320 = 0;
     field324 = 0;
     field452 = 0;
+    behaviourNameHash = 0;
     field436 = 0;
-    field216 = 0;
+    characterSubType = 0;
     soundHandle = 0;
     soundParam = 0;
     punchDir = 0;
@@ -297,24 +293,6 @@ void Humanoid::Draw() {
         m->rotZ = (u16)(drawOrient.z & 0xFFFF);
         m->Show(0);
 
-        // PC: populate AnimationMatrices with world-space bone positions.
-        // Replaces PSX GTE callback mechanism (SetupModelCallbacks/CopyMatrix).
-        if (hm->animMatrices && m->drawable) {
-            OriginalSTree* ost = m->drawable->GetAlternateSTree();
-            if (!ost) {
-                ost = m->drawable->GetOriginalSTree();
-            }
-            if (ost && ost->skeleton) {
-                // Build world matrix matching Show(): RotMatrixZYX * Scale * Translation
-                Mat4 world;
-                p3dBuildRotMatrixZYX(m->rotX, m->rotY, m->rotZ, world);
-                f32 s = FIX16_TO_FLOAT(static_cast<SModel*>(m)->scale);
-                world.ScaleRotation(s);
-                world.SetTranslation((f32)m->posX, (f32)m->posY, (f32)m->posZ);
-
-                hm->animMatrices->UpdateWorldPositions(ost->skeleton, world);
-            }
-        }
         return;
     }
     // No model: fallback to debug wireframe
@@ -393,29 +371,19 @@ s32 Humanoid::RestorePositionFromBip01() {
         return 0;
     }
 
-    OriginalSTree* source = m->drawable->GetAlternateSTree();
-    if (!source) {
-        source = m->drawable->GetOriginalSTree();
-    }
+    OriginalSTree* source = GetActiveSTree(m->drawable);
     STreeData* skeleton = source ? source->skeleton : nullptr;
-    if (!skeleton || !skeleton->joints || skeleton->numJoints <= 0
-        || !skeleton->jointOrderMap || skeleton->numMapEntries <= 0) {
+    const STreeJoint* joint = skeleton ? skeleton->GetJoint(0) : nullptr;
+    if (!joint) {
         return 0;
     }
 
-    u32 jointIndex = skeleton->jointOrderMap[0];
-    if (jointIndex >= skeleton->numJoints) {
-        return 0;
-    }
+    LVector local = {};
+    local.x = joint->translationX;
+    local.y = joint->translationY;
+    local.z = joint->translationZ;
 
-    const STreeJoint& joint = skeleton->joints[jointIndex];
-
-    SVector local = {};
-    local.x = (s16)joint.translationX;
-    local.y = (s16)joint.translationY;
-    local.z = (s16)joint.translationZ;
-
-    SVector worldOffset = {};
+    LVector worldOffset = {};
     GetObjectToWorldSpaceVector(local, worldOffset);
 
     s32 nextX = homePos.x;
@@ -596,6 +564,10 @@ void Humanoid::CreateModel(const char* name) {
         behaviour = new Behaviour(this, thingType, 0);
     }
 
+    if (field452 != 0 && activeZone) {
+        activeZone->AddHumanoidToOverlordMembers(this);
+    }
+
     // PSX: calls Thing::CreateModel which does the LevelManager lookup
     Thing::CreateModel(name);
 
@@ -604,6 +576,7 @@ void Humanoid::CreateModel(const char* name) {
     if (m) {
         m->ApplyAnimToModel(0, 0, 2, 0, 0);
         SModel* sm = static_cast<SModel*>(m);
+        sm->scale = GetCharSubTypeScale(characterSubType);
         sm->InitSemiTransMode();
     }
 
@@ -615,6 +588,11 @@ void Humanoid::CreateModel(const char* name) {
 void Humanoid::DeleteModel() {
     MARKFUNCTION(0x80063514);
     Thing::DeleteModel();
+
+    if (field452 != 0 && activeZone) {
+        activeZone->RemoveHumanoidFromOverlordMembers(this);
+    }
+
     ReleaseSound();
 }
 
@@ -736,6 +714,89 @@ void Humanoid::HandleCollisionSound(s32 hitType) {
 void Humanoid::AnalyzeMesh(DBRoot* root) {
     MARKFUNCTION(0x80062E54);
     Thing::AnalyzeMesh(root);
+
+    if (!root) {
+        return;
+    }
+
+    behaviourNameHash = 0;
+
+    for (u32 index = 0; index < root->attribCount; index++) {
+        const DBAttrib* attrib = root->GetAttribByIndex(index);
+        if (!attrib) {
+            continue;
+        }
+
+        switch (attrib->id) {
+            case 0x0C:
+                characterSubType = GetCharSubTypeEnumFromHashID((s32)p3dHash(attrib->GetAttribString()));
+                break;
+            case 0x0D:
+            {
+                const u16 hitPoints = (u16)attrib->value;
+                maxHealth = hitPoints;
+                health = hitPoints;
+                break;
+            }
+            case 0x0E:
+                activeZone = g_ai
+                    ? static_cast<ActiveZone*>(g_ai->activeZoneList.FindNodeCRC(p3dHash(attrib->GetAttribString())))
+                    : nullptr;
+                break;
+            case 0x10:
+                field452 = (s32)attrib->value;
+                break;
+            case 0x11:
+                behaviourNameHash = p3dHash(attrib->GetAttribString());
+                break;
+            case 0x1D:
+                if (p3dHash(attrib->GetAttribString()) == p3dHash("AS_NISMode")) {
+                    field364 = 73;
+                    SetActionState(73, 0);
+                }
+                break;
+            case 0x1F:
+                field384 = GetPreActiveIdle((s32)p3dHash(attrib->GetAttribString()));
+                break;
+            case 0x20:
+                field388 = (s32)p3dHash(attrib->GetAttribString());
+                break;
+            case 0x21:
+                field392 = (s32)p3dHash(attrib->GetAttribString());
+                break;
+            case 0x22:
+                field396 = (s32)p3dHash(attrib->GetAttribString());
+                break;
+            case 0x23:
+                field400 = (s32)p3dHash(attrib->GetAttribString());
+                break;
+            case 0x24:
+                field404 = (s32)p3dHash(attrib->GetAttribString());
+                break;
+            case 0x25:
+                field408 = (s32)attrib->value;
+                break;
+            case 0x28:
+                field412 = 1;
+                break;
+            case 0x29:
+                field416 = 1;
+                break;
+            default:
+                break;
+        }
+    }
+
+    const s16 subTypeHitPoints = GetCharSubTypeHitPoints(characterSubType);
+    if (subTypeHitPoints != 0) {
+        maxHealth = (u16)subTypeHitPoints;
+        health = (u16)subTypeHitPoints;
+    }
+
+    const u32 subTypeBehaviourHash = GetBehaviourNameHash(characterSubType);
+    if (subTypeBehaviourHash != 0) {
+        behaviourNameHash = subTypeBehaviourHash;
+    }
 }
 
 // PSX: SetActionState__8HumanoidUll (HUMANOID.CPP:2792)
@@ -890,7 +951,7 @@ void Humanoid::SetActionState(u32 state, s32 param) {
         case AS_DEAD:              stateDispatch = SD_DEAD; break;
         case AS_HOTFOOT:
             field344 = 0;
-            stateDispatch = SD_HOTFOOT;
+            stateDispatch = SD_NIS_MODE;
             field348 = 8;
             break;
         case AS_HIT_EXPLOSION:     stateDispatch = SD_GOT_HIT_HIGH; break;
@@ -938,7 +999,7 @@ void Humanoid::ProcessAction() {
         case SD_LADDER_LATCH: _LadderLatch(); break;
         case SD_CLIMB_LADDER: _ClimbLadder(); break;
         case SD_LADDER_DISMOUNT: _LadderDismount(); break;
-        case SD_HOTFOOT:      _Hotfoot(); break;
+        case SD_NIS_MODE:     _NISMode(); break;
         default: break;
     }
 }
@@ -1151,6 +1212,26 @@ void Humanoid::ReleaseTarget() {
         }
         field256 = 0;
     }
+}
+
+// PSX: IsInActiveZone__8Humanoid (HUMANOID.CPP:2612, 0x80065230)
+bool Humanoid::IsInActiveZone() const {
+    MARKFUNCTION(0x80065230);
+
+    return activeZone != nullptr
+        && activeZone->box.IsValid()
+        && activeZone->box.IsInside(pos);
+}
+
+// PSX: IsTargetInActiveZone__8Humanoid (HUMANOID.CPP:2630, 0x80065290)
+bool Humanoid::IsTargetInActiveZone() const {
+    MARKFUNCTION(0x80065290);
+
+    Humanoid* target = reinterpret_cast<Humanoid*>(static_cast<intptr_t>(field256));
+    return target != nullptr
+        && activeZone != nullptr
+        && activeZone->box.IsValid()
+        && activeZone->box.IsInside(target->pos);
 }
 
 // PSX: FaceAngleY__8Humanoidli (HUMANOID.CPP:2402)
@@ -1835,7 +1916,8 @@ void Humanoid::_Pickup() {
 void Humanoid::_Hotfoot() {
     MARKFUNCTION(0x80067F54);
 
-    FaceAngleY(faceAngle, 1);
+    const s32 faceImmediate = ((flags2 & TF2_NIS_ENTER) != 0) ? 0 : 1;
+    FaceAngleY(faceAngle, faceImmediate);
 
     SVector dir = {};
     dir.x = (s16)orientation.x;
@@ -2131,6 +2213,21 @@ s32 Humanoid::LetGoOfLedge() {
     }
 
     return ok;
+}
+
+// PSX: _NISMode__8Humanoid (HUMANOID.CPP:8770, 0x8006C564)
+void Humanoid::_NISMode() {
+    MARKFUNCTION(0x8006C564);
+
+    flags &= ~TF_DYNAMIC;
+    velocity = {};
+    contactForce = {};
+    maxFallDivisor = 0;
+
+    if (model) {
+        HumanoidModel* humanoidModel = static_cast<HumanoidModel*>(model);
+        humanoidModel->field116 = 0;
+    }
 }
 
 // PSX: _Throw__8Humanoid (HUMANOID.CPP:4998, 0x800685A8)

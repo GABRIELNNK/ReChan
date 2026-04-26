@@ -1,6 +1,6 @@
 #include "gen/control.h"
 #include "config.h"
-#include "p3d/keycode.h"
+#include "pc/inputaction.h"
 
 // Global singleton (PSX: 0x800DD69C)
 InputManager* g_inputManager = nullptr;
@@ -58,6 +58,7 @@ static const u8 sPlayerMap[3][16] = {
 // Button::Input (0x8002D8C4) = process raw bit (0 or 1)
 // PSX: RawHandler__6Buttonl updates duration (frames held) and state.
 void Button::Input(s32 bit) {
+    MARKFUNCTION(0x8002D8C4);
     prevInput = rawInput;
     rawInput = bit;
 
@@ -78,6 +79,7 @@ void Button::Input(s32 bit) {
 
 // Button::GetState (0x8002D898) = return state based on mode
 s32 Button::GetState() const {
+    MARKFUNCTION(0x8002D898);
     s32 out = state;
     if (mode == BUTTON_MODE_ONESHOT || mode == BUTTON_MODE_REPEAT) {
         const_cast<Button*>(this)->state = 0;
@@ -87,10 +89,8 @@ s32 Button::GetState() const {
 
 // Button::SetMode (0x8002D9E8)
 void Button::SetMode(s16 m) {
+    MARKFUNCTION(0x8002DB40);
     mode = static_cast<ButtonMode>(m);
-    rawInput = 0;
-    prevInput = 0;
-    state = 0;
 }
 
 
@@ -101,6 +101,7 @@ void Button::SetMode(s16 m) {
 // PSX iterates 16 buttons, looks up controlMap[i] for physical->logical mapping,
 // then calls Button::Input with the corresponding bit.
 void Control::Input(u32 buttonBits) {
+    MARKFUNCTION(0x8002DCF0);
     for (int i = 0; i < 16; ++i) {
         int mapped = controlMap[i];
         s32 bit = ((buttonBits & (1u << i)) != 0) ? 1 : 0;
@@ -110,6 +111,7 @@ void Control::Input(u32 buttonBits) {
 
 // Control::GetMask (0x8002DDEC) = combine 16 Button::GetState results into bitmask
 u32 Control::GetMask() const {
+    MARKFUNCTION(0x8002DDEC);
     u32 mask = 0;
     for (int i = 0; i < 16; ++i) {
         if (buttons[i].GetState()) {
@@ -127,6 +129,7 @@ void Control::SetControlMapArray(const u8* map) {
 }
 
 void Control::ApplyCurrentModeMap() {
+    MARKFUNCTION(0x8002DE88);
     if (!modeMap) {
         return;
     }
@@ -142,12 +145,14 @@ void Control::ApplyCurrentModeMap() {
 
 // InputManager::InputManager (0x8002DF74)
 InputManager::InputManager() {
+    MARKFUNCTION(0x8002DF74);
     UpdateReverseMap();
     InternalReset();
 }
 
 // InputManager::~InputManager (0x8002E048)
 InputManager::~InputManager() {
+    MARKFUNCTION(0x8002E048);
     // PSX: destroys Control objects, calls ~Manager
 }
 
@@ -156,9 +161,26 @@ InputManager::~InputManager() {
 // dispatches to Control::Input for per-button processing.
 // PSX reads Sony pad buffer; on PC we pass pre-built button bits.
 void InputManager::ServiceInput(u32 buttons, u16 padIndex) {
+    MARKFUNCTION(0x8002E0D4);
     if (padIndex > 1) return;
 
     Control& ctrl = controls[padIndex];
+
+    if (ctrl.padType == 's' || ctrl.padType == 'S') {
+        if (ctrl.analogLX < 0x21u) {
+            buttons |= PsxPad::Left;
+        }
+        else if (ctrl.analogLX >= 0xE0u) {
+            buttons |= PsxPad::Right;
+        }
+
+        if (ctrl.analogLY < 0x21u) {
+            buttons |= PsxPad::Up;
+        }
+        else if (ctrl.analogLY >= 0xE0u) {
+            buttons |= PsxPad::Down;
+        }
+    }
 
     // Store raw button bitmask (PSX: control+32)
     ctrl.rawButtons = buttons;
@@ -171,9 +193,49 @@ void InputManager::ServiceInput(u32 buttons, u16 padIndex) {
     ctrl.Input(buttons);
 }
 
+void InputManager::ServiceHostPads(const ActionInput* actionInput) {
+    Control& pad0 = controls[0];
+    Control& pad1 = controls[1];
+
+    const bool analogPad = actionInput && actionInput->UsesAnalogPad();
+    u32 buttons = 0;
+
+    pad0.padType = analogPad ? 's' : 'A';
+    if (actionInput) {
+        buttons = actionInput->GetPadButtons();
+
+        if (pad0.modeMap == sTitleControlMode && actionInput->IsHeld(ACTION_MENU_CONFIRM)) {
+            buttons |= PsxPad::Start;
+        }
+    }
+
+    if (analogPad && actionInput) {
+        actionInput->GetPadAnalog(pad0.analogLX, pad0.analogLY, pad0.analogRX, pad0.analogRY);
+    }
+    else {
+        pad0.analogLX = 128;
+        pad0.analogLY = 128;
+        pad0.analogRX = 128;
+        pad0.analogRY = 128;
+    }
+
+    ServiceInput(buttons, 0);
+
+    pad1.padType = 0;
+    pad1.rawButtons = 0;
+    pad1.flags = 0;
+    pad1.hasConnectedPad = 0;
+    pad1.analogLX = 128;
+    pad1.analogLY = 128;
+    pad1.analogRX = 128;
+    pad1.analogRY = 128;
+    pad1.Input(0);
+}
+
 // InputManager::Step (0x8002E6E8)
 // Per-frame cleanup: clears controlValFlags
 void InputManager::Step() {
+    MARKFUNCTION(0x8002E6E8);
     controlValFlags[0] = 0;
     controlValFlags[1] = 0;
 }
@@ -181,6 +243,7 @@ void InputManager::Step() {
 // InputManager::GetControlVal (0x8002E5BC)
 // Returns processed button bitmask from Control::GetMask
 u32 InputManager::GetControlVal(u16 padIndex) {
+    MARKFUNCTION(0x8002E5BC);
     if (padIndex > 1) return 0;
 
     Control& ctrl = controls[padIndex];
@@ -201,6 +264,7 @@ u32 InputManager::GetRawButtons(u16 padIndex) const {
 // PSX: GetMappedButton__C7Controlc (0x8002DF14)
 // Maps PSX button bit index through reverseMap + controlMap to Button*.
 Button* InputManager::GetButtonForBit(u16 padIndex, u8 bitIndex) {
+    MARKFUNCTION(0x8002DF14);
     if (padIndex > 1) return &controls[0].buttons[0];
     if (bitIndex >= 16) return &controls[padIndex].buttons[0];
     Control& ctrl = controls[padIndex];
@@ -221,11 +285,13 @@ void InputManager::GetAnalog(u16 padIndex, u8& lx, u8& ly, u8& rx, u8& ry) const
 
 // InputManager::SetControlMapArray (0x8002E2F0)
 void InputManager::SetControlMapArray(s16 padIndex, const u8* map) {
+    MARKFUNCTION(0x8002E2F0);
     if (padIndex < 0 || padIndex > 1) return;
     controls[padIndex].SetControlMapArray(map);
 }
 
 void InputManager::SetControlModeArray(s16 padIndex, const s16* modeMap) {
+    MARKFUNCTION(0x8002E33C);
     if (padIndex < 0 || padIndex > 1 || !modeMap) {
         return;
     }
@@ -240,6 +306,7 @@ const u8* InputManager::PlayerMapArray() const {
 }
 
 const u8* InputManager::DefaultMapArray() const {
+    MARKFUNCTION(0x8002E460);
     return sDefaultMapArray;
 }
 
@@ -248,11 +315,13 @@ u8 InputManager::GetPlayerConfig() const {
 }
 
 void InputManager::SetPlayerConfig(u8 config) {
+    MARKFUNCTION(0x8002E3F0);
     playerConfig = config % 3;
     UpdateReverseMap();
 }
 
 void InputManager::UpdateReverseMap() {
+    MARKFUNCTION(0x8002E414);
     const u8* map = PlayerMapArray();
     for (u8 i = 0; i < 16; ++i) {
         reverseMap[map[i]] = i;
@@ -261,6 +330,7 @@ void InputManager::UpdateReverseMap() {
 
 // InputManager::InternalReset (0x8002E550)
 void InputManager::InternalReset() {
+    MARKFUNCTION(0x8002E550);
     // PSX default resets map and button state, then applies mode map later.
     for (int p = 0; p < 2; ++p) {
         for (int i = 0; i < 16; ++i) {
@@ -270,6 +340,7 @@ void InputManager::InternalReset() {
         controls[p].modeMap = nullptr;
         controls[p].flags = 0;
         controls[p].rawButtons = 0;
+        controls[p].padType = 0;
         controls[p].hasConnectedPad = 0;
         controls[p].analogLX = controls[p].analogLY = 128;
         controls[p].analogRX = controls[p].analogRY = 128;

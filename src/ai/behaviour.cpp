@@ -3,10 +3,10 @@
 #include "ai/humanoid.h"
 #include "ai/obstacle.h"
 #include "ai/thing.h"
+#include "gen/ai.h"
 #include "gen/director.h"
 #include "gen/game.h"
 #include "gen/camera.h"
-#include "pc/inputaction.h"
 #include "pc/debugui.h"
 #include "p3d/p3dmath.h"
 
@@ -36,28 +36,56 @@ static constexpr s32 DIR_LEFT = 8;  // angleDiff near 90 - pushing to character'
 // Fixed-point 127 << 16
 static constexpr s32 STICK_MAX_FP = 0x7F0000;
 
-extern s32 g_directorActive;
-
-Behaviour::Behaviour(Humanoid* ownerHumanoid, u32 handlerType, s32 /*aiParam*/) {
+Behaviour::Behaviour(Humanoid* ownerHumanoid, u32 handlerType, s32 inAiParam) {
     MARKFUNCTION(0x80069CB0);
     owner = ownerHumanoid;
+    aiType = handlerType;
+    currentPath = nullptr;
+    field36 = 0;
+    currentPathNodeIndex = 0;
+    aiParam = inAiParam;
     handlerThisOffset = 0;
     handlerDispatch = -1;
     handler = nullptr;
     previousButtons = 0;
     buttonHoldCounter = 0;
     behaviourFlags = 0;
-    padPort = 0;
+    padPort = 1;
+    field276 = 0;
     SetAIHandler(handlerType);
 }
 
 void Behaviour::SetAIHandler(u32 handlerType) {
     MARKFUNCTION(0x80069D3C);
+
+    nextHandlerThisOffset = 0;
+    nextHandlerDispatch = 0;
+    nextHandler = nullptr;
+
+    if (g_ai && owner && owner->behaviourNameHash != 0) {
+        animConfigPtr = static_cast<BehaviourAttrib*>(g_ai->behaviourList.FindNodeCRC(owner->behaviourNameHash));
+    }
+    else {
+        animConfigPtr = nullptr;
+    }
+
+    if (!animConfigPtr && g_ai) {
+        animConfigPtr = static_cast<BehaviourAttrib*>(g_ai->behaviourList.FindNode("Default"));
+    }
+
+    handlerThisOffset = 0;
+    handlerDispatch = -1;
     handler = nullptr;
 
     if (handlerType == AITypes::TT_PLAYER) {
+        padPort = 0;
         handler = PlayerUserControl;
     }
+}
+
+bool Behaviour::InActiveZone() const {
+    MARKFUNCTION(0x80074888);
+    return owner && owner->IsInActiveZone();
 }
 
 void Behaviour::Process() {
@@ -80,7 +108,7 @@ void Behaviour::Process() {
 // PSX: PlayerUserControl__9Behaviour (BEHAVE.CPP:1474, 0x80074F5C)
 void Behaviour::PlayerUserControl(Behaviour* self) {
     MARKFUNCTION(0x80074F5C);
-    if (!self || !self->owner || !g_game || !g_actionInput) {
+    if (!self || !self->owner || !g_game || !g_inputManager) {
         return;
     }
 
@@ -91,25 +119,82 @@ void Behaviour::PlayerUserControl(Behaviour* self) {
         return;
     }
 
-    const bool gameplayInputEnabled = (self->behaviourFlags & Behaviour::BF_INPUT_PROCESSING) != 0;
-    if (!gameplayInputEnabled) {
+    u32 buttons = 0;
+    if ((self->behaviourFlags & Behaviour::BF_INPUT_PROCESSING) != 0) {
+        buttons = (u32)g_game->GetControlVal(self->padPort);
+    }
+    else {
         self->behaviourFlags |= Behaviour::BF_INPUT_PROCESSING;
     }
 
-    // Read movement from ActionInput (works for both keyboard and gamepad)
-    s32 analogX = gameplayInputEnabled ? g_actionInput->GetMoveX() : 0;
-    s32 analogY = gameplayInputEnabled ? g_actionInput->GetMoveY() : 0;
-    s32 stickX = gameplayInputEnabled ? g_actionInput->GetMoveX() : 0;
-    s32 stickY = gameplayInputEnabled ? g_actionInput->GetMoveY() : 0;
-    s32 direction = 0;
+    const Control* control = nullptr;
+    if ((u16)self->padPort < 2u) {
+        control = &g_inputManager->controls[self->padPort];
+    }
 
-    // Direction classification
+    s32 analogX = 0;
+    s32 analogY = 0;
+    s32 stickX = 0;
+    s32 stickY = 0;
+    s32 direction = 0;
     s32 ownerAngle = owner->orientation.y;
     s32 targetAngle = ownerAngle;
 
     owner->moveSpeed = 0;
 
-    if (analogX || analogY) {
+    if (control && (control->padType == 's' || control->padType == 'S') && buttons != 0) {
+        stickX = (s32)control->analogLX - 127;
+        stickY = (s32)control->analogLY - 127;
+
+        s32 absX = stickX;
+        if (absX < 0) {
+            absX = -absX;
+        }
+        if (absX >= 64) {
+            analogX = stickX;
+            if (stickX > 0) {
+                buttons |= PsxPad::Right;
+            }
+            else {
+                buttons |= PsxPad::Left;
+            }
+        }
+
+        s32 absY = stickY;
+        if (absY < 0) {
+            absY = -absY;
+        }
+        if (absY >= 64) {
+            analogY = stickY;
+            if (stickY > 0) {
+                buttons |= PsxPad::Down;
+            }
+            else {
+                buttons |= PsxPad::Up;
+            }
+        }
+    }
+    else if ((buttons & 0xF000u) != 0) {
+        if ((buttons & PsxPad::Left) != 0) {
+            analogX = -32;
+            stickX = -127;
+        }
+        else if ((buttons & PsxPad::Right) != 0) {
+            analogX = 32;
+            stickX = 127;
+        }
+
+        if ((buttons & PsxPad::Up) != 0) {
+            analogY = -32;
+            stickY = -127;
+        }
+        else if ((buttons & PsxPad::Down) != 0) {
+            analogY = 32;
+            stickY = 127;
+        }
+    }
+
+    if (analogX != 0 || analogY != 0) {
         Camera& cam = g_game->GetCamera();
         s32 cameraAngle = cam.GetOrientY();
 
@@ -140,12 +225,12 @@ void Behaviour::PlayerUserControl(Behaviour* self) {
         direction = dirCode;
 
         s32 absX = stickX;
-        if (stickX < 0) {
-            absX = -stickX;
+        if (absX < 0) {
+            absX = -absX;
         }
         s32 absY = stickY;
-        if (stickY < 0) {
-            absY = -stickY;
+        if (absY < 0) {
+            absY = -absY;
         }
         s32 maxAxis = stickX;
         if (absY >= absX) {
@@ -164,19 +249,23 @@ void Behaviour::PlayerUserControl(Behaviour* self) {
         }
     }
 
-    // PSX clears Behaviour bit 0 each frame while Director input is disabled.
-    // PlayerUserControl then ignores the current pad sample and re-arms the bit.
-    s32 actionReq = gameplayInputEnabled ? g_actionInput->ResolveGameAction(direction)
-                                         : GA_GUARD_RELEASE;
+    if (self->previousButtons == buttons) {
+        self->buttonHoldCounter++;
+    }
+    else {
+        self->buttonHoldCounter = 0;
+    }
+    self->previousButtons = buttons;
 
-    // Set faceAngle for movement/direction-based actions
+    s32 actionReq = FindActionRequest(self->actionRequestState, buttons & 0xFFFF0FFFu, direction, (u16)self->padPort);
+
     if ((u32)(actionReq - 2) < 3
         || actionReq == GA_STRAFE
         || actionReq == 19
         || actionReq == GA_GRAB
         || actionReq == GA_GRAB_FORWARD
         || actionReq == 16) {
-        owner->faceAngle = targetAngle;
+        owner->SetDesiredMoveDirection(targetAngle);
     }
 
     owner->RequestAction((u32)actionReq);
@@ -196,7 +285,7 @@ s32 Behaviour::MoveToDestinationPoint(u32 threshold) {
         owner->RequestAction(2);  // GA_RUN
         // PSX: sets owner->moveSpeed from animConfigPtr speed data
         if (animConfigPtr) {
-            s16 spd = *(s16*)((u8*)animConfigPtr + 44);
+            s16 spd = (s16)animConfigPtr->runningSpeed;
             owner->moveSpeed = spd;
         }
         return 0;
@@ -208,7 +297,7 @@ s32 Behaviour::MoveToDestinationPoint(u32 threshold) {
         owner->RequestAction(6);  // GA_WALK
         // PSX: sets owner->moveSpeed to half of speed
         if (animConfigPtr) {
-            s16 spd = *(s16*)((u8*)animConfigPtr + 44);
+            s16 spd = (s16)animConfigPtr->runningSpeed;
             owner->moveSpeed = (spd + ((u16)spd >> 15)) >> 1;
         }
         return 0;
@@ -297,7 +386,7 @@ void Behaviour::SubwayDodgeRight(Behaviour* b) {
     b->owner->FaceThingDesired(nullptr);
     b->owner->FaceAngleY(b->owner->faceAngle, 0);
     if (b->animConfigPtr) {
-        b->owner->moveSpeed = *(s16*)((u8*)b->animConfigPtr + 44);
+        b->owner->moveSpeed = (s16)b->animConfigPtr->runningSpeed;
     }
     b->owner->SetDesiredMoveDirection(b->owner->faceAngle + 0x4000);
     b->owner->SetTarget(nullptr);
@@ -359,7 +448,7 @@ void Behaviour::SubwayDodgeLeft(Behaviour* b) {
     b->owner->FaceThingDesired(nullptr);
     b->owner->FaceAngleY(b->owner->faceAngle, 0);
     if (b->animConfigPtr) {
-        b->owner->moveSpeed = *(s16*)((u8*)b->animConfigPtr + 44);
+        b->owner->moveSpeed = (s16)b->animConfigPtr->runningSpeed;
     }
     b->owner->SetDesiredMoveDirection(b->owner->faceAngle - 0x4000);
     b->owner->SetTarget(nullptr);
@@ -391,7 +480,7 @@ void Behaviour::SubwayDodgeJump(Behaviour* b) {
     }
 
     if (b->animConfigPtr) {
-        b->owner->moveSpeed = *(s16*)((u8*)b->animConfigPtr + 44);
+        b->owner->moveSpeed = (s16)b->animConfigPtr->runningSpeed;
     }
     b->owner->RequestAction(3);
 

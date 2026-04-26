@@ -10,7 +10,9 @@ public:
     ~PlayerModel() override;
 
     void ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 p4, s32 p5) override;
+    void SetupModelCallbacks() override;
     void SetAnim(s32 animEnum, s32 a3, s32 force, s32 extra) override;
+    s32 MirrorTree() override;
     void HandleLoop(AnimStructure* anim) override;
     void HandleRunToLast(AnimStructure* anim) override;
     void HandleIncFrame(AnimStructure* anim) override;

@@ -317,11 +317,13 @@ void Player::Reset() {
     Humanoid::Reset();
 
     stateCounter = 100;
-    health = 200;
-    flags |= TF_DYNAMIC | TF_BIT5 | TF_BIT3;
     velocity = {};
     contactForce = {};
+    lastPos = orientation;
+
+    health = 200;
     turnRate = 5500;
+    flags |= TF_DYNAMIC | TF_BIT5 | TF_BIT3;
     // PSX: runSpeed set from humanoid data (GetHumanoidData). Default for Player.
     runSpeed = PLAYER_RUN_FORCE;
     field616 = 0;
@@ -340,7 +342,6 @@ void Player::Reset() {
     debugAnimOverrideApplying = false;
     debugAnimOverrideEnum = -1;
     debugAnimOverrideLoopType = ANIM_LOOP;
-    lastPos = orientation;
 
     SetActionState(AS_STAND, 0);
 }
@@ -756,11 +757,9 @@ void Player::SetActionState(u32 state, s32 param) {
         case AS_PUNCH_ATTACK:
         case AS_KICK_ATTACK:
         {
-            // PSX cases 32,34: FindFoe, SetHumanoidTarget, EnterCombatCombo.
-            // While combo tree is still unreversed, fall back to Humanoid setup.
+            // PSX cases 32,34: acquire a foe and attempt to enter combat combo.
             SetHumanoidTarget(FindFoe(750, 10922, 0));
             if (!EnterCombatCombo()) {
-                Humanoid::SetActionState(state, param);
                 return;
             }
             actionState = (s32)state;
@@ -768,6 +767,11 @@ void Player::SetActionState(u32 state, s32 param) {
         }
         case AS_PICKUP:
         {
+            const u32 nearInteractionFlags = (u32)field368;
+            if (((nearInteractionFlags >> 6) & 1u) != 0 || ((nearInteractionFlags >> 1) & 1u) != 0) {
+                return;
+            }
+
             // PSX case 44: pickup object - play weapon pickup dialog when present.
             if (rightHandObj) {
                 s32 dialogID = GetWeaponPickupDialog((s32)rightHandObj->thingType);
@@ -783,6 +787,12 @@ void Player::SetActionState(u32 state, s32 param) {
         }
         case AS_THROW_PICKUP:
         {
+            const u32 nearInteractionFlags = (u32)field368;
+            if (((nearInteractionFlags >> 6) & 1u) != 0 || ((nearInteractionFlags >> 1) & 1u) != 0) {
+                DropPickup(1, 1);
+                return;
+            }
+
             // PSX case 45: preload throw voice line for throw release timing.
             LoadDialog(84, 0x33);
 
@@ -1056,8 +1066,8 @@ void Player::OnCheckpoint() {
 
 void Player::SetLivesLeft(s32 lives) {
     MARKFUNCTION(0x80033D9C);
-    if (lives < 0) {
-        lives = 0;
+    if (lives >= 100) {
+        lives = 99;
     }
     livesLeft = lives;
 }
@@ -1397,9 +1407,9 @@ void Player::_Stand() {
                 SetActionState(AS_THROW_PICKUP, 0);
             }
             else {
-                // PSX: CheckForPickup__8Humanoid; if returns 1, skip to LABEL_87
-                // CheckForPickup not yet reversed - fall through to combat idle
-                SetActionState(AS_COMBAT_IDLE, 0);
+                if (CheckForPickup() == 0) {
+                    SetActionState(AS_COMBAT_IDLE, 0);
+                }
             }
             goto standPostDispatch;
         }
@@ -1964,7 +1974,7 @@ void Player::_Run() {
                 // PSX: falls through to LABEL_13
             }
             else {
-                // PSX: CheckForPickup__8Humanoid - result discarded, goto LABEL_13
+                CheckForPickup();
             }
         }
         else if ((cb >> 6) & 1) {
@@ -2759,6 +2769,13 @@ void Player::Debug_ApplyForcedAnimation() {
         return;
     }
 
+    if (((flags2 >> 4) & 1u) == 0) {
+        flags2 = static_cast<s32>((flags2 | 0x10u) & ~0x60u);
+        field516 = 0;
+        field520 = 0;
+        field524 = 0;
+    }
+
     Model* m = static_cast<Model*>(model);
     AnimStructure* anim = m ? static_cast<AnimStructure*>(m->animStructure) : nullptr;
     if (!anim) {
@@ -2806,6 +2823,13 @@ bool Player::Debug_PlayAnimation(s32 animEnum, s32 loopType) {
     debugAnimOverrideActive = true;
 
     debugAnimOverrideApplying = true;
+    if (((flags2 >> 4) & 1u) == 0) {
+        flags2 = static_cast<s32>((flags2 | 0x10u) & ~0x60u);
+        field516 = 0;
+        field520 = 0;
+        field524 = 0;
+    }
+
     m->ApplyAnimToModel(0, animEnum, loopType, 0, 0);
     debugAnimOverrideApplying = false;
 
@@ -2852,6 +2876,11 @@ void Player::Debug_StopAnimation() {
     debugAnimOverrideApplying = false;
     debugAnimOverrideEnum = -1;
     debugAnimOverrideLoopType = ANIM_LOOP;
+
+    flags2 &= ~0x70u;
+    field516 = 0;
+    field520 = 0;
+    field524 = 0;
 
     if (!model) {
         return;

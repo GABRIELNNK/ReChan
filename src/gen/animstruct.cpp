@@ -26,11 +26,12 @@ AnimStructure::AnimStructure(s32 m, void* anim, s32 lt, Model* mdl, void* drawab
     if (mode == 0 && animation && mdl) {
         // Get skeleton from model's drawable
         STreeData* skeleton = nullptr;
-        if (mdl->drawable) {
-            OriginalSTree* original = mdl->drawable->GetOriginalSTree();
-            if (original) {
-                skeleton = original->skeleton;
-            }
+        DrawableBasic* drawable = drawableBasic
+            ? static_cast<DrawableBasic*>(drawableBasic)
+            : mdl->drawable;
+        OriginalSTree* active = GetActiveSTree(drawable);
+        if (active) {
+            skeleton = active->skeleton;
         }
         if (skeleton) {
             flip = new TransformFlip();

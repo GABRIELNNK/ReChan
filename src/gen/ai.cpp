@@ -10,7 +10,9 @@
 #include "pc/log.h"
 #include "gen/camera.h"
 #include "gen/path.h"
+#include "gen/ccfile.h"
 #include "p3d/p3dmath.h"
+#include "p3d/hash.h"
 #include "ai/obstacle.h"
 #include "ai/player.h"
 #include "ai/humanoid.h"
@@ -35,6 +37,62 @@ static ccList g_worldPointList;
 
 // PSX: gp+0x5E0 (0x800DCF2C)
 static s32 humanoidVolumeRadius = 0xC0;
+
+static bool IsAsciiAlphaNum(char c) {
+    return (c >= '0' && c <= '9')
+        || (c >= 'A' && c <= 'Z')
+        || (c >= 'a' && c <= 'z');
+}
+
+static char* GetNextAlphaNumToken(char* outToken, char* cursor, const char* end) {
+    while (cursor < end && !IsAsciiAlphaNum(*cursor)) {
+        cursor++;
+    }
+
+    char* out = outToken;
+    while (cursor < end && IsAsciiAlphaNum(*cursor)) {
+        *out++ = *cursor++;
+    }
+    *out = '\0';
+    return cursor;
+}
+
+static u32 AlphaToULong(const char* token) {
+    u32 value = 0;
+    while (*token >= '0' && *token <= '9') {
+        value = value * 10 + (u32)(*token - '0');
+        token++;
+    }
+    return value;
+}
+
+static void CopyComboToken(char* dst, const char* src) {
+    s32 index = 0;
+    while (index < 7 && src[index] != '\0') {
+        dst[index] = src[index];
+        index++;
+    }
+    dst[index] = '\0';
+}
+
+BehaviourAttrib::BehaviourAttrib() {
+    MARKFUNCTION(0x80074434);
+}
+
+BehaviourAttrib::~BehaviourAttrib() {
+    MARKFUNCTION(0x800744C0);
+
+    delete[] comboChances;
+    comboChances = nullptr;
+
+    if (comboStrings) {
+        for (s32 index = 0; index < comboCount; index++) {
+            delete[] comboStrings[index];
+        }
+        delete[] comboStrings;
+        comboStrings = nullptr;
+    }
+}
 
 static s32 AbsS32(s32 v) {
     if (v < 0) {
@@ -156,6 +214,10 @@ static void UnpopulateBlockHelper(ccList& list) {
 // PSX: __2AI (AI.CPP:297, 0x80054180)
 AI::AI() {
     MARKFUNCTION(0x80054180);
+
+    InternalReset();
+    g_game->GetHandlerSet1().AddHandler(aiPrivHandler, 10);
+    pri = -64;
 }
 
 // PSX: _._2AI (AI.CPP:317, 0x800542C4)
@@ -173,6 +235,8 @@ AI::~AI() {
 // PSX: InternalOpen__2AI (AI.CPP:322, 0x8005436C)
 void AI::InternalOpen() {
     MARKFUNCTION(0x8005436C);
+
+    ParseBehaviourAttribScript();
 }
 
 // PSX: InternalClose__2AI (AI.CPP:327, 0x8005438C)
@@ -681,7 +745,7 @@ void AI::Populate() {
                 player->pos = pt->pos;
 
                 s32 yRot = pt->field44;
-                player->faceAngle = yRot;
+                player->SetDesiredMoveDirection(yRot);
                 player->FaceAngleY(yRot, 0);
 
                 const DBAttrib* a15 = pt->FindAttrib(15);
@@ -689,8 +753,7 @@ void AI::Populate() {
                     player->blockNum = (u16)a15->value;
                 }
 
-                // PSX: calls Reset via vtable, then sets TF_ACTIVATED
-                player->Reset();
+                player->UpdatePosition();
                 player->flags |= TF_ACTIVATED;
 
                 if (g_characterManager) {
@@ -874,25 +937,22 @@ void AI::UnpopulateBlock() {
     UnpopulateBlockHelper(moveList);
 }
 
-// PSX: GetPickupWithinReach__2AIP8Humanoid (AI.CPP:1999, 0x80056BFC)
+// PSX: GetPickupWithinReach__2AIP8Humanoid (AI.CPP:1999, 0x80056B04)
 Thing* AI::GetPickupWithinReach(Humanoid* humanoid) {
-    MARKFUNCTION(0x80056BFC);
+    MARKFUNCTION(0x80056B04);
     if (!humanoid)
         return nullptr;
 
     LVector reachPt;
-    reachPt.x = humanoid->pos.x + (s32)((300LL * (s32)sinf(ANGLE2RAD(humanoid->orientation.y))) >> 0);
+    reachPt.x = humanoid->pos.x + (s32)(((s64)rmSin16((s16)humanoid->orientation.y) * 300) >> 16);
     reachPt.y = humanoid->pos.y + 300;
-    reachPt.z = humanoid->pos.z + (s32)((300LL * (s32)sinf(ANGLE2RAD(humanoid->orientation.y + 0x4000))) >> 0);
+    reachPt.z = humanoid->pos.z + (s32)(((s64)rmSin16((s16)(humanoid->orientation.y + 0x4000)) * 300) >> 16);
 
     for (ccMinNode* n = pickupList.head; n; n = n->next) {
         Thing* thing = static_cast<Thing*>(n);
-        s32 dx = thing->pos.x - reachPt.x;
-        s32 dy = thing->pos.y - reachPt.y;
-        s32 dz = thing->pos.z - reachPt.z;
-        s32 dist = (s32)rmMag3((f32)dx, (f32)dy, (f32)dz);
-        if (dist < 550)
+        if (thing->DistanceFromPoint(reachPt) < 550) {
             return thing;
+        }
     }
     return nullptr;
 }
@@ -913,6 +973,158 @@ Thing* AI::FindThing(u32 id) {
 // Requires ccFile + BehaviourAttrib class reversal.
 void AI::ParseBehaviourAttribScript() {
     MARKFUNCTION(0x800CA650);
+
+    ccFile file;
+    if (!file.Open("scr\\behave.txt", ccFile::OPEN_READ)) {
+        return;
+    }
+
+    const s32 length = file.GetLength();
+    if (length <= 0) {
+        file.Close();
+        return;
+    }
+
+    char* buffer = new char[length];
+    if (file.Read(buffer, (u32)length) != length) {
+        delete[] buffer;
+        file.Close();
+        return;
+    }
+
+    char token[32] = {};
+    char* cursor = buffer;
+    const char* end = buffer + length;
+    BehaviourAttrib* current = nullptr;
+    s32 comboIndex = -1;
+
+    while (cursor < end) {
+        cursor = GetNextAlphaNumToken(token, cursor, end);
+        if (token[0] == '\0') {
+            break;
+        }
+
+        switch (p3dHash(token)) {
+            case 4627422: // BEGIN
+                cursor = GetNextAlphaNumToken(token, cursor, end);
+                if (token[0] != '\0') {
+                    current = new BehaviourAttrib();
+                    current->nameCRC = p3dHash(token);
+                    comboIndex = -1;
+                }
+                break;
+            case 92004129: // AGGRESSION
+                if (current) {
+                    cursor = GetNextAlphaNumToken(token, cursor, end);
+                    current->aggression = (u16)AlphaToULong(token);
+                }
+                break;
+            case 111945726: // CIRCLING
+                if (current) {
+                    cursor = GetNextAlphaNumToken(token, cursor, end);
+                    current->circling = (u16)AlphaToULong(token);
+                }
+                break;
+            case 140965031: // DISTANCING
+                if (current) {
+                    cursor = GetNextAlphaNumToken(token, cursor, end);
+                    current->distancing = (u16)AlphaToULong(token);
+                }
+                break;
+            case 86524271: // NCOMBO
+                if (current) {
+                    cursor = GetNextAlphaNumToken(token, cursor, end);
+                    current->comboCount = (u16)AlphaToULong(token);
+                    delete[] current->comboChances;
+                    current->comboChances = nullptr;
+                    if (current->comboStrings) {
+                        for (u16 index = 0; index < current->comboCount; index++) {
+                            delete[] current->comboStrings[index];
+                        }
+                        delete[] current->comboStrings;
+                        current->comboStrings = nullptr;
+                    }
+                    if (current->comboCount > 0) {
+                        current->comboChances = new u16[current->comboCount]();
+                        current->comboStrings = new char*[current->comboCount]();
+                        for (u16 index = 0; index < current->comboCount; index++) {
+                            current->comboStrings[index] = new char[8]();
+                        }
+                    }
+                    comboIndex = 0;
+                }
+                break;
+            case 4735343: // COMBO
+                if (current && current->comboCount > 0 && comboIndex >= 0 && comboIndex < current->comboCount) {
+                    cursor = GetNextAlphaNumToken(token, cursor, end);
+                    current->comboChances[comboIndex] = (u16)AlphaToULong(token);
+                    cursor = GetNextAlphaNumToken(token, cursor, end);
+                    CopyComboToken(current->comboStrings[comboIndex], token);
+                    comboIndex++;
+                }
+                break;
+            case 238602555: // ATTACKFREQ
+                if (current) {
+                    cursor = GetNextAlphaNumToken(token, cursor, end);
+                    current->attackFreq = (u16)AlphaToULong(token);
+                }
+                break;
+            case 114870587: // MINTHINK
+                if (current) {
+                    cursor = GetNextAlphaNumToken(token, cursor, end);
+                    current->minThink = (u16)AlphaToULong(token);
+                }
+                break;
+            case 129137524: // RUNNINGSPEED
+                if (current) {
+                    cursor = GetNextAlphaNumToken(token, cursor, end);
+                    current->runningSpeed = (u16)AlphaToULong(token);
+                }
+                break;
+            case 195925748: // STRAIFINGSPEED
+                if (current) {
+                    cursor = GetNextAlphaNumToken(token, cursor, end);
+                    current->strafingSpeed = (u16)AlphaToULong(token);
+                }
+                break;
+            case 5612152: // PUNCH
+                if (current) {
+                    cursor = GetNextAlphaNumToken(token, cursor, end);
+                    current->punch = (u16)AlphaToULong(token);
+                }
+                break;
+            case 327035: // KICK
+                if (current) {
+                    cursor = GetNextAlphaNumToken(token, cursor, end);
+                    current->kick = (u16)AlphaToULong(token);
+                }
+                break;
+            case 5822279: // THROW
+                if (current) {
+                    cursor = GetNextAlphaNumToken(token, cursor, end);
+                    current->throwChance = (u16)AlphaToULong(token);
+                }
+                break;
+            case 241699415: // MAXTHINK
+                if (current) {
+                    cursor = GetNextAlphaNumToken(token, cursor, end);
+                    current->maxThink = (u16)AlphaToULong(token);
+                }
+                break;
+            case 18980: // END
+                if (current) {
+                    behaviourList.AddNodeTail(current);
+                    current = nullptr;
+                    comboIndex = -1;
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
+    delete[] buffer;
+    file.Close();
 }
 
 // PSX: aiPrivHandler (AI.CPP:257, 0x800540E0) - handler callback

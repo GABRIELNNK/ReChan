@@ -11,11 +11,12 @@
 #include "pddi/pddidev.h"
 #include "pddi/pdditex.h"
 
-#include <vector>
 #include <string>
 #include <cstring>
-#include <algorithm>
-#include <cstdio>
+
+namespace p3d {
+    RawTextureUploadCallback rawTextureUploader = nullptr;
+}
 
 // tTexture
 
@@ -26,13 +27,17 @@ tTexture::~tTexture() {
         texture->Release();
         texture = nullptr;
     }
+    delete[] textureData;
+    textureData = nullptr;
+    textureDataSize = 0;
 }
 
 bool tTexture::Create(int width, int height, int bpp, int alphaDepth,
                       const void* rgba) {
     if (!p3d::device) return false;
     if (texture) {
-        delete texture;
+        texture->Release();
+        texture = nullptr;
     }
     texture = p3d::device->NewTexture();
     texture->SetData(width, height, bpp, alphaDepth, rgba);
@@ -41,6 +46,27 @@ bool tTexture::Create(int width, int height, int bpp, int alphaDepth,
 
 int tTexture::GetWidth() const { return texture ? texture->GetWidth() : 0; }
 int tTexture::GetHeight() const { return texture ? texture->GetHeight() : 0; }
+
+void tTexture::SetTextureData(const u8* data, u32 size) {
+    delete[] textureData;
+    textureData = nullptr;
+    textureDataSize = 0;
+
+    if (!data || size == 0) {
+        return;
+    }
+
+    textureData = new u8[size];
+    std::memcpy(textureData, data, size);
+    textureDataSize = size;
+}
+
+void tTexture::SetTextureRect(s16 x, s16 y, s16 w, s16 h) {
+    textureRect.x = x;
+    textureRect.y = y;
+    textureRect.w = w;
+    textureRect.h = h;
+}
 
 // 0x6008 sub-chunk parser
 
@@ -92,106 +118,24 @@ static bool ParseTexChunkHeader(const u8* data, u32 size, TexChunkHeader& out) {
 // tTextureLoader
 
 void tTextureLoader::LoadChunk(tChunkFile* file, tInventory* store) {
-    // Pending CLUT from previous sub-chunk
-    struct PendingCLUT {
-        std::vector<u8> rgba;  // decoded palette as RGBA8 (numColors * 4)
-        int numColors;
-    };
-    PendingCLUT pendingClut;
-    bool hasClut = false;
-
-    while (file->ChunksRemaining()) {
-        u16 id = file->BeginChunk();
-
-        if (id == 0x6008) {
-            u32 len = file->GetCurrentDataLength();
-            std::vector<u8> buf(len);
-            file->GetData(buf.data(), len);
-
-            TexChunkHeader hdr;
-            if (ParseTexChunkHeader(buf.data(), len, hdr)) {
-                if (hdr.isClut) {
-                    // Decode CLUT: ABGR1555 entries
-                    int numColors = hdr.rw * std::max<int>(hdr.rh, 1);
-                    pendingClut.numColors = numColors;
-                    pendingClut.rgba.resize(numColors * 4);
-
-                    for (int i = 0; i < numColors; ++i) {
-                        if (static_cast<u32>(i * 2 + 2) <= hdr.rawSize) {
-                            u16 c16 = hdr.rawData[i * 2] | (hdr.rawData[i * 2 + 1] << 8);
-                            PsxColorToRGBA(c16,
-                                           pendingClut.rgba[i * 4 + 0],
-                                           pendingClut.rgba[i * 4 + 1],
-                                           pendingClut.rgba[i * 4 + 2],
-                                           pendingClut.rgba[i * 4 + 3]);
-                        }
-                    }
-                    hasClut = true;
-                }
-                else if (hasClut) {
-                    // Determine bpp from CLUT size
-                    int bpp, actualW, actualH;
-                    if (pendingClut.numColors <= 16) {
-                        bpp = 4;
-                        actualW = hdr.rw * 4;
-                        actualH = hdr.rh;
-                    }
-                    else if (pendingClut.numColors <= 256) {
-                        bpp = 8;
-                        actualW = hdr.rw * 2;
-                        actualH = hdr.rh;
-                    }
-                    else {
-                        hasClut = false;
-                        file->EndChunk();
-                        continue;
-                    }
-
-                    if (actualW <= 0 || actualH <= 0) {
-                        hasClut = false;
-                        file->EndChunk();
-                        continue;
-                    }
-
-                    // Decode pixels using the pending CLUT
-                    u32 pixels = static_cast<u32>(actualW) * actualH;
-                    std::vector<u8> rgba(pixels * 4);
-
-                    if (bpp == 4) {
-                        for (u32 i = 0; i < pixels; i += 2) {
-                            u32 byteIdx = i / 2;
-                            if (byteIdx >= hdr.rawSize) break;
-                            u8 byte = hdr.rawData[byteIdx];
-                            u8 lo = byte & 0x0F;
-                            u8 hi = (byte >> 4) & 0x0F;
-
-                            if (lo * 4 + 3 < static_cast<int>(pendingClut.rgba.size()))
-                                std::memcpy(&rgba[i * 4], &pendingClut.rgba[lo * 4], 4);
-                            if (i + 1 < pixels && hi * 4 + 3 < static_cast<int>(pendingClut.rgba.size()))
-                                std::memcpy(&rgba[(i + 1) * 4], &pendingClut.rgba[hi * 4], 4);
-                        }
-                    }
-                    else // bpp == 8
-                    {
-                        for (u32 i = 0; i < pixels; ++i) {
-                            if (i >= hdr.rawSize) break;
-                            u8 idx = hdr.rawData[i];
-                            if (idx * 4 + 3 < static_cast<int>(pendingClut.rgba.size()))
-                                std::memcpy(&rgba[i * 4], &pendingClut.rgba[idx * 4], 4);
-                        }
-                    }
-
-                    auto* tex = new tTexture();
-                    tex->SetName(hdr.name.c_str());
-                    tex->Create(actualW, actualH, bpp, 1, rgba.data());
-                    store->Store(tex);
-                    tex->Release();
-
-                    hasClut = false;
-                }
-            }
-        }
-
-        file->EndChunk();
+    if (!store) {
+        return;
     }
+
+    const u32 len = file->GetCurrentDataLength();
+    std::string payload(len, '\0');
+    file->GetData(payload.data(), len);
+
+    TexChunkHeader hdr;
+    if (!ParseTexChunkHeader(reinterpret_cast<const u8*>(payload.data()), len, hdr)) {
+        return;
+    }
+
+    auto* tex = new tTexture();
+    tex->SetName(hdr.name.c_str());
+    tex->SetTextureRect(hdr.rx, hdr.ry, hdr.rw, hdr.rh);
+    tex->SetTextureType(hdr.type);
+    tex->SetTextureData(hdr.rawData, hdr.rawSize);
+    store->Store(tex);
+    tex->Release();
 }

@@ -107,7 +107,8 @@ TransformAnim* TransformAnim::Parse(const u8* rawData, u32 rawSize) {
 // TransformFlip
 
 TransformFlip::TransformFlip()
-    : frame(0), frameReal(0), dirty(1), additiveTranslation(false), anim(nullptr), tree(nullptr) {}
+        : frame(0), frameReal(0), dirty(1), additiveTranslation(false), mirrored(false), anim(nullptr), tree(nullptr),
+            mirroredJointOrderMap(nullptr) {}
 
 TransformFlip::~TransformFlip() {
     // We don't own anim or tree - they are managed externally
@@ -145,15 +146,9 @@ void TransformFlip::UpdateJoints() {
         return;
     }
 
-    for (u32 i = 0; i < tree->numJoints; i++) {
-        STreeJoint& joint = tree->joints[i];
-        joint.translationX = joint.bindTranslationX;
-        joint.translationY = joint.bindTranslationY;
-        joint.translationZ = joint.bindTranslationZ;
-        joint.rotationX = joint.bindRotationX;
-        joint.rotationY = joint.bindRotationY;
-        joint.rotationZ = joint.bindRotationZ;
-    }
+    const u32* jointOrderMap = (mirrored && mirroredJointOrderMap)
+        ? mirroredJointOrderMap
+        : tree->jointOrderMap;
 
     // Process translation channels
     for (s32 i = 0; i < anim->numTransChannels; i++) {
@@ -164,10 +159,10 @@ void TransformFlip::UpdateJoints() {
 
         // Map animation parameter to joint index
         u32 jointParam = ch.jointParam;
-        if (jointParam >= tree->numMapEntries || !tree->jointOrderMap) {
+        if (jointParam >= tree->numMapEntries || !jointOrderMap) {
             continue;
         }
-        u32 jointIdx = tree->jointOrderMap[jointParam];
+        u32 jointIdx = jointOrderMap[jointParam];
         if (jointIdx >= tree->numJoints) {
             continue;
         }
@@ -183,10 +178,10 @@ void TransformFlip::UpdateJoints() {
         }
 
         u32 jointParam = ch.jointParam;
-        if (jointParam >= tree->numMapEntries || !tree->jointOrderMap) {
+        if (jointParam >= tree->numMapEntries || !jointOrderMap) {
             continue;
         }
-        u32 jointIdx = tree->jointOrderMap[jointParam];
+        u32 jointIdx = jointOrderMap[jointParam];
         if (jointIdx >= tree->numJoints) {
             continue;
         }

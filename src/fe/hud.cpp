@@ -37,6 +37,11 @@ HUD::~HUD() {
     MARKFUNCTION(0x8003F53C);
 }
 
+// PSX: InternalReset__3HUD (HUD.CPP:350, 0x8003F650)
+void HUD::InternalReset() {
+    MARKFUNCTION(0x8003F650);
+}
+
 // PSX: Display__3HUD (HUD.CPP:357, 0x8003F67C)
 void HUD::Display() {
     MARKFUNCTION(0x8003F67C);
@@ -197,13 +202,6 @@ void HUD::DebugDisplay(s32 flag) {
 // PSX: SelfUpdate__3HUD (HUD.CPP:611, 0x8003FC10)
 void HUD::SelfUpdate() {
     MARKFUNCTION(0x8003FC10);
-    if (inputEnabled && g_actionInput && g_actionInput->JustPressed(ACTION_COUNTER)) {
-        World* world = g_game ? g_game->GetWorld() : nullptr;
-        if (!world || world->GetCurLevelID() != 7) {
-            ToggleShowAll();
-        }
-    }
-
     hits.Update();
     foeHealth.Update();
     playerHealth.Update();

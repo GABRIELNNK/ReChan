@@ -77,6 +77,13 @@ namespace GpBtn {
     static constexpr s32 NONE = -1;
 };
 
+namespace MouseBtn {
+    static constexpr s32 Left = 0;
+    static constexpr s32 Right = 1;
+    static constexpr s32 Middle = 2;
+    static constexpr s32 NONE = -1;
+};
+
 // Gamepad axis IDs for bindings
 namespace GpAxis {
     static constexpr s32 LeftX = 0;
@@ -90,6 +97,7 @@ namespace GpAxis {
 
 struct ActionBinding {
     int keyboardKey;       // keyboard key, or 0 for none
+    s32 mouseButton;       // MouseBtn value, or MouseBtn::NONE
     s32 gamepadButton;     // GpBtn value, or GpBtn::NONE
     s32 gamepadButton2;    // alternate GpBtn (e.g. D-pad for movement), or GpBtn::NONE
     s32 gamepadAxis;       // GpAxis value, or GpAxis::NONE
@@ -135,17 +143,15 @@ public:
 
     // Rebinding
     void SetKeyBinding(Action action, int key);
+    void SetMouseButtonBinding(Action action, s32 mouseButton);
     void SetGamepadButtonBinding(Action action, s32 gpButton);
     int GetKeyBinding(Action action) const;
+    s32 GetMouseButtonBinding(Action action) const;
     s32 GetGamepadButtonBinding(Action action) const;
 
-    // When false, gameplay actions return inactive (menus still work)
-    bool controlsEnabled = true;
-
-    // Resolve the highest-priority combat action from current input state.
-    // direction: camera-relative direction from PlayerUserControl
-    // Returns a GameAction value for RequestAction().
-    s32 ResolveGameAction(s32 direction) const;
+    u32 GetPadButtons() const;
+    bool UsesAnalogPad() const { return gamepadActive; }
+    void GetPadAnalog(u8& lx, u8& ly, u8& rx, u8& ry) const;
 
 private:
     InputState states[ACTION_COUNT] = {};
@@ -157,11 +163,6 @@ private:
     s32 moveY = 0;
     s32 lookX = 0;
     s32 lookY = 0;
-
-    // Hold thresholds matching PSX FindActionRequest command table
-    static constexpr s16 GRAB_HOLD_THRESHOLD = 6;
-    static constexpr s16 HEAVY_PUNCH_THRESHOLD = 8;
-    static constexpr s16 HEAVY_KICK_THRESHOLD = 10;
 
     bool PollAction(Action action, PlatformInput* platform) const;
 };

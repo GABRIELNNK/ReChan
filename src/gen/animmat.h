@@ -1,7 +1,9 @@
 #pragma once
 #include "core.h"
 
+class Model;
 struct STreeData;
+struct STreeJoint;
 struct Mat4;
 
 // PSX bone slot names (10 tracked joints):
@@ -48,11 +50,13 @@ struct AnimationMatrices {
 
     // Returns prev/cur frame bone translations for attack collision sweep
     s32 GetAttack(u32 joint, LVector& outPrev, LVector& outCur) const;
+    s32 GetWeaponAttack(u32 joint, const LVector& localOffset, LVector& outPrev, LVector& outCur) const;
+
+    void SetupCallbacks(Model* model);
+    void SetupExtraCallbacks(Model* model);
+    s32 SetExtraCallbacks(s32 matrixType, s32 enable);
+    s32 CopyMatrix(u32 joint, const Mat4& jointMatrix);
 
     // PC: resolve bone name UIDs to skeleton joint indices (called once)
     void CacheBoneIndices(const STreeData* skeleton);
-
-    // PC: compute world-space bone translations from skeleton + world matrix.
-    // Replaces PSX GTE callback mechanism. Call after Show() each frame.
-    void UpdateWorldPositions(const STreeData* skeleton, const Mat4& worldMatrix);
 };

@@ -18,6 +18,7 @@
 #include "gen/ai.h"
 #include "ai/obstacle.h"
 #include "gen/display.h"
+#include "pc/log.h"
 
 static bool sEnabled = false;
 static bool sShowPlayer = false;
@@ -25,11 +26,14 @@ static bool sShowCamera = false;
 static bool sShowAudio = false;
 static bool sShowAnimation = false;
 static bool sShowGame = false;
+static bool sShowConsoleNotes = false;
 static bool sShowImGuiDemo = false;
 static s32 sAnimSelectedEnum = 0;
 static s32 sAnimSelectedLoopType = ANIM_LOOP;
 static bool sInputRoutingOverride = false;
 static s32 sInputRoutingSelection = 0; // 0 = Camera input, 1 = Player input
+static char sConsoleNoteInput[1024] = {};
+static char sLastConsoleNote[1024] = {};
 
 bool DebugUI::IsPlayerInputAllowed() {
     if (!sInputRoutingOverride) {
@@ -200,6 +204,28 @@ static void LVectorText(const char* label, const LVector& v) {
                 v.x / 4096.0f, v.y / 4096.0f, v.z / 4096.0f);
 }
 
+static void SubmitConsoleNote() {
+    const char* text = sConsoleNoteInput;
+    while (*text == ' ' || *text == '\t' || *text == '\r' || *text == '\n') {
+        text++;
+    }
+
+    if (*text == '\0') {
+        sConsoleNoteInput[0] = '\0';
+        return;
+    }
+
+    if (g_time) {
+        LOG("[ConsoleNote][frame=%u] %s", g_time->GetFrameCounter(), text);
+    }
+    else {
+        LOG("[ConsoleNote] %s", text);
+    }
+
+    std::snprintf(sLastConsoleNote, sizeof(sLastConsoleNote), "%s", text);
+    sConsoleNoteInput[0] = '\0';
+}
+
 void DebugUI::Init() {}
 
 bool DebugUI::IsEnabled() {
@@ -234,6 +260,7 @@ void DebugUI::Draw() {
             ImGui::MenuItem("Camera", nullptr, &sShowCamera);
             ImGui::MenuItem("Animation", nullptr, &sShowAnimation);
             ImGui::MenuItem("Audio", nullptr, &sShowAudio);
+            ImGui::MenuItem("Console Notes", nullptr, &sShowConsoleNotes);
             ImGui::Separator();
             ImGui::MenuItem("ImGui Demo", nullptr, &sShowImGuiDemo);
             ImGui::EndMenu();
@@ -597,6 +624,33 @@ void DebugUI::Draw() {
                 ImGui::Text("WAX Banks: %d", g_sound->numWaxBanks);
                 ImGui::Text("Music: %s", g_sound->musicPlaying ? "yes" : "no");
                 ImGui::Text("Active: %d", g_sound->activeFlag);
+            }
+        }
+        ImGui::End();
+    }
+
+    if (sShowConsoleNotes) {
+        if (ImGui::Begin("Console Notes", &sShowConsoleNotes)) {
+            ImGui::TextWrapped("Type a comment and press Enter or Submit. It is printed to console and appended to rechan.log.");
+
+            bool submit = ImGui::InputText("Comment", sConsoleNoteInput, sizeof(sConsoleNoteInput), ImGuiInputTextFlags_EnterReturnsTrue);
+            ImGui::SameLine();
+            if (ImGui::Button("Submit")) {
+                submit = true;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Clear")) {
+                sConsoleNoteInput[0] = '\0';
+            }
+
+            if (submit) {
+                SubmitConsoleNote();
+                ImGui::SetKeyboardFocusHere(-1);
+            }
+
+            if (sLastConsoleNote[0] != '\0') {
+                ImGui::Separator();
+                ImGui::TextWrapped("Last saved note: %s", sLastConsoleNote);
             }
         }
         ImGui::End();

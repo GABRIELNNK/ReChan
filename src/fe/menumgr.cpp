@@ -223,6 +223,16 @@ void MenuMgr::Activate() {
         rsEvent(RS_LOAD_AND_PLAY_DIALOG, 0, track, 0x1C);
     }
     state = 1;
+
+    if (g_inputManager) {
+        const s16* menuMode = MenuControlModeArray();
+        const u8* defaultMap = g_inputManager->DefaultMapArray();
+        for (s16 padIndex = 0; padIndex < 2; ++padIndex) {
+            g_inputManager->SetControlModeArray(padIndex, menuMode);
+            g_inputManager->SetControlMapArray(padIndex, defaultMap);
+        }
+    }
+
     if (topMenu) {
         topMenu->DynSetup();
     }
@@ -242,6 +252,16 @@ void MenuMgr::Deactivate() {
         g_frontEndSound->ProcessSoundEvent(FE_SND_MENU_ACCEPT);
     }
     rsEvent(RS_UNMUTE, 0, 0, 0);
+
+    if (g_inputManager) {
+        const s16* gameMode = GameControlModeArray();
+        const u8* playerMap = g_inputManager->PlayerMapArray();
+        for (s16 padIndex = 0; padIndex < 2; ++padIndex) {
+            g_inputManager->SetControlModeArray(padIndex, gameMode);
+            g_inputManager->SetControlMapArray(padIndex, playerMap);
+        }
+    }
+
     screenStackDepth = 0;
 }
 
@@ -360,31 +380,35 @@ void MenuMgr::PopMenu() {
 // processInput: when true, process buttons; false = poll only.
 void MenuMgr::QueryInput(bool processInput) {
     MARKFUNCTION(0x8005FDF4);
-    if (!g_actionInput) return;
-    if (!processInput) return;
-
-    // Cancel/Pop (ESC or gamepad B) - check before START since both may share a key
-    if (g_actionInput->JustPressed(ACTION_MENU_BACK)) {
-        InputItemPop();
+    if (!processInput || !g_inputManager) {
+        return;
     }
-    else if (g_actionInput->JustPressed(ACTION_OPEN_CLOSE_MENU)) {
+
+    g_inputManager->Step();
+    u32 buttons = g_inputManager->GetControlVal(0);
+    if (buttons == 0) {
+        return;
+    }
+
+    if ((buttons & PsxPad::Start) != 0) {
         state = 8;
     }
-    // D-pad navigation
-    if (g_actionInput->JustPressed(ACTION_MENU_UP)) {
+    if ((buttons & PsxPad::Up) != 0) {
         InputPadUp();
     }
-    if (g_actionInput->JustPressed(ACTION_MENU_DOWN)) {
+    if ((buttons & PsxPad::Down) != 0) {
         InputPadDown();
     }
-    if (g_actionInput->JustPressed(ACTION_MENU_LEFT)) {
+    if ((buttons & PsxPad::Left) != 0) {
         InputPadLeft();
     }
-    if (g_actionInput->JustPressed(ACTION_MENU_RIGHT)) {
+    if ((buttons & PsxPad::Right) != 0) {
         InputPadRight();
     }
-    // Confirm/Push
-    if (g_actionInput->JustPressed(ACTION_MENU_CONFIRM)) {
+    if ((buttons & PsxPad::Triangle) != 0) {
+        InputItemPop();
+    }
+    if ((buttons & PsxPad::Cross) != 0) {
         InputItemPush();
     }
 }

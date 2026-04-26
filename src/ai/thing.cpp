@@ -274,6 +274,7 @@ void Thing::CreateModel(const char* name) {
             gm = new GModel();
             model = gm;
         }
+        gm->backPtr = this;
         gm->SetOriginalGeo(static_cast<OriginalGeo*>(found));
     }
     else if (modelType == 1) {
@@ -288,6 +289,7 @@ void Thing::CreateModel(const char* name) {
             sm = new SModel();
             model = sm;
         }
+        sm->backPtr = this;
         sm->SetOriginalSTree(static_cast<OriginalSTree*>(found));
     }
     else if (modelType == 2) {
@@ -302,6 +304,7 @@ void Thing::CreateModel(const char* name) {
             em = new EModel();
             model = em;
         }
+        em->backPtr = this;
         em->SetOriginalETree(static_cast<OriginalETree*>(found), nullptr);
     }
 

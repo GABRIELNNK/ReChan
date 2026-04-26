@@ -74,6 +74,7 @@ public:
     void DisplayExtraTake();
     void DisplayTally(s32 tallyType);
     void ToggleShowAll();
+    void InternalReset();
 
     uintptr_t FindScreen(u32 id) override;
     const char** GetScreenNames() override;

@@ -95,6 +95,7 @@ enum ThingFlags : u32 {
     TF_ACTIVATED = 0x0010,  // currently activated
     TF_BIT5 = 0x0020,
     TF_MODEL_CREATED = 0x0040,  // model has been created
+    TF_DIRECTOR_ACTIVE = 0x0200,  // director-owned mark set during script processing
     TF_BIT8 = 0x0100,
     TF_DYNAMIC = 0x0800,  // is a DynamicThing
     TF_ON_GROUND = 0x1000,  // on ground
@@ -107,7 +108,6 @@ enum ThingFlags2 : u32 {
     TF2_NIS_ENTER = 0x0010,  // entered NIS control
     TF2_NIS_FROZEN = 0x0020,  // NIS frozen (no movement)
     TF2_NIS_MASK = 0x0070,  // mask for NIS state bits
-    TF2_DIRECTOR_ACTIVE = 0x0200,  // director sets on all humanoids during script
 };
 
 // Thing - base class for all game entities

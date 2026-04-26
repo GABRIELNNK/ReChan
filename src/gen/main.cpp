@@ -10,8 +10,11 @@
 #include "pddi/pddidev.h"
 #include "pc/audio.h"
 #include "pc/debugui.h"
+#include "pc/inputaction.h"
 #include "gen/game.h"
 #include "gen/time.h"
+#include "radlib/rtask.h"
+#include "ai/player.h"
 
 #include <vector>
 #include <algorithm>
@@ -62,8 +65,18 @@ int main() {
     p3d::display->SetWndProc(OnWndProc);
     p3d::display->SetOverlayCallback(DebugUI::Draw);
 
+    rTaskInit(100);
+    rInitTaskList(&rMainTaskList);
+    rInitTaskList(&rFrameTaskList);
+    rFrameCount = 0;
+    rFrameCount60 = 0;
+
     Game game;
     game.Open();
+
+    if (!g_actionInput) {
+        g_actionInput = new ActionInput();
+    }
 
     game.SetState(GameState::Intro);
 
@@ -81,14 +94,30 @@ int main() {
         g_time->Tick(realDt);
         g_time->Step();
 
+        rFrameCount = 1;
+        rFrameCount60 = 1;
+        rDoTaskList(&rFrameTaskList, 0);
+
         p3d::display->PollEvents();
+
+        if (p3d::input) {
+            p3d::input->ServiceInput();
+        }
+        if (g_actionInput) {
+            g_actionInput->Update(p3d::input);
+        }
+        if (g_inputManager) {
+            g_inputManager->ServiceHostPads(g_actionInput);
+        }
 
         bool running = game.Step();
         if (!running) {
-            // PSX: when Step returns false (from gsDetermineGameOverState or gsEndState),
-            // the main loop resets lives via SetLivesLeft and re-enters via QueueLevelLoad.
             // PSX: SetLivesLeft(g_player, savedLives)
+            Player::s_player->SetLivesLeft(4);
             game.SetState(GameState::QueueLevelLoad);
+        }
+        else {
+            rDoTaskList(&rMainTaskList, 0);
         }
 
         g_time->WaitForFrameEnd(frameStart);
@@ -105,6 +134,9 @@ int main() {
 
     platform->DestroyContext(ctx);
     tPlatform::Destroy();
+
+    delete g_actionInput;
+    g_actionInput = nullptr;
 
     LOG("Clean shutdown");
     Log::Get().Shutdown();

@@ -9,7 +9,6 @@
 #include "gen/control.h"
 #include "ai/fevolume.h"
 #include "ai/obstacle.h"
-#include "pc/inputaction.h"
 #include "pc/settings.h"
 #include "pc/log.h"
 #include "snd/fesnd.h"
@@ -555,14 +554,17 @@ void feMenuMgr::PopMenu() {
 // Polls input, dispatches to virtual Input* functions.
 void feMenuMgr::QueryInput(bool processInput) {
     MARKFUNCTION(0x80011774);
-    if (!g_actionInput) return;
-    if (!processInput) return;
-
-    // Back/Start - prioritize back so ESC pops instead of closing.
-    if (g_actionInput->JustPressed(ACTION_MENU_BACK)) {
-        InputItemPop();
+    if (!g_inputManager) {
+        return;
     }
-    else if (g_actionInput->JustPressed(ACTION_OPEN_CLOSE_MENU)) {
+
+    g_inputManager->Step();
+    u32 buttons = g_inputManager->GetControlVal(0);
+    if (!processInput || buttons == 0) {
+        return;
+    }
+
+    if ((buttons & PsxPad::Start) != 0) {
         hdMenu* levelMenu = FindMenu(HASH_LEVEL_SCREEN);
         if (curMenu != levelMenu) {
             state = 8;
@@ -572,21 +574,23 @@ void feMenuMgr::QueryInput(bool processInput) {
         }
     }
 
-    // D-pad navigation
-    if (g_actionInput->JustPressed(ACTION_MENU_UP)) {
+    if ((buttons & PsxPad::Up) != 0) {
         InputPadUp();
     }
-    if (g_actionInput->JustPressed(ACTION_MENU_DOWN)) {
+    if ((buttons & PsxPad::Down) != 0) {
         InputPadDown();
     }
-    if (g_actionInput->JustPressed(ACTION_MENU_LEFT)) {
+    if ((buttons & PsxPad::Left) != 0) {
         InputPadLeft();
     }
-    if (g_actionInput->JustPressed(ACTION_MENU_RIGHT)) {
+    if ((buttons & PsxPad::Right) != 0) {
         InputPadRight();
     }
-    // Confirm/Push
-    if (g_actionInput->JustPressed(ACTION_MENU_CONFIRM)) {
+
+    if ((buttons & PsxPad::Triangle) != 0) {
+        InputItemPop();
+    }
+    if ((buttons & PsxPad::Cross) != 0) {
         InputItemPush();
     }
 }

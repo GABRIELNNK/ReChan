@@ -16,6 +16,7 @@
 class pddiPrimBuffer;
 class Thing;
 class AnimStructure;
+class SModel;
 struct AnimationMatrices;
 struct STreeData;
 struct TransformAnim;
@@ -82,6 +83,7 @@ struct OriginalSTree : public OriginalBasic {
 
     // CPU skinning data (local-space verts + joint indices)
     SkinData* skinData = nullptr;
+    bool activeTreeInUse = false;
 
     OriginalSTree();
     ~OriginalSTree() override;
@@ -120,6 +122,15 @@ struct DrawableBasic {
     virtual OriginalSTree* GetAlternateSTree() const { return nullptr; }
 };
 
+inline OriginalSTree* GetActiveSTree(const DrawableBasic* drawable) {
+    if (!drawable) {
+        return nullptr;
+    }
+
+    OriginalSTree* active = drawable->GetAlternateSTree();
+    return active ? active : drawable->GetOriginalSTree();
+}
+
 // DrawableSTree - wraps OriginalSTree for per-entity rendering (36 bytes on PSX)
 // PSX layout:
 //   +0..11:  DrawableTree base
@@ -130,6 +141,8 @@ struct DrawableBasic {
 struct DrawableSTree : public DrawableBasic {
     OriginalSTree* original = nullptr;   // +24 on PSX
     OriginalSTree* alternate = nullptr;  // +28 on PSX
+    u32 mirrorFlags = 0;                 // +32 on PSX, bit 0 = mirrored tree
+    u32* mirroredJointOrderMap = nullptr;
 
     DrawableSTree(OriginalSTree* orig);
     ~DrawableSTree() override;
@@ -137,6 +150,7 @@ struct DrawableSTree : public DrawableBasic {
     // PSX: Display__13DrawableSTree (calls OriginalSTree::Draw -> tPrimGeom::Display)
     // PC: draws the pddiPrimBuffer
     void Display(u32 flags) override;
+    s32 MirrorTree(SModel* model);
     OriginalSTree* GetOriginalSTree() const override { return original; }
     OriginalSTree* GetAlternateSTree() const override { return alternate; }
 };
@@ -266,7 +280,10 @@ public:
 
     void Animate() override;
     void ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 p4, s32 p5) override;
+    void ApplyAnimToModelBasic(TransformAnim* animation);
     void SetOriginalSTree(OriginalSTree* original);
+    virtual void SetupModelCallbacks();
+    virtual s32 MirrorTree();
     void InitSemiTransMode();
     void PlayDynamicAnim(s32 animEnum);
 };
@@ -306,24 +323,21 @@ public:
     // +104: attack foot radius
     s32 attackFootRadius = 100;
     // +108
-    s32 field108 = 400;
+    s32 field108 = 100;
     // +112
-    s32 field112 = 0;
+    s32 field112 = 400;
     // +116
-    s32 field116 = 0;
+    s32 field116 = 100;
     // +120
     s32 field120 = 0;
-    // +124
-    s32 field124 = 0;
-    // +128
-    s32 field128 = 0;
-    // +132
-    s32 field132 = 0xFFFF;
+    // +124..+132: persistent 16.16 head-track direction vector.
+    LVector headTrackDir = { 0, 0, 0xFFFF };
 
     HumanoidModel();
     ~HumanoidModel() override;
 
     void Animate() override;
+    void SetupModelCallbacks() override;
     void SetAnim(s32 animEnum, s32 a3, s32 force, s32 extra) override;
 
     // Only loops when mode == 0 (normal animation playback).

@@ -1,4 +1,5 @@
 #include "ai/activezn.h"
+#include "ai/humanoid.h"
 #include "ai/thing.h"
 #include "gen/database.h"
 #include "gen/path.h"
@@ -101,7 +102,58 @@ void ActiveZone::RemoveHumanoidFromOverlordMembers(Humanoid* h) {
     }
 }
 
+// PSX: GetNumberOfThinkingMembers__10ActiveZone (ACTIVEZN.CPP:433, 0x800A6E30)
+s32 ActiveZone::GetNumberOfThinkingMembers() const {
+    MARKFUNCTION(0x800A6E30);
+
+    s32 thinkingCount = 0;
+    for (s32 index = 0; index < 3; index++) {
+        Humanoid* member = members[index];
+        if (member && (member->flags & TF_ACTIVATED) != 0) {
+            thinkingCount++;
+        }
+    }
+
+    return thinkingCount;
+}
+
 // PSX: IsInActiveZone__10ActiveZoneP5Thing (ACTIVEZN.CPP:680)
 bool ActiveZone::IsInActiveZone(Thing* thing) const {
     return box.IsInside(thing->pos);
+}
+
+// PSX: IsPathNodeTerminator__10ActiveZoneP10LinearPathl (ACTIVEZN.CPP:1318)
+bool ActiveZone::IsPathNodeTerminator(LinearPath* path, s32 nodeIndex) const {
+    MARKFUNCTION(0x800A76AC);
+
+    if (!path || !path->nodeAttribs || nodeIndex < 0 || nodeIndex >= path->numPoints) {
+        return false;
+    }
+
+    const NodeAttribs& attribs = path->nodeAttribs[nodeIndex];
+    for (s32 index = 0; index < attribs.count; index++) {
+        if (attribs.ids[index] == 'W') {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// PSX: AllowBreakoffOfDestinationNode__10ActiveZoneP10LinearPathl (ACTIVEZN.CPP:1352)
+bool ActiveZone::AllowBreakoffOfDestinationNode(LinearPath* path, s32 nodeIndex) const {
+    MARKFUNCTION(0x800A7718);
+
+    if (!path || !path->nodeAttribs || nodeIndex < 0 || nodeIndex >= path->numPoints) {
+        return false;
+    }
+
+    const NodeAttribs& attribs = path->nodeAttribs[nodeIndex];
+    for (s32 index = 0; index < attribs.count; index++) {
+        if (attribs.ids[index] == 'X') {
+            return true;
+        }
+    }
+
+    return false;
 }

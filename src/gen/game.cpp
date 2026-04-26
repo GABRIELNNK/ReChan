@@ -14,6 +14,7 @@
 #include "gen/model.h"
 #include "gen/director.h"
 #include "gen/scoremgr.h"
+#include "gen/control.h"
 #include "snd/sound.h"
 #include "snd/rsevent.h"
 #include "snd/fesnd.h"
@@ -27,7 +28,6 @@
 #include "fe/hud.h"
 #include "radmovie/movieplayer.h"
 #include "pc/tim.h"
-#include "pc/inputaction.h"
 #include "p3d/keycode.h"
 #include "p3d/input.h"
 #include "p3d/context.h"
@@ -45,7 +45,7 @@ Game* g_game = nullptr;
 
 // PSX globals
 s16 g_selectedLevel = -1;   // gp+44: queued level ID (-1 = none)
-s32 g_directorActive = 0;   // gp+20: director intro script active
+s32 g_directorActive = 0;   // gp+20: directorTimeOut gate used by gsPlayState
 s32 g_feInitialized = 0;    // gp+88: FE memory puddle initialized
 
 
@@ -96,14 +96,6 @@ Game::Game() {
     handlerSet2.AddHandler(AnimateEverythingHandler, -48);
     handlerSet2.AddHandler(DrawEverythingHandlerCB, -16);
     handlerSet2.AddHandler(EndFrameHandler, -64);
-
-    // PSX: handlerSet1 gets AI and Director handler callbacks
-    // aiPrivHandler (pri=0) - runs AI::MoveThings per frame
-    handlerSet1.AddHandler(aiPrivHandler, 0);
-    // runDirector (pri=-32) - runs Director::Process per frame
-    handlerSet1.AddHandler(runDirector, -32);
-    // DrawDirectorOverlays (pri=-64) - draws widescreen bars etc.
-    handlerSet2.AddHandler(DrawDirectorOverlays, -48);
 
     SetState(GameState::Null);
     g_game = this;
@@ -188,11 +180,6 @@ void Game::InternalOpen() {
         g_inputManager = new InputManager();
         g_inputManager->SetName("InputManager", 0);
         managerList.AddNodePri(g_inputManager);
-    }
-
-    // PC: ActionInput system (keyboard -> game actions, bypassing pad emulation)
-    if (!g_actionInput) {
-        g_actionInput = new ActionInput();
     }
 
     // 10. LevelManager (PSX: 136 bytes)
@@ -358,6 +345,10 @@ void Game::DrawEverythingHandlerCB(Handler*) {
     p3d::context->SetBlendMode(PDDI_BLEND_NONE);
     p3d::context->SetCullMode(PDDI_CULL_NONE);
 
+    if (g_director) {
+        g_director->updateVramAnims();
+    }
+
     // PSX: passes player position (MEMORY[0x1C] = thePlayer->pos) to DrawEverythingHandler,
     // NOT the camera position. Used for block distance sorting and seam offsets.
     const LVector& playerPos = Player::s_player ? Player::s_player->pos
@@ -418,16 +409,6 @@ void Game::EndFrameHandler(Handler*) {
 bool Game::Step() {
     MARKFUNCTION(0x8002B65C); // Step__4Game
 
-    // Poll platform-level keyboard/mouse state before anything reads it
-    if (p3d::input) {
-        p3d::input->ServiceInput();
-    }
-
-    // Update ActionInput (polls keyboard + gamepad, updates action states)
-    if (g_actionInput) {
-        g_actionInput->Update(p3d::input);
-    }
-
     if (stateFunc)
         return stateFunc(this);
     return false;
@@ -485,8 +466,14 @@ bool Game::gsIntroState(Game* game) {
         g_display->EndFrame();
         game->introTimer++;
 
-        // 300 on psx
-        if (game->introTimer >= 100 || (g_actionInput && g_actionInput->AnyJustPressed())) {
+        u32 buttons = 0;
+        if (g_inputManager) {
+            g_inputManager->Step();
+            buttons = g_inputManager->GetControlVal(0);
+        }
+        game->controlVal[0] = (s32)buttons;
+
+        if (game->introTimer >= 300 || buttons != 0) {
             if (game->introTexture) {
                 game->introTexture->Release();
                 game->introTexture = nullptr;
@@ -523,6 +510,11 @@ bool Game::gsTitleState(Game* game) {
     game->titleScreen = new TitleScreen();
     game->titleScreen->Init("XC/TITLE.1", g_oxFontFile);
 
+    if (g_inputManager) {
+        g_inputManager->Step();
+        g_inputManager->GetControlVal(0);
+    }
+
 
 
     // PSX: rsEvent(4, 22, 0, 0) - set sound location to title music
@@ -540,6 +532,14 @@ bool Game::gsTitleState(Game* game) {
     game->titleFadeType = 0;
 
     game->SetState(GameState::TitleLoop);
+
+    if (g_inputManager) {
+        const s16* titleMode = TitleControlModeArray();
+        for (s16 padIndex = 0; padIndex < 2; ++padIndex) {
+            g_inputManager->SetControlModeArray(padIndex, titleMode);
+        }
+    }
+
     return true;
 }
 
@@ -610,6 +610,13 @@ bool Game::gsTitleLoopState(Game* game) {
     }
     g_display->EndFrame();
 
+    u32 buttons = 0;
+    if (g_inputManager) {
+        g_inputManager->Step();
+        buttons = g_inputManager->GetControlVal(0);
+    }
+    game->controlVal[0] = (s32)buttons;
+
     // PSX: attract mode timer check (gp+128 - gp+124) >= 900
     s32 elapsed = game->titleIdleTimer - game->titleIdleBase;
     if (elapsed >= 900) {
@@ -619,7 +626,7 @@ bool Game::gsTitleLoopState(Game* game) {
         return true;
     }
 
-    if (g_actionInput && (g_actionInput->JustPressed(ACTION_OPEN_CLOSE_MENU) || g_actionInput->JustPressed(ACTION_MENU_CONFIRM))) {
+    if ((buttons & PsxPad::Start) != 0) {
         // PSX: ProcessSoundEvent(gp[72], 8)
         if (g_frontEndSound) {
             g_frontEndSound->ProcessSoundEvent(FE_SND_MENU_OPEN);
@@ -655,8 +662,12 @@ bool Game::gsInitState(Game* game) {
         game->firstBoot = 0;
     }
 
-    // PSX: setup input control mode arrays for both pads (loop i=0,1)
-    // PC: no longer needed, ActionInput handles input directly
+    if (g_inputManager) {
+        const s16* gameMode = GameControlModeArray();
+        for (s16 padIndex = 0; padIndex < 2; ++padIndex) {
+            g_inputManager->SetControlModeArray(padIndex, gameMode);
+        }
+    }
 
     // PSX: VBlankLogo::StopLogo
     StopLogo();
@@ -706,9 +717,10 @@ bool Game::gsPrePlayState(Game* game) {
     MARKFUNCTION(0x80029AC0); // gsPrePlayState
 
     // PSX: 432 bytes, 27 blocks.
-    // Loads overlay, shows menu, calls DetermineLevelIntro, sets up audio
-    // listener, checks checkpoint, resets HUD, input control modes,
-    // then transitions to Play state.
+    // Loads overlay, shows menu, sets up the audio listener, checks checkpoint,
+    // resets HUD/input mappings, then transitions to Play state.
+    // It does not call DetermineLevelIntro here; the Director entry script
+    // seeded by World::Load handles that after Play begins.
 
     World* world = game->GetWorld();
     s32 levelID = (world) ? world->GetCurLevelID() : 0;
@@ -729,14 +741,21 @@ bool Game::gsPrePlayState(Game* game) {
         // PSX: LoadOverlay(0) - load normal overlay
     }
 
-    // PSX: rsEvent(21, player+28, cameraManager+384, 0) - set 3D audio listener
+    // PSX: theCamera->Think()
+    if (g_display && g_display->GetCamera()) {
+        g_display->GetCamera()->Think();
+    }
+
+    // PSX: rsEvent(21, player+28, theCamera+384, 0) - set 3D audio listener
     // The args are pointers to player position and camera matrix for 3D audio.
     // On PC we pass zeros - audio spatialization not yet wired.
     rsEvent(21, 0, 0, 0);
 
-    // PSX: if CheckpointInfo::IsValid(player+636): player field364 = 1
+    // PSX: if CheckpointInfo::IsValid(player+636): theCamera->lookAtMode = 1
     if (Player::s_player && Player::s_player->checkpoint.IsValid()) {
-        Player::s_player->field364 = 1;
+        if (g_display && g_display->GetCamera()) {
+            g_display->GetCamera()->SetLookAtMode(1);
+        }
     }
 
     // PSX: SetState(Play=8)
@@ -746,13 +765,21 @@ bool Game::gsPrePlayState(Game* game) {
     g_directorActive = 1;
 
     // PSX: HUD->InternalReset()
-    // InternalReset is empty on PSX
+    g_hud->InternalReset();
 
     // PSX: clear controlVal
     game->controlVal[0] = 0;
     game->controlVal[1] = 0;
 
     // PSX: loop i=0..1: SetControlModeArray, PlayerMapArray, SetControlMapArray
+    if (g_inputManager) {
+        const s16* gameMode = GameControlModeArray();
+        const u8* playerMap = g_inputManager->PlayerMapArray();
+        for (s16 padIndex = 0; padIndex < 2; ++padIndex) {
+            g_inputManager->SetControlModeArray(padIndex, gameMode);
+            g_inputManager->SetControlMapArray(padIndex, playerMap);
+        }
+    }
 
     // PSX: if level != 7: SetHUDVisible(0, 1, 1)
     if (g_hud) {
@@ -770,24 +797,34 @@ bool Game::gsPrePlayState(Game* game) {
 bool Game::gsPlayState(Game* game) {
     MARKFUNCTION(0x80029C6C); // gsPlayState
 
-    // PSX: if g_directorActive != 0, it calls Director::Process() directly.
-    // PC still relies on the full handler path here for camera/display updates.
     if (g_directorActive) {
-        game->ProcessHandlers();
-        rsEvent(21, 0, 0, 0);
+        if (g_director) {
+            g_director->Process();
+        }
+
+        if (g_ai) {
+            g_ai->MoveCamera();
+        }
+
+        ProcessHandlerList(game->handlerSet2.handlerList);
         return true;
     }
 
     // PSX: InputManager::Step, then loop 2 pads storing GetControlVal
+    if (g_inputManager) {
+        g_inputManager->Step();
+        for (s16 padIndex = 0; padIndex < 2; ++padIndex) {
+            game->controlVal[padIndex] = g_inputManager->GetControlVal((u16)padIndex);
+        }
+    }
+
     // PSX: ProcessHandlers(game) - runs handlerSet1 (think) + handlerSet2 (draw)
     game->ProcessHandlers();
-
-    rsEvent(21, 0, 0, 0);
 
     // PSX: check state==Play AND director scriptState==0 for pause eligibility
     if (game->state == GameState::Play) {
         s32 canPause = (!g_director || g_director->scriptState == 0);
-        if (canPause && g_actionInput && g_actionInput->JustPressed(ACTION_OPEN_CLOSE_MENU)) {
+        if (canPause && (game->controlVal[0] & PsxPad::Start) != 0) {
             LOG("[Game] Pause requested from Play");
             game->SetState(GameState::Menu);
             Shock(ShockEnum::SHOCK_CLEAR);
@@ -1016,6 +1053,12 @@ bool Game::gsQueueLevelLoad(Game* game) {
     // PSX: jcsStartDialog() - initialize dialog/subtitle system
     jcsStartDialog();
 
+    // PSX: Step__12InputManager(0); GetControlVal__12InputManagerUs(0, 0)
+    if (g_inputManager) {
+        g_inputManager->Step();
+        g_inputManager->GetControlVal(0);
+    }
+
     return true;
 }
 
@@ -1065,6 +1108,12 @@ bool Game::gsQueuePetalLoad(Game* game) {
     // PSX: jcsStartDialog()
     jcsStartDialog();
 
+    // PSX: Step__12InputManager(0); GetControlVal__12InputManagerUs(0, 0)
+    if (g_inputManager) {
+        g_inputManager->Step();
+        g_inputManager->GetControlVal(0);
+    }
+
     return true;
 }
 
@@ -1094,6 +1143,12 @@ bool Game::gsQueueLevelPetalLoad(Game* game) {
 
     // PSX: jcsStartDialog()
     jcsStartDialog();
+
+    // PSX: Step__12InputManager(0); GetControlVal__12InputManagerUs(0, 0)
+    if (g_inputManager) {
+        g_inputManager->Step();
+        g_inputManager->GetControlVal(0);
+    }
 
     return true;
 }
@@ -1196,8 +1251,14 @@ bool Game::gsEndGameLoopState(Game* game) {
 
     g_display->EndFrame();
 
-    // PSX: check start or confirm to continue
-    if (g_actionInput && (g_actionInput->JustPressed(ACTION_OPEN_CLOSE_MENU) || g_actionInput->JustPressed(ACTION_MENU_CONFIRM))) {
+    u32 buttons = 0;
+    if (g_inputManager) {
+        g_inputManager->Step();
+        buttons = g_inputManager->GetControlVal(0);
+    }
+    game->controlVal[0] = (s32)buttons;
+
+    if ((buttons & (PsxPad::Start | PsxPad::Cross)) != 0) {
         // PSX: ProcessSoundEvent(frontEndSound, 19) = FE_SND_JT_0
         if (g_frontEndSound) {
             g_frontEndSound->ProcessSoundEvent(FE_SND_JT_0);

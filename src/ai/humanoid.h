@@ -5,6 +5,7 @@
 #include "pc/inputaction.h"
 #include "snd/hmndsnd.h"
 
+class ActiveZone;
 struct FightingComboNode;
 
 // Action state IDs for Humanoid::SetActionState
@@ -86,7 +87,7 @@ enum StateDispatch : u16 {
     SD_DEAD_PLAYER = 48,   // PSX case 72: player death
     SD_CLIMB_LADDER = 49,   // PSX case 27: climb ladder
     SD_LADDER_DISMOUNT = 50,   // PSX case 28: ladder dismount
-    SD_HOTFOOT = 51,   // PSX case 73: Hotfoot
+    SD_NIS_MODE = 51,   // PSX case 73: NISMode
     // Player-specific dispatch via direct function pointer (stateDispatch = -1 on PSX)
     SD_HARDFALL = 250,
     SD_HARDLAND = 251,
@@ -113,8 +114,8 @@ public:
     // PSX +212 (s32): run speed for AddForce
     s32 runSpeed = 0;
 
-    // PSX +216 (s32): reserved
-    s32 field216 = 0;
+    // PSX +216 (s32): character subtype enum from HUMNDATA.CPP
+    s32 characterSubType = 0;
 
     // PSX +220 (ptr): face angle data table
     void* faceAngleData = nullptr;
@@ -187,9 +188,6 @@ public:
     // Action query helpers - read commandBits by named action.
     // Returns false if the action bit is not set or controls are disabled.
     inline bool HasAction(GameAction action) const {
-        if (g_actionInput && !g_actionInput->controlsEnabled) {
-            return false;
-        }
         return (commandBits >> static_cast<s32>(action)) & 1;
     }
 
@@ -214,17 +212,11 @@ public:
 
     // Check if any attack bit (7-20) is set
     inline bool HasAnyAttack() const {
-        if (g_actionInput && !g_actionInput->controlsEnabled) {
-            return false;
-        }
         return (commandBits >> GA_GRAB) & 0x3FFF;
     }
 
     // Check if any pickup/grab bit is set (bits 7, 15, 16, 19)
     inline bool HasAnyPickup() const {
-        if (g_actionInput && !g_actionInput->controlsEnabled) {
-            return false;
-        }
         return ((commandBits >> GA_GRAB) & 1) ||
             ((commandBits >> GA_GRAB_FORWARD) & 1) ||
             (commandBits & 0x10000) ||
@@ -278,6 +270,9 @@ public:
     // PSX +452 (s32): reserved
     s32 field452 = 0;
 
+    // PSX +456 (u32): behaviour name hash override from HUMNDATA.CPP
+    u32 behaviourNameHash = 0;
+
     // PSX +460 (s32): humanoid data ptr (from GetHumanoidData)
     void* humanoidData = nullptr;
 
@@ -322,8 +317,8 @@ public:
     // PSX +528 (s32): reserved
     s32 field528 = 0;
 
-    // PSX +532 (s32): reserved
-    s32 field532 = 0;
+    // PSX +532: cached owning active zone pointer
+    ActiveZone* activeZone = nullptr;
 
     // PSX +536: embedded ccNode for combat/targeting list
     ccNode combatNode;
@@ -374,6 +369,8 @@ public:
     virtual s32 TestAndSetRisingAttack();
     s32 LetGoOfLedge();
     void SetHumanoidTarget(Humanoid* target);
+    bool IsInActiveZone() const;
+    bool IsTargetInActiveZone() const;
 
     virtual void _Stand();
     virtual void _Run();
@@ -400,6 +397,7 @@ public:
     virtual void _LadderDismount();
     virtual void _ClimbLadder();
     virtual void _Hotfoot();
+    virtual void _NISMode();
     virtual void CreateSound();
     virtual void ReleaseSound();
     virtual void _DoStand();
