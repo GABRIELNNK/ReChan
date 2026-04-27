@@ -57,6 +57,8 @@ public:
     void ProcessSwitches();
     void Render(const LVector* playerPos);
     void Unload();
+    void UnloadLevelPart2();
+    void UnloadPermanent();
     void UnloadPetal();
     void ResetLevel();
     void CheckThingSwitches(Thing* thing);
@@ -159,3 +161,6 @@ private:
     // OffsetToPreventSeams (GAME.CPP:2482) - shifts block pos toward player
     void OffsetToPreventSeams(LVector& pos, const LVector& playerPos);  // 0x8002AF88
 };
+
+// PSX: DeletePlayerBlendAndAnimData (WORLD.CPP:2059, 0x80047014)
+s32 DeletePlayerBlendAndAnimData();

@@ -104,22 +104,22 @@ Game::Game() {
 
 Game::~Game() {
     // Clean up intro/title resources
-    if (introTexture) { 
+    if (introTexture) {
         introTexture->Release();
-        introTexture = nullptr; 
+        introTexture = nullptr;
     }
     if (titleScreen) {
-        delete titleScreen; 
-        titleScreen = nullptr; 
+        delete titleScreen;
+        titleScreen = nullptr;
     }
-    if (gameOverScreen) { 
-        delete gameOverScreen; 
+    if (gameOverScreen) {
+        delete gameOverScreen;
         gameOverScreen = nullptr;
     }
     FreeXconFE();
     if (g_oxFontFile) {
         delete g_oxFontFile;
-        g_oxFontFile = nullptr; 
+        g_oxFontFile = nullptr;
     }
     ScreenDraw::Shutdown();
 
@@ -321,10 +321,10 @@ static void AnimateLoop(ccList& list) {
 void Game::AnimateEverythingHandler(Handler*) {
     MARKFUNCTION(0x8002B2F0);
     if (!g_ai) return;
-    AnimateLoop(g_ai->activeZoneList);
     AnimateLoop(g_ai->humanoidList);
     AnimateLoop(g_ai->pickupList);
     AnimateLoop(g_ai->inactivePickupList);
+    AnimateLoop(g_ai->moveList);
 }
 
 // PSX: DrawEverythingHandler__FP7Handler (GAME.CPP:2211, 0x8002A98C)
@@ -352,7 +352,7 @@ void Game::DrawEverythingHandlerCB(Handler*) {
     // PSX: passes player position (MEMORY[0x1C] = thePlayer->pos) to DrawEverythingHandler,
     // NOT the camera position. Used for block distance sorting and seam offsets.
     const LVector& playerPos = Player::s_player ? Player::s_player->pos
-                                                : g_display->GetCamera()->GetPosition();
+        : g_display->GetCamera()->GetPosition();
     world->Render(&playerPos);
 
     // PSX: entities are drawn inside DrawEverythingHandler with VRAM active,
@@ -594,6 +594,9 @@ bool Game::gsTitleLoopState(Game* game) {
                 FreeXconFSImage();
                 LoadXconFE();
                 game->PlayMovie("prolog.str", 1, 0);
+                if (g_characterManager) {
+                    g_characterManager->LoadCharTexture(0);
+                }
                 g_frontEndSound->ProcessSoundEvent(FE_SND_MENU_ACCEPT);
                 LOG("[Game] TitleLoop: fade complete -> OpenFE");
                 game->titleFadeType = 0;
@@ -979,7 +982,7 @@ bool Game::gsQueueLevelLoad(Game* game) {
     rsEvent(RS_STOP_MUSIC, 0, 0, 0);
 
     // PSX: Shock(18) - controller vibration pulse
-    // TODO: Shock not yet reversed
+    Shock(ShockEnum::SHOCK_CLEAR);
 
     // PSX: MenuFade() - blocking fade to black
     // TODO: MenuFade not yet reversed (blocking inline loop on PSX)
@@ -1000,10 +1003,7 @@ bool Game::gsQueueLevelLoad(Game* game) {
 
     // PSX: UnloadLevel(world), UnloadLevelPart2(world)
     world->Unload();
-    // TODO: UnloadLevelPart2 not yet reversed (additional cleanup)
-
-    // PSX: DeletePlayerBlendAndAnimData() - free player blend tree memory
-    // TODO: not yet reversed
+    world->UnloadLevelPart2();
 
     // PSX: FreeDynamicPrimBuffers(), AllocateDynamicPrimBuffers(0)
     // PSX GPU primitive buffers - not applicable on PC
@@ -1031,6 +1031,10 @@ bool Game::gsQueueLevelLoad(Game* game) {
     if (g_cameraManager) {
         g_cameraManager->SetupPaths();
         g_display->GetCamera()->SetCameraAnchor(g_cameraManager->GetAnchor());
+    }
+
+    if (g_database) {
+        g_database->Close();
     }
 
     tMatrixCamera* cam = g_display->GetCamera()->GetP3DCamera();
@@ -1069,6 +1073,7 @@ bool Game::gsQueuePetalLoad(Game* game) {
     rsEvent(RS_STOP_MUSIC, 0, 0, 0);
 
     // PSX: Shock(18), MenuFade(), SetHUDVisible(0, 0, 1)
+    Shock(ShockEnum::SHOCK_CLEAR);
     if (g_hud) {
         g_hud->SetHUDVisible(0, 1);
     }
@@ -1157,7 +1162,7 @@ bool Game::gsDetermineNextGameState(Game* game) {
     MARKFUNCTION(0x80029924); // gsDetermineNextGameState
 
     // PSX: Shock(18) - controller vibration on death
-    // TODO: Shock not yet reversed
+    Shock(ShockEnum::SHOCK_CLEAR);
 
     // PSX: decrement lives and branch to EndGame if depleted, else QueuePetalLoad.
     if (Player::s_player) {
@@ -1182,7 +1187,6 @@ bool Game::gsDetermineNextGameState(Game* game) {
 bool Game::gsDetermineGameOverState(Game* game) {
     MARKFUNCTION(0x800299B0); // gsDetermineGameOverState
     // PSX: returns 0 (false) - stops the game loop
-    // On PC, main.cpp catches false return and handles it
     return false;
 }
 
@@ -1242,9 +1246,9 @@ bool Game::gsEndGameLoopState(Game* game) {
                 game->gameOverScreen = nullptr;
             }
             FreeXconFSImage();
+            DeletePlayerBlendAndAnimData();
             LoadXconFE();
-            // PSX transitions to OpenLocationMenu (state 19) which goes to FE
-            game->SetState(GameState::OpenFE);
+            game->SetState(GameState::OpenLocationMenu);
         }
         return true;
     }
@@ -1367,7 +1371,9 @@ cleanup:
         if (g_oxFontFile) {
             g_oxFontFile->ReloadFont("XC/FONTS.1");
         }
-        // PSX: LoadCharTexture(g_charMgr, 0) -- TODO when charMgr is reversed
+        if (g_characterManager) {
+            g_characterManager->LoadCharTexture(0);
+        }
     }
 
     // PSX: rsEvent(13, 7, 0, 0) -- cleanup

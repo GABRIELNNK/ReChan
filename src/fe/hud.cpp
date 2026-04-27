@@ -572,6 +572,18 @@ void HUD::SelfUpdate() {
         ResetHudWidescreenAnchors(raw);
     }
 
+    // PSX uses InputManager button callbacks for logical button 0 (L2 / Status Display).
+    // Until that callback layer is reversed on PC, mirror the same trigger here.
+    if (inputEnabled && g_inputManager) {
+        World* world = g_game ? g_game->GetWorld() : nullptr;
+        if (world && world->GetCurLevelID() != 7) {
+            Button* statusButton = g_inputManager->GetButtonForBit(0, 0);
+            if (statusButton && statusButton->rawInput && !statusButton->prevInput) {
+                ToggleShowAll();
+            }
+        }
+    }
+
     hits.Update();
     foeHealth.Update();
     playerHealth.Update();

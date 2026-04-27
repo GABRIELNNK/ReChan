@@ -16,3 +16,7 @@
 
 // Director cutscene bars: 0 = PSX-like alpha fade, 1 = slide in/out using alpha as progress.
 #define DIRECTOR_WIDESCREEN_SLIDE_BARS 1
+
+// When ESC is bound to both menu back and menu open/close,
+// let it back out of submenu pages before closing the whole menu.
+#define ESC_BACKS_OUT_SUBMENUS_FIRST 1

@@ -22,6 +22,7 @@ public:
     void Activate() override;
     void SelfInit() override;
     void GotoStartScreen() override;
+    void Deactivate() override;
     void InputItemPush() override;
     void PushMenu(hdMenu* menu) override;
     void PopMenu() override;

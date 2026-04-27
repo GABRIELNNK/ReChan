@@ -1832,8 +1832,10 @@ bool World::LoadLevelIndex(u32 levelIndex) {
     // PSX: CheckpointInfo
     u32 startBlockNum = 0;
     bool hasCheckpoint = false;
-    // TODO: CheckpointInfo::IsValid() not yet reversed
-    // if (checkpoint.IsValid()) { startBlockNum = checkpoint.field24; hasCheckpoint = true; }
+    if (Player::s_player && Player::s_player->checkpoint.IsValid()) {
+        startBlockNum = (u32)Player::s_player->checkpoint.field24;
+        hasCheckpoint = true;
+    }
 
     // PSX: WorldEffects, PWorldEffects, ParticleSystem
     // TODO: not yet reversed
@@ -1861,7 +1863,9 @@ bool World::LoadLevelIndex(u32 levelIndex) {
     // TODO: not yet reversed
 
     // PSX: ScoreManager::SetPar
-    // TODO: not yet reversed
+    if (g_scoreManager) {
+        g_scoreManager->SetPar();
+    }
 
     // PSX: Director->Reset() then Director->SetScript()
     if (g_director) {
@@ -1873,7 +1877,8 @@ bool World::LoadLevelIndex(u32 levelIndex) {
     ProcessSwitches();
 
     // PSX: Close__8Database(0)
-    // TODO: database close not yet implemented
+    // PC: deferred until Game::gsQueueLevelLoad after CameraManager::SetupPaths,
+    // because we still run the camera load callback after Construct returns.
 
     // PSX: AllocBlockPool__12BlockManager(0) - allocate block node pool
     // PC: blocks already allocated by LoadBlocksFunc
@@ -2523,6 +2528,20 @@ void World::Unload() {
     }
 }
 
+// PSX: UnloadLevelPart2__5World (WORLD.CPP:1355, 0x80046208)
+void World::UnloadLevelPart2() {
+    MARKFUNCTION(0x80046208);
+
+    streamData.clear();
+    DeletePlayerBlendAndAnimData();
+    WorldPoints_Reset();
+}
+
+// PSX: UnloadPermanent__5World (WORLD.CPP:1886, 0x80046CB0)
+void World::UnloadPermanent() {
+    MARKFUNCTION(0x80046CB0);
+}
+
 // PSX: UnloadPetal__5World (WORLD.CPP:1176, 0x80045F34)
 void World::UnloadPetal() {
     MARKFUNCTION(0x80045F34);
@@ -2656,6 +2675,12 @@ void World::LoadPetal(u32 petalIndex) {
 
     // PSX: StopLogo after load completes
     StopLogo();
+}
+
+// PSX: DeletePlayerBlendAndAnimData__Fv (WORLD.CPP:2059, 0x80047014)
+s32 DeletePlayerBlendAndAnimData() {
+    MARKFUNCTION(0x80047014);
+    return 0;
 }
 
 // PSX: ResetLevel__5World (WORLD.CPP:1918, 0x80046DE0)

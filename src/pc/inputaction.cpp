@@ -24,7 +24,8 @@ ActionInput::ActionInput() {
     bindings[ACTION_GRAB] = { KEY_L, MouseBtn::Middle, GpBtn::B, GpBtn::NONE, GpAxis::NONE, 0 };
     bindings[ACTION_DIVE_ROLL] = { KEY_LEFT_CONTROL, MouseBtn::NONE, GpBtn::RB, GpBtn::NONE, GpAxis::NONE, 0 };
     bindings[ACTION_STRAFE] = { KEY_LEFT_SHIFT, MouseBtn::NONE, GpBtn::NONE, GpBtn::NONE, GpAxis::RTrigger, 0.5f };
-    bindings[ACTION_COUNTER] = { KEY_TAB, MouseBtn::NONE, GpBtn::NONE, GpBtn::NONE, GpAxis::LTrigger, 0.5f };
+    bindings[ACTION_COUNTER] = { KEY_U, MouseBtn::NONE, GpBtn::LB, GpBtn::NONE, GpAxis::NONE, 0 };
+    bindings[ACTION_STATUS_DISPLAY] = { KEY_TAB, MouseBtn::NONE, GpBtn::NONE, GpBtn::NONE, GpAxis::LTrigger, 0.5f };
 
     bindings[ACTION_MOVE_UP] = { KEY_W, MouseBtn::NONE, GpBtn::NONE, GpBtn::DpadUp, GpAxis::LeftY, -0.3f };
     bindings[ACTION_MOVE_DOWN] = { KEY_S, MouseBtn::NONE, GpBtn::NONE, GpBtn::DpadDown, GpAxis::LeftY, 0.3f };
@@ -257,6 +258,9 @@ u32 ActionInput::GetPadButtons() const {
         buttons |= 0x8000;
     }
 
+    if (IsHeld(ACTION_STATUS_DISPLAY)) {
+        buttons |= 0x0001;
+    }
     if (IsHeld(ACTION_STRAFE)) {
         buttons |= 0x0002;
     }
@@ -269,8 +273,11 @@ u32 ActionInput::GetPadButtons() const {
     if (IsHeld(ACTION_KICK)) {
         buttons |= 0x0010;
     }
-    if (IsHeld(ACTION_GRAB) || IsHeld(ACTION_MENU_BACK)) {
+    if (IsHeld(ACTION_GRAB)) {
         buttons |= 0x0020;
+    }
+    if (IsHeld(ACTION_MENU_BACK)) {
+        buttons |= 0x0010;
     }
     if (IsHeld(ACTION_JUMP) || IsHeld(ACTION_MENU_CONFIRM)) {
         buttons |= 0x0040;

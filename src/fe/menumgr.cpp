@@ -1,3 +1,4 @@
+#include "gen/common.h"
 #include "fe/menumgr.h"
 #include "fe/hdmenuitems.h"
 #include "gen/linefile.h"
@@ -375,6 +376,21 @@ void MenuMgr::PopMenu() {
     PopScreen();
 }
 
+u32 MenuMgr::FilterHostMenuButtons(u32 buttons) const {
+#if ESC_BACKS_OUT_SUBMENUS_FIRST
+    if (screenStackDepth > 1 && g_actionInput && !g_actionInput->IsGamepadActive()) {
+        const int openCloseKey = g_actionInput->GetKeyBinding(ACTION_OPEN_CLOSE_MENU);
+        const int backKey = g_actionInput->GetKeyBinding(ACTION_MENU_BACK);
+        if (openCloseKey != 0 && openCloseKey == backKey
+            && g_actionInput->IsHeld(ACTION_OPEN_CLOSE_MENU)
+            && g_actionInput->IsHeld(ACTION_MENU_BACK)) {
+            buttons &= ~PsxPad::Start;
+        }
+    }
+#endif
+    return buttons;
+}
+
 // PSX: QueryInput__7MenuMgrb (0x8005FDF4)
 // Polls input and dispatches to virtual Input* functions.
 // processInput: when true, process buttons; false = poll only.
@@ -389,6 +405,8 @@ void MenuMgr::QueryInput(bool processInput) {
     if (buttons == 0) {
         return;
     }
+
+    buttons = FilterHostMenuButtons(buttons);
 
     if ((buttons & PsxPad::Start) != 0) {
         state = 8;

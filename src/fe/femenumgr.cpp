@@ -287,6 +287,16 @@ static s32 NewGameCallback(hdMenuItem* item) {
     // PSX: UnloadPermanent__5World()
     // PSX: MEMORY[0x1F4] = 0
     if (g_game) {
+        if (World* world = g_game->GetWorld()) {
+            world->Unload();
+            world->UnloadLevelPart2();
+            world->UnloadPermanent();
+        }
+    }
+    if (g_scoreManager) {
+        g_scoreManager->drunkenMasterUnlocked = 0;
+    }
+    if (g_game) {
         g_game->SetState(GameState::Init);  // state 4
     }
     return 4;  // state=4 = game state change
@@ -563,6 +573,8 @@ void feMenuMgr::QueryInput(bool processInput) {
     if (!processInput || buttons == 0) {
         return;
     }
+
+    buttons = FilterHostMenuButtons(buttons);
 
     if ((buttons & PsxPad::Start) != 0) {
         hdMenu* levelMenu = FindMenu(HASH_LEVEL_SCREEN);

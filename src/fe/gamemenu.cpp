@@ -4,6 +4,7 @@
 #include "gen/game.h"
 #include "gen/control.h"
 #include "gen/scoremgr.h"
+#include "fe/hud.h"
 #include "snd/fesnd.h"
 #include "snd/rsevent.h"
 #include "snd/sound.h"
@@ -56,6 +57,7 @@ struct SoundMenuState {
 static SoundMenuState g_soundState;
 static char s_pauseGoldDragonBuf[8] = {};
 static u32 s_pauseGoldDragonToken = 0;
+static s32 s_pauseHudDragonShowState = 0;
 
 // PSX: __8gameMenu (Overlay4 0x80010100)
 gameMenu::gameMenu() {
@@ -273,6 +275,27 @@ void gameMenu::SelfInit() {
 void gameMenu::GotoStartScreen() {
     MARKFUNCTION(0x80037DA0);
     GotoScreen(startScreenHashes[pauseIndex]);
+
+    if (g_hud) {
+        s_pauseHudDragonShowState = g_hud->dragonShowState;
+        g_hud->EnableInput(0);
+        if (!s_pauseHudDragonShowState) {
+            g_hud->ToggleShowAll();
+        }
+    }
+}
+
+// PSX: Deactivate__8gameMenu (Overlay4 0x80037E14)
+void gameMenu::Deactivate() {
+    MARKFUNCTION(0x80037E14);
+    MenuMgr::Deactivate();
+
+    if (g_hud) {
+        g_hud->EnableInput(1);
+        if (!s_pauseHudDragonShowState) {
+            g_hud->ToggleShowAll();
+        }
+    }
 }
 
 // PSX: InputItemPush__8gameMenu (Overlay4 0x80037B6C)

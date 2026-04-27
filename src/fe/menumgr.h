@@ -52,6 +52,8 @@ public:
     virtual void PopMenu();
     virtual void HandleInputChange();
 
+    u32 FilterHostMenuButtons(u32 buttons) const;
+
     void PostFlightDef();
 
     void SetTopMenu(u32 hash);
