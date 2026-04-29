@@ -11,6 +11,8 @@
 #include "p3d/input.h"
 #include "p3d/context.h"
 #include "pc/debugui.h"
+#include "gen/game.h"
+#include "gen/world.h"
 #include "gen/time.h"
 #include "gen/paramanim.h"
 
@@ -517,6 +519,11 @@ void Camera::DebugCam() {
             Player::s_player->homePos = position;
             Player::s_player->velocity = {};
             Player::s_player->contactForce = {};
+
+            World* world = g_game ? g_game->GetWorld() : nullptr;
+            if (world) {
+                world->CheckThingSwitches(Player::s_player);
+            }
         }
     }
 

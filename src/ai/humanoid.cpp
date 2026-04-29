@@ -257,21 +257,15 @@ static s8 LookupThrowShockFrame(u32 address) {
     return shockFrame;
 }
 
-static void SubtractHitPointsDirect(Humanoid* humanoid, u16 damage) {
-    if (!humanoid) {
-        return;
+// PSX: CalculateFallDamage__Fl (PLAYER.CPP:3161, 0x80032348)
+static s32 CalculateFallDamage(s32 heightUnits) {
+    MARKFUNCTION(0x80032348);
+
+    if (heightUnits >= 6) {
+        return (5 * heightUnits) - 5;
     }
 
-    if (damage >= humanoid->health) {
-        humanoid->health = 0;
-    }
-    else {
-        humanoid->health = static_cast<u16>(humanoid->health - damage);
-    }
-
-    if (g_hud) {
-        g_hud->UpdateFoe(humanoid);
-    }
+    return 0;
 }
 
 struct PsxFightingMoveRaw;
@@ -1512,7 +1506,7 @@ void Humanoid::HandleCollision(Thing* other, s32 damage, ...) {
             if (clampedDamage > 0xFFFFu) {
                 clampedDamage = 0xFFFFu;
             }
-            SubtractHitPointsDirect(this, static_cast<u16>(clampedDamage));
+            SubtractHitPoints(static_cast<u16>(clampedDamage));
 
             if (appliedDamage > DROP_PICKUP_DAMAGE_THRESHOLD && rightHandObj) {
                 // PSX writes held pickup +0x134 before forced drop.
@@ -1668,6 +1662,24 @@ void Humanoid::AnalyzeMesh(DBRoot* root) {
             behaviourNameHash,
             field384);
     }
+}
+
+// PSX: SubtractHitPoints__8HumanoidUs (HUMANOID.CPP:9388, 0x8006CEB4)
+s32 Humanoid::SubtractHitPoints(u16 hitPoints) {
+    MARKFUNCTION(0x8006CEB4);
+
+    if (hitPoints >= health) {
+        health = 0;
+    }
+    else {
+        health = static_cast<u16>(health - hitPoints);
+    }
+
+    if (g_hud) {
+        g_hud->UpdateFoe(this);
+    }
+
+    return health;
 }
 
 // PSX: SetActionState__8HumanoidUll (HUMANOID.CPP:2792)
@@ -3607,11 +3619,10 @@ void Humanoid::HandleLand(s32 height) {
         return;
     }
 
-    const s32 drop = (groundStandHeight - height) / 512;
-    const s32 fallDamage = (drop >= 6) ? ((5 * drop) - 5) : 0;
+    const s32 fallDamage = CalculateFallDamage((groundStandHeight - height) / 512);
 
     if (actionState != AS_NIS_MODE) {
-        SubtractHitPointsDirect(this, static_cast<u16>(fallDamage));
+        SubtractHitPoints(static_cast<u16>(fallDamage));
     }
 
     if (fallDamage > 0 && this == (Humanoid*)Player::s_player) {
@@ -5411,7 +5422,7 @@ s32 Humanoid::ThrowCharacterReceive() {
     if (move) {
         const u8 throwDamage = LookupThrowDamageByte(move->address);
         if (move->throwScoreFrame == frame) {
-            SubtractHitPointsDirect(this, throwDamage);
+            SubtractHitPoints(throwDamage);
         }
 
         if (LookupThrowShockFrame(move->address) == frame) {
@@ -5422,7 +5433,7 @@ s32 Humanoid::ThrowCharacterReceive() {
     if (anim->loopCount > 0) {
         if (move && move->throwScoreFrame == 127) {
             const u8 throwDamage = LookupThrowDamageByte(move->address);
-            SubtractHitPointsDirect(this, throwDamage);
+            SubtractHitPoints(throwDamage);
         }
         SetActionState(AS_SPIN_BACK_RECOVER, 0);
         return 1;
@@ -5439,7 +5450,7 @@ s32 Humanoid::ThrowFreeFall() {
         const PsxFightingMoveRaw* move = ResolveFightingMoveAddress(static_cast<u32>(field528));
         if (move) {
             const u8 throwDamage = LookupThrowDamageByte(move->address);
-            SubtractHitPointsDirect(this, throwDamage);
+            SubtractHitPoints(throwDamage);
         }
 
         SetActionState(AS_FLYING_BACK_CHECK, 0);

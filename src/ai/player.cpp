@@ -8,6 +8,7 @@
 #include "gen/charmgr.h"
 #include "gen/control.h"
 #include "gen/colsect.h"
+#include "gen/director.h"
 #include "snd/rsevent.h"
 #include "snd/hmndsnd.h"
 #include "p3d/p3dmath.h"
@@ -297,6 +298,15 @@ void Player::Think() {
         humanoidSound->Think();
     }
     PlayerSingleEncounterCheak();
+
+    if (model) {
+        HumanoidModel* hm = static_cast<HumanoidModel*>(model);
+        hm->attackHandRadius = 72;
+        hm->attackFootRadius = 100;
+    }
+
+    flags &= ~TF_BIT1;
+    flags2 &= ~TF2_BIT3;
 
     ProcessControl();
 
@@ -810,21 +820,51 @@ void Player::SetActionState(u32 state, s32 param) {
         }
         case AS_GET_UP:
         {
-            // PSX case 68: get up from knockdown. stateDispatch=43, field616=0
+            // PSX case 68: get up from knockdown.
             flags2 &= ~0x70;
+            if (model) {
+                Model* m = static_cast<Model*>(model);
+                m->SetAnim(29, 0, 0, 0);
+            }
+            PlayDialogBasedOnPriority(0, 512);
             field344 = 0;
             stateDispatch = SD_GET_UP;
             field348 = 8;
             field616 = 0;
+            field468 = 0;
             stateTimer = 0;
             actionState = (s32)state;
             return;
         }
         case AS_DEAD:
         {
-            // PSX case 72: player death. Complex death dialog/anim sequence.
-            // stateDispatch=48, flags|=0x80, field616=0
+            // PSX case 72: player death. Preserve carry-over motion for specific
+            // incoming states, otherwise switch to player death anim 17.
+            const s32 prevState = actionState;
+            const bool preserveDeathMotion = (prevState >= 56 && prevState <= 59)
+                || (prevState >= 69 && prevState <= 72);
+
+            if (prevState == 64) {
+                LoadDialog(55, 0xFF);
+            }
+            else if (prevState == 65) {
+                LoadDialog(56, 0xFF);
+            }
+            else if (!preserveDeathMotion && model) {
+                Model* m = static_cast<Model*>(model);
+                m->SetAnim(17, param, 0, 0);
+            }
+
+            if (model) {
+                Model* m = static_cast<Model*>(model);
+                AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+                if (anim) {
+                    anim->humanoidCB = {};
+                }
+            }
+
             field616 = 0;
+            thinkCounter = 0;
             stateTimer = 0;
             flags |= 0x80;
             field344 = 0;
@@ -868,7 +908,7 @@ void Player::ProcessAction() {
         case SD_TABLE_ROLL:    _TableRoll(); return;
         case SD_DO_STAND:      _DoStand(); return;
         // Player-specific handlers (PSX: vtable index dispatch)
-        case SD_GET_UP:        _DoStand(); return;
+        case SD_GET_UP:        Humanoid::_CrouchUp(); return;
         case SD_HORIZONTAL_POLE: _HorizontalPoleSwing(); return;
         case SD_LEDGE_LATCH:   _LedgeLatch(); return;
         case SD_LEDGE_PULLUP:  _LedgePullup(); return;
@@ -2577,14 +2617,15 @@ void Player::_LedgePullup() {
 }
 
 // PSX: _Dead__6Player (PLAYER.CPP:4256, 0x80033858)
-// Sets death flag and triggers death sequence via Director.
+// Sets death flag and starts the standard Director death script once.
 void Player::_Dead() {
     MARKFUNCTION(0x80033858);
 
     if (!field620) {
         field620 = 1;
-        // PSX: SetCodeSnip(theDirector, death, 0)
-        // Director system not yet reversed
+        if (g_director) {
+            g_director->SetCodeSnip(Director::GetDeathScript(), nullptr);
+        }
     }
 }
 

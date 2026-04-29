@@ -373,6 +373,7 @@ public:
     void Activate() override;
     void Deactivate() override;
     void Move() override;
+    s32 SubtractHitPoints(u16 hitPoints);
     void HandleLand(s32 height) override;
     s32 HandleAnimationControl();
     void CreateModel(const char* name) override;
