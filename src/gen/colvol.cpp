@@ -60,3 +60,65 @@ bool CheckStaticHorizontalBoxPointCollision(
     if (rotZ > box.maxZ) return false;
     return true;
 }
+
+// PSX: CheckStaticBoxSphereCollision (COLVOL.CPP:461, 0x800AA22C)
+bool CheckStaticBoxSphereCollision(
+    const LVector& boxPos,
+    const tagCollisionBox& box,
+    s32 rotY,
+    const LVector& spherePos,
+    const tagCollisionSphere& sphere) {
+    MARKFUNCTION(0x800AA22C);
+
+    const s32 minX = (s32)box.minX - sphere.radius;
+    const s32 maxX = (s32)box.maxX + sphere.radius;
+    const s32 minY = (s32)box.minY - sphere.radius;
+    const s32 maxY = (s32)box.maxY + sphere.radius;
+    const s32 minZ = (s32)box.minZ - sphere.radius;
+    const s32 maxZ = (s32)box.maxZ + sphere.radius;
+
+    const s32 dx = spherePos.x - boxPos.x;
+    const s32 dy = spherePos.y - boxPos.y;
+    const s32 dz = spherePos.z - boxPos.z;
+
+    const s32 sinY = rmSin16(rotY);
+    const s32 cosY = rmSin16(rotY + 0x4000);
+
+    const s32 localX = static_cast<s32>((static_cast<s64>(cosY) * dx) >> 16)
+        + static_cast<s32>((static_cast<s64>(-sinY) * dz) >> 16);
+    const s32 localZ = static_cast<s32>((static_cast<s64>(sinY) * dx) >> 16)
+        + static_cast<s32>((static_cast<s64>(cosY) * dz) >> 16);
+
+    if (localX < minX || localX > maxX) {
+        return false;
+    }
+    if (dy < minY || dy > maxY) {
+        return false;
+    }
+    if (localZ < minZ || localZ > maxZ) {
+        return false;
+    }
+
+    return true;
+}
+
+bool CheckStaticCylinderSphereCollision(
+    const LVector& cylPos,
+    const tagCollisionCylinder& cyl,
+    const LVector& spherePos,
+    const tagCollisionSphere& sphere) {
+    MARKFUNCTION(0x800AA3E0);
+
+    const s32 radius = cyl.radius + sphere.radius;
+    const s32 minY = cyl.lowerY - sphere.radius;
+    const s32 maxY = cyl.upperY + sphere.radius;
+    const s32 relY = spherePos.y - cylPos.y;
+
+    if (relY < minY || relY > maxY) {
+        return false;
+    }
+
+    return rmMag2(
+        static_cast<f32>(spherePos.x - cylPos.x),
+        static_cast<f32>(spherePos.z - cylPos.z)) <= radius;
+}

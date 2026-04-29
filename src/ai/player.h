@@ -208,10 +208,10 @@ public:
     void SignalEnemyGetUp();
     void SignalEnemyDead(Humanoid* enemy);
     bool EnterCombatCombo();
-    void LoadCombatDialog();
-    void PlayCombatKnockDownDialog(s32 damageType);
-    void HandleHitShock(s32 damageType);
-    void PlayCombatThrowDialog();
+    s32 LoadCombatDialog() override;
+    void PlayCombatKnockDownDialog(s32 damageType) override;
+    void HandleHitShock(s32 damageType) override;
+    void PlayCombatThrowDialog() override;
     bool PlayerSingleEncounterCheak();
     void LoadPlayerTauntResponse(Humanoid* target);
     void PlayPlayerTauntResponse();

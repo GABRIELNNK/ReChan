@@ -1,5 +1,7 @@
 #include "snd/hmndsnd.h"
 #include "snd/prstsnd.h"
+#include "snd/wpnsnd.h"
+#include "ai/pickup.h"
 #include "ai/humanoid.h"
 #include "gen/common.h"
 #include "p3d/p3dmath.h"
@@ -294,21 +296,47 @@ s32 CHumanoidSound::HitByFireBlast() {
 
 s32 CHumanoidSound::GrabWeapon() {
     MARKFUNCTION(0x80061170);
-    // PSX: accesses humanoid->field500 (pickup) -> GetWeaponSoundPtr -> Grab
-    // weapon sound not yet reversed
-    return 0;
+    if (!humanoid || !humanoid->rightHandObj) {
+        return 0;
+    }
+
+    Pickup* pickup = static_cast<Pickup*>(humanoid->rightHandObj);
+    CWeaponSound* weaponSound = pickup->GetWeaponSoundPtr();
+    if (!weaponSound) {
+        return 0;
+    }
+
+    return weaponSound->Grab();
 }
 
 s32 CHumanoidSound::WeaponMiss() {
     MARKFUNCTION(0x800611C0);
-    // weapon sound not yet reversed
-    return 0;
+    if (!humanoid || !humanoid->rightHandObj) {
+        return 0;
+    }
+
+    Pickup* pickup = static_cast<Pickup*>(humanoid->rightHandObj);
+    CWeaponSound* weaponSound = pickup->GetWeaponSoundPtr();
+    if (!weaponSound) {
+        return 0;
+    }
+
+    return weaponSound->Miss();
 }
 
 s32 CHumanoidSound::WeaponHit() {
     MARKFUNCTION(0x80061210);
-    // weapon sound not yet reversed
-    return 0;
+    if (!humanoid || !humanoid->rightHandObj) {
+        return 0;
+    }
+
+    Pickup* pickup = static_cast<Pickup*>(humanoid->rightHandObj);
+    CWeaponSound* weaponSound = pickup->GetWeaponSoundPtr();
+    if (!weaponSound) {
+        return 0;
+    }
+
+    return weaponSound->HitHumanoid();
 }
 
 // helpers

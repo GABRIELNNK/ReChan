@@ -5,9 +5,25 @@
 #include "gen/scoremgr.h"
 #include "gen/game.h"
 #include "gen/world.h"
+#include "p3d/p3dmath.h"
 #include <cstdio>
 
 static char s_dragonCountBuf[32];
+static const char s_hdHitSingular[] = "hit";
+static const char s_hdHitPlural[] = "hits";
+
+static void ApplyHdHitsColor(xcTextPrim* textPrim, s16 colorR, s16 colorG, s16 colorB) {
+    if (!textPrim) {
+        return;
+    }
+
+    xcColour1555 color;
+    color.Set8((u8)colorR, (u8)colorG, (u8)colorB);
+    textPrim->colorR = color.GetRed8();
+    textPrim->colorG = color.GetGreen8();
+    textPrim->colorB = color.GetBlue8();
+    textPrim->colorA = color.GetAlpha8();
+}
 
 // PSX: _8hdTtlive (HDITEM.CPP:295, 0x8008EF44)
 hdTtlive::hdTtlive() {
@@ -90,6 +106,9 @@ void hdHealth::SetText(const char* text) {
         u32* hashes = textObj->StringHashes();
         if (text) {
             hashes[textObj->paletteIdx] = xcRegisterRuntimeString(text);
+        }
+        else {
+            hashes[textObj->paletteIdx] = 0;
         }
     }
 }
@@ -338,12 +357,16 @@ void hdHits::Init(oxScreenManager* scrmgr) {
 
     overlay = scrmgr->FindOverlay((u32)0x71AB6E45);
     if (overlay && rawData) {
+        oxOvl helper;
+        helper.overlay = overlay;
         hitsTextObj = (xcTextPrim*)overlay->GetTextObj(0xAFA07175, rawData);
         hitsTextObj2 = (xcTextPrim*)overlay->GetTextObj(0xA3B1A82A, rawData);
+        if (hitsTextObj2) {
+            hitsTextObj2->hdr.subtype = 5;
+        }
         if (hitsTextObj) {
             hitsTextObj->StringHashes()[hitsTextObj->paletteIdx] = xcRegisterRuntimeString(hitsBuf);
-            origPosX = (s16)hitsTextObj->mtx.GetX();
-            origPosY = (s16)hitsTextObj->mtx.GetY();
+            helper.GetPrimPos(reinterpret_cast<u8*>(hitsTextObj), origPosX, origPosY);
         }
     }
     if (overlay) {
@@ -357,24 +380,29 @@ void hdHits::Init(oxScreenManager* scrmgr) {
 
 void hdHits::Update() {
     MARKFUNCTION(0x8008FA2C);
-    // Fade toward white (255,255,255)
-    if (colorR < 255) {
-        colorR += 8;
-        if (colorR > 255) colorR = 255;
-    }
+    colorR = 255;
     if (colorG < 255) {
         colorG += 8;
-        if (colorG > 255) colorG = 255;
+        if (colorG > 255) {
+            colorG = 255;
+        }
     }
     if (colorB < 255) {
         colorB += 8;
-        if (colorB > 255) colorB = 255;
+        if (colorB > 255) {
+            colorB = 255;
+        }
     }
 
+    ApplyHdHitsColor(hitsTextObj, colorR, colorG, colorB);
+
     if (hitsTextObj) {
-        hitsTextObj->colorR = (u8)colorR;
-        hitsTextObj->colorG = (u8)colorG;
-        hitsTextObj->colorB = (u8)colorB;
+        oxOvl helper;
+        helper.overlay = overlay;
+        const s32 shakeRange = (hitCount < 5) ? hitCount : 5;
+        const s32 offsetX = (s32)rmRangedRandom((u32)shakeRange) - shakeRange;
+        const s32 offsetY = (s32)rmRangedRandom((u32)shakeRange) - (shakeRange / 2);
+        helper.SetPrimPos(reinterpret_cast<u8*>(hitsTextObj), (s16)(origPosX + offsetX), (s16)(origPosY + offsetY));
     }
 }
 
@@ -384,10 +412,23 @@ void hdHits::IncrementHits() {
     if (hitCount >= 2 && overlay) {
         overlay->visibility = 1;
     }
-    sprintf(hitsBuf, "%2d", hitCount);
+
+    const char* suffix = (hitCount < 2) ? s_hdHitSingular : s_hdHitPlural;
+    snprintf(hitsBuf, sizeof(hitsBuf), "%2d %s", hitCount, suffix);
+
     colorR = 255;
     colorG = 0;
     colorB = 0;
+
+    ApplyHdHitsColor(hitsTextObj, colorR, colorG, colorB);
+
+    const u32 fontHash = (hitCount < 3) ? fontHashLo : fontHashMid;
+    if (hitsTextObj) {
+        hitsTextObj->fontHash = fontHash;
+    }
+    if (hitsTextObj2) {
+        hitsTextObj2->fontHash = fontHash;
+    }
 }
 
 void hdHits::TriggerUpdate() {

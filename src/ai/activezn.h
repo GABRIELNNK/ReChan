@@ -52,7 +52,11 @@ public:
     void AddHumanoidToOverlordMembers(Humanoid* h);
     void RemoveHumanoidFromOverlordMembers(Humanoid* h);
     s32 GetNumberOfThinkingMembers() const;
+    s32 AllowedToMoveIn(Humanoid* humanoid);
     bool IsInActiveZone(class Thing* thing) const;
+    LinearPath* FindFirstValidPath(Humanoid* humanoid);
+    s32 DoAICheck(LinearPath* path, s32 nodeIndex, Humanoid* humanoid);
+    s32 DoActionsAtNode(LinearPath* path, s32 nodeIndex, Humanoid* humanoid);
     bool IsPathNodeTerminator(LinearPath* path, s32 nodeIndex) const;
     bool AllowBreakoffOfDestinationNode(LinearPath* path, s32 nodeIndex) const;
 };

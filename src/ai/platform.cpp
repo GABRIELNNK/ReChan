@@ -1185,7 +1185,7 @@ bool Platform::HandleEnvironmentCollision(LVector& nextPos) {
             continue;
         }
 
-        hum->HandleCollision(this, 17);
+        hum->HandleCollision(this, 17, 0);
         hitSomething = true;
 
         if (platformSound) {
@@ -1406,7 +1406,7 @@ void Platform::HandleHumanoidCollision(Humanoid* hum) {
 
             // PSX: if health > 0, call HandleCollision + dialog/shock (PLATFORM.CPP:2230-2237)
             if (hum->health != 0) {
-                hum->HandleCollision(this, 1);
+                hum->HandleCollision(this, 1, 0);
                 if (hum == (Humanoid*)Player::s_player) {
                     hum->LoadDialog(0x36, 0xFF);
                     Shock(SHOCK_9);

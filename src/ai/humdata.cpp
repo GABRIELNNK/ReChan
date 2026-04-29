@@ -140,6 +140,9 @@ static const CharSubTypeData kCharSubTypeDataTable[] = {
     { -1, 0, 0, -1, -1 },
 };
 
+// PSX: global humanoidDataTable pointer (HUMNDATA.CPP)
+const HumanoidDataEntry* humanoidDataTable = nullptr;
+
 s32 GetEnumFromHashTable(const HashEnum* table, u32 count, s32 hash) {
     if (!hash) {
         return -1;
@@ -202,4 +205,23 @@ s16 GetCharSubTypeHitPoints(s32 charSubType) {
 u32 GetBehaviourNameHash(s32 charSubType) {
     const CharSubTypeData* entry = CharSubTypeDataTableElement(charSubType);
     return entry ? entry->behaviourNameHash : 0;
+}
+
+// PSX: GetHumanoidData__FQ22AI10ThingTypes (HUMNDATA.CPP:297)
+const HumanoidDataEntry* GetHumanoidData(u16 thingType) {
+    MARKFUNCTION(0x8007DB94);
+
+    const HumanoidDataEntry* entry = humanoidDataTable;
+    if (!entry) {
+        return nullptr;
+    }
+
+    while (entry->thingType != -1) {
+        if (static_cast<u16>(entry->thingType) == thingType) {
+            return entry;
+        }
+        entry++;
+    }
+
+    return nullptr;
 }

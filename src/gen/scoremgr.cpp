@@ -3,6 +3,7 @@
 #include "gen/world.h"
 #include "gen/handler.h"
 #include "gen/ai.h"
+#include "fe/hud.h"
 
 ScoreManager* g_scoreManager = nullptr;
 
@@ -341,23 +342,27 @@ void ScoreManager::Print() const {
 }
 
 // PSX: RegisterCollectible__12ScoreManagerPC11Collectiblei (SCOREMGR.CPP:611, 0x8004D260)
-void ScoreManager::RegisterCollectible(const Collectible* collectible, s32 type) {
+s32 ScoreManager::RegisterCollectible(const Collectible* collectible, s32 type) {
     MARKFUNCTION(0x8004D260);
 
+    const s32 collectibleAddr = static_cast<s32>(reinterpret_cast<uintptr_t>(collectible));
+
     if (type == 1) {
-        if (collectibleCount >= 0 && collectibleCount < 10) {
-            collectibleRegistry[collectibleCount] = static_cast<s32>(reinterpret_cast<uintptr_t>(collectible));
-            collectibleCount++;
-        }
+        collectibleRegistry[collectibleCount++] = collectibleAddr;
+        return 0;
     }
-    else if (type == 2) {
-        // PSX returns currentGoldDragons for current level/petal.
-        // Read-only query, no state change needed.
+
+    if (type == 2) {
+        const s32 index = static_cast<s32>(g_game->GetWorld()->GetCurrentLevelIndex()) * 3
+            + static_cast<s32>(g_game->GetWorld()->GetCurrentPetalIndex());
+        return petalStats[index].goldDragons;
     }
+
+    return 0;
 }
 
 // PSX: RegisterGotCollectible__12ScoreManagerPC11Collectiblei (SCOREMGR.CPP:649, 0x8004D2E0)
-void ScoreManager::RegisterGotCollectible(const Collectible* collectible, s32 type) {
+s32 ScoreManager::RegisterGotCollectible(const Collectible* collectible, s32 type) {
     MARKFUNCTION(0x8004D2E0);
 
     const s32 collectibleAddr = static_cast<s32>(reinterpret_cast<uintptr_t>(collectible));
@@ -369,21 +374,19 @@ void ScoreManager::RegisterGotCollectible(const Collectible* collectible, s32 ty
                 break;
             }
         }
-        currentCollectCount++;
+        return ++currentCollectCount;
     }
-    else if (type == 2) {
-        if (g_game && g_game->GetWorld()) {
-            const u32 level = g_game->GetWorld()->GetCurrentLevelIndex();
-            const u32 petal = g_game->GetWorld()->GetCurrentPetalIndex();
-            if (level < 7 && petal < 3) {
-                currentGoldDragons++;
-                // PSX also writes to checkpointGradeCollect byte and petalStats entry.
-                u8* cpBytes = reinterpret_cast<u8*>(&checkpointGradeCollect);
-                cpBytes[2] = currentGoldDragons;
-                petalStats[level * 3 + petal].goldDragons = currentGoldDragons;
-            }
-        }
+
+    if (type == 2) {
+        const s32 index = static_cast<s32>(g_game->GetWorld()->GetCurrentLevelIndex()) * 3
+            + static_cast<s32>(g_game->GetWorld()->GetCurrentPetalIndex());
+        const u8 goldDragons = ++currentGoldDragons;
+        reinterpret_cast<u8*>(&checkpointGradeCollect)[2] = goldDragons;
+        petalStats[index].goldDragons = goldDragons;
+        return static_cast<s32>(reinterpret_cast<uintptr_t>(&petalStats[index]));
     }
+
+    return 0;
 }
 
 // PSX: AddFightPoints__12ScoreManagerl (SCOREMGR.CPP:693, 0x8004D388)
@@ -428,8 +431,9 @@ void ScoreManager::BreakFightingChain() {
     fightingChainLast = 0;
     fightingChainTimer = 0;
 
-    // PSX: TriggerBonusUpdate__3HUD(theHudMgr)
-    // HUD not yet reversed.
+    if (g_hud) {
+        g_hud->TriggerBonusUpdate();
+    }
 }
 
 // PSX: AddFightingPoints__12ScoreManagerl (SCOREMGR.CPP:780, 0x8004D45C)
@@ -441,8 +445,9 @@ void ScoreManager::AddFightingPoints(s32 points) {
     fightingChainTotal += points;
     fightingChainTimer += 15;
 
-    // PSX: UpdateBonusScore__3HUDllRC10tagLVector(theHudMgr, ...)
-    // HUD not yet reversed.
+    if (g_hud) {
+        g_hud->UpdateBonusScore();
+    }
 }
 
 // PSX: HandleGameBegin__12ScoreManager (SCOREMGR.CPP:798, 0x8004D4C8)
@@ -531,18 +536,16 @@ bool ScoreManager::IsDrunkenMasterSuitEnabled() {
         return drunkenMasterUnlocked != 0;
     }
 
-    // PSX: reads from a level table to determine threshold.
-    // v3 = *(_DWORD *)(8 * curLevel + MEMORY[0x24])
-    // This is likely World::GetLevelType() or a level-data lookup.
-    // For now, use level count 7 as the max unlock condition.
-    const u32 curLevel = g_game->GetWorld()->GetCurrentLevelIndex();
-    (void)curLevel;
+    const s32 levelID = g_game->GetWorld()->GetCurLevelID();
 
-    // PSX logic: if levelType == 6, need >= 6 dragons.
-    //            if levelType == 7 && totalDragons == 20, permanently unlock.
-    if (totalDragons >= 20) {
+    bool enabled = false;
+    if (levelID == 6) {
+        enabled = totalDragons >= 6;
+    }
+
+    if (levelID == 7 && totalDragons == 20) {
         drunkenMasterUnlocked = 1;
     }
 
-    return drunkenMasterUnlocked != 0;
+    return enabled || drunkenMasterUnlocked != 0;
 }

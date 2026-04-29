@@ -12,6 +12,7 @@
 #include "snd/hmndsnd.h"
 #include "p3d/p3dmath.h"
 #include "pc/log.h"
+#include "gen/ai.h"
 #include "gen/blockmgr.h"
 #include "gen/scoremgr.h"
 
@@ -43,6 +44,7 @@ static constexpr s32 WALL_JUMP_TRACE_DISTANCE = 256;
 static constexpr s32 WALL_JUMP_COLLISION_RADIUS = 16;
 static constexpr s32 WALL_JUMP_COLLISION_HEIGHT = 500;
 static constexpr s32 WALL_JUMP_MIN_HEIGHT_ABOVE_FLOOR = 256;
+static constexpr u32 WALL_JUMP_MIN_WALL_HEIGHT = 0;
 static constexpr u32 WALL_JUMP_MIN_COLLISION_RATIO = 0;
 static constexpr s32 WALL_JUMP_MIN_ANGLE = 0;
 
@@ -271,6 +273,11 @@ Player::Player(const LVector* initialPos)
     jumpReturnHeight = homePos.y;
 
     SetActionState(AS_INACTIVE_IDLE, 0);
+
+    // PSX PLAYER.CPP:1014 creates Behaviour in Player ctor.
+    if (!behaviour) {
+        behaviour = new Behaviour(this, AITypes::TT_PLAYER, 0);
+    }
 }
 
 // PSX: _._6Player (PLAYER.CPP:1050)
@@ -533,7 +540,7 @@ void Player::SetActionState(u32 state, s32 param) {
             field348 = 8;
             if (model) {
                 Model* m = static_cast<Model*>(model);
-                m->SetAnim(PLAYER_ANIM_WALL_JUMP_START, ANIM_RUN_TO_LAST, 0, 0);
+                m->SetAnim(PLAYER_ANIM_WALL_JUMP_START, param, 0, 0);
             }
             velocity = {};
             contactForce = {};
@@ -1138,13 +1145,13 @@ bool Player::EnterCombatCombo() {
 }
 
 // PSX: LoadCombatDialog__6Player (PLAYER.CPP:5000, 0x800343F4)
-void Player::LoadCombatDialog() {
+s32 Player::LoadCombatDialog() {
     MARKFUNCTION(0x800343F4);
 
     // PSX: a1[121] = +484 = field484 (FightingComboNode pointer)
     // PSX: if (!v2 || actionState == 37) return 0
     if (!field484 || actionState == 37) {
-        return;
+        return 0;
     }
 
     // PSX: v4 = *(field484+8), check *(u8*)(v4+19) == 1 (fighting type)
@@ -1154,7 +1161,7 @@ void Player::LoadCombatDialog() {
     // Full reversal of the node access requires FightingComboNode structure.
 
     if (!PlayerSingleEncounterCheak()) {
-        return;
+        return 0;
     }
 
     // PSX: check rightHandObj (weapon/held item) and sub-type in range 10-12
@@ -1162,7 +1169,7 @@ void Player::LoadCombatDialog() {
     if (weapon) {
         s32 dialogID = GetWeaponFinalBlowDialog((s32)weapon->thingType);
         LoadDialog((u32)dialogID, 0x33);
-        return;
+        return 0;
     }
 
     // PSX: rmRangedRandom(2) to randomize between combat lines
@@ -1172,17 +1179,18 @@ void Player::LoadCombatDialog() {
     if ((commandBits >> 8) & 1) {
         if (rnd) {
             LoadDialog(26, 0x33);
-            return;
+            return 0;
         }
     }
     else if ((commandBits >> 9) & 1) {
         if (rnd) {
             LoadDialog(25, 0x33);
-            return;
+            return 0;
         }
     }
 
     LoadDialog(76, 0x33);
+    return 0;
 }
 
 // PSX: PlayCombatKnockDownDialog__6Player15DamageTypesTags (PLAYER.CPP:5094, 0x80034510)
@@ -1741,9 +1749,8 @@ void Player::_Jump() {
             if (floorHeight == (s32)0x80000001 || (pos.y - floorHeight) > WALL_JUMP_MIN_HEIGHT_ABOVE_FLOOR) {
                 s32 wallAngle = 0;
                 LVector wallPos = {};
-                s32 hasWall = CheckWallConstraintForJump(
-                    this,
-                    WALL_JUMP_MIN_COLLISION_RATIO,
+                s32 hasWall = CheckWallConstraint(
+                    WALL_JUMP_MIN_WALL_HEIGHT,
                     WALL_JUMP_TRACE_DISTANCE,
                     WALL_JUMP_MIN_ANGLE,
                     wallAngle,
@@ -1757,6 +1764,28 @@ void Player::_Jump() {
             }
         }
     }
+
+    {
+        u32 cb = (u32)commandBits;
+        s32 wantsAirAttack = 0;
+        if (((cb >> 8) & 1) || ((cb >> 9) & 1) || ((cb >> 14) & 1)) {
+            wantsAirAttack = 1;
+        }
+
+        if (wantsAirAttack) {
+            commandBits = (s32)(((u32)commandBits | 0x4000u) & ~0x0100u & ~0x0200u);
+            SetActionState(AS_PUNCH_ATTACK, 0);
+            if (actionState == AS_PUNCH_ATTACK) {
+                velocity.y = 0;
+                if (m && m->drawable && ((m->drawable->displayFlag & 1) != 0)) {
+                    m->Animate();
+                }
+            }
+        }
+    }
+
+    m = model ? static_cast<Model*>(model) : nullptr;
+    anim = (m != nullptr) ? static_cast<AnimStructure*>(m->animStructure) : nullptr;
 
     // PSX: vtable+204 = CheckForLanding
     CheckForLanding();

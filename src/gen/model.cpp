@@ -29,6 +29,24 @@ static DrawableSTree* GetDrawableSTree(Model* model) {
     return static_cast<DrawableSTree*>(model->drawable);
 }
 
+static void SyncFlipTreeWithDrawable(Model* model, AnimStructure* anim) {
+    if (!model || !anim || !anim->flip) {
+        return;
+    }
+
+    DrawableBasic* drawable = model->drawable;
+    OriginalSTree* active = GetActiveSTree(drawable);
+    STreeData* skeleton = active ? active->skeleton : nullptr;
+    if (!skeleton) {
+        return;
+    }
+
+    if (anim->flip->tree != skeleton) {
+        anim->flip->tree = skeleton;
+        anim->flip->dirty = 1;
+    }
+}
+
 static void UpdateFlipMirrorState(Model* model, AnimStructure* anim) {
     if (!anim || !anim->flip) {
         return;
@@ -83,6 +101,10 @@ OriginalSTree::~OriginalSTree() {
     if (skinData) {
         delete skinData;
         skinData = nullptr;
+    }
+    if (compositeAnim) {
+        delete compositeAnim;
+        compositeAnim = nullptr;
     }
 }
 
@@ -366,6 +388,16 @@ void SModel::Show(u32 flags) {
     if (!drawable || !backPtr)
         return;
 
+    const u32 ownerFlags = backPtr->flags;
+    const bool ownerDeadWindow = (ownerFlags & 0x80u) != 0;
+    const bool ownerSemiFlag = (ownerFlags & 0x100u) != 0;
+    const bool useSemiTrans = ownerDeadWindow && ownerSemiFlag;
+
+    // PSX: if owner is no longer in death draw state, clear the transient semi bit.
+    if (!ownerDeadWindow && ownerSemiFlag) {
+        backPtr->flags &= ~0x100u;
+    }
+
     // Mark as visible + drawn
     modelFlags |= 0x50;
 
@@ -383,8 +415,16 @@ void SModel::Show(u32 flags) {
 
     p3d::context->SetWorldMatrix(world);
 
+    if (useSemiTrans) {
+        p3d::context->SetBlendMode(PDDI_BLEND_ALPHA);
+    }
+
     // PSX: calls drawable->Display(flags) through vtable
     drawable->Display(flags);
+
+    if (useSemiTrans) {
+        p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+    }
 }
 
 // PSX: Animate__6SModel (MODEL.CPP:1416, 0x8006F640)
@@ -396,8 +436,83 @@ void SModel::Animate() {
     }
 }
 
+// PSX: InitBlendPose__6SModel (MODEL.CPP:1328, 0x8006F438)
+BlendPoseState* SModel::InitBlendPose() {
+    MARKFUNCTION(0x8006F438);
+
+    AnimStructure* anim = static_cast<AnimStructure*>(animStructure);
+    if (!anim || !anim->flip || !anim->flip->tree) {
+        return nullptr;
+    }
+
+    const u32 jointCount = anim->flip->tree->numJoints;
+
+    if (!anim->blendPose) {
+        anim->blendPose = new BlendPoseState();
+    }
+
+    if (!anim->blendPose) {
+        return nullptr;
+    }
+
+    if (anim->blendPose->jointCount != jointCount) {
+        delete[] anim->blendPose->joints;
+        anim->blendPose->joints = nullptr;
+        anim->blendPose->jointCount = jointCount;
+
+        if (jointCount > 0) {
+            anim->blendPose->joints = new BlendJointPose[jointCount];
+        }
+    }
+
+    return anim->blendPose;
+}
+
+// PSX: ApplyBlending__6SModelP10tAnimationll (MODEL.CPP:1346, 0x8006F4A0)
+AnimStructure* SModel::ApplyBlending(TransformAnim* animation, s32 blendFrames, s32 startFrame) {
+    MARKFUNCTION(0x8006F4A0);
+
+    AnimStructure* anim = static_cast<AnimStructure*>(animStructure);
+    if (!animation || !anim || anim->mode != 0 || !anim->flip || !anim->flip->tree) {
+        return nullptr;
+    }
+
+    BlendPoseState* blendPose = InitBlendPose();
+    if (!blendPose || !blendPose->joints) {
+        return nullptr;
+    }
+
+    STreeData* skeleton = anim->flip->tree;
+    for (u32 jointIndex = 0; jointIndex < blendPose->jointCount; jointIndex++) {
+        const STreeJoint& joint = skeleton->joints[jointIndex];
+        BlendJointPose& pose = blendPose->joints[jointIndex];
+        pose.translationX = joint.translationX;
+        pose.translationY = joint.translationY;
+        pose.translationZ = joint.translationZ;
+        pose.rotationX = joint.rotationX;
+        pose.rotationY = joint.rotationY;
+        pose.rotationZ = joint.rotationZ;
+    }
+
+    ApplyAnimToModelBasic(animation);
+
+    anim = static_cast<AnimStructure*>(animStructure);
+    if (!anim) {
+        return nullptr;
+    }
+
+    anim->endFrame = blendFrames << 16;
+    anim->startFrame = 0;
+    anim->currentFrame = 0;
+    anim->prevFrame = 0;
+    anim->loopCount = 0;
+    anim->SetLoopType(ANIM_BLEND2, 0);
+    anim->field56 = startFrame;
+    return anim;
+}
+
 // PSX: ApplyAnimToModel__6SModellllll (MODEL.CPP:1098, 0x8006EEAC)
-void SModel::ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 /*p4*/, s32 /*p5*/) {
+void SModel::ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 p4, s32 p5) {
     MARKFUNCTION(0x8006EEAC);
     if (!g_characterManager) {
         return;
@@ -426,9 +541,28 @@ void SModel::ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 /*p
         animStructure = new AnimStructure(0, animation, loopType, this, drawable);
     }
 
+    AnimStructure* as = (AnimStructure*)animStructure;
+    if (!as) {
+        return;
+    }
+
+    as->animEnum = animEnum;
+
+    if (p4 != 0) {
+        as = ApplyBlending(animation, p4, p5 << 16);
+        if (as && as->loopTypeField == ANIM_BLEND2) {
+            as->animEnum = animEnum;
+            if (as->blendPose) {
+                as->blendPose->loopType = loopType;
+            }
+            as->humanoidCB = {};
+            return;
+        }
+    }
+
     ApplyAnimToModelBasic(animation);
 
-    AnimStructure* as = (AnimStructure*)animStructure;
+    as = (AnimStructure*)animStructure;
     if (!as) {
         return;
     }
@@ -463,6 +597,7 @@ void SModel::ApplyAnimToModelBasic(TransformAnim* animation) {
     }
 
     anim->animation = animation;
+    SyncFlipTreeWithDrawable(this, anim);
     anim->flip->anim = animation;
     UpdateFlipMirrorState(this, anim);
     anim->flip->dirty = 1;
@@ -641,14 +776,14 @@ void HumanoidModel::SetAnim(s32 animEnum, s32 a3, s32 force, s32 extra) {
     s32 thingType = backPtr->thingType;
 
     if (animEnum == 0) {
-        ApplyAnimToModel(thingType, animEnum, ANIM_HOLD_FIRST, a3, extra);
+        ApplyAnimToModel(thingType, animEnum, ANIM_HOLD_FIRST, 0, 0);
         return;
     }
 
     if (animEnum == 1 || animEnum == 2 || animEnum == 4 || animEnum == 15 || animEnum == 22
         || animEnum == 43 || animEnum == 45 || animEnum == 49 || animEnum == 50
         || animEnum == 314 || animEnum == 315) {
-        ApplyAnimToModel(thingType, animEnum, ANIM_LOOP, a3, extra);
+        ApplyAnimToModel(thingType, animEnum, ANIM_LOOP, 0, 0);
         return;
     }
 
@@ -667,7 +802,7 @@ void HumanoidModel::SetAnim(s32 animEnum, s32 a3, s32 force, s32 extra) {
     }
 
     // PSX default path uses RunToLast for all remaining humanoid anims.
-    ApplyAnimToModel(thingType, animEnum, ANIM_RUN_TO_LAST, a3, extra);
+    ApplyAnimToModel(thingType, animEnum, ANIM_RUN_TO_LAST, 0, 0);
 }
 
 // PSX: _13HumanoidModel (MHUMAN.CPP:45, 0x8006E020)
@@ -718,7 +853,7 @@ void HumanoidModel::SetupModelCallbacks() {
 
     animMatrices->SetupCallbacks(this);
     animMatrices->SetHumanoid(backPtr);
-    if (!backPtr) {
+    if (backPtr == Player::s_player) {
         animMatrices->SetupExtraCallbacks(this);
     }
 }

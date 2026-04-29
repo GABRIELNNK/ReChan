@@ -3,6 +3,9 @@
 #include "gen/world.h"
 #include "gen/database.h"
 #include "gen/charmgr.h"
+#include "gen/model.h"
+#include "gen/animstruct.h"
+#include "gen/scoremgr.h"
 #include "gen/blockmgr.h"
 #include "gen/colmgr.h"
 #include "ai/colfight.h"
@@ -19,9 +22,11 @@
 #include "ai/fevolume.h"
 #include "ai/activezn.h"
 #include "ai/arrow.h"
+#include "ai/collect.h"
 #include "ai/door.h"
 #include "ai/ladder.h"
 #include "ai/launcher.h"
+#include "ai/pickup.h"
 #include "ai/trapdoor.h"
 #include "ai/platform.h"
 #include "ai/teleporter.h"
@@ -276,10 +281,11 @@ void AI::AddThingNoTagList(const char* name, u16 type,
         Humanoid* h = new Humanoid(pos, type);
         thing = h;
     }
-    // PSX: types 301-328 = Pickups (+ type 101 = collectible)
+    // PSX: types 301-328 = Pickups. Type 101 also routes through Pickup.
+    // The separate Collectible class is type 436 and stays on the obstacle/moveList path.
     else if ((u16)(type - 301) < 28u) {
-        // Pickup class not yet reversed - skip creation
         targetList = &pickupList;
+        thing = new Pickup(pos, type);
     }
     // PSX: all other types (0, 101, 201, 402-472, etc.)
     else {
@@ -293,10 +299,10 @@ void AI::AddThingNoTagList(const char* name, u16 type,
                 thing->orientation.z = orient->z;
             }
         }
-        // Type 101 = Collectible (Pickup class, goes to pickupList)
+        // Type 101 = Pickup-backed collectible entry, not the obstacle Collectible class (436).
         else if (type == AITypes::TT_COLLECTIBLE) {
-            // Pickup class not yet reversed - skip creation
             targetList = &pickupList;
+            thing = new Pickup(pos, type);
         }
         // Type 201 = Platform (goes to moveList)
         // Types 402-472 = Interactive objects (go to moveList)
@@ -306,7 +312,6 @@ void AI::AddThingNoTagList(const char* name, u16 type,
             if (type == AITypes::TT_BOSS) {
                 FrontEndVolume* vol = new FrontEndVolume(pos, type);
                 thing = vol;
-                LOG("[AI] FrontEndVolume created: name=%s pos=(%d,%d,%d)", name ? name : "null", pos->x, pos->y, pos->z);
             }
             else if (type == AITypes::TT_LAUNCHER) {
                 thing = new Launcher(pos, type);
@@ -327,9 +332,11 @@ void AI::AddThingNoTagList(const char* name, u16 type,
             else if (type == AITypes::TT_TRAPDOOR) {
                 thing = new TrapDoor(pos, type);
             }
+            else if (type == AITypes::TT_COLLECTIBLE_OBJ) {
+                thing = new Collectible(pos, type);
+            }
             else if (type == AITypes::TT_PLATFORM) {
                 thing = new Platform(pos, type);
-                LOG("[AI] Platform created: name=%s pos=(%d,%d,%d)", name ? name : "null", pos->x, pos->y, pos->z);
             }
             // Type 472 = Arrow (hub navigational arrow)
             else if (type == AITypes::TT_ARROW) {
@@ -360,6 +367,7 @@ void AI::AddThingNoTagList(const char* name, u16 type,
     // PSX: for humanoids (type 1-28), OpenCharacter + LoadCharacter + LoadAnimation(0..123)
     if ((u16)(type - 1) < 28u) {
         if (g_characterManager) {
+            g_characterManager->OpenCharacter(type);
             g_characterManager->LoadCharacter(type);
             // PSX: LoadAnimation(type, 0, 124, callback) - loads anims 0-123 synchronously
             // AnimCallback chains through all 124 anims via LoadAnimationBatch
@@ -379,6 +387,12 @@ void AI::AddThingNoTagList(const char* name, u16 type,
     }
 
     thing->Reset();
+
+    if ((u16)(type - 1) < 28u) {
+        Humanoid* humanoid = static_cast<Humanoid*>(thing);
+        humanoid->orientation = humanoid->spawnOrientation;
+        humanoid->faceAngle = humanoid->spawnOrientation.y;
+    }
 
     targetList->AddNodeTail(thing);
 }
@@ -400,9 +414,9 @@ static void HandleHumanoidHumanoidCollision(Humanoid* a, Humanoid* b) {
         return;
     }
 
-    s32 dx = b->pos.x - a->pos.x;
-    s32 dy = b->pos.y - a->pos.y;
-    s32 dz = b->pos.z - a->pos.z;
+    s32 dx = b->homePos.x - a->homePos.x;
+    s32 dy = b->homePos.y - a->homePos.y;
+    s32 dz = b->homePos.z - a->homePos.z;
     s32 twiceRadius = xzRadius + xzRadius;
 
     if (dx < -twiceRadius || dx > twiceRadius) {
@@ -435,8 +449,8 @@ static void HandleHumanoidHumanoidCollision(Humanoid* a, Humanoid* b) {
         lockB = true;
     }
 
-    LVector posA = a->pos;
-    LVector posB = b->pos;
+    LVector posA = a->homePos;
+    LVector posB = b->homePos;
 
     s32 diffX = posB.x - posA.x;
     s32 diffZ = posB.z - posA.z;
@@ -528,8 +542,8 @@ static void HandleHumanoidHumanoidCollision(Humanoid* a, Humanoid* b) {
         }
     }
 
-    a->pos = posA;
-    b->pos = posB;
+    a->homePos = posA;
+    b->homePos = posB;
 }
 
 // PSX: HandleHumanoidHumanoidCollision__Fv (AI.CPP:951, 0x800554D0)
@@ -593,7 +607,15 @@ void AI::MoveThings() {
     }
 
     // 8. Pickup deactivation: move deactivated pickups from pickupList to inactivePickupList
-    // Pickup::PickupDeactivate not yet reversed - skip deactivation loop
+    for (ccMinNode* n = pickupList.head; n;) {
+        ccMinNode* next = n->next;
+        Pickup* pickup = static_cast<Pickup*>(n);
+        if (pickup->PickupDeactivate()) {
+            pickupList.RemNode(n);
+            inactivePickupList.AddNode(nullptr, n);
+        }
+        n = next;
+    }
 
     // 9. Update positions
     UpdatePositions(humanoidList);
@@ -758,6 +780,20 @@ void AI::Populate() {
 
                 if (g_characterManager) {
                     g_characterManager->LoadCharacter(0);
+
+                    const s32 desiredMeshType = (g_scoreManager && g_scoreManager->IsDrunkenMasterSuitEnabled()) ? 1 : 0;
+                    if (desiredMeshType != *GetPlayerMeshType()) {
+                        g_characterManager->ReloadCharacter(0, desiredMeshType, nullptr);
+
+                        Model* model = static_cast<Model*>(player->model);
+                        if (model) {
+                            AnimStructure* anim = static_cast<AnimStructure*>(model->animStructure);
+                            if (anim) {
+                                anim->ReAttachTree(0, 0);
+                            }
+                            model->ApplyAnimToModel(0, 0, 2, 0, 0);
+                        }
+                    }
                 }
             }
         }
@@ -888,6 +924,11 @@ void AI::PopulateActiveZonesPaths() {
         LinearPath* lp = new LinearPath();
         lp->Init(path);
         az->AddLinearPath(lp);
+
+        LOG("[AI::PopulateActiveZonesPaths] zone=%s path=%s pointCount=%u",
+            zoneName,
+            path->GetName() ? path->GetName() : "null",
+            path->pointCount);
     }
 }
 
@@ -948,7 +989,7 @@ Thing* AI::GetPickupWithinReach(Humanoid* humanoid) {
     reachPt.y = humanoid->pos.y + 300;
     reachPt.z = humanoid->pos.z + (s32)(((s64)rmSin16((s16)(humanoid->orientation.y + 0x4000)) * 300) >> 16);
 
-    for (ccMinNode* n = pickupList.head; n; n = n->next) {
+    for (ccMinNode* n = inactivePickupList.head; n; n = n->next) {
         Thing* thing = static_cast<Thing*>(n);
         if (thing->DistanceFromPoint(reachPt) < 550) {
             return thing;
@@ -957,14 +998,85 @@ Thing* AI::GetPickupWithinReach(Humanoid* humanoid) {
     return nullptr;
 }
 
+// PSX: CheckObstacleAttack__2AIPP8ObstacleiPC8HumanoidPC27FightingCollisionAttackType
+// (AI.CPP:2043, 0x80056BFC)
+s32 AI::CheckObstacleAttack(
+    Obstacle** outObstacles,
+    s32 maxCount,
+    const Humanoid* humanoid,
+    const FightingCollisionAttackType* attackType) {
+    MARKFUNCTION(0x80056BFC);
+
+    if (!humanoid || !attackType) {
+        return 0;
+    }
+
+    LVector sphereCenters[2] = {};
+    tagCollisionSphere spheres[2] = {};
+
+    sphereCenters[0] = attackType->endA;
+    spheres[0].radius = attackType->radiusA;
+
+    s32 sphereCount = 1;
+    if (attackType->hasSecondary != 0) {
+        sphereCenters[1] = attackType->endB;
+        spheres[1].radius = attackType->radiusB;
+        sphereCount = 2;
+    }
+
+    s32 obstacleCount = 0;
+    for (ccMinNode* node = moveList.head; node; node = node->next) {
+        Obstacle* obstacle = dynamic_cast<Obstacle*>(static_cast<Thing*>(node));
+        if (!obstacle) {
+            continue;
+        }
+
+        if (!obstacle->CareAboutAttack()) {
+            continue;
+        }
+
+        const s32 xzDistance = AbsS32(obstacle->pos.x - humanoid->pos.x)
+            + AbsS32(obstacle->pos.z - humanoid->pos.z);
+        if (xzDistance >= 2001) {
+            continue;
+        }
+
+        for (s32 sphereIndex = 0; sphereIndex < sphereCount; sphereIndex++) {
+            if (CheckStaticBoxSphereCollision(
+                    obstacle->pos,
+                    obstacle->collBox,
+                    obstacle->orientation.y,
+                    sphereCenters[sphereIndex],
+                    spheres[sphereIndex])) {
+                if (obstacleCount < maxCount && outObstacles) {
+                    outObstacles[obstacleCount] = obstacle;
+                }
+                obstacleCount++;
+            }
+        }
+    }
+
+    return obstacleCount;
+}
+
 // PSX: FindThing__2AIUl (AI.CPP:2321, 0x80056DE4)
 Thing* AI::FindThing(u32 id) {
     MARKFUNCTION(0x80056DE4);
-    for (ccMinNode* n = thingList.head; n; n = n->next) {
-        Thing* thing = static_cast<Thing*>(n);
-        if (thing->uniqueID == (u16)id) return thing;
+
+    Thing* thing = static_cast<Thing*>(humanoidList.FindNodeCRC(id, nullptr));
+    if (!thing) {
+        thing = static_cast<Thing*>(pickupList.FindNodeCRC(id, nullptr));
+        if (!thing) {
+            thing = static_cast<Thing*>(inactivePickupList.FindNodeCRC(id, nullptr));
+            if (!thing) {
+                // PSX still probes moveList here but returns null regardless.
+                moveList.FindNodeCRC(id, nullptr);
+                return nullptr;
+            }
+        }
     }
-    return nullptr;
+
+    return thing;
 }
 
 // PSX: ParseBehaviourAttribScript__2AI (AI.CPP:2168, 0x800CA650)

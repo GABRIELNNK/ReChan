@@ -42,7 +42,8 @@ namespace AITypes {
         TT_DANTE = 15,     // Dante class (684 bytes)
         TT_BUTCH = 17,     // Butch class (620 bytes)
         TT_HUMANOID_LAST = 28,
-        // Collectible (Pickup class, goes to pickupList)
+        // Pickup-backed collectible entry; PSX AddThingNoTagList routes 101 through Pickup.
+        // This is distinct from TT_COLLECTIBLE_OBJ (436), which is the real Collectible class.
         TT_COLLECTIBLE = 101,
         // Platform (goes to moveList)
         TT_PLATFORM = 201,
@@ -62,7 +63,7 @@ namespace AITypes {
         TT_KICKNROLL = 422,
         TT_DESTRUCTIBLE_DP = 424,  // with dead pool check
         TT_UNTOUCHABLE = 435,
-        TT_COLLECTIBLE_OBJ = 436,
+        TT_COLLECTIBLE_OBJ = 436, // Collectible class (Obstacle subclass)
         TT_TRIGGERTHING = 451,
         TT_GENERATOR = 455,
         TT_ENEMYGENERATOR = 456,
@@ -171,7 +172,7 @@ public:
     virtual void Move();
     virtual void CreateModel(const char* name);
     virtual void DeleteModel();
-    virtual void HandleCollision(Thing* other, s32 damage);
+    virtual void HandleCollision(Thing* other, s32 damage, ...);
     virtual void AnalyzeMesh(DBRoot* root);
     virtual void GetViewSpot(LVector* outPos, LVector* outTarget);
     virtual void Kill();

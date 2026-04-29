@@ -333,7 +333,7 @@ void Thing::DeleteModel() {
 }
 
 // PSX: HandleCollision__5ThingP5Thingle (THING.CPP:713)
-void Thing::HandleCollision(Thing* /*other*/, s32 /*damage*/) {
+void Thing::HandleCollision(Thing* /*other*/, s32 /*damage*/, ...) {
     MARKFUNCTION(0x80061B08);
     // Base does nothing
 }

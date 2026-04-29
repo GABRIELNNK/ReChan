@@ -4,7 +4,9 @@
 #include "ai/thing.h"
 
 class Humanoid;
+class Obstacle;
 struct DBVolume;
+struct FightingCollisionAttackType;
 
 // PSX: BehaviourAttrib (56 bytes) - parsed from scr\behave.txt and stored in AI::behaviourList.
 struct BehaviourAttrib : public ccNode {
@@ -79,6 +81,11 @@ public:
     void PopulateBlock();
     void UnpopulateBlock();
     Thing* GetPickupWithinReach(Humanoid* humanoid);
+    s32 CheckObstacleAttack(
+        Obstacle** outObstacles,
+        s32 maxCount,
+        const Humanoid* humanoid,
+        const FightingCollisionAttackType* attackType);
     Thing* FindThing(u32 id);
     void ParseBehaviourAttribScript();
     void privMoveList(ccList& list);

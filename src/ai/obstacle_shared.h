@@ -23,5 +23,10 @@ bool CorrectThingPositionObstacle(
 
 void SetCorrectThingPositionDebug(bool enabled);
 
-inline s32 MulShift16(s32 a, s32 b);
-inline s32 Div2TowardZero(s32 value);
+inline s32 MulShift16(s32 a, s32 b) {
+    return (s32)(((s64)a * (s64)b) >> 16);
+}
+
+inline s32 Div2TowardZero(s32 value) {
+    return (value + (s32)((u32)value >> 31)) >> 1;
+}

@@ -18,12 +18,17 @@ class Thing;
 class AnimStructure;
 class SModel;
 struct AnimationMatrices;
+struct BlendPoseState;
 struct STreeData;
 struct TransformAnim;
 
 struct ModelFloorHeightState {
     s32 current = (s32)0x80000001;
     s32 previous = (s32)0x80000001;
+    s32 shadowMinX = 0;
+    s32 shadowMinY = 0;
+    s32 shadowMaxX = 0;
+    s32 shadowMaxZ = 0;
 };
 
 // Pre-parsed skinning data for CPU vertex skinning each frame
@@ -42,6 +47,24 @@ struct SkinData {
     u32 numIndices = 0;
 
     ~SkinData() { delete[] verts; delete[] indices; }
+};
+
+// PSX tCompositeAnim data loaded from character P3D chunk 0x4007.
+// The runtime suit object derived from this data (OriginalSTree +56 on PSX)
+// is still unreversed on PC, so only the composite definition is preserved.
+struct CompositeAnimPartData {
+    u16 field0 = 0;
+    u16 field1 = 0;
+    u32 animNameUID = 0;
+};
+
+struct CompositeAnimData {
+    u32 nameUID = 0;
+    u16 field12 = 0;
+    u16 numParts = 0;
+    CompositeAnimPartData* parts = nullptr;
+
+    ~CompositeAnimData() { delete[] parts; }
 };
 
 // OriginalBasic - base for model data stored in LevelManager lists.
@@ -69,9 +92,11 @@ struct OriginalBasic : public ccNode {
 //   +24..35: (OriginalTree fields, unused on PC)
 //   +36:     tSTree* (PSX P3D STree pointer)
 //   +52:     tCompositeAnim* (PSX composite animation)
-//   +56:     animation data pointer
+//   +56:     suit/runtime object derived from the composite animation
 //
 // PC: instead of PSX-specific tSTree/tPrimGeom, we store PC-ready mesh data.
+// We also preserve the raw 0x4007 composite definition, but not the derived
+// suit/runtime object yet.
 struct OriginalSTree : public OriginalBasic {
     // PC mesh data (replaces PSX tSTree + tPrimGeom + GTE rendering)
     pddiPrimBuffer* meshBuffer = nullptr;
@@ -84,6 +109,9 @@ struct OriginalSTree : public OriginalBasic {
     // CPU skinning data (local-space verts + joint indices)
     SkinData* skinData = nullptr;
     bool activeTreeInUse = false;
+
+    // Character P3D 0x4007 composite animation definition.
+    CompositeAnimData* compositeAnim = nullptr;
 
     OriginalSTree();
     ~OriginalSTree() override;
@@ -281,6 +309,8 @@ public:
     void Animate() override;
     void ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 p4, s32 p5) override;
     void ApplyAnimToModelBasic(TransformAnim* animation);
+    BlendPoseState* InitBlendPose();
+    AnimStructure* ApplyBlending(TransformAnim* animation, s32 blendFrames, s32 startFrame);
     void SetOriginalSTree(OriginalSTree* original);
     virtual void SetupModelCallbacks();
     virtual s32 MirrorTree();

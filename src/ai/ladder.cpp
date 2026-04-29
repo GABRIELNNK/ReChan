@@ -261,11 +261,6 @@ void Ladder::HandleHumanoidCollision(Humanoid* hum) {
 
     s32 as = hum->actionState;
 
-    // Keep ledge transition states from being re-captured by ladder top-approach logic.
-    if (as == AS_LEDGE_LATCH || as == AS_LEDGE_PULLUP) {
-        return;
-    }
-
     // PSX 0x8008A2E4-0x8008A338: states 25/26 just set flag and return
     if (as == AS_LADDER_CLIMB_UP || as == AS_LADDER_CLIMB_DOWN) {
         hum->field368 |= 2;

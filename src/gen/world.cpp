@@ -1419,6 +1419,67 @@ static void LoadGeoPairsInRange(
             storeId);
     }
 }
+
+static bool LoadBlocksForPetalFromStream(
+    BlockManager& blockMgr,
+    const std::vector<u8>& streamData,
+    u32 targetPetal,
+    const char* logTag)
+{
+    if (streamData.empty()) {
+        return false;
+    }
+
+    const u32 dataSize = static_cast<u32>(streamData.size());
+    const u8* data = streamData.data();
+    const auto entries = ParseStreamHeader(data, dataSize);
+    if (entries.empty()) {
+        return false;
+    }
+
+    std::vector<u32> wdbIndices;
+    for (u32 i = 0; i < (u32)entries.size(); i++) {
+        if (strncmp(entries[i].magic, ".WDB", 4) == 0) {
+            wdbIndices.push_back(i);
+        }
+    }
+    if (wdbIndices.empty()) {
+        return false;
+    }
+
+    u32 petalIndex = targetPetal;
+    if (petalIndex >= (u32)wdbIndices.size()) {
+        petalIndex = 0;
+    }
+
+    const u32 petalStart = wdbIndices[petalIndex];
+    const u32 petalEnd = (petalIndex + 1 < (u32)wdbIndices.size())
+                             ? wdbIndices[petalIndex + 1]
+                             : (u32)entries.size();
+
+    std::vector<const u8*> blkPtrs;
+    std::vector<u32> blkSizes;
+    for (u32 i = petalStart; i < petalEnd; i++) {
+        if (strncmp(entries[i].magic, ".BLK", 4) != 0) {
+            continue;
+        }
+
+        if (entries[i].offset + entries[i].size > dataSize) {
+            blkPtrs.push_back(nullptr);
+            blkSizes.push_back(0);
+        }
+        else {
+            blkPtrs.push_back(data + entries[i].offset);
+            blkSizes.push_back(entries[i].size);
+        }
+    }
+
+    const u32 blkCount = static_cast<u32>(blkPtrs.size());
+    blockMgr.LoadBlocks(0, blkPtrs.data(), blkSizes.data(), blkCount);
+
+    LOG("[%s] Parsed %u BLK entries for petal %u", logTag, blkCount, petalIndex);
+    return true;
+}
 // Database::Scan handles WDB parsing now (see database.cpp).
 
 void World::LoadTPGTextures(const u8* lcfData, u32 lcfSize) {
@@ -1884,8 +1945,10 @@ bool World::LoadLevelIndex(u32 levelIndex) {
     // PC: blocks already allocated by LoadBlocksFunc
 
     // PSX: LoadBlocks__12BlockManagerUl(0, startBlockNum)
-    // PC: blocks already parsed by Load(). The active/draw lists were built in LoadBlocks.
-    // Pop ulateBlock is called by LoadBlocks on PSX. On PC we call it here.
+    // On PC we deferred Parse() in Load() and do it here to match PSX timing.
+    LoadBlocksForPetalFromStream(blockMgr, streamData, currentPetalIndex, "World");
+
+    // PopulateBlock is called by LoadBlocks on PSX. On PC we call it explicitly.
     if (g_ai) {
         g_ai->PopulateBlock();
     }
@@ -2078,23 +2141,10 @@ bool World::Load(const std::string& lcfPath) {
     // Initialize blocks from volumes (PSX _LoadBlocksFunc - Block::Init)
     blockMgr.LoadBlocksFunc(blockVolumes);
 
-    // Parse only this petal's BLK data into blocks
-    std::vector<const u8*> blkPtrs;
-    std::vector<u32> blkSizes;
-    for (u32 i = petalStart; i < petalEnd; i++) {
-        if (strncmp(entries[i].magic, ".BLK", 4) != 0) continue;
-        if (entries[i].offset + entries[i].size > dataSize) {
-            blkPtrs.push_back(nullptr);
-            blkSizes.push_back(0);
-        }
-        else {
-            blkPtrs.push_back(data + entries[i].offset);
-            blkSizes.push_back(entries[i].size);
-        }
-    }
-    blockMgr.LoadBlocks(0, blkPtrs.data(), blkSizes.data(), blkCount);
-
-    LOG("[World] Loaded %u blocks", blockMgr.GetNumBlocks());
+    // PSX timing: BLK parse/load is performed later during Construct, after AI::Populate.
+    // Keep only block metadata (LoadBlocksFunc) here and defer Parse() to preserve
+    // spawn-time activation semantics in AddThingNoTagList.
+    LOG("[World] Deferring parse of %u BLK entries until post-populate construct step", blkCount);
 
     // Debug: log ALL block positions and compute level AABB
     s32 minX = 0x7FFFFFFF, minY = 0x7FFFFFFF, minZ = 0x7FFFFFFF;
@@ -2640,30 +2690,19 @@ void World::LoadPetal(u32 petalIndex) {
         }
         blockMgr.LoadBlocksFunc(blockVolumes);
 
-        // Parse BLK data
-        u32 blkCount = 0;
-        std::vector<const u8*> blkPtrs;
-        std::vector<u32> blkSizes;
-        for (u32 i = petalStart; i < petalEnd; i++) {
-            if (strncmp(entries[i].magic, ".BLK", 4) != 0) continue;
-            blkCount++;
-            if (entries[i].offset + entries[i].size > dataSize) {
-                blkPtrs.push_back(nullptr);
-                blkSizes.push_back(0);
-            }
-            else {
-                blkPtrs.push_back(data + entries[i].offset);
-                blkSizes.push_back(entries[i].size);
-            }
-        }
-        blockMgr.LoadBlocks(0, blkPtrs.data(), blkSizes.data(), blkCount);
-
-        LOG("[World] LoadPetal: loaded %u blocks", blockMgr.GetNumBlocks());
+        // PSX timing: BLK parse/load happens after AI::Populate.
+        LOG("[World] LoadPetal: deferring BLK parse until post-populate");
     }
 
     // PSX: AI::Populate for new petal entities
     if (g_ai) {
         g_ai->Populate();
+    }
+
+    LoadBlocksForPetalFromStream(blockMgr, streamData, currentPetalIndex, "World::LoadPetal");
+
+    if (g_ai) {
+        g_ai->PopulateBlock();
     }
 
     if (g_director) {

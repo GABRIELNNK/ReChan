@@ -5,6 +5,7 @@
 #include "gen/geometry.h"
 #include "gen/skeleton.h"
 #include "gen/game.h"
+#include "gen/scoremgr.h"
 #include "gen/world.h"
 #include "p3d/hash.h"
 #include "p3d/loadmanager.h"
@@ -75,6 +76,197 @@ static void P3DLoadTextures(const u8* data, u32 size) {
     }
 }
 
+static u16 ReadRRU16(const u8* data) {
+    return (u16)(data[0] | (data[1] << 8));
+}
+
+static u32 ReadRRU32(const u8* data) {
+    return (u32)(data[0] | (data[1] << 8) | (data[2] << 16) | (data[3] << 24));
+}
+
+static bool IsValidRRResourceIndex(const CharFile* cf, s32 index) {
+    if (!cf || !cf->fileHandle || !cf->rrHeader || index < 0 || index >= cf->rrHeaderEntries) {
+        return false;
+    }
+
+    const s32 size = rrSize(cf->rrHeader, index);
+    const s32 offset = rrOffset(cf->rrHeader, index);
+    if (size <= 0 || offset < 0) {
+        return false;
+    }
+
+    const s32 fileSize = cf->fileHandle->GetLength();
+    const s64 endOffset = (s64)offset + (s64)size;
+    if (fileSize > 0 && endOffset > (s64)fileSize) {
+        return false;
+    }
+
+    return true;
+}
+
+static bool IsCharacterPrimGeom(const u8* data, u32 size) {
+    if (!data || size < 108) {
+        return false;
+    }
+
+    if (data[12] != 'P' || data[13] != 'R' || data[14] != 'I' || data[15] != 'M') {
+        return false;
+    }
+
+    u32 vertListOff = ReadRRU32(data + 0x10) << 2;
+    u16 numVerts = ReadRRU16(data + 0x14);
+    u16 numPolys = ReadRRU16(data + 0x16);
+    u32 primListOff = ReadRRU32(data + 0x40) << 2;
+    u32 polyDataOff = ReadRRU32(data + 0x54) << 2;
+
+    if (numVerts == 0 || numPolys == 0) {
+        return false;
+    }
+
+    if (vertListOff + (u32)numVerts * 8 > size) {
+        return false;
+    }
+
+    if (polyDataOff + (u32)numPolys * 4 > size) {
+        return false;
+    }
+
+    if (primListOff >= size) {
+        return false;
+    }
+
+    return true;
+}
+
+static const u8* ResolveCharacterPrimGeom(const u8* data, u32 size, u32* outSize, u32* outOffset) {
+    if (outSize) {
+        *outSize = 0;
+    }
+    if (outOffset) {
+        *outOffset = 0;
+    }
+
+    if (IsCharacterPrimGeom(data, size)) {
+        if (outSize) {
+            *outSize = size;
+        }
+        return data;
+    }
+
+    for (u32 offset = 4; offset + 108 <= size; offset += 4) {
+        const u8* candidate = data + offset;
+        u32 candidateSize = size - offset;
+        if (!IsCharacterPrimGeom(candidate, candidateSize)) {
+            continue;
+        }
+
+        if (outSize) {
+            *outSize = candidateSize;
+        }
+        if (outOffset) {
+            *outOffset = offset;
+        }
+        return candidate;
+    }
+
+    return nullptr;
+}
+
+static void ClearCharacterOriginalData(OriginalSTree* original) {
+    if (!original) {
+        return;
+    }
+
+    if (original->meshBuffer) {
+        original->meshBuffer->Release();
+        original->meshBuffer = nullptr;
+    }
+    if (original->skeleton) {
+        delete original->skeleton;
+        original->skeleton = nullptr;
+    }
+    if (original->skinData) {
+        delete original->skinData;
+        original->skinData = nullptr;
+    }
+    if (original->compositeAnim) {
+        delete original->compositeAnim;
+        original->compositeAnim = nullptr;
+    }
+
+    original->meshVertCount = 0;
+    original->meshTriCount = 0;
+}
+
+static bool PopulateCharacterOriginal(OriginalSTree* original, CharFile* cf, u32 type,
+                                      const u8* extraData, u32 extraSize,
+                                      const u8* dataBuf, u32 dataSize) {
+    if (!original || !cf || !dataBuf || dataSize == 0) {
+        return false;
+    }
+
+    CompositeAnimData* compositeAnim = nullptr;
+    STreeData* skeleton = ParseP3DStreamFull(dataBuf, dataSize, &compositeAnim);
+
+    u32 primGeomSize = 0;
+    u32 primGeomOffset = 0;
+    const u8* primGeomData = ResolveCharacterPrimGeom(extraData, extraSize, &primGeomSize, &primGeomOffset);
+
+    if (!skeleton && !primGeomData) {
+        if (compositeAnim) {
+            delete compositeAnim;
+        }
+        return false;
+    }
+
+    if (cf->dataBuffer && cf->dataSize > 1) {
+        original->nameCRC = ReadRRU32((const u8*)cf->dataBuffer + 4);
+    }
+    original->SetStoreID(type == 0 ? 0 : 2);
+
+    if (primGeomData && primGeomOffset != 0) {
+        LOG("[CharMgr] Resolved embedded tPrimGeom for type %u at +0x%X", type, primGeomOffset);
+    }
+
+    ClearCharacterOriginalData(original);
+
+    if (skeleton) {
+        s32 idleAnimSize = 0;
+        u8* idleAnimBuf = cf->ReadResource(8, &idleAnimSize);
+        if (idleAnimBuf) {
+            ApplyAnimFrame0(skeleton, idleAnimBuf, (u32)idleAnimSize);
+            std::free(idleAnimBuf);
+        }
+
+        original->skeleton = skeleton;
+        original->compositeAnim = compositeAnim;
+        skeleton = nullptr;
+        compositeAnim = nullptr;
+
+        if (primGeomData) {
+            BuildPerJointMeshes(original, primGeomData, primGeomSize);
+        }
+
+        LOG("[CharMgr] Populated OriginalSTree with skeleton for type %u (hash 0x%08X, %u joints)",
+            type, original->nameCRC, original->skeleton->numJoints);
+    }
+    else {
+        original->meshBuffer = primGeomData ? ParseBLKPrims(primGeomData, primGeomSize) : nullptr;
+
+        LOG("[CharMgr] Populated OriginalSTree (flat) for type %u (hash 0x%08X)",
+            type, original->nameCRC);
+    }
+
+    if (skeleton) {
+        delete skeleton;
+    }
+    if (compositeAnim) {
+        delete compositeAnim;
+    }
+
+    return true;
+}
+
 // Global singleton (PSX: gp+796)
 CharacterManager* g_characterManager = nullptr;
 
@@ -136,37 +328,37 @@ static const AnimGroupEntry* FindAnimGroupEntry(s32 startEnum) {
 }
 
 // PSX: 0x800D6880 - character name table indexed by ThingType
-// 29 entries (0-28), index 29 is EMPTY_SENTINEL
+// 29 entries for ThingTypes 0-28.
 const char* g_charNameTable[] = {
     "JACKIE",   // 0 - player
     "LENNY",    // 1
-    "IGOR",     // 2
-    "ROSCOE",   // 3
-    "MIME",      // 4
-    "DISCO",    // 5
-    "HOOD",     // 6
-    "CLOWN",    // 7
-    "BROCK",    // 8
-    "WAITER",   // 9
-    "CHEF",     // 10
+    "ROSCOE",   // 2
+    "FACTORY",  // 3
+    "STEEL",    // 4
+    "BROCK",    // 5
+    "JANITOR",  // 6
+    "IGOR",     // 7
+    "YAK",      // 8
+    "BLIND",    // 9
+    "GRONTAR",  // 10
     "JACQUES",  // 11
-    "DANTE",    // 12
-    "JANITOR",  // 13
-    "SHAOLIN",  // 14
-    "BLIND",    // 15
-    "VAGRANT",  // 16
-    "ELITE",    // 17
-    "TAO",      // 18
-    "HAZARD",   // 19
-    "FACTORY",  // 20
-    "SHO",      // 21
-    "STEEL",    // 22
-    "GRONTAR",  // 23
-    "GOR",      // 24
-    "YAKUZA",   // 25
-    "LORNA",    // 26
-    "YAK",      // 27
-    "BLIND",    // 28 (duplicate)
+    "DISCO",    // 12
+    "CLOWN",    // 13
+    "YAKUZA",   // 14
+    "DANTE",    // 15
+    "HOOD",     // 16
+    "CHEF",     // 17
+    "HAZARD",   // 18
+    "VAGRANT",  // 19
+    "SHO",      // 20
+    "ELITE",    // 21
+    "WAITER",   // 22
+    "MIME",     // 23
+    "LORNA",    // 24
+    "SHAOLIN",  // 25
+    "GOR",      // 26
+    "TAO",      // 27
+    "DM",       // 28
 };
 
 
@@ -180,6 +372,14 @@ void FreeAnimMemory(void* ptr) {
     }
 
     delete static_cast<TransformAnim*>(ptr);
+}
+
+static u32 GetLoadedAnimationNameUID(const void* animation) {
+    if (!animation) {
+        return 0;
+    }
+
+    return *reinterpret_cast<const u32*>(animation);
 }
 
 // PSX: GetCompositeAnimationNameHash (CHARMGR.CPP:267, 0x80039624)
@@ -519,17 +719,53 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
         }
     }
 
+    // PSX: rrIdx = slotIdx * 2 + 3 (resource index for P3D model data)
+    s32 rrIdx = slotIdx * 2 + 3;
+
+    if (!IsValidRRResourceIndex(cf, rrIdx) || !IsValidRRResourceIndex(cf, rrIdx - 1)) {
+        LOG("[CharMgr] LoadCharacter: invalid RR resources for type %u (slot %d, rrIdx %d)", type, slotIdx, rrIdx);
+        if (callback) callback->Callback();
+        return;
+    }
+
+    if (type == 0 && !IsValidRRResourceIndex(cf, slotIdx * 2 + 4)) {
+        LOG("[CharMgr] LoadCharacter: invalid player texture resource for type %u (slot %d)", type, slotIdx);
+        if (callback) callback->Callback();
+        return;
+    }
+
     CharSlot& slot = slots[slotIdx];
     slot.thingType = type;
     slot.charFile = cf;
     cf->AddRef();
 
-    // PSX: rrIdx = slotIdx * 2 + 3 (resource index for P3D model data)
-    s32 rrIdx = slotIdx * 2 + 3;
+    auto abortLoad = [&]() {
+        if (slot.dataBuffer) {
+            std::free(slot.dataBuffer);
+            slot.dataBuffer = nullptr;
+        }
+        slot.model = nullptr;
+        slot.loadCount = 0;
+        slot.thingType = CharSlot::EMPTY_SENTINEL;
+        memset(slot.animIndexTable, 0xFF, CharSlot::ANIM_TABLE_SIZE);
+        if (slot.charFile) {
+            slot.charFile->DeleteRef();
+            slot.charFile = nullptr;
+        }
+    };
 
     // Read P3D model data (resource rrIdx)
     s32 dataSize = 0;
     u8* dataBuf = cf->ReadResource(rrIdx, &dataSize);
+    if (!dataBuf || dataSize <= 0) {
+        LOG("[CharMgr] LoadCharacter: failed to read model resource for type %u (resource %d)", type, rrIdx);
+        if (dataBuf) {
+            std::free(dataBuf);
+        }
+        abortLoad();
+        if (callback) callback->Callback();
+        return;
+    }
 
     if (type == 0) {
         // Player: also read skeleton/extra buffer (resource rrIdx-1)
@@ -537,18 +773,66 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
         s32 skelSize1 = rrSize(cf->rrHeader, rrIdx - 1);
         s32 skelSize2 = rrSize(cf->rrHeader, slotIdx * 2 + 4);
         s32 skelSize = std::max(skelSize1, skelSize2);
+        if (skelSize <= 0) {
+            LOG("[CharMgr] LoadCharacter: invalid player skeleton size for type %u", type);
+            std::free(dataBuf);
+            abortLoad();
+            if (callback) callback->Callback();
+            return;
+        }
+
         u8* skelBuf = (u8*)std::malloc(skelSize);
+        if (!skelBuf) {
+            LOG("[CharMgr] LoadCharacter: out of memory allocating player skeleton (%d bytes)", skelSize);
+            std::free(dataBuf);
+            abortLoad();
+            if (callback) callback->Callback();
+            return;
+        }
+
         cf->fileHandle->Seek((u32)rrOffset(cf->rrHeader, rrIdx - 1), ccFile::SEEK_FROM_START);
-        cf->fileHandle->Read(skelBuf, (u32)skelSize);
+        if (cf->fileHandle->Read(skelBuf, (u32)skelSize) != skelSize) {
+            LOG("[CharMgr] LoadCharacter: failed to read player skeleton resource for type %u", type);
+            std::free(skelBuf);
+            std::free(dataBuf);
+            abortLoad();
+            if (callback) callback->Callback();
+            return;
+        }
+
         slot.dataBuffer = skelBuf;
         g_playerMeshType = 0;
     }
     else {
         // NPC: read extra buffer (resource rrIdx-1)
         s32 extraSize = rrSize(cf->rrHeader, rrIdx - 1);
+        if (extraSize <= 0) {
+            LOG("[CharMgr] LoadCharacter: invalid NPC extra resource size for type %u", type);
+            std::free(dataBuf);
+            abortLoad();
+            if (callback) callback->Callback();
+            return;
+        }
+
         u8* extraBuf = (u8*)std::malloc(extraSize);
+        if (!extraBuf) {
+            LOG("[CharMgr] LoadCharacter: out of memory allocating NPC extra buffer (%d bytes)", extraSize);
+            std::free(dataBuf);
+            abortLoad();
+            if (callback) callback->Callback();
+            return;
+        }
+
         cf->fileHandle->Seek((u32)rrOffset(cf->rrHeader, rrIdx - 1), ccFile::SEEK_FROM_START);
-        cf->fileHandle->Read(extraBuf, (u32)extraSize);
+        if (cf->fileHandle->Read(extraBuf, (u32)extraSize) != extraSize) {
+            LOG("[CharMgr] LoadCharacter: failed to read NPC extra resource for type %u", type);
+            std::free(extraBuf);
+            std::free(dataBuf);
+            abortLoad();
+            if (callback) callback->Callback();
+            return;
+        }
+
         slot.dataBuffer = extraBuf;
     }
 
@@ -566,8 +850,10 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
     //
     // PSX: P3DLoad with 8 loaders (tGeoLoader, tMatLoader, tPrimLoader,
     //      tSTreeLoader, tTexLoader, tClutAnimLoader, tTexAnimLoader, tCompAnimLoader)
-    // PC: ParseP3DStreamFull extracts textures + skeleton.
-    STreeData* skeleton = ParseP3DStreamFull(dataBuf, dataSize);
+    // PC: ParseP3DStreamFull extracts textures + skeleton and preserves the
+    // character's 0x4007 composite animation definition for future suit work.
+    CompositeAnimData* compositeAnim = nullptr;
+    STreeData* skeleton = ParseP3DStreamFull(dataBuf, dataSize, &compositeAnim);
     std::free(dataBuf);
 
     // PSX: CharDataLoadCallback post-processing:
@@ -578,7 +864,7 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
     // PC: parse tPrimGeom with skeleton to build per-joint mesh
     if (slot.dataBuffer && g_levelManager) {
         u32 nameHash = 0;
-        if (cf->dataBuffer && cf->dataSize > 0) {
+        if (cf->dataBuffer && cf->dataSize > 1) {
             nameHash = *(u32*)((u8*)cf->dataBuffer + 4);
         }
 
@@ -589,6 +875,14 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
             original->SetStoreID(type == 0 ? 0 : 2);
 
             s32 bufSize = rrSize(cf->rrHeader, rrIdx - 1);
+            u32 primGeomSize = 0;
+            u32 primGeomOffset = 0;
+            const u8* primGeomData = ResolveCharacterPrimGeom(
+                (const u8*)slot.dataBuffer, (u32)bufSize, &primGeomSize, &primGeomOffset);
+
+            if (primGeomData && primGeomOffset != 0) {
+                LOG("[CharMgr] Resolved embedded tPrimGeom for type %u at +0x%X", type, primGeomOffset);
+            }
 
             if (skeleton) {
                 // Seed the freshly loaded STree once from anim 0 / frame 0 so joints with
@@ -603,15 +897,21 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
 
                 original->skeleton = skeleton;
                 skeleton = nullptr; // ownership transferred
-                BuildPerJointMeshes(original, (const u8*)slot.dataBuffer, (u32)bufSize);
+                original->compositeAnim = compositeAnim;
+                compositeAnim = nullptr;
+                if (primGeomData) {
+                    BuildPerJointMeshes(original, primGeomData, primGeomSize);
+                }
 
                 LOG("[CharMgr] Created OriginalSTree with skeleton for type %u (hash 0x%08X, %u joints)",
                     type, nameHash, original->skeleton->numJoints);
             }
             else {
                 // Fallback: flat mesh without skeleton
-                pddiPrimBuffer* meshBuf = ParseBLKPrims(
-                    (const u8*)slot.dataBuffer, (u32)bufSize);
+                pddiPrimBuffer* meshBuf = nullptr;
+                if (primGeomData) {
+                    meshBuf = ParseBLKPrims(primGeomData, primGeomSize);
+                }
                 original->meshBuffer = meshBuf;
 
                 LOG("[CharMgr] Created OriginalSTree (flat) for type %u (hash 0x%08X)",
@@ -625,6 +925,9 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
     // Clean up skeleton if not transferred to OriginalSTree
     if (skeleton) {
         delete skeleton;
+    }
+    if (compositeAnim) {
+        delete compositeAnim;
     }
 
     LOG("[CharMgr] Loaded character type %u into slot %d", type, slotIdx);
@@ -686,11 +989,13 @@ void CharacterManager::ReloadCharacter(u32 type, s32 meshType, CharMgrCallback* 
         return;
     }
 
-    // TODO: remove old model from P3D inventory (same as UnloadCharacter)
-    // TODO: delete OriginalSTree from LevelManager
-
-    // Re-read from .RR (same resource indices as LoadCharacter)
-    s32 rrIdx = idx * 2 + 3;
+    // PSX: meshType selects RR pair (2,3) or (4,5) before CharDataLoadCallback.
+    s32 extraIdx = meshType ? 4 : 2;
+    s32 rrIdx = extraIdx + 1;
+    if (!IsValidRRResourceIndex(cf, extraIdx) || !IsValidRRResourceIndex(cf, rrIdx)) {
+        if (callback) callback->Callback();
+        return;
+    }
 
     // Free old data buffer and re-read
     if (slot.dataBuffer) {
@@ -698,20 +1003,55 @@ void CharacterManager::ReloadCharacter(u32 type, s32 meshType, CharMgrCallback* 
         slot.dataBuffer = nullptr;
     }
 
-    s32 extraSize = rrSize(cf->rrHeader, rrIdx - 1);
+    s32 extraSize = rrSize(cf->rrHeader, extraIdx);
     u8* extraBuf = (u8*)std::malloc(extraSize);
-    cf->fileHandle->Seek((u32)rrOffset(cf->rrHeader, rrIdx - 1), ccFile::SEEK_FROM_START);
+    cf->fileHandle->Seek((u32)rrOffset(cf->rrHeader, extraIdx), ccFile::SEEK_FROM_START);
     cf->fileHandle->Read(extraBuf, (u32)extraSize);
     slot.dataBuffer = extraBuf;
 
     s32 dataSize = 0;
     u8* dataBuf = cf->ReadResource(rrIdx, &dataSize);
+    if (!dataBuf || dataSize <= 0) {
+        if (dataBuf) {
+            std::free(dataBuf);
+        }
+        if (callback) callback->Callback();
+        return;
+    }
 
     // PSX: CharDataLoadCallback processes the TexturePage via P3DLoad
     P3DLoadTextures(dataBuf, dataSize);
-    std::free(dataBuf);
 
-    // TODO: post-load model lookup and OriginalSTree creation
+    if (g_levelManager) {
+        u32 nameHash = 0;
+        if (cf->dataBuffer && cf->dataSize > 1) {
+            nameHash = ReadRRU32((const u8*)cf->dataBuffer + 4);
+        }
+
+        OriginalBasic* existing = g_levelManager->FindModel((s32)nameHash);
+        OriginalSTree* original = nullptr;
+        bool addOriginal = false;
+        if (existing && existing->GetType() == 1) {
+            original = static_cast<OriginalSTree*>(existing);
+        }
+        else if (!existing) {
+            original = new OriginalSTree();
+            addOriginal = true;
+        }
+
+        if (original && PopulateCharacterOriginal(original, cf, type,
+                                                  static_cast<const u8*>(slot.dataBuffer), (u32)extraSize,
+                                                  dataBuf, (u32)dataSize)) {
+            if (addOriginal) {
+                g_levelManager->AddOriginal(original, 0);
+            }
+        }
+        else if (addOriginal) {
+            delete original;
+        }
+    }
+
+    std::free(dataBuf);
 
     if (callback) callback->Callback();
 }
@@ -727,10 +1067,13 @@ void CharacterManager::LoadCharTexture(u32 type) {
     CharFile* cf = slot.charFile;
     if (!cf) return;
 
-    // PSX: texture resource index depends on meshType and IsDrunkenMasterSuitEnabled
-    // Base: rrIdx = idx * 2 + 4
-    s32 rrIdx = idx * 2 + 4;
-    // TODO: if type == 0 && IsDrunkenMasterSuitEnabled(), rrIdx = idx * 2 + 6
+    // PSX: reloads the texture-bearing P3D resource (3 normally, 5 for player DM suit).
+    s32 rrIdx = 3;
+    if (type == 0 && g_scoreManager && g_scoreManager->IsDrunkenMasterSuitEnabled()) {
+        if (IsValidRRResourceIndex(cf, 5)) {
+            rrIdx = 5;
+        }
+    }
 
     s32 texSize = 0;
     u8* texBuf = cf->ReadResource(rrIdx, &texSize);
@@ -827,10 +1170,6 @@ void CharacterManager::LoadAnimationBatch(u32 type, s32 animEnum, CharMgrCallbac
     // Check if already loaded
     if (animEnum >= 0 && animEnum < (s32)CharSlot::ANIM_TABLE_SIZE) {
         if (slot.animIndexTable[animEnum] != 0xFF) {
-            u8 handle = slot.animIndexTable[animEnum];
-            if (handle < CHAR_MAX_ANIMS) {
-                animRefCounts[handle]++;
-            }
             if (callback) callback->Callback();
             return;
         }
@@ -842,7 +1181,38 @@ void CharacterManager::LoadAnimationBatch(u32 type, s32 animEnum, CharMgrCallbac
         return;
     }
 
-    // TODO: check if animation already in P3D inventory
+    u32 animNameUID = 0;
+    if (cf->dataBuffer != nullptr) {
+        const u32* animHashTable = static_cast<const u32*>(cf->dataBuffer);
+        const s32 animHashIndex = animEnum + 2;
+        if (animHashIndex >= 0 && animHashIndex < cf->dataSize) {
+            animNameUID = animHashTable[animHashIndex];
+        }
+    }
+
+    if (animNameUID == 0) {
+        if (callback) callback->Callback();
+        return;
+    }
+
+    for (s32 handleIdx = 0; handleIdx < CHAR_MAX_ANIMS; handleIdx++) {
+        if ((animRefCounts[handleIdx] & 0x7F) == 0) {
+            continue;
+        }
+
+        if (GetLoadedAnimationNameUID(animPtrs[handleIdx]) != animNameUID) {
+            continue;
+        }
+
+        if (animEnum >= 0 && animEnum < (s32)CharSlot::ANIM_TABLE_SIZE) {
+            animRefCounts[handleIdx]++;
+            slot.animIndexTable[animEnum] = (u8)handleIdx;
+            slot.loadCount++;
+        }
+
+        if (callback) callback->Callback();
+        return;
+    }
 
     // Allocate handle from free list
     if (freeListHead == nullptr) {
@@ -886,11 +1256,18 @@ void CharacterManager::LoadAnimationBatch(u32 type, s32 animEnum, CharMgrCallbac
         else {
             CameraParamAnim* cameraAnim = ParseCameraParamAnim(animBuf, (u32)animSize, p3dBuf, (u32)p3dSize);
             std::free(animBuf);
+            if (cameraAnim && cameraAnim->nameUID == 0) {
+                cameraAnim->nameUID = animNameUID;
+            }
             animPtrs[handleIdx] = cameraAnim;
         }
     }
     else {
-        animPtrs[handleIdx] = ParseCameraParamAnim(nullptr, 0, p3dBuf, (u32)p3dSize);
+        CameraParamAnim* cameraAnim = ParseCameraParamAnim(nullptr, 0, p3dBuf, (u32)p3dSize);
+        if (cameraAnim && cameraAnim->nameUID == 0) {
+            cameraAnim->nameUID = animNameUID;
+        }
+        animPtrs[handleIdx] = cameraAnim;
     }
 
     if (p3dBuf) {

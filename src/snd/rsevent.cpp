@@ -304,7 +304,16 @@ static s32 PlayDialogHandle(DialogEntry* entry, u32 distanceHint) {
     }
 
     if (entry->voice != AUDIO_VOICE_INVALID) {
+        if (AudioEngine::IsVoicePlaying(entry->voice)) {
+            if (distanceHint != 0) {
+                const f32 maxDistance = (f32)distanceHint * 100.0f;
+                AudioEngine::SetVoiceDistanceRange(entry->voice, 0.0f, maxDistance);
+            }
+            return 1;
+        }
+
         AudioEngine::StopVoice(entry->voice);
+        entry->voice = AUDIO_VOICE_INVALID;
     }
 
     entry->voice = AudioEngine::PlaySample(entry->sample, g_sound->dialogVolume, 0.0f, false);

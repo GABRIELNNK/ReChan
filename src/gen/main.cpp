@@ -107,7 +107,10 @@ int main() {
             g_actionInput->Update(p3d::input);
         }
         if (g_inputManager) {
-            g_inputManager->ServiceHostPads(g_actionInput);
+            const ActionInput* actionInputForGame = DebugUI::ShouldBlockGameInput()
+                ? nullptr
+                : g_actionInput;
+            g_inputManager->ServiceHostPads(actionInputForGame);
         }
 
         bool running = game.Step();

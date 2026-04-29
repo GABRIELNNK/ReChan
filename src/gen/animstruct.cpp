@@ -5,6 +5,29 @@
 #include "ai/humanoid.h"
 #include "p3d/p3dmath.h"
 
+static void BlendTreePose(s32 weight, const BlendPoseState* blendPose, STreeData* tree) {
+    if (!blendPose || !blendPose->joints || !tree || !tree->joints) {
+        return;
+    }
+
+    u32 jointCount = tree->numJoints;
+    if (blendPose->jointCount < jointCount) {
+        jointCount = blendPose->jointCount;
+    }
+
+    for (u32 jointIndex = 0; jointIndex < jointCount; jointIndex++) {
+        STreeJoint& joint = tree->joints[jointIndex];
+        const BlendJointPose& pose = blendPose->joints[jointIndex];
+
+        joint.translationX = pose.translationX + (s32)(((s64)weight * (s64)(joint.translationX - pose.translationX)) >> 16);
+        joint.translationY = pose.translationY + (s32)(((s64)weight * (s64)(joint.translationY - pose.translationY)) >> 16);
+        joint.translationZ = pose.translationZ + (s32)(((s64)weight * (s64)(joint.translationZ - pose.translationZ)) >> 16);
+        joint.rotationX = (s16)(pose.rotationX + (s32)(((s64)weight * (s64)(s32)(s16)(joint.rotationX - pose.rotationX)) >> 16));
+        joint.rotationY = (s16)(pose.rotationY + (s32)(((s64)weight * (s64)(s32)(s16)(joint.rotationY - pose.rotationY)) >> 16));
+        joint.rotationZ = (s16)(pose.rotationZ + (s32)(((s64)weight * (s64)(s32)(s16)(joint.rotationZ - pose.rotationZ)) >> 16));
+    }
+}
+
 // PSX: _13AnimStructurelP10tAnimationlP5ModelP13DrawableBasic (0x80070740)
 // mode: 0=normal, 1=reverse, 2=runToLast, 3=camera
 // animation: TransformAnim* (parsed from raw binary)
@@ -57,6 +80,7 @@ AnimStructure::~AnimStructure() {
     delete flip;
     flip = nullptr;
     animation = nullptr;
+    delete blendPose;
     blendPose = nullptr;
 }
 
@@ -220,8 +244,28 @@ void AnimStructure::ExecuteHandler(s32 doFlip) {
         if (currentFrame < 0) {
             currentFrame = 0;
         }
-        flip->SetFrameReal(currentFrame);
-        flip->UpdateJoints();
+
+        if (mode == 0 && loopTypeField == ANIM_BLEND2) {
+            s32 blendDuration = endFrame + FIX16_ONE;
+            s32 blendWeight = FIX16_ONE + 1;
+            if (blendDuration != 0) {
+                blendWeight = rmDiv16i(currentFrame + FIX16_ONE, blendDuration);
+            }
+
+            if (blendWeight <= FIX16_ONE) {
+                flip->SetFrameReal(currentFrame);
+                flip->UpdateJoints();
+                BlendTreePose(blendWeight, blendPose, flip->tree);
+            }
+            else {
+                flip->SetFrameReal(currentFrame);
+                flip->UpdateJoints();
+            }
+        }
+        else {
+            flip->SetFrameReal(currentFrame);
+            flip->UpdateJoints();
+        }
     }
 
     // Store state
@@ -306,9 +350,29 @@ void AnimStructure::DecFrame() {
 
 // PSX: RunToLastBlend__13AnimStructure
 void AnimStructure::RunToLastBlend() {
-    if (endFrame > 0 && currentFrame > endFrame) {
-        currentFrame = endFrame;
-        loopCount++;
+    MARKFUNCTION(0x80071410);
+
+    if (currentFrame > endFrame) {
+        AnimHumanoidCB savedCB = humanoidCB;
+        const s32 startFrame = field56;
+        s32 loopType = ANIM_RUN_TO_LAST;
+        if (blendPose) {
+            loopType = blendPose->loopType;
+        }
+
+        SModel* sModel = dynamic_cast<SModel*>(model);
+        if (!sModel || !animation) {
+            return;
+        }
+
+        sModel->ApplyAnimToModelBasic(animation);
+        if (flip) {
+            flip->Reset();
+        }
+
+        SetLoopType(loopType, 1);
+        humanoidCB = savedCB;
+        currentFrame = startFrame + FIX16_ONE;
     }
 }
 
@@ -341,13 +405,16 @@ void AnimStructure::ProcessHumanoidCB() {
     }
 
     // PSX selector dispatch uses vtable slots via selector:
-    // 61 -> vtable +240 (_DoStand), 62 -> vtable +244 (_DoRun).
+    // 60 -> vtable +236 (DoJump), 61 -> vtable +240 (_DoStand), 62 -> vtable +244 (_DoRun).
     Humanoid* humanoid = dynamic_cast<Humanoid*>(model->backPtr);
     if (!humanoid) {
         return;
     }
 
     switch (cb.offsetHi) {
+        case 60:
+            humanoid->DoJump();
+            return;
         case 61:
             humanoid->_DoStand();
             return;

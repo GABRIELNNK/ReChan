@@ -6,6 +6,7 @@
 #include "ai/thing.h"
 #include "ai/humanoid.h"
 #include "ai/obstacle.h"
+#include "ai/pickup.h"
 #include "ai/player.h"
 #include "p3d/p3dmath.h"
 #include "gen/model.h"
@@ -703,9 +704,8 @@ void HandleThingEnvironmentCollisions(ccList& thingList) {
         if (thing->thingType >= 29) {
             // Non-humanoid: keep defaults (radius=128, ckHeight=768)
             // Pickups (type 301-328) override yMinOffset
-            // PSX: GetCollisionYMin__C6Pickup - not yet reversed
             if (thing->thingType >= 301 && thing->thingType < 329) {
-                // yMinOffset = ((Pickup*)thing)->GetCollisionYMin();
+                yMinOffset = static_cast<Pickup*>(thing)->GetCollisionYMin();
             }
         }
         else {
@@ -738,7 +738,7 @@ void HandleThingEnvironmentCollisions(ccList& thingList) {
 
         // PSX: if climbing state and not on ground and no ticket, let go of ledge
         if (!doWall && !thing->GetTicketIssuer() && !(thing->flags & TF_ON_GROUND)) {
-            // LetGoOfLedge not yet reversed
+            static_cast<Humanoid*>(thing)->LetGoOfLedge();
         }
     }
 
@@ -769,17 +769,15 @@ void HandleHumanoidObstacleCollisions(ccList& humanoidList) {
 }
 
 // PSX: HandlePickupObstacleCollisions__FR6ccList (COLMGR.CPP:1699) 0x800A9740
-// Iterates obstacle list, dispatches per-obstacle pickup collision handler
-void HandlePickupObstacleCollisions(ccList& obstacleList) {
+// Iterates a pickup list and dispatches each active pickup through Obstacle's scan helper.
+void HandlePickupObstacleCollisions(ccList& pickupList) {
     MARKFUNCTION(0x800A9740);
 
-    for (ccMinNode* node = obstacleList.head; node != nullptr;) {
+    for (ccMinNode* node = pickupList.head; node != nullptr;) {
         ccMinNode* next = node->next;
-        DynamicThing* thing = (DynamicThing*)node;
-        if (thing->flags & TF_MODEL_CREATED) {
-            // PSX: Obstacle::HandlePickupObstacleCollision(thing)
-            // (OBSTACLE.CPP:1235, 0x8007BF18) - iterates pickup list for
-            // this obstacle. Requires Obstacle class - not yet reversed.
+        Pickup* pickup = static_cast<Pickup*>(static_cast<Thing*>(node));
+        if (pickup->flags & TF_MODEL_CREATED) {
+            Obstacle::HandlePickupObstacleCollision(pickup);
         }
         node = next;
     }

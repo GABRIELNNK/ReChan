@@ -3,11 +3,13 @@
 #include "ai/obstacle_shared.h"
 #include "ai/activezn.h"
 #include "ai/humanoid.h"
+#include "ai/pickup.h"
 #include "ai/player.h"
 #include "gen/ai.h"
 #include "gen/animmat.h"
 #include "gen/blockmgr.h"
 #include "gen/camera.h"
+#include "gen/colsect.h"
 #include "gen/config.h"
 #include "gen/colvol.h"
 #include "gen/database.h"
@@ -117,6 +119,135 @@ void Obstacle::UpdatePosition() {
     MARKFUNCTION(0x8007CDDC);
 }
 
+// PSX: FillBoxCentre__8ObstacleR10tagLVectorRC10tagLVectorRC9_RMVECT16RC15tagCollisionBox
+// (OBSTACLE.CPP:651, 0x8007B184)
+void Obstacle::FillBoxCentre(
+    LVector& outPos,
+    const LVector& pos,
+    const LVector& orientation,
+    const tagCollisionBox& box) {
+    MARKFUNCTION(0x8007B184);
+
+    const s32 sinY = rmSin16((s16)orientation.y);
+    const s32 cosY = rmSin16((s16)(orientation.y + 0x4000));
+    const s32 centreX = Div2TowardZero((s32)box.minX + (s32)box.maxX);
+    const s32 centreY = Div2TowardZero((s32)box.minY + (s32)box.maxY);
+    const s32 centreZ = Div2TowardZero((s32)box.minZ + (s32)box.maxZ);
+
+    outPos.x = pos.x + (s32)((cosY * (s64)centreX) >> 16) + (s32)((sinY * (s64)centreZ) >> 16);
+    outPos.y = pos.y + centreY;
+    outPos.z = pos.z + (s32)((-sinY * (s64)centreX) >> 16) + (s32)((cosY * (s64)centreZ) >> 16);
+}
+
+// PSX: GetWorldFloorHeight__8ObstacleRC10tagLVector (OBSTACLE.CPP:680, 0x8007B2F0)
+s32 Obstacle::GetWorldFloorHeight(const LVector& pos) {
+    MARKFUNCTION(0x8007B2F0);
+
+    s32 floorHeight = (s32)0x80000001;
+    s32 ceilingHeight = 0;
+    LVector floorNormal = {};
+    LVector ceilingNormal = {};
+    CollisionSector::GetWorldFloorAndCeilingHeight(
+        floorHeight, ceilingHeight, floorNormal, ceilingNormal, pos, 0);
+    return floorHeight;
+}
+
+// PSX: StaticGetObstacleFloorHeight__8ObstacleRC10tagLVector (OBSTACLE.CPP:2232, 0x8007D198)
+s32 Obstacle::StaticGetObstacleFloorHeight(const LVector& pos) {
+    MARKFUNCTION(0x8007D198);
+
+    s32 bestFloorHeight = (s32)0x80000001;
+    if (!g_ai) {
+        return bestFloorHeight;
+    }
+
+    for (ccMinNode* node = g_ai->moveList.head; node != nullptr; node = node->next) {
+        Obstacle* obstacle = static_cast<Obstacle*>(static_cast<Thing*>(node));
+        if ((obstacle->flags & TF_MODEL_CREATED) == 0) {
+            continue;
+        }
+        if (obstacle->GetPhysical() == 0) {
+            continue;
+        }
+
+        s32 deltaX = pos.x - obstacle->pos.x;
+        if (deltaX < 0) {
+            deltaX = -deltaX;
+        }
+        if (deltaX >= obstacle->collBox.extent) {
+            continue;
+        }
+
+        s32 deltaZ = pos.z - obstacle->pos.z;
+        if (deltaZ < 0) {
+            deltaZ = -deltaZ;
+        }
+        if (deltaZ >= obstacle->collBox.extent) {
+            continue;
+        }
+
+        if (!CheckStaticHorizontalBoxPointCollision(
+                obstacle->pos, obstacle->collBox, obstacle->orientation.y, pos)) {
+            continue;
+        }
+
+        const s32 floorHeight = obstacle->GetObstacleFloorHeight(pos);
+        if (bestFloorHeight < floorHeight && floorHeight < pos.y) {
+            bestFloorHeight = floorHeight;
+        }
+    }
+
+    return bestFloorHeight;
+}
+
+// PSX: AllocateAndCreateShadow__8Obstacle (OBSTACLE.CPP:1941, 0x8007CD2C)
+void Obstacle::AllocateAndCreateShadow() {
+    MARKFUNCTION(0x8007CD2C);
+
+    if (!model) {
+        return;
+    }
+
+    Model* modelPtr = static_cast<Model*>(model);
+    if (!modelPtr->field36) {
+        modelPtr->field36 = new ModelFloorHeightState();
+    }
+
+    UpdateShadowFloorHeight();
+}
+
+// PSX: UpdateShadowFloorHeight__8Obstacle (OBSTACLE.CPP:2300, 0x8007D354)
+void Obstacle::UpdateShadowFloorHeight() {
+    MARKFUNCTION(0x8007D354);
+
+    if (!model) {
+        return;
+    }
+
+    Model* modelPtr = static_cast<Model*>(model);
+    if (!modelPtr->field36) {
+        return;
+    }
+
+    ModelFloorHeightState* floorState = static_cast<ModelFloorHeightState*>(modelPtr->field36);
+
+    LVector boxCentre = {};
+    FillBoxCentre(boxCentre, pos, orientation, collBox);
+
+    const s32 worldFloorHeight = GetWorldFloorHeight(boxCentre);
+    s32 obstacleFloorHeight = StaticGetObstacleFloorHeight(boxCentre);
+    if (obstacleFloorHeight < worldFloorHeight) {
+        obstacleFloorHeight = worldFloorHeight;
+    }
+
+    floorState->previous = floorState->current;
+    floorState->current = obstacleFloorHeight;
+    floorState->shadowMinX = (s32)collBox.minX;
+    floorState->shadowMinY = (s32)collBox.minY;
+    floorState->shadowMaxX = (s32)collBox.maxX;
+    floorState->shadowMaxZ = (s32)collBox.maxZ;
+}
+
 void Obstacle::CreateModel(const char* name) {
     MARKFUNCTION(0x8007CC64);
     // PSX: empty stub - real work in AllocateAndCreateModel
@@ -156,6 +287,52 @@ void Obstacle::AnalyzeMesh(DBRoot* root) {
 
 void Obstacle::FillSphere(tSphere& sphere) const {
     MARKFUNCTION(0x8007CE08);
+}
+
+// PSX: HandlePickupObstacleCollision__8ObstacleP6Pickup (OBSTACLE.CPP:1212, 0x8007C034)
+void Obstacle::HandlePickupObstacleCollision(Pickup* pickup) {
+    MARKFUNCTION(0x8007C034);
+
+    if (!pickup || !g_ai) {
+        return;
+    }
+
+    tagCollisionSphere sphere = {};
+    sphere.radius = 128;
+
+    for (ccMinNode* node = g_ai->moveList.head; node != nullptr; node = node->next) {
+        Obstacle* obstacle = static_cast<Obstacle*>(static_cast<Thing*>(node));
+        if ((obstacle->flags & TF_MODEL_CREATED) == 0) {
+            continue;
+        }
+
+        const s32 threshold = static_cast<s32>(pickup->collisionRadius) + sphere.radius;
+
+        s32 deltaX = obstacle->pos.x - pickup->pos.x;
+        if (deltaX < 0) {
+            deltaX = -deltaX;
+        }
+        if (deltaX >= threshold) {
+            continue;
+        }
+
+        s32 deltaZ = obstacle->pos.z - pickup->pos.z;
+        if (deltaZ < 0) {
+            deltaZ = -deltaZ;
+        }
+        if (deltaZ >= threshold) {
+            continue;
+        }
+
+        if (CheckStaticBoxSphereCollision(
+                obstacle->pos,
+                obstacle->collBox,
+                obstacle->orientation.y,
+                pickup->pos,
+                sphere)) {
+            obstacle->HandlePickupCollision(pickup);
+        }
+    }
 }
 
 void Obstacle::HandlePickupCollision(Thing* pickup) {}
@@ -395,14 +572,6 @@ static bool CheckXZStaticBoxCylinderCollision(
         return true;
     }
     return false;
-}
-
-inline s32 MulShift16(s32 a, s32 b) {
-    return (s32)(((s64)a * b) >> 16);
-}
-
-inline s32 Div2TowardZero(s32 value) {
-    return (value + (s32)((u32)value >> 31)) >> 1;
 }
 
 static constexpr s32 OBSTACLE_CORRECT_BUFFER = 4;

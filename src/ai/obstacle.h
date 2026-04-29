@@ -4,6 +4,7 @@
 
 class Humanoid;
 class Obstacle;
+class Pickup;
 struct tSphere;
 
 // Obstacle (116 bytes on PSX) - base class for interactive objects
@@ -34,6 +35,8 @@ public:
     void CreateModel(const char* name) override;
     void DeleteModel() override;
     void AnalyzeMesh(DBRoot* root) override;
+    void AllocateAndCreateShadow();
+    void UpdateShadowFloorHeight();
 
     virtual void FillSphere(tSphere& sphere) const;
     virtual void HandlePickupCollision(Thing* pickup);
@@ -53,6 +56,10 @@ public:
     s32 GetPhysical() const;
     void SetCollisionBox(const tagCollisionBox& box);
 
+    static void FillBoxCentre(LVector& outPos, const LVector& pos, const LVector& orientation, const tagCollisionBox& box);
+    static s32 GetWorldFloorHeight(const LVector& pos);
+    static s32 StaticGetObstacleFloorHeight(const LVector& pos);
+    static void HandlePickupObstacleCollision(Pickup* pickup);
     static void HandleHumanoidObstacleCollision(Humanoid* hum);
 };
 

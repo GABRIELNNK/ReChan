@@ -14,7 +14,7 @@ void HandleThingFloor(DynamicThing* thing, s32 radius, s32 yMinOffset, s32 check
 void ClearThingFloorHeights(ccList& list);
 void HandleThingEnvironmentCollisions(ccList& thingList);
 void HandleHumanoidObstacleCollisions(ccList& obstacleList);
-void HandlePickupObstacleCollisions(ccList& obstacleList);
+void HandlePickupObstacleCollisions(ccList& pickupList);
 void HandleHumanoidPickupCollisions(ccList& humanoidList, ccList& pickupList);
 
 // COLMGR globals (PSX: gp-relative)

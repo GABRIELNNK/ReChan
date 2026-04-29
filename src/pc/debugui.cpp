@@ -2,6 +2,7 @@
 #include "pc/debugui.h"
 #include "imgui.h"
 #include "gen/game.h"
+#include "gen/world.h"
 #include "gen/camera.h"
 #include "gen/animstruct.h"
 #include "gen/model.h"
@@ -35,7 +36,24 @@ static s32 sInputRoutingSelection = 0; // 0 = Camera input, 1 = Player input
 static char sConsoleNoteInput[1024] = {};
 static char sLastConsoleNote[1024] = {};
 
+static bool ShouldBlockGameInputFromImGui() {
+    if (!sEnabled || !ImGui::GetCurrentContext()) {
+        return false;
+    }
+
+    const ImGuiIO& io = ImGui::GetIO();
+    return io.WantCaptureKeyboard || io.WantCaptureMouse || io.WantTextInput;
+}
+
+bool DebugUI::ShouldBlockGameInput() {
+    return ShouldBlockGameInputFromImGui();
+}
+
 bool DebugUI::IsPlayerInputAllowed() {
+    if (ShouldBlockGameInputFromImGui()) {
+        return false;
+    }
+
     if (!sInputRoutingOverride) {
         return true;
     }
@@ -43,6 +61,10 @@ bool DebugUI::IsPlayerInputAllowed() {
 }
 
 bool DebugUI::IsDebugCameraInputAllowed() {
+    if (ShouldBlockGameInputFromImGui()) {
+        return false;
+    }
+
     if (!sInputRoutingOverride) {
         return true;
     }
@@ -110,10 +132,25 @@ static const char* ActionStateName(s32 s) {
         case AS_PUNCH_ATTACK: return "PunchAttack";
         case AS_KICK_ATTACK: return "KickAttack";
         case AS_COMBAT_IDLE: return "CombatIdle";
+        case AS_BACK_GRAB_LATCH: return "BackGrabLatch";
+        case AS_BACK_GRAB: return "BackGrab";
+        case AS_BACK_GRAB_RELEASE: return "BackGrabRelease";
+        case AS_COUNTER_ATTACK_PRE_LATCH: return "CounterAttackPreLatch";
+        case AS_COUNTER_ATTACK_LATCH: return "CounterAttackLatch";
+        case AS_COUNTER_ATTACK: return "CounterAttack";
+        case AS_COUNTER_ATTACK_RECOVERY: return "CounterAttackRecovery";
         case AS_PICKUP: return "Pickup";
         case AS_THROW_PICKUP: return "ThrowPickup";
+        case AS_THROW_CHARACTER_RECEIVE: return "ThrowCharacterReceive";
+        case SD_COUNTER_ATTACK_PRE_LATCH: return "CounterAttackPreLatch";
+        case SD_COUNTER_ATTACK_LATCH: return "CounterAttackLatch";
+        case SD_COUNTER_ATTACK: return "CounterAttack";
+        case SD_COUNTER_ATTACK_RECOVERY: return "CounterAttackRecovery";
+        case AS_BACK_GRAB_RECEIVE_PRE_LATCH: return "BackGrabReceivePreLatch";
+        case AS_BACK_GRAB_RECEIVE_LATCH: return "BackGrabReceiveLatch";
+        case AS_THROW_FREE_FALL: return "ThrowFreeFall";
         case AS_FLYING_BACK_LAND: return "FlyingBackLand";
-        case AS_BACK_GRAB_RECOVER: return "BackGrabRecover";
+        case AS_BACK_GRAB_RECEIVE: return "BackGrabReceive";
         case AS_GET_UP: return "GetUp";
         case AS_FLYING_BACK_CHECK: return "FlyingBackCheck";
         case AS_SPIN_BACK_RECOVER: return "SpinBackRecover";
@@ -122,6 +159,41 @@ static const char* ActionStateName(s32 s) {
         case AS_HIT_ENVIRONMENT: return "HitEnvironment";
         default: return "Unknown";
     }
+}
+
+static void RefreshPlayerDrunkenMasterState() {
+    if (!g_scoreManager || !g_characterManager) {
+        return;
+    }
+
+    const s32 desiredMeshType = g_scoreManager->IsDrunkenMasterSuitEnabled() ? 1 : 0;
+    if (!g_characterManager->IsCharacterLoaded(0)) {
+        return;
+    }
+
+    Player* player = Player::s_player;
+    Model* model = (player && player->model) ? static_cast<Model*>(player->model) : nullptr;
+    AnimStructure* anim = model ? static_cast<AnimStructure*>(model->animStructure) : nullptr;
+    const s32 animEnum = anim ? anim->animEnum : 0;
+    const s32 loopType = anim ? anim->loopTypeField : ANIM_LOOP;
+
+    if (desiredMeshType != *GetPlayerMeshType()) {
+        g_characterManager->ReloadCharacter(0, desiredMeshType, nullptr);
+    }
+    else {
+        g_characterManager->LoadCharTexture(0);
+    }
+
+    if (!model) {
+        return;
+    }
+
+    AnimStructure* updatedAnim = model->animStructure ? static_cast<AnimStructure*>(model->animStructure) : nullptr;
+    if (updatedAnim) {
+        updatedAnim->ReAttachTree(0, animEnum);
+    }
+
+    model->ApplyAnimToModel(0, animEnum, loopType, 0, 0);
 }
 
 static const char* StateDispatchName(u16 d) {
@@ -253,6 +325,9 @@ void DebugUI::Draw() {
     if (!sEnabled) {
         return;
     }
+
+    ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(), ImGuiDockNodeFlags_PassthruCentralNode);
+
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("Windows")) {
             ImGui::MenuItem("Game", nullptr, &sShowGame);
@@ -392,6 +467,27 @@ void DebugUI::Draw() {
                 ImGui::Text("Flags: 0x%04X", p->flags);
                 ImGui::Text("Flags2: 0x%04X", p->flags2);
                 ImGui::Text("Player Flags: 0x%08X", p->playerFlags);
+
+                ImGui::SeparatorText("Drunken Master");
+                if (g_scoreManager) {
+                    ImGui::Text("Total Gold Dragons: %d", g_scoreManager->GetTotalGoldDragon());
+                    ImGui::Text("Permanent Latch: %s", g_scoreManager->drunkenMasterUnlocked ? "yes" : "no");
+                    ImGui::Text("Suit Enabled: %s", g_scoreManager->IsDrunkenMasterSuitEnabled() ? "yes" : "no");
+                    ImGui::Text("Player Mesh Type: %d", *GetPlayerMeshType());
+
+                    bool drunkenMasterLatched = g_scoreManager->drunkenMasterUnlocked != 0;
+                    if (ImGui::Checkbox("Latch Drunken Master Unlock", &drunkenMasterLatched)) {
+                        g_scoreManager->drunkenMasterUnlocked = drunkenMasterLatched ? 1 : 0;
+                        RefreshPlayerDrunkenMasterState();
+                    }
+
+                    if (ImGui::Button("Reload Player Suit")) {
+                        RefreshPlayerDrunkenMasterState();
+                    }
+                }
+                else {
+                    ImGui::Text("ScoreManager: null");
+                }
 
                 ImGui::SeparatorText("Animation Runtime");
                 if (anim) {

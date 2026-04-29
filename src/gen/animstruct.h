@@ -26,6 +26,23 @@ struct AnimHumanoidCB {
     void* funcPtr = nullptr; // +100
 };
 
+struct BlendJointPose {
+    s32 translationX = 0;
+    s32 translationY = 0;
+    s32 translationZ = 0;
+    s16 rotationX = 0;
+    s16 rotationY = 0;
+    s16 rotationZ = 0;
+};
+
+struct BlendPoseState {
+    BlendJointPose* joints = nullptr;
+    u32 jointCount = 0;
+    s32 loopType = ANIM_RUN_TO_LAST;
+
+    ~BlendPoseState() { delete[] joints; }
+};
+
 // AnimStructure (104 bytes on PSX)
 // PSX layout:
 //   [0-5]  ccNode (24 bytes)
@@ -36,8 +53,8 @@ struct AnimHumanoidCB {
 //   [10] +40: (reserved)
 //   [11] +44: s32 loopType
 //   [12] +48: s32 speed (16.16, 0x10000 = 1.0)
-//   [13] +52: void* blendPose (for mode 7 blend)
-//   [14] +56: (reserved)
+//   [13] +52: BlendPoseState* blendPose (for mode 7 blend)
+//   [14] +56: blend resume frame (16.16)
 //   [15] +60: s32 currentFrame (16.16)
 //   [16] +64: s32 startFrame
 //   [17] +68: s32 endFrame
@@ -80,7 +97,7 @@ public:
     // +48
     s32 speed = FIX16_ONE;
     // +52
-    void* blendPose = nullptr;
+    BlendPoseState* blendPose = nullptr;
     // +56
     s32 field56 = 0;
     // +60

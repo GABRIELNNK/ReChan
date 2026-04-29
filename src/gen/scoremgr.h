@@ -108,8 +108,8 @@ public:
     void HandleCheckpoint();
     void HandleCheckpointBegin();
     void Print() const;
-    void RegisterCollectible(const Collectible* collectible, s32 type);
-    void RegisterGotCollectible(const Collectible* collectible, s32 type);
+    s32 RegisterCollectible(const Collectible* collectible, s32 type);
+    s32 RegisterGotCollectible(const Collectible* collectible, s32 type);
     void AddFightPoints(s32 points);
     void AddComboPoints(s32 points);
     void AddStylePoints(s32 points);

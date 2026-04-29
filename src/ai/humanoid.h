@@ -6,7 +6,10 @@
 #include "snd/hmndsnd.h"
 
 class ActiveZone;
+class Pickup;
 struct FightingComboNode;
+struct PsxFightingMoveRaw;
+struct PsxFightingJointRaw;
 
 // Action state IDs for Humanoid::SetActionState
 // PSX: 74-case switch at 0x80065680. IDs confirmed from handler transitions.
@@ -16,6 +19,7 @@ enum ActionState : u32 {
     AS_STAND_ANIM = 2,
     AS_WALL_JUMP_TAUNT = 3,   // PSX Player case 3: wall jump taunt/idle
     AS_DIVE_ROLL = 4,
+    AS_TAUNT_PAUSE = 5,       // PSX Humanoid case 5: taunt/pause hold
     AS_PAUSE = 6,             // Humanoid: pause/guard. Player: running jump
     AS_JUMP = 8,              // standing jump (no tables)
     AS_WALL_JUMP = 9,         // PSX Player case 9: wall jump
@@ -40,11 +44,22 @@ enum ActionState : u32 {
     AS_PUNCH_ATTACK = 32,
     AS_KICK_ATTACK = 34,
     AS_COMBAT_IDLE = 36,
+    AS_BACK_GRAB_LATCH = 37,
+    AS_BACK_GRAB = 38,
+    AS_BACK_GRAB_RELEASE = 39,
+    AS_COUNTER_ATTACK_PRE_LATCH = 40,
+    AS_COUNTER_ATTACK_LATCH = 41,
+    AS_COUNTER_ATTACK = 42,
+    AS_COUNTER_ATTACK_RECOVERY = 43,
     AS_PICKUP = 44,           // PSX Player case 44: pick up object
     AS_THROW_PICKUP = 45,
     AS_STUNNED = 55,
     AS_FLYING_BACK_LAND = 58,
-    AS_BACK_GRAB_RECOVER = 62,
+    AS_THROW_CHARACTER_RECEIVE = 59,
+    AS_BACK_GRAB_RECEIVE_PRE_LATCH = 60,
+    AS_BACK_GRAB_RECEIVE_LATCH = 61,
+    AS_BACK_GRAB_RECEIVE = 62,
+    AS_THROW_FREE_FALL = 63,
     AS_GET_UP = 68,
     AS_FLYING_BACK_CHECK = 70,
     AS_SPIN_BACK_RECOVER = 71,
@@ -60,10 +75,13 @@ enum ActionState : u32 {
 enum StateDispatch : u16 {
     SD_NONE = 0,
     SD_STAND = 22,
+    // PSX dispatch values are class-specific vtable slots.
+    // Humanoid slot 23 -> _Taunt; Player slot 23 -> dive-roll handler.
     SD_DIVE_ROLL = 23,
     SD_PAUSE = 24,
     SD_RUN = 25,
     SD_BACKFLIP = 26,
+    // Humanoid slot 27 -> _DiveRoll; Player slot 27 -> _Straif.
     SD_STRAFE = 27,
     SD_JUMP = 28,
     SD_FALL = 29,
@@ -76,6 +94,7 @@ enum StateDispatch : u16 {
     SD_SPIN_BACK = 36,
     SD_FLYING_BACK = 37,
     SD_STUNNED = 38,
+    SD_FLOATING = 274,
     SD_THROW = 39,
     SD_PICKUP = 40,
     // PSX vtable indices 41-48 used by Player-specific handlers
@@ -95,9 +114,23 @@ enum StateDispatch : u16 {
     SD_INACTIVE_IDLE = 253,
     SD_PUSH_OBJECT = 254,
     SD_TABLE_ROLL = 255,
+    SD_KILLED = 257,
     SD_DO_STAND = 258,
     SD_LADDER_LATCH_TOP = 259,
     SD_LADDER_LATCH = 260,
+    SD_FIGHTING_COMBO = 261,
+    SD_BACK_GRAB_LATCH = 262,
+    SD_BACK_GRAB = 263,
+    SD_BACK_GRAB_RELEASE = 264,
+    SD_BACK_GRAB_RECEIVE_PRE_LATCH = 265,
+    SD_BACK_GRAB_RECEIVE_LATCH = 266,
+    SD_BACK_GRAB_RECEIVE = 267,
+    SD_THROW_CHARACTER_RECEIVE = 268,
+    SD_THROW_FREE_FALL = 269,
+    SD_COUNTER_ATTACK_PRE_LATCH = 270,
+    SD_COUNTER_ATTACK_LATCH = 271,
+    SD_COUNTER_ATTACK = 272,
+    SD_COUNTER_ATTACK_RECOVERY = 273,
 };
 
 // Humanoid - DynamicThing with combat, animation, and AI state
@@ -126,8 +159,14 @@ public:
     // PSX +228 (s32): reserved
     s32 field228 = 0;
 
-    // PSX +256 (s32): reserved
-    s32 field256 = 0;
+    // PSX +232,+236,+240: cached spawn position from AddThingNoTagList.
+    LVector spawnPos = {};
+
+    // PSX +244,+248,+252: cached spawn orientation from AddThingNoTagList.
+    LVector spawnOrientation = {};
+
+    // PSX +256 (ptr on host): current target humanoid
+    uintptr_t field256 = 0;
 
     // PSX +260 (u8): reserved
     u8 field260 = 0;
@@ -284,6 +323,9 @@ public:
     u16 field468 = 0;
     u16 comboCount = 1;
 
+    // PSX +472 (s32): fighting hit latch/reset in SetCurrentFightingNode
+    s32 field472 = 0;
+
     // PSX +476 (ptr): FightingSystem* (current)
     void* fightingSystem = nullptr;
     // PSX +480 (ptr): FightingSystem* (default)
@@ -331,16 +373,20 @@ public:
     void Activate() override;
     void Deactivate() override;
     void Move() override;
+    void HandleLand(s32 height) override;
     s32 HandleAnimationControl();
     void CreateModel(const char* name) override;
     void DeleteModel() override;
-    void HandleCollision(Thing* other, s32 damage) override;
+    void HandleCollision(Thing* other, s32 damage, ...) override;
+    void HandleCollisionReactionStates(s32 hitType, s32 impactRegion);
     void HandleCollisionSound(s32 hitType);
     void AnalyzeMesh(DBRoot* root) override;
 
     virtual void SetActionState(u32 state, s32 param);
     virtual void ProcessAction();
     virtual void ProcessControl();
+    void Kill() override;
+    void Killed();
 
     void RequestAction(u32 actionID);
     void FaceThing(Thing* target, s32 immediate);
@@ -351,6 +397,7 @@ public:
     void SetTarget(Humanoid* target);
     void ReleaseTarget();
     void FaceAngleY(s32 angle, s32 immediate);
+    void SetTauntAnim(s32 index);
     void SetIdleAnimation(s32 loopType, s32 doTransition);
     bool TestIdleAnimation();
     s32 LoadDialog(u32 dialogID, s32 priority);
@@ -358,19 +405,74 @@ public:
     s32 PlayDialogBasedOnPriority(s32 minPriority, s32 maxPriority);
     s32 KillDialog(s32 force, s32 minPriority, s32 maxPriority);
     s32 EnterCombatCombo();
+    s32 ProcessSoundEvent(s32 eventType);
+    s32 ProcessFightingMove(const PsxFightingMoveRaw* move, s32 frame);
+    s32 ProcessFightingMoveStrikeJoint(
+        const PsxFightingJointRaw* joint,
+        s32 frame,
+        s32 attackType,
+        s32 fightingPoints,
+        s32 stylePointsFlag,
+        s32 weaponBreakOnEmpty);
+    s32 GetTargetingFrame(const PsxFightingMoveRaw* move) const;
+    s32 ProcessGenericFightingMove(const PsxFightingMoveRaw* move, s32 frame);
+    s32 ProcessBodyThrow(const PsxFightingMoveRaw* move, s32 frame);
+    s32 BodyThrowAttack(s32 radius);
+    s32 ThrowCharacterReceive();
+    s32 ThrowFreeFall();
+    s32 GetImpactRegion(const LVector& point);
     s32 FindSiblingWithRequestedCommand(const FightingComboNode* root, u32 requestedBits);
     s32 FindSiblingWithRequestedCommand(const FightingComboNode* root, u32 requestedBits, s32 frame);
+    s32 FindChildWithRequestedCommand(const FightingComboNode* root, u32 requestedBits);
+    s32 FindChildWithRequestedCommand(const FightingComboNode* root, u32 requestedBits, s32 frame);
+    Humanoid* FightTargetAndThrowLatch(u8 fightingType);
+    s32 SetCurrentFightingNode();
+    s32 ProcessFightingComboNode();
+    s32 TestAndSetWeaponKungFU();
+    s32 TestWallContextFightingRequestRemap();
     void PrepareLedgeLatch(const LVector& correctionPos, const LVector& normal);
+    s32 CheckForLanding();
     bool CheckForLedges();
     bool CheckForLedges2(LVector& outNormal, LVector& outCorrectionPos, s32 clearance);
     s32 CheckForPickup();
     s32 RestorePositionFromBip01();
     void SetDesiredMoveDirection(s32 angle) { faceAngle = angle; }
+    virtual s32 TestAndSetBackGrab();
     virtual s32 TestAndSetRisingAttack();
+    s32 BackGrabCharacterLatch();
+    s32 BackGrabCharacter();
+    s32 BackGrabCharacterRelease();
+    s32 BackGrabCharacterReceivePreLatch();
+    s32 BackGrabCharacterReceiveLatch();
+    s32 BackGrabCharacterReceive();
+    s32 CounterAttack();
+    s32 CounterAttackPreLatch();
+    s32 CounterAttackLatch();
+    s32 CounterAttackRecovery();
     s32 LetGoOfLedge();
     void SetHumanoidTarget(Humanoid* target);
     bool IsInActiveZone() const;
     bool IsTargetInActiveZone() const;
+    s32 QuickCheckWallCollision(s16 angle, s32 distance, s32 radius, s32 height);
+    s32 CheckWallCollision(
+        s16 angle,
+        s32 distance,
+        s32 radius,
+        s32 height,
+        s32& outCollisionRatio,
+        LVector& outWallNormal,
+        LVector& outHitPoint,
+        s32& outVerticalSpan,
+        s32& outWallMaterial);
+    s32 CheckWallConstraint(
+        u32 minWallHeight,
+        s32 distance,
+        s32 minAngle,
+        s32& outWallAngle,
+        LVector& outHitPoint);
+    s32 CheckDWOCollision(s16 angle, s32 distance);
+    bool HasEnemyTauntDialog();
+    void _CrouchUp();
 
     virtual void _Stand();
     virtual void _Run();
@@ -387,6 +489,7 @@ public:
     virtual void _Dead();
     virtual void _SpinBack();
     virtual void _FlyingBack();
+    virtual void _Floating();
     virtual void _Stunned();
     virtual void _Throw();
     virtual void _Pickup();
@@ -400,9 +503,15 @@ public:
     virtual void _NISMode();
     virtual void CreateSound();
     virtual void ReleaseSound();
+    virtual void DoJump();
     virtual void _DoStand();
     virtual void _DoRun();
+    virtual s32 LoadCombatDialog();
+    virtual void PlayCombatKnockDownDialog(s32 damageType);
+    virtual void HandleHitShock(s32 damageType);
+    virtual void PlayCombatThrowDialog();
 
+    s32 SetRightHandObj(Pickup* pickup);
     void DeleteRightHandObj();
     void DeleteLeftHandObj();
     void DropPickup(s32 dropRight, s32 dropLeft);

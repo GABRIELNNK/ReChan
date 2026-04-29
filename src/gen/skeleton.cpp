@@ -16,17 +16,80 @@ static s16 ReadS16(const u8* p) { return (s16)(p[0] | (p[1] << 8)); }
 
 // P3D chunk IDs
 static constexpr u16 CHUNK_P3D_CONTAINER = 0xFF04;
+static constexpr u16 CHUNK_COMP_ANIM = 0x4007;
 static constexpr u16 CHUNK_P3D_TEXTURE = 0x6008;
 static constexpr u16 CHUNK_STREE = 0x6120;
 static constexpr u16 CHUNK_MAPPED_STREE = 0x6122;
 
-STreeData* ParseP3DStreamFull(const u8* data, u32 size) {
+static bool ReadPStringUID(const u8* data, u32 size, u32* pos, u32* outUID) {
+    if (!data || !pos || !outUID || *pos >= size) {
+        return false;
+    }
+
+    const u8 nameLen = data[*pos];
+    (*pos)++;
+    if (*pos + nameLen > size) {
+        return false;
+    }
+
+    char nameBuf[256];
+    memcpy(nameBuf, data + *pos, nameLen);
+    nameBuf[nameLen] = 0;
+    *pos += nameLen;
+
+    *outUID = p3dHash(nameBuf);
+    return true;
+}
+
+static CompositeAnimData* ParseCompositeAnimChunk(const u8* data, u32 size) {
+    if (!data || size < 5) {
+        return nullptr;
+    }
+
+    u32 pos = 0;
+    u32 nameUID = 0;
+    if (!ReadPStringUID(data, size, &pos, &nameUID) || pos + 4 > size) {
+        return nullptr;
+    }
+
+    CompositeAnimData* compositeAnim = new CompositeAnimData();
+    compositeAnim->nameUID = nameUID;
+    compositeAnim->field12 = ReadU16(data + pos);
+    pos += 2;
+    compositeAnim->numParts = ReadU16(data + pos);
+    pos += 2;
+
+    if (compositeAnim->numParts != 0) {
+        compositeAnim->parts = new CompositeAnimPartData[compositeAnim->numParts]();
+    }
+
+    for (u32 partIndex = 0; partIndex < compositeAnim->numParts; partIndex++) {
+        CompositeAnimPartData& part = compositeAnim->parts[partIndex];
+        if (!ReadPStringUID(data, size, &pos, &part.animNameUID) || pos + 4 > size) {
+            delete compositeAnim;
+            return nullptr;
+        }
+
+        part.field0 = ReadU16(data + pos);
+        pos += 2;
+        part.field1 = ReadU16(data + pos);
+        pos += 2;
+    }
+
+    return compositeAnim;
+}
+
+STreeData* ParseP3DStreamFull(const u8* data, u32 size, CompositeAnimData** outCompositeAnim) {
     if (!data || size < 6) {
+        if (outCompositeAnim) {
+            *outCompositeAnim = nullptr;
+        }
         return nullptr;
     }
 
     World* world = g_game ? g_game->GetWorld() : nullptr;
     STreeData* skeleton = nullptr;
+    CompositeAnimData* compositeAnim = nullptr;
 
     u16 rootId = ReadU16(data);
     u32 rootSize = ReadU32(data + 2);
@@ -66,6 +129,15 @@ STreeData* ParseP3DStreamFull(const u8* data, u32 size) {
                 }
             }
         }
+        else if (chunkId == CHUNK_COMP_ANIM) {
+            if (!compositeAnim) {
+                compositeAnim = ParseCompositeAnimChunk(data + cpos + 6, chunkSize - 6);
+                if (compositeAnim) {
+                    LOG("[Skeleton] Parsed composite anim 0x%08X with %u parts",
+                        compositeAnim->nameUID, compositeAnim->numParts);
+                }
+            }
+        }
         else if (chunkId == CHUNK_MAPPED_STREE) {
             if (!skeleton) {
                 skeleton = ParseSTreeChunk(data + cpos + 6, chunkSize - 6, true);
@@ -87,6 +159,13 @@ STreeData* ParseP3DStreamFull(const u8* data, u32 size) {
     if (skeleton) {
         LOG("[Skeleton] Parsed STree: %u joints, %u map entries",
             skeleton->numJoints, skeleton->numMapEntries);
+    }
+
+    if (outCompositeAnim) {
+        *outCompositeAnim = compositeAnim;
+    }
+    else if (compositeAnim) {
+        delete compositeAnim;
     }
 
     return skeleton;

@@ -4,6 +4,7 @@
 #include "snd/prstsnd.h"
 #include "snd/hmndsnd.h"
 #include "snd/platsnd.h"
+#include "snd/wpnsnd.h"
 
 struct PlatformSoundLoadData {
     u8 pad[2];
@@ -295,6 +296,37 @@ s32 CSoundFactory::CreateObject(u32 typeId, CSound** outObj, u32 soundId) {
     *outObj = nullptr;
 
     switch (typeId) {
+        case 10050:
+        {
+            CWeaponSound* obj = new CWeaponSound();
+            u32 weaponIndex = 6;
+            if (soundId != 101) {
+                weaponIndex = soundId - 301;
+            }
+            if (weaponIndex >= 28) {
+                delete obj;
+                return -100;
+            }
+
+            struct {
+                u16 field16;
+                u16 hitHumanoid;
+                u16 explodePrimary;
+                u16 grab;
+                u16 explodeSecondary;
+                u16 miss;
+            } data = {};
+
+            data.hitHumanoid = static_cast<u16>(3 * weaponIndex + 47);
+            data.explodePrimary = static_cast<u16>(3 * weaponIndex + 48);
+            data.grab = static_cast<u16>(3 * weaponIndex + 46);
+            data.explodeSecondary = 45;
+            data.miss = 29;
+
+            obj->Load(&data);
+            *outObj = obj;
+            break;
+        }
         case 10040:
         {
             CPlatformSound* obj = new CPlatformSound();

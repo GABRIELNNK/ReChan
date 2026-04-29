@@ -15,6 +15,15 @@ struct CharSubTypeData {
     s16 hitPoints;
 };
 
+// PSX HUMNDATA.CPP table entry (type -> data pointer + threshold/id)
+struct HumanoidDataEntry {
+    s32 thingType;
+    void* data;
+    u16 dataID;
+};
+
+extern const HumanoidDataEntry* humanoidDataTable;
+
 s32 GetEnumFromHashTable(const HashEnum* table, u32 count, s32 hash);
 s32 GetPreActiveIdle(s32 hash);
 s32 GetTauntAnim(s32 hash);
@@ -24,3 +33,4 @@ s32 GetCharSubTypeScale(s32 charSubType);
 s16 GetCharSubTypeClut(s32 charSubType);
 s16 GetCharSubTypeHitPoints(s32 charSubType);
 u32 GetBehaviourNameHash(s32 charSubType);
+const HumanoidDataEntry* GetHumanoidData(u16 thingType);

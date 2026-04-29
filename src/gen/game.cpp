@@ -48,8 +48,6 @@ s16 g_selectedLevel = -1;   // gp+44: queued level ID (-1 = none)
 s32 g_directorActive = 0;   // gp+20: directorTimeOut gate used by gsPlayState
 s32 g_feInitialized = 0;    // gp+88: FE memory puddle initialized
 
-
-
 const Game::StateFunc Game::sStateTable[static_cast<int>(GameState::COUNT)] = {
     gsNullState,
     gsIntroState,
@@ -595,7 +593,7 @@ bool Game::gsTitleLoopState(Game* game) {
                 LoadXconFE();
                 game->PlayMovie("prolog.str", 1, 0);
                 if (g_characterManager) {
-                    g_characterManager->LoadCharTexture(0);
+                    g_characterManager->LoadCharTexture((u32)AITypes::TT_PLAYER);
                 }
                 g_frontEndSound->ProcessSoundEvent(FE_SND_MENU_ACCEPT);
                 LOG("[Game] TitleLoop: fade complete -> OpenFE");
@@ -1372,7 +1370,7 @@ cleanup:
             g_oxFontFile->ReloadFont("XC/FONTS.1");
         }
         if (g_characterManager) {
-            g_characterManager->LoadCharTexture(0);
+            g_characterManager->LoadCharTexture((u32)AITypes::TT_PLAYER);
         }
     }
 

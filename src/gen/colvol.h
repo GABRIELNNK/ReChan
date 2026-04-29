@@ -40,3 +40,18 @@ void SetCollisionBoxExtent(tagCollisionBox& box);
 // Rotates the relative offset by -rotY before checking against box XZ bounds.
 bool CheckStaticHorizontalBoxPointCollision(
     const LVector& posA, const tagCollisionBox& box, s32 rotY, const LVector& posB);
+
+// PSX: CheckStaticBoxSphereCollision (COLVOL.CPP:461, 0x800AA22C)
+// Tests if a sphere centered at spherePos intersects an oriented box centered at boxPos.
+bool CheckStaticBoxSphereCollision(
+    const LVector& boxPos,
+    const tagCollisionBox& box,
+    s32 rotY,
+    const LVector& spherePos,
+    const tagCollisionSphere& sphere);
+
+bool CheckStaticCylinderSphereCollision(
+    const LVector& cylPos,
+    const tagCollisionCylinder& cyl,
+    const LVector& spherePos,
+    const tagCollisionSphere& sphere);

@@ -1,10 +1,13 @@
 #pragma once
 #include "p3d/skeleton.h"
 
+struct CompositeAnimData;
+
 // Parse the P3D stream (0xFF04 container) extracting BOTH textures (to VRAM)
 // and skeleton data (returned). Textures are uploaded via World::UploadToVRAM.
-// Returns the STreeData if found, nullptr otherwise.
-STreeData* ParseP3DStreamFull(const u8* data, u32 size);
+// When requested, also preserves the raw character composite animation
+// definition from chunk 0x4007.
+STreeData* ParseP3DStreamFull(const u8* data, u32 size, CompositeAnimData** outCompositeAnim = nullptr);
 
 // Parse the raw tTransformAnim binary blob and apply frame-0 values to skeleton joints.
 // PSX: tTranAnimLoader2::Load relocates the blob, then UpdateJoints writes to joints.

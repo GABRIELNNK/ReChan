@@ -260,6 +260,19 @@ static void p3dVecTimesMatrixLocal(const LVector& in, const Mat4& matrix, LVecto
     out.z = TruncToS32((f32)in.x * matrix.m[2] + (f32)in.y * matrix.m[6] + (f32)in.z * matrix.m[10] + matrix.m[14]);
 }
 
+static void BuildModelWorldMatrix(const Model* model, Mat4& worldMatrix) {
+    worldMatrix = Mat4();
+    if (!model) {
+        return;
+    }
+
+    p3dBuildRotMatrixZYX(model->rotX, model->rotY, model->rotZ, worldMatrix);
+
+    const SModel* skeletalModel = static_cast<const SModel*>(model);
+    worldMatrix.ScaleRotation(FIX16_TO_FLOAT(skeletalModel->scale));
+    worldMatrix.SetTranslation((f32)model->posX, (f32)model->posY, (f32)model->posZ);
+}
+
 static void MYrmCartesianToSphericalLocal(const LVector& cartesian, LVector& spherical) {
     const s32 mag = (s32)rmMag3((f32)cartesian.x, (f32)cartesian.y, (f32)cartesian.z);
     if (mag == 0) {
@@ -669,7 +682,17 @@ s32 AnimationMatrices::CopyMatrix(u32 joint, const Mat4& jointMatrix) {
         return 0;
     }
 
-    WritePsxMatrix(matrixData, jointMatrix);
+    Humanoid* owner = static_cast<Humanoid*>(GetHumanoid());
+    Model* model = owner ? static_cast<Model*>(owner->model) : nullptr;
+    if (model) {
+        Mat4 worldMatrix;
+        BuildModelWorldMatrix(model, worldMatrix);
+        WritePsxMatrix(matrixData, worldMatrix * jointMatrix);
+    }
+    else {
+        WritePsxMatrix(matrixData, jointMatrix);
+    }
+
     copied = 1;
     return 1;
 }
