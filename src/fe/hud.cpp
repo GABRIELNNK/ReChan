@@ -726,7 +726,7 @@ void HUD::UpdateHealth(s32 playerHP, s32 foeHP) {
 // PSX: SetFoe__3HUDP8Humanoid (HUD.CPP:767, 0x8003FFF4)
 void HUD::SetFoe(Humanoid* foe) {
     MARKFUNCTION(0x8003FFF4);
-    if (!currentFoe) {
+    if (!foe) {
         return;
     }
     // Check if foe is a boss type - bosses don't use the foe health bar
