@@ -50,11 +50,12 @@ in vec2 vUV;
 flat in vec2 vTexInfo;
 uniform usampler2D uVRAM;
 uniform int uHasVRAM;
+uniform float uAlphaScale;
 out vec4 FragColor;
 void main() {
     float tpageF = vTexInfo.x;
     if (uHasVRAM == 0 || tpageF < 0.0) {
-        FragColor = vec4(vColor, 1.0);
+        FragColor = vec4(vColor, uAlphaScale);
         return;
     }
 
@@ -98,7 +99,7 @@ void main() {
     float g = float((clutWord >> 5u) & 0x1Fu) / 31.0;
     float b = float((clutWord >> 10u) & 0x1Fu) / 31.0;
 
-    FragColor = vec4(r, g, b, 1.0) * vec4(vColor, 1.0);
+    FragColor = vec4(r, g, b, uAlphaScale) * vec4(vColor, 1.0);
 }
 )";
 
@@ -439,7 +440,16 @@ bool glDisplay::InitDisplay(const pddiDisplayInit& init) {
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
     ImGui::StyleColorsDark();
+
+    if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+        ImGuiStyle& style = ImGui::GetStyle();
+        style.WindowRounding = 0.0f;
+        style.Colors[ImGuiCol_WindowBg].w = 1.0f;
+    }
+
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 450");
     imguiInitialized = true;
@@ -476,8 +486,18 @@ void glDisplay::RenderOverlay() {
     if (overlayCallback) {
         overlayCallback();
     }
+
+    ImGuiIO& io = ImGui::GetIO();
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+    if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+        GLFWwindow* backupContext = glfwGetCurrentContext();
+        ImGui::UpdatePlatformWindows();
+        ImGui::RenderPlatformWindowsDefault();
+        glfwMakeContextCurrent(backupContext);
+    }
+
     imguiFrameStarted = false;
 }
 
@@ -1006,6 +1026,9 @@ void glContext::DrawPrimBuffer(pddiPrimBuffer* buffer) {
         return;
 
     glUseProgram(program3D);
+
+    const float alphaScale = (cachedBlendMode == PDDI_BLEND_ALPHA) ? 0.5f : 1.0f;
+    glUniform1f(glGetUniformLocation(program3D, "uAlphaScale"), alphaScale);
 
     Mat4 mvp = projection * (viewMatrix * worldMatrix);
     glUniformMatrix4fv(glGetUniformLocation(program3D, "uMVP"),
