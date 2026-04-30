@@ -118,6 +118,18 @@ void LevelManager::DeleteOriginalModelsByID(s32 id) {
     MARKFUNCTION(0x80058E70);
 
     const s8 matchID = static_cast<s8>(id);
+
+    ccMinNode* streeNode = streeList.head;
+    while (streeNode) {
+        ccMinNode* next = streeNode->next;
+        OriginalBasic* original = static_cast<OriginalBasic*>(static_cast<ccNode*>(streeNode));
+        if (GetOriginalStoreID(original) == matchID) {
+            streeList.RemNode(streeNode);
+            delete streeNode;
+        }
+        streeNode = next;
+    }
+
     for (s32 i = 0; i < 4; i++) {
         ccMinNode* n = modelLists[i].head;
         while (n) {

@@ -775,6 +775,9 @@ Director::Director() {
 // PSX: _._8Director (DIRECTOR.CPP:2681, 0x8003BE10)
 Director::~Director() {
     MARKFUNCTION(0x8003BE10);
+    if (g_director == this) {
+        g_director = nullptr;
+    }
 }
 
 // PSX: InternalOpen__8Director (DIRECTOR.CPP:2704, 0x800CA2AC)
@@ -791,6 +794,7 @@ void Director::InternalOpen() {
 // PSX: InternalClose__8Director (DIRECTOR.CPP:2757, 0x8003C11C)
 void Director::InternalClose() {
     MARKFUNCTION(0x8003C11C);
+    cleanUpTexAnim();
     handlerSetA.PurgeHandlers();
     handlerSetB.PurgeHandlers();
     Manager::InternalClose();

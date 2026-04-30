@@ -276,6 +276,20 @@ CharFile* g_charFileList = nullptr;
 // PSX: gp+3468 - mesh type for reload
 static s32 g_playerMeshType = 0;
 
+static bool IsLiveCharFilePointer(const CharFile* cf) {
+    if (!cf) {
+        return false;
+    }
+
+    for (CharFile* cur = g_charFileList; cur; cur = cur->next) {
+        if (cur == cf) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 struct AnimGroupEntry {
     s32 startEnum;
     u32 count;
@@ -701,11 +715,26 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
 
     s32 slotIdx = FindSlot(type);
     if (type != 0 && slotIdx >= 0) {
-        slots[slotIdx].loadCount++;
-        if (callback) {
-            callback->Callback();
+        CharSlot& existingSlot = slots[slotIdx];
+        if (existingSlot.charFile && IsLiveCharFilePointer(existingSlot.charFile)) {
+            existingSlot.loadCount++;
+            if (callback) {
+                callback->Callback();
+            }
+            return;
         }
-        return;
+
+        if (existingSlot.dataBuffer) {
+            std::free(existingSlot.dataBuffer);
+            existingSlot.dataBuffer = nullptr;
+        }
+
+        existingSlot.charFile = nullptr;
+        existingSlot.model = nullptr;
+        existingSlot.loadCount = 0;
+        existingSlot.thingType = CharSlot::EMPTY_SENTINEL;
+        memset(existingSlot.animIndexTable, 0xFF, CharSlot::ANIM_TABLE_SIZE);
+        slotIdx = -1;
     }
 
     // Find slot - PSX: type 0 -> slot 0, else search slots 1-3 for empty
@@ -963,7 +992,9 @@ void CharacterManager::UnloadCharacter(u32 type) {
     // TODO: find/delete OriginalSTree from LevelManager
 
     // Clear slot
+    slot.loadCount = 0;
     slot.thingType = CharSlot::EMPTY_SENTINEL;
+    memset(slot.animIndexTable, 0xFF, CharSlot::ANIM_TABLE_SIZE);
 
     // Release CharFile
     if (slot.charFile) {
@@ -1186,7 +1217,18 @@ void CharacterManager::LoadAnimationBatch(u32 type, s32 animEnum, CharMgrCallbac
     }
 
     CharFile* cf = slot.charFile;
-    if (!cf) {
+    if (!cf || !IsLiveCharFilePointer(cf)) {
+        if (slot.dataBuffer) {
+            std::free(slot.dataBuffer);
+            slot.dataBuffer = nullptr;
+        }
+
+        slot.charFile = nullptr;
+        slot.model = nullptr;
+        slot.loadCount = 0;
+        slot.thingType = CharSlot::EMPTY_SENTINEL;
+        memset(slot.animIndexTable, 0xFF, CharSlot::ANIM_TABLE_SIZE);
+
         if (callback) callback->Callback();
         return;
     }
@@ -1417,6 +1459,11 @@ void CharacterManager::PurgeLevel() {
 
         // PSX: UnloadAnimation(type, 0, 392) = unload ALL animations
         UnloadAnimation(type, 0, CharSlot::ANIM_TABLE_SIZE);
+
+        // Host guard: force full slot release even if instance-side references
+        // were not balanced during UnPopulate.
+        slots[i].loadCount = 1;
+
         UnloadCharacter(type);
         CloseCharacter(type);
     }

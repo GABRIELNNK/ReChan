@@ -1,4 +1,5 @@
 #include "common.h"
+#include "ai/obstacle.h"
 #include "ai/player.h"
 #include "gen/world.h"
 #include "gen/ai.h"
@@ -1870,6 +1871,15 @@ bool World::LoadLevelIndex(u32 levelIndex) {
 
     currentPetalIndex = targetPetalIndex;
 
+    // Level-begin stats must reset before Populate registers collectibles.
+    if (g_scoreManager) {
+        g_scoreManager->HandleLevelBegin();
+    }
+
+    if (g_hud) {
+        g_hud->OnLoadLevel();
+    }
+
     // PSX: rsEvent(4, petalSoundIDs[levelIndex][targetPetalIndex] - 1, 0, 0)
     if (petalSoundIDs && levelIndex < (u32)levelCount) {
         s32 soundLocation = (s32)petalSoundIDs[levelIndex][targetPetalIndex] - 1;
@@ -2566,19 +2576,45 @@ void World::OffsetToPreventSeams(LVector& pos, const LVector& playerPos) {
 }
 
 void World::Unload() {
-    UnloadUVPrimData();
-    UnloadCBVPrimData();
-    PurgeSwitches();
-
-    blockMgr.InternalClose();
-    if (g_ai) {
-        g_ai->UnPopulate(0);
+    if (g_hud) {
+        g_hud->OnUnloadLevel();
     }
+
+    const bool hadLoadedLevel = !streamData.empty() || (vramHandle != 0);
+    if (hadLoadedLevel) {
+        blockMgr.InternalClose();
+        if (g_ai) {
+            g_ai->UnPopulate(0);
+        }
+
+        Obstacle_ClearPetalAnimList();
+        UnloadUVPrimData();
+        UnloadCBVPrimData();
+        PurgeSwitches();
+
+        if (g_director) {
+            g_director->PurgeAnims();
+        }
+        if (g_display && g_display->GetCamera()) {
+            g_display->GetCamera()->PurgeAnims();
+        }
+        if (g_levelManager) {
+            g_levelManager->PurgeLevel();
+        }
+    }
+    else {
+        UnloadUVPrimData();
+        UnloadCBVPrimData();
+        PurgeSwitches();
+    }
+
     streamData.clear();
     if (vramHandle && p3d::context) {
         p3d::context->DestroyVRAMTexture(vramHandle);
         vramHandle = 0;
     }
+
+    rsEvent(RS_UNLOAD_LEVEL, 0, 0, 0);
 }
 
 // PSX: UnloadLevelPart2__5World (WORLD.CPP:1355, 0x80046208)
@@ -2645,6 +2681,15 @@ void World::LoadPetal(u32 petalIndex) {
 
     targetPetalIndex = petalIndex;
     currentPetalIndex = petalIndex;
+
+    // Petal load is a new level segment; clear per-level score/collect state first.
+    if (g_scoreManager) {
+        g_scoreManager->HandleLevelBegin();
+    }
+
+    if (g_hud) {
+        g_hud->OnLoadLevel();
+    }
 
     // PSX: LevelManager::LoadPetal re-reads from Stream at petal position.
     // PC: re-parse the already-loaded LCF data for the new petal.

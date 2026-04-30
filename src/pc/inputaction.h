@@ -150,7 +150,7 @@ public:
     s32 GetMouseButtonBinding(Action action) const;
     s32 GetGamepadButtonBinding(Action action) const;
 
-    u32 GetPadButtons() const;
+    u32 GetPadButtons(bool menuActionsEnabled) const;
     bool UsesAnalogPad() const { return gamepadActive; }
     void GetPadAnalog(u8& lx, u8& ly, u8& rx, u8& ry) const;
 

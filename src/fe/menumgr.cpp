@@ -378,13 +378,21 @@ void MenuMgr::PopMenu() {
 
 u32 MenuMgr::FilterHostMenuButtons(u32 buttons) const {
 #if ESC_BACKS_OUT_SUBMENUS_FIRST
-    if (screenStackDepth > 1 && g_actionInput && !g_actionInput->IsGamepadActive()) {
+    if (g_actionInput && !g_actionInput->IsGamepadActive()) {
         const int openCloseKey = g_actionInput->GetKeyBinding(ACTION_OPEN_CLOSE_MENU);
         const int backKey = g_actionInput->GetKeyBinding(ACTION_MENU_BACK);
-        if (openCloseKey != 0 && openCloseKey == backKey
+        const bool sharedEsc = (openCloseKey != 0
+            && openCloseKey == backKey
             && g_actionInput->IsHeld(ACTION_OPEN_CLOSE_MENU)
-            && g_actionInput->IsHeld(ACTION_MENU_BACK)) {
-            buttons &= ~PsxPad::Start;
+            && g_actionInput->IsHeld(ACTION_MENU_BACK));
+
+        if (sharedEsc) {
+            if (screenStackDepth > 1) {
+                buttons &= ~PsxPad::Start;
+            }
+            else {
+                buttons &= ~PsxPad::Triangle;
+            }
         }
     }
 #endif
@@ -440,6 +448,8 @@ s32 MenuMgr::Invoke() {
     MARKFUNCTION(0x8005FB00);
     if (!active) {
         Activate();
+        Update();
+        return state;
     }
     QueryInput(true);
     Update();

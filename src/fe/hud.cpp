@@ -187,6 +187,134 @@ static void BuildHudWidescreenAnchors(xcSection* sectionPtr, u8* rawData) {
     }
 }
 
+static bool GetHudOverlayBoundsX(xcOverlayData* overlay, u8* rawData, s32& outMinX, s32& outMaxX) {
+    if (!overlay || !rawData) {
+        return false;
+    }
+
+    const xcOverlayItem* items = overlay->GetItems();
+    bool found = false;
+    s32 minX = 0;
+    s32 maxX = 0;
+
+    auto trackX = [&](s32 x) {
+        if (!found) {
+            minX = x;
+            maxX = x;
+            found = true;
+        }
+        else {
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+        }
+    };
+
+    for (u32 i = 0; i < overlay->primCount; i++) {
+        u8* prim = rawData + items[i].dataOffset;
+        xcPrimHeader* hdr = reinterpret_cast<xcPrimHeader*>(prim);
+        if (hdr->subtype == 5) {
+            continue;
+        }
+
+        if (hdr->type == XC_PRIM_POLYF4) {
+            const xcPolyF4Prim* poly = reinterpret_cast<const xcPolyF4Prim*>(prim);
+            s16 bx0, by0, bx1, by1;
+            poly->GetBounds(bx0, by0, bx1, by1);
+            trackX(bx0);
+            trackX(bx1);
+            continue;
+        }
+        if (hdr->type == XC_PRIM_POLYG4) {
+            const xcPolyG4Prim* poly = reinterpret_cast<const xcPolyG4Prim*>(prim);
+            s16 bx0, by0, bx1, by1;
+            poly->GetBounds(bx0, by0, bx1, by1);
+            trackX(bx0);
+            trackX(bx1);
+            continue;
+        }
+
+        oxOvl helper;
+        helper.overlay = overlay;
+        s16 x = 0, y = 0;
+        if (helper.GetPrimPos(prim, x, y)) {
+            trackX(x);
+        }
+    }
+
+    if (!found) {
+        return false;
+    }
+
+    outMinX = minX;
+    outMaxX = maxX;
+    return true;
+}
+
+static bool HudWidescreenAnchorsLookPreShifted(u8* rawData) {
+#if FIX_ASPECT_RATIO
+    if (!rawData || s_hudAnchorCount == 0) {
+        return false;
+    }
+
+    const s32 shiftX = GetHudWidescreenShiftX();
+    if (shiftX <= 0) {
+        return false;
+    }
+
+    const s32 threshold = (shiftX > 16) ? (shiftX / 4) : 4;
+    bool leftShifted = false;
+    bool rightShifted = false;
+
+    for (s32 i = 0; i < s_hudAnchorCount; i++) {
+        const HudOverlayAnchor& a = s_hudAnchors[i];
+        if (!a.overlay || a.direction == 0) {
+            continue;
+        }
+
+        s32 minX = 0;
+        s32 maxX = 0;
+        if (!GetHudOverlayBoundsX(a.overlay, rawData, minX, maxX)) {
+            continue;
+        }
+
+        if (a.direction < 0 && minX < -threshold) {
+            leftShifted = true;
+        }
+        if (a.direction > 0 && maxX > static_cast<s32>(DEFAULT_SCREEN_WIDTH) + threshold) {
+            rightShifted = true;
+        }
+
+        if (leftShifted && rightShifted) {
+            return true;
+        }
+    }
+#endif
+
+    return false;
+}
+
+static void PrimeHudWidescreenAppliedOffsetsIfNeeded(u8* rawData) {
+    if (!rawData || s_hudAnchorCount == 0) {
+        return;
+    }
+
+    const s32 shiftX = GetHudWidescreenShiftX();
+    if (shiftX <= 0) {
+        return;
+    }
+
+    if (!HudWidescreenAnchorsLookPreShifted(rawData)) {
+        return;
+    }
+
+    for (s32 i = 0; i < s_hudAnchorCount; i++) {
+        HudOverlayAnchor& a = s_hudAnchors[i];
+        if (a.overlay && a.direction != 0) {
+            a.appliedX = a.direction * shiftX;
+        }
+    }
+}
+
 // PC: called every frame from SelfUpdate - recomputes shiftX and shifts only the delta.
 static void UpdateHudWidescreenAnchors(u8* rawData) {
     if (!rawData || s_hudAnchorCount == 0) {
@@ -813,11 +941,25 @@ void HUD::ToggleShowAll() {
 // PSX: OnLoadLevel__3HUD (HUD.CPP:887, 0x8004028C)
 void HUD::OnLoadLevel() {
     MARKFUNCTION(0x8004028C);
+
+    u8* raw = section ? section->rawData : nullptr;
+    BuildHudWidescreenAnchors(section, raw);
+    if (raw) {
+        PrimeHudWidescreenAppliedOffsetsIfNeeded(raw);
+        UpdateHudWidescreenAnchors(raw);
+        FixHubPromptBottomBar(section, raw);
+    }
 }
 
 // PSX: OnUnloadLevel__3HUD (HUD.CPP:891, 0x80040294)
 void HUD::OnUnloadLevel() {
     MARKFUNCTION(0x80040294);
+
+    u8* raw = section ? section->rawData : nullptr;
+    if (raw) {
+        ResetHudWidescreenAnchors(raw);
+    }
+
     s_hudAnchorCount = 0;
     if (bossHandle) {
         bossHandle->refCount--;

@@ -242,19 +242,19 @@ s32 ActionInput::GetGamepadButtonBinding(Action action) const {
     return GpBtn::NONE;
 }
 
-u32 ActionInput::GetPadButtons() const {
+u32 ActionInput::GetPadButtons(bool menuActionsEnabled) const {
     u32 buttons = 0;
 
-    if (IsHeld(ACTION_MOVE_UP) || IsHeld(ACTION_MENU_UP)) {
+    if (IsHeld(ACTION_MOVE_UP) || (menuActionsEnabled && IsHeld(ACTION_MENU_UP))) {
         buttons |= 0x1000;
     }
-    if (IsHeld(ACTION_MOVE_RIGHT) || IsHeld(ACTION_MENU_RIGHT)) {
+    if (IsHeld(ACTION_MOVE_RIGHT) || (menuActionsEnabled && IsHeld(ACTION_MENU_RIGHT))) {
         buttons |= 0x2000;
     }
-    if (IsHeld(ACTION_MOVE_DOWN) || IsHeld(ACTION_MENU_DOWN)) {
+    if (IsHeld(ACTION_MOVE_DOWN) || (menuActionsEnabled && IsHeld(ACTION_MENU_DOWN))) {
         buttons |= 0x4000;
     }
-    if (IsHeld(ACTION_MOVE_LEFT) || IsHeld(ACTION_MENU_LEFT)) {
+    if (IsHeld(ACTION_MOVE_LEFT) || (menuActionsEnabled && IsHeld(ACTION_MENU_LEFT))) {
         buttons |= 0x8000;
     }
 
@@ -276,10 +276,10 @@ u32 ActionInput::GetPadButtons() const {
     if (IsHeld(ACTION_GRAB)) {
         buttons |= 0x0020;
     }
-    if (IsHeld(ACTION_MENU_BACK)) {
+    if (menuActionsEnabled && IsHeld(ACTION_MENU_BACK)) {
         buttons |= 0x0010;
     }
-    if (IsHeld(ACTION_JUMP) || IsHeld(ACTION_MENU_CONFIRM)) {
+    if (IsHeld(ACTION_JUMP) || (menuActionsEnabled && IsHeld(ACTION_MENU_CONFIRM))) {
         buttons |= 0x0040;
     }
     if (IsHeld(ACTION_PUNCH)) {

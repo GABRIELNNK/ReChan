@@ -202,7 +202,8 @@ void InputManager::ServiceHostPads(const ActionInput* actionInput) {
 
     pad0.padType = analogPad ? 's' : 'A';
     if (actionInput) {
-        buttons = actionInput->GetPadButtons();
+        const bool menuActionsEnabled = (pad0.modeMap == sMenuControlMode);
+        buttons = actionInput->GetPadButtons(menuActionsEnabled);
 
         if (pad0.modeMap == sTitleControlMode && actionInput->IsHeld(ACTION_MENU_CONFIRM)) {
             buttons |= PsxPad::Start;
