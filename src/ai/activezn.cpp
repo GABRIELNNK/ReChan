@@ -154,6 +154,24 @@ bool ActiveZone::IsInActiveZone(Thing* thing) const {
     return box.IsInside(thing->pos);
 }
 
+// PSX: GetActiveZoneCenterPoint__10ActiveZone (ACTIVEZN.CPP:217, 0x800A6B40)
+void ActiveZone::GetActiveZoneCenterPoint(LVector& outCenter) const {
+    MARKFUNCTION(0x800A6B40);
+
+    // PSX performs arithmetic shift midpoint with sign correction.
+    const u32 sumX = (u32)box.minX + (u32)box.maxX;
+    const u32 sumY = (u32)box.minY + (u32)box.maxY;
+    const u32 sumZ = (u32)box.minZ + (u32)box.maxZ;
+
+    const s32 centerX = (s32)((sumX + (sumX >> 31)) >> 1);
+    const s32 centerY = (s32)((sumY + (sumY >> 31)) >> 1);
+    const s32 centerZ = (s32)((sumZ + (sumZ >> 31)) >> 1);
+
+    outCenter.x = centerX;
+    outCenter.y = centerY;
+    outCenter.z = centerZ;
+}
+
 // PSX: FindFirstValidPath__10ActiveZoneP8Humanoid (ACTIVEZN.CPP:942, 0x800A6F98)
 LinearPath* ActiveZone::FindFirstValidPath(Humanoid* humanoid) {
     MARKFUNCTION(0x800A6F98);

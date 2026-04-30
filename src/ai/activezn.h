@@ -54,6 +54,7 @@ public:
     s32 GetNumberOfThinkingMembers() const;
     s32 AllowedToMoveIn(Humanoid* humanoid);
     bool IsInActiveZone(class Thing* thing) const;
+    void GetActiveZoneCenterPoint(LVector& outCenter) const;
     LinearPath* FindFirstValidPath(Humanoid* humanoid);
     s32 DoAICheck(LinearPath* path, s32 nodeIndex, Humanoid* humanoid);
     s32 DoActionsAtNode(LinearPath* path, s32 nodeIndex, Humanoid* humanoid);

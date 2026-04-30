@@ -104,6 +104,7 @@ struct Behaviour {
     s32 BreakOffPathAndFight();
     void InitPathAIState(LinearPath* path);
     void ComplexAttack();
+    s32 CounterAttack();
     s32 NavigateWorld(s32& moveDirection);
     s32 NavigateEnemies(s32 mode);
     s32 LookAheadFloorCheck(s16 angleOffset, s32 distance, s32 radius);
@@ -120,6 +121,15 @@ struct Behaviour {
     static void BackoffAndTaunt(Behaviour* behaviour);
     static void BackOutOfTheFight(Behaviour* behaviour);
     static void NDMS(Behaviour* behaviour);
+    static void ButchDMS(Behaviour* behaviour);
+    static void ButchDMS_Charge(Behaviour* behaviour);
+    static void GrontarDMS(Behaviour* behaviour);
+    static void PaulDMS(Behaviour* behaviour);
+    static void OscarDMS(Behaviour* behaviour);
+    static void OscarHenchmanDMS(Behaviour* behaviour);
+    static void DanteDMS_Phase1(Behaviour* behaviour);
+    static void DanteDMS_Phase2(Behaviour* behaviour);
+    static void DanteDMS_Phase3(Behaviour* behaviour);
     static void Jumping(Behaviour* behaviour);
     static void DieWhenWeHitTheGround(Behaviour* behaviour);
     static void SubwayDodgeRight(Behaviour* behaviour);

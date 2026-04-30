@@ -388,6 +388,7 @@ public:
     virtual void ProcessControl();
     void Kill() override;
     void Killed();
+    s32 GetStraifPhase();
 
     void RequestAction(u32 actionID);
     void FaceThing(Thing* target, s32 immediate);

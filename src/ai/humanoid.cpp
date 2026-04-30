@@ -2412,6 +2412,51 @@ void Humanoid::Killed() {
     flags |= TF_DEAD;
 }
 
+// PSX: GetStraifPhase__8Humanoid (HUMANOID.CPP:9476, 0x8006CF7C)
+s32 Humanoid::GetStraifPhase() {
+    MARKFUNCTION(0x8006CF7C);
+
+    if (actionState != AS_BACKFLIP) {
+        return 0;
+    }
+
+    if (!model) {
+        return 0;
+    }
+
+    const u8* modelBytes = reinterpret_cast<const u8*>(model);
+    const void* animState = *reinterpret_cast<void* const*>(modelBytes + 0x20);
+    if (!animState) {
+        return 0;
+    }
+
+    const u8* animBytes = reinterpret_cast<const u8*>(animState);
+    const s32 animWord44 = *reinterpret_cast<const s32*>(animBytes + 0x44);
+    const s16 animHalf3E = *reinterpret_cast<const s16*>(animBytes + 0x3E);
+    const s32 animWord2C = *reinterpret_cast<const s32*>(animBytes + 0x2C);
+    const s32 animWord54 = *reinterpret_cast<const s32*>(animBytes + 0x54);
+
+    const s32 animTop16 = animWord44 >> 16;
+    const s32 animTop15Signed = animWord44 >> 17;
+
+    if ((s32)animHalf3E == animTop15Signed) {
+        return 2;
+    }
+
+    if (animWord2C == 0) {
+        return (((s32)animHalf3E ^ animTop16) != 0) ? 1 : 0;
+    }
+
+    if (animWord2C == 1) {
+        if (animHalf3E != 0) {
+            return 0;
+        }
+        return (animWord54 < 2) ? 1 : 0;
+    }
+
+    return 0;
+}
+
 void Humanoid::RequestAction(u32 actionID) {
     MARKFUNCTION(0x8006CFFC);
     commandBits |= (1 << actionID);

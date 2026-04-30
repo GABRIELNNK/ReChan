@@ -54,12 +54,137 @@ static constexpr s32 NDMS_MID_DIST_THRESHOLD = 0x4B0;
 static constexpr s32 NDMS_HEIGHT_DELTA_THRESHOLD = 0x100;
 static constexpr s32 NDMS_FLOOR_SAFE_DELTA_THRESHOLD = 0x101;
 
+// PSX BEHAVEB globals (0x800DD5E0+).
+static constexpr s32 BUTCH_FAR_DIST = 0x578;
+static constexpr s32 BUTCH_ATTACK_DIST = 0x320;
+static constexpr s32 GRONTAR_FAR_ATTACK_DIST = 0x708;
+static constexpr s32 GRONTAR_CLOSE_ATTACK_DIST = 0x352;
+static constexpr s32 WALL_CHECK_DISTANCE = 0xC0;
+static constexpr s32 WALL_CHECK_DISTANCE_RADIUS = 0x46;
+static constexpr s32 OSCAR_CLOSE_DIST = 0x311;
+static constexpr s32 OSCAR_MID_DIST = 0x4B0;
+static constexpr s32 OSCAR_ANGLE_WINDOW_START = 0x2000;
+static constexpr s32 OSCAR_ANGLE_WINDOW_RANGE = 0xC38E;
+static constexpr s32 OSCAR_HENCH_ANGLE_WINDOW_START = 0x1555;
+static constexpr s32 OSCAR_HENCH_ANGLE_WINDOW_RANGE = 0xD8E3;
+static constexpr s32 OSCAR_HENCH_SYNC_COUNTER_MAX = 15;
+static constexpr s32 DANTE_PHASE1_HEALTH_SCALE = 0xB333;
+static constexpr s32 DANTE_PHASE1_DIST_THRESHOLD = 0x3E8;
+static constexpr s32 DANTE_PHASE2_HEALTH_SCALE = 0x6666;
+static constexpr s32 DANTE_PHASE2_CLOSE_DIST = 0x400;
+static constexpr s32 DANTE_PHASE3_CLOSE_DIST = 0x3E8;
+static constexpr s32 DANTE_PHASE3_MID_DIST = 0x8CA;
+static constexpr char DANTE_PHASE2_DESK_SUBZONE_NAME[] = "desk";
+static constexpr s32 PAUL_CLOSE_ATTACK_DIST = 0x352;
+static constexpr s32 PAUL_DANCE_TIME = 0xC8;
+static constexpr s32 PAUL_RECOVER_TIME = 0x64;
+static constexpr s32 PAUL_SPOTLIGHT_RADIUS = 0x190;
+static constexpr char PAUL_SPOTLIGHT_NAME[] = "BossSpotLight";
+
 // PSX BreakOffPathAndFight field-of-view checks.
 static constexpr s32 BREAKOFF_FIELD_LEFT = 0x3555;
 static constexpr s32 BREAKOFF_FIELD_RIGHT = 0x3555;
 
 // PSX global at 0x800DD9B8 set by SetAIHandler for Oscar henchmen paths.
 static Humanoid* OscarsHenchman = nullptr;
+// PSX global at 0x800DD9B4 used by Oscar henchman combat decisions.
+static Humanoid* bossOscar = nullptr;
+// PSX global at 0x800DD9BC reserved for Paul boss wiring.
+static Humanoid* bossPaul = nullptr;
+// PSX gp+0xCC8 counter used by OscarHenchmanDMS.
+static s32 OscarHenchmanSyncCounter = 0;
+
+static bool IsPlayerAggressiveCombatState(s32 actionState) {
+    if ((u32)(actionState - 0x45) < 4u) {
+        return true;
+    }
+    return actionState == 0x38;
+}
+
+static bool IsOscarSyncActionState(s32 actionState) {
+    switch (actionState) {
+    case 0x24:
+    case 0x25:
+    case 0x26:
+    case 0x3B:
+    case 0x3C:
+    case 0x3D:
+    case 0x3E:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool IsDantePhase1PressureState(s32 actionState) {
+    switch (actionState) {
+    case 6:
+    case 8:
+    case 13:
+    case 16:
+    case 33:
+    case 35:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static Thing* FindBossSpotLight() {
+    if (!g_ai) {
+        return nullptr;
+    }
+
+    return g_ai->FindThing(p3dHash(PAUL_SPOTLIGHT_NAME));
+}
+
+static s32 ClipAngle360Local(s32 angle) {
+    return angle & ANGLE_FULL_ROTATION;
+}
+
+static s32 GetFaceAngleDataValue(const Humanoid* humanoid, s32 offset) {
+    const u8* bytes = reinterpret_cast<const u8*>(humanoid->faceAngleData);
+    return (s32)(*reinterpret_cast<const s16*>(bytes + offset));
+}
+
+static s32 GetFaceAngleDataForwardAngle(const Humanoid* humanoid) {
+    return GetFaceAngleDataValue(humanoid, 0x2C);
+}
+
+static s32 GetFaceAngleDataBackAngle(const Humanoid* humanoid) {
+    return GetFaceAngleDataValue(humanoid, 0x2E);
+}
+
+static bool ShouldAdvanceDantePhase(const Humanoid* humanoid, s32 scale) {
+    const s64 scaledMaxHealth = ((s64)(u32)humanoid->maxHealth * (s64)scale) >> 16;
+    return scaledMaxHealth >= (s64)(u32)humanoid->health;
+}
+
+// PSX: wallCheck(Humanoid*, long) (BEHAVEB.CPP:1274, 0x8001E05C)
+static s32 wallCheck(Humanoid* humanoid, s32 angle) {
+    MARKFUNCTION(0x8001E05C);
+
+    if (!humanoid) {
+        return 0;
+    }
+
+    s32 collisionRatio = 0;
+    LVector wallNormal = {};
+    LVector hitPoint = {};
+    s32 verticalSpan = 0;
+    s32 wallMaterial = 0;
+
+    return humanoid->CheckWallCollision(
+        (s16)angle,
+        WALL_CHECK_DISTANCE,
+        WALL_CHECK_DISTANCE_RADIUS,
+        500,
+        collisionRatio,
+        wallNormal,
+        hitPoint,
+        verticalSpan,
+        wallMaterial);
+}
 
 static void RestoreDeferredHandlerOrNDMS(Behaviour* self) {
     if (self->nextHandlerDispatch != 0) {
@@ -134,7 +259,9 @@ void Behaviour::SetAIHandler(u32 handlerType) {
     handler = Idle;
 
     if (owner && behaviourHash == p3dHash("OscarHenchmen")) {
-		// TODO
+        handlerThisOffset = 0;
+        handlerDispatch = -1;
+        handler = OscarHenchmanDMS;
         OscarsHenchman = owner;
         return;
     }
@@ -145,15 +272,1575 @@ void Behaviour::SetAIHandler(u32 handlerType) {
         handler = PlayerUserControl;
         break;
     case AITypes::TT_GRONTAR:
-    case AITypes::TT_PAUL:
-    case AITypes::TT_OSCAR:
+        handler = GrontarDMS;
+        break;
     case AITypes::TT_DANTE:
+        handler = DanteDMS_Phase1;
+        break;
+    case AITypes::TT_OSCAR:
+        bossOscar = owner;
+        handler = OscarDMS;
+        break;
     case AITypes::TT_BUTCH:
-        // TODO
+        handler = ButchDMS;
+        break;
+    case AITypes::TT_PAUL:
+        bossPaul = owner;
+        handler = PaulDMS;
         break;
     default:
         break;
     }
+}
+
+// PSX: CounterAttack__9Behaviour (BEHAVEB.CPP:1965, 0x8001EDB4)
+s32 Behaviour::CounterAttack() {
+    MARKFUNCTION(0x8001EDB4);
+
+    Player* player = Player::s_player;
+    s32 currentCounterTarget = player ? player->field484 : 0;
+    s32 shouldCounter = 0;
+
+    s32& lastCounterTarget = field80To176[11];
+    s32& counterSlotCursor = field80To176[22];
+    s32* counterTargets = &field80To176[12];
+    s32* counterCounts = &field80To176[17];
+
+    if (currentCounterTarget != 0 && player && (u32)(player->actionState - 0x20) < 5u) {
+        if (lastCounterTarget != currentCounterTarget) {
+            if (counterSlotCursor >= 5) {
+                counterSlotCursor = 0;
+            }
+
+            const s32 slot = counterSlotCursor;
+            if (counterTargets[slot] == currentCounterTarget) {
+                counterCounts[slot] = counterCounts[slot] + 1;
+            }
+            else {
+                counterTargets[slot] = currentCounterTarget;
+                counterCounts[slot] = 0;
+
+                for (s32 index = slot + 1; index < 5; index++) {
+                    counterTargets[index] = 0;
+                    counterCounts[index] = 0;
+                }
+            }
+
+            counterSlotCursor = slot + 1;
+
+            if (counterCounts[2] > 0 || counterCounts[1] >= 2 || counterCounts[0] >= 3) {
+                shouldCounter = 1;
+            }
+
+            counterSlotCursor = 0;
+        }
+    }
+    else {
+        counterSlotCursor = 0;
+    }
+
+    lastCounterTarget = currentCounterTarget;
+    return shouldCounter;
+}
+
+// PSX: _ButchDMS__9Behaviour (BEHAVEB.CPP:284, 0x8001CB20)
+void Behaviour::ButchDMS(Behaviour* self) {
+    MARKFUNCTION(0x8001CB20);
+
+    if (!self || !self->owner) {
+        return;
+    }
+
+    if (g_director->scriptState != 0) {
+        return;
+    }
+
+    if (!self->InActiveZone()) {
+        return;
+    }
+
+    Player* player = Player::s_player;
+    if (!player) {
+        return;
+    }
+
+    Humanoid* owner = self->owner;
+    owner->FaceThingDesired(player);
+
+    const s32 distanceToPlayer = owner->DistanceFromPointXZ(player->pos);
+    if ((u32)(owner->actionState - 0x20) >= 5u) {
+        self->comboScriptIndex = -1;
+        self->comboScriptCursor = 0;
+    }
+
+    ActiveZone* ownerZone = owner->activeZone;
+    self->currentPath = nullptr;
+    if (ownerZone && self->BreakOffPathAndFight() == 0) {
+        self->currentPath = ownerZone->FindFirstValidPath(owner);
+    }
+
+    if (self->currentPath) {
+        self->InitPathAIState(self->currentPath);
+        self->nextHandlerThisOffset = 0;
+        self->nextHandlerDispatch = -1;
+        self->nextHandler = ButchDMS;
+        return;
+    }
+
+    const LVector ownerPos = owner->pos;
+    const s32 ownerFacing = owner->orientation.y;
+
+    if (g_ai->GetPickupWithinReach(owner) != nullptr) {
+        owner->RequestAction(7);
+        return;
+    }
+
+    if (IsPlayerAggressiveCombatState(player->actionState)) {
+        self->nextHandlerThisOffset = 0;
+        self->nextHandlerDispatch = -1;
+        self->nextHandler = ButchDMS;
+
+        self->navDecisionCounter = 0;
+        self->handlerThisOffset = 0;
+        self->handlerDispatch = -1;
+        self->handler = BackoffAndTaunt;
+        return;
+    }
+
+    owner->FaceThingDesired(player);
+    if (distanceToPlayer < BUTCH_ATTACK_DIST) {
+        self->navDecisionCounter = 0;
+        self->ComplexAttack();
+        return;
+    }
+
+    self->navDecisionCounter++;
+    if (self->navDecisionCounter >= 26) {
+        self->navDecisionCounter = 0;
+
+        if (BUTCH_FAR_DIST < distanceToPlayer) {
+            const s32 randomAction = (s32)rmRangedRandom(100);
+            if (randomAction < 30) {
+                owner->RequestAction(30);
+                return;
+            }
+
+            if ((u32)(randomAction - 30) < 30u) {
+                s32 canCharge = 0;
+                if (IsPointInFieldOf(player->pos, ownerPos, ownerFacing, 0xAAA, 0xAAA) != 0) {
+                    s32 collisionRatio = 0;
+                    LVector wallNormal = {};
+                    LVector hitPoint = {};
+                    s32 verticalSpan = 0;
+                    s32 wallMaterial = 0;
+                    const s32 wallHit = owner->CheckWallCollision(
+                        (s16)ownerFacing,
+                        distanceToPlayer,
+                        0xFA,
+                        0x100,
+                        collisionRatio,
+                        wallNormal,
+                        hitPoint,
+                        verticalSpan,
+                        wallMaterial);
+                    canCharge = (wallHit == 0) ? 1 : 0;
+                }
+
+                if (canCharge != 0) {
+                    self->navDecisionCounter = 0;
+                    self->handlerThisOffset = 0;
+                    self->handlerDispatch = -1;
+                    self->handler = ButchDMS_Charge;
+                    return;
+                }
+            }
+        }
+
+        const s32 randomDecision = (s32)rmRangedRandom(100);
+        if (randomDecision < 60) {
+            const s32 randomDirection = (s32)rmRangedRandom(100);
+
+            if (randomDirection < 15) {
+                self->navDecision = 3;
+
+                s32 collisionRatio = 0;
+                LVector wallNormal = {};
+                LVector hitPoint = {};
+                s32 verticalSpan = 0;
+                s32 wallMaterial = 0;
+                if (owner->CheckWallCollision(
+                    (s16)(ownerFacing + 0x4000),
+                    0x100,
+                    0xFA,
+                    0x100,
+                    collisionRatio,
+                    wallNormal,
+                    hitPoint,
+                    verticalSpan,
+                    wallMaterial) != 0) {
+                    self->navDecision = 2;
+                }
+            }
+            else if ((u32)(randomDirection - 15) < 15u) {
+                self->navDecision = 2;
+
+                s32 collisionRatio = 0;
+                LVector wallNormal = {};
+                LVector hitPoint = {};
+                s32 verticalSpan = 0;
+                s32 wallMaterial = 0;
+                if (owner->CheckWallCollision(
+                    (s16)(ownerFacing - 0x4000),
+                    0x100,
+                    0xFA,
+                    0x100,
+                    collisionRatio,
+                    wallNormal,
+                    hitPoint,
+                    verticalSpan,
+                    wallMaterial) != 0) {
+                    self->navDecision = 3;
+                }
+            }
+            else if ((u32)(randomDirection - 30) < 15u) {
+                self->navDecision = 1;
+
+                s32 collisionRatio = 0;
+                LVector wallNormal = {};
+                LVector hitPoint = {};
+                s32 verticalSpan = 0;
+                s32 wallMaterial = 0;
+                if (owner->CheckWallCollision(
+                    (s16)ownerFacing,
+                    0x100,
+                    0xFA,
+                    0x100,
+                    collisionRatio,
+                    wallNormal,
+                    hitPoint,
+                    verticalSpan,
+                    wallMaterial) != 0) {
+                    if (wallMaterial == 0x180) {
+                        owner->moveSpeed = (s16)self->animConfigPtr->runningSpeed;
+                        owner->RequestAction(3);
+
+                        self->nextHandlerThisOffset = 0;
+                        self->nextHandlerDispatch = -1;
+                        self->nextHandler = ButchDMS;
+
+                        self->handlerThisOffset = 0;
+                        self->handlerDispatch = -1;
+                        self->handler = Jumping;
+                        return;
+                    }
+
+                    self->navDecision = ((s32)rmRangedRandom(2) != 0) ? 2 : 3;
+                }
+            }
+            else {
+                self->navDecision = 4;
+            }
+        }
+        else {
+            self->navDecision = ((u32)(randomDecision - 60) < 20u) ? 5 : 6;
+        }
+    }
+
+    const s32 navDecision = self->navDecision;
+    if ((u32)navDecision >= 8u) {
+        return;
+    }
+
+    switch (navDecision) {
+    case 1:
+        owner->moveSpeed = (s16)self->animConfigPtr->strafingSpeed;
+        owner->RequestAction(6);
+        return;
+
+    case 2:
+        owner->SetDesiredMoveDirection(owner->faceAngle - 0x4000);
+        owner->moveSpeed = (s16)self->animConfigPtr->strafingSpeed;
+        owner->RequestAction(6);
+        return;
+
+    case 3:
+        owner->SetDesiredMoveDirection(owner->faceAngle + 0x4000);
+        owner->moveSpeed = (s16)self->animConfigPtr->strafingSpeed;
+        owner->RequestAction(6);
+        return;
+
+    case 4:
+        owner->SetDesiredMoveDirection(owner->faceAngle + 0x8000);
+        owner->moveSpeed = (s16)self->animConfigPtr->strafingSpeed;
+        owner->RequestAction(6);
+        return;
+
+    case 5:
+        owner->RequestAction(1);
+        return;
+
+    case 6:
+    {
+        const s32 randomTaunt = (s32)rmRangedRandom(4);
+        if (randomTaunt == 0) {
+            owner->field316 = 0x5C;
+        }
+        else if (randomTaunt == 1) {
+            owner->field316 = 0x5B;
+        }
+        else {
+            owner->field316 = 0x5A;
+        }
+
+        owner->RequestAction(0x15);
+        return;
+    }
+
+    default:
+        return;
+    }
+}
+
+// PSX: _ButchDMS_Charge__9Behaviour (BEHAVEB.CPP:630, 0x8001D178)
+void Behaviour::ButchDMS_Charge(Behaviour* self) {
+    MARKFUNCTION(0x8001D178);
+
+    if (!self || !self->owner) {
+        return;
+    }
+
+    Player* player = Player::s_player;
+    if (!player) {
+        return;
+    }
+
+    Humanoid* owner = self->owner;
+    const LVector ownerPos = owner->pos;
+    const LVector playerPos = player->pos;
+    const s32 ownerFacing = owner->orientation.y;
+
+    const s32 distanceToPlayer = owner->DistanceFromPointXZ(playerPos);
+    owner->FaceThingDesired(player);
+
+    self->navDecisionCounter++;
+    if (self->navDecisionCounter >= 51) {
+        if (IsPointInFieldOf(playerPos, ownerPos, ownerFacing, 0xAAA, 0xAAA) == 0) {
+            self->navDecisionCounter = 0;
+            self->handlerThisOffset = 0;
+            self->handlerDispatch = -1;
+            self->handler = ButchDMS;
+            return;
+        }
+    }
+
+    s32 collisionRatio = 0;
+    LVector wallNormal = {};
+    LVector hitPoint = {};
+    s32 verticalSpan = 0;
+    s32 wallMaterial = 0;
+
+    if (owner->CheckWallCollision(
+        (s16)ownerFacing,
+        0x100,
+        0xFA,
+        0x100,
+        collisionRatio,
+        wallNormal,
+        hitPoint,
+        verticalSpan,
+        wallMaterial) == 0) {
+        if (distanceToPlayer < BUTCH_ATTACK_DIST) {
+            owner->RequestAction(7);
+        }
+
+        self->navDecisionCounter = 0;
+        self->handlerThisOffset = 0;
+        self->handlerDispatch = -1;
+        self->handler = ButchDMS;
+        return;
+    }
+
+    const s32 runSpeed = (s16)self->animConfigPtr->runningSpeed;
+    owner->moveSpeed = runSpeed << 1;
+    owner->RequestAction(31);
+}
+
+// PSX: _GrontarDMS__9Behaviour (BEHAVEB.CPP:717, 0x8001D314)
+void Behaviour::GrontarDMS(Behaviour* self) {
+    MARKFUNCTION(0x8001D314);
+
+    if (!self || !self->owner) {
+        return;
+    }
+
+    Humanoid* owner = self->owner;
+    Player* player = Player::s_player;
+    if (!player) {
+        return;
+    }
+
+    const s32 distanceToPlayer = owner->DistanceFromPointXZ(player->pos);
+    if ((u32)(owner->actionState - 0x20) >= 5u) {
+        self->comboScriptIndex = -1;
+        self->comboScriptCursor = 0;
+    }
+
+    owner->FaceThingDesired(player);
+
+    s32& closeCombatState = self->field80To176[0];
+    s32& comboStateA = self->field80To176[1];
+    s32& comboStateB = self->field80To176[2];
+
+    auto resetComboState = [&]() {
+        closeCombatState = 0;
+        comboStateA = 0;
+        comboStateB = 0;
+    };
+
+    if (!self->InActiveZone()) {
+        if (distanceToPlayer < GRONTAR_CLOSE_ATTACK_DIST && !IsPlayerAggressiveCombatState(player->actionState)) {
+            const s32 playerInField = IsPointInFieldOf(player->pos, owner->pos, owner->orientation.y, 0x2AAA, 0x2AAA);
+            const s32 randomAction = (s32)rmRangedRandom(100);
+            if (playerInField != 0 && randomAction < 75) {
+                owner->RequestAction(15);
+            }
+            else {
+                self->ComplexAttack();
+            }
+
+            resetComboState();
+            return;
+        }
+
+        LVector zoneCenter = {};
+        owner->activeZone->GetActiveZoneCenterPoint(zoneCenter);
+        owner->FaceThingDesired(player);
+        owner->FacePointDesired(zoneCenter);
+        owner->moveSpeed = (s16)self->animConfigPtr->strafingSpeed;
+        owner->RequestAction(6);
+
+        resetComboState();
+        return;
+    }
+
+    if (IsPlayerAggressiveCombatState(player->actionState)) {
+        owner->field316 = 0x5A;
+        owner->RequestAction(0x15);
+        return;
+    }
+
+    if (distanceToPlayer < GRONTAR_CLOSE_ATTACK_DIST) {
+        const s32 playerInField = IsPointInFieldOf(player->pos, owner->pos, owner->orientation.y, 0x2AAA, 0x2AAA);
+        const s32 randomAction = (s32)rmRangedRandom(100);
+        if (playerInField != 0 && randomAction < 75) {
+            owner->RequestAction(15);
+        }
+        else {
+            self->ComplexAttack();
+        }
+
+        resetComboState();
+        return;
+    }
+
+    if (distanceToPlayer < GRONTAR_FAR_ATTACK_DIST) {
+        if (player->actionState == 12) {
+            owner->RequestAction(7);
+            resetComboState();
+            return;
+        }
+
+        if (closeCombatState != 0) {
+            if ((s32)rmRangedRandom(100) < 50) {
+                owner->RequestAction(8);
+                comboStateB = 1;
+            }
+            else {
+                owner->RequestAction(9);
+                comboStateA = 1;
+            }
+
+            closeCombatState = 0;
+            return;
+        }
+
+        if (comboStateB != 0) {
+            if (owner->field484 == 0) {
+                owner->RequestAction(8);
+                comboStateB = 0;
+                comboStateA = 1;
+            }
+            return;
+        }
+
+        if (comboStateA != 0) {
+            if (owner->field484 == 0) {
+                owner->RequestAction(9);
+                comboStateA = 0;
+                comboStateB = 1;
+            }
+            return;
+        }
+
+        if ((s32)rmRangedRandom(100) < 2) {
+            owner->field316 = 0x5A;
+            owner->RequestAction(0x15);
+            return;
+        }
+
+        owner->RequestAction(5);
+        closeCombatState = 1;
+        return;
+    }
+
+    if (player->actionState == 1) {
+        if (owner->actionState != 4 && (s32)rmRangedRandom(100) >= 99) {
+            owner->field316 = 0x5A;
+            owner->RequestAction(0x15);
+            return;
+        }
+
+        owner->RequestAction(1);
+        return;
+    }
+
+    s32 playerInField = 0;
+    if (player->actionState == 11 || player->actionState == 10) {
+        playerInField = IsPointInFieldOf(player->pos, owner->pos, owner->orientation.y, 0x1555, 0x1555);
+    }
+
+    if (playerInField != 0 && (s32)rmRangedRandom(100) < 20) {
+        owner->RequestAction(14);
+        return;
+    }
+
+    owner->RequestAction(1);
+}
+
+// PSX: _PaulDMS__9Behaviour (BEHAVEB.CPP:950, 0x8001D7CC)
+void Behaviour::PaulDMS(Behaviour* self) {
+    MARKFUNCTION(0x8001D7CC);
+
+    if (!self || !self->owner) {
+        return;
+    }
+
+    Humanoid* owner = self->owner;
+    Humanoid* player = Player::s_player;
+    if (!player) {
+        return;
+    }
+
+    const s32 distanceToPlayer = owner->DistanceFromPoint(player->pos);
+
+    ActiveZone* ownerZone = owner->activeZone;
+    if (!self->InActiveZone() || !ownerZone || !ownerZone->IsInActiveZone(player)) {
+        return;
+    }
+
+    owner->SetTarget(player);
+
+    if ((u32)(owner->actionState - 0x20) >= 5u) {
+        self->comboScriptIndex = -1;
+        self->comboScriptCursor = 0;
+    }
+
+    if (self->BreakOffPathAndFight() == 0) {
+        self->currentPath = ownerZone->FindFirstValidPath(owner);
+    }
+
+    if (self->currentPath) {
+        self->InitPathAIState(self->currentPath);
+        self->nextHandlerThisOffset = 0;
+        self->nextHandlerDispatch = -1;
+        self->nextHandler = PaulDMS;
+        return;
+    }
+
+    owner->FaceThingDesired(player);
+
+    s32& spotRecoverTimer = self->field80To176[6]; // +0x68
+    if (spotRecoverTimer != 0) {
+        spotRecoverTimer -= 1;
+    }
+
+    const s32 strafeSpeed = self->animConfigPtr ? (s16)self->animConfigPtr->strafingSpeed : 0;
+
+    s32 shouldDance = 0;
+    Thing* bossSpotLight = FindBossSpotLight();
+    if (bossSpotLight) {
+        LVector spotPos = bossSpotLight->pos;
+        spotPos.y = owner->pos.y;
+
+        if (owner->DistanceFromPoint(spotPos) < PAUL_SPOTLIGHT_RADIUS) {
+            shouldDance = (distanceToPlayer > PAUL_CLOSE_ATTACK_DIST) ? 1 : 0;
+        }
+    }
+    // PSX early-returns when WEffect::Find("BossSpotLight") fails.
+    // TODO: WEffect
+
+    s32& spotPathWasForcedOff = self->field80To176[3]; // +0x5C
+    if (g_director && g_director->scriptState != 0) {
+        // PSX: WEffect::EnablePath(0)
+        spotPathWasForcedOff = 1;
+        return;
+    }
+
+    if (spotPathWasForcedOff != 0) {
+        // PSX: WEffect::EnablePath(1)
+        spotPathWasForcedOff = 0;
+    }
+
+    s32& danceActive = self->field80To176[4]; // +0x60
+    s32& danceTimer = self->field80To176[5]; // +0x64
+    if (shouldDance != 0) {
+        if (danceActive == 0 && spotRecoverTimer == 0) {
+            // PSX: WEffect::EnablePath(0)
+            danceActive = 1;
+            danceTimer = PAUL_DANCE_TIME;
+        }
+    }
+
+    if (danceActive != 0) {
+        bool atAnimEnd = false;
+        Model* model = owner->model ? static_cast<Model*>(owner->model) : nullptr;
+        if (model && model->animStructure) {
+            const u8* animBytes = reinterpret_cast<const u8*>(model->animStructure);
+            const s16 currentFrameHi = *reinterpret_cast<const s16*>(animBytes + 0x3E);
+            const s16 endFrameHi = *reinterpret_cast<const s16*>(animBytes + 0x46);
+            atAnimEnd = (currentFrameHi == endFrameHi);
+        }
+
+        if (atAnimEnd) {
+            if ((s32)rmRangedRandom(100) < 50) {
+                owner->field316 = 0x5B;
+            }
+            else {
+                owner->field316 = 0x5A;
+            }
+            owner->RequestAction(1);
+        }
+        else {
+            owner->RequestAction(0x15);
+        }
+
+        danceTimer -= 1;
+        if (danceTimer > 0) {
+            if (!IsPlayerAggressiveCombatState(owner->actionState)) {
+                return;
+            }
+        }
+
+        // PSX: WEffect::EnablePath(1)
+        danceActive = 0;
+        spotRecoverTimer = PAUL_RECOVER_TIME;
+        return;
+    }
+
+    const s32 ownerInPlayerField = IsPointInFieldOf(owner->pos, player->pos, player->orientation.y, 0x1555, 0x1555) ? 1 : 0;
+    const s32 playerPressureState = IsDantePhase1PressureState(player->actionState) ? 1 : 0;
+    const s32 playerIsStrafing = (player->actionState == 12) ? 1 : 0;
+    const s32 ownerInCombatState = ((u32)(owner->actionState - 0x20) < 5u) ? 1 : 0;
+
+    s32& strafeDecision = self->field80To176[9]; // +0x74
+    if (owner->actionState == 11) {
+        if (owner->GetStraifPhase() != 0) {
+            if (strafeDecision == 2) {
+                owner->SetDesiredMoveDirection(owner->faceAngle + 0x8000);
+            }
+            else if (strafeDecision == 3) {
+                owner->SetDesiredMoveDirection(owner->faceAngle - 0x4000);
+            }
+            else if (strafeDecision == 1) {
+                owner->SetDesiredMoveDirection(owner->faceAngle + 0x4000);
+            }
+
+            owner->FaceThingDesired(player);
+            owner->RequestAction(6);
+            return;
+        }
+
+        owner->RequestAction(1);
+        return;
+    }
+
+    if (IsPlayerAggressiveCombatState(player->actionState)) {
+        owner->SetDesiredMoveDirection(owner->faceAngle + 0x8000);
+        owner->moveSpeed = strafeSpeed;
+        owner->RequestAction(6);
+        strafeDecision = 2;
+        return;
+    }
+
+    if (distanceToPlayer > PAUL_CLOSE_ATTACK_DIST) {
+        if (playerIsStrafing != 0 && ownerInPlayerField != 0) {
+            owner->RequestAction(9);
+            return;
+        }
+
+        if (playerPressureState != 0 && ownerInPlayerField != 0) {
+            owner->RequestAction(8);
+            return;
+        }
+
+        owner->moveSpeed = strafeSpeed;
+        owner->RequestAction(2);
+        return;
+    }
+
+    if (player->field484 != 0 && ownerInCombatState == 0) {
+        if ((s32)rmRangedRandom(100) < 75) {
+            if (!IsPlayerAggressiveCombatState(owner->actionState)) {
+                s32 collisionRatio = 0;
+                LVector wallNormal = {};
+                LVector hitPoint = {};
+                s32 verticalSpan = 0;
+                s32 wallMaterial = 0;
+                const s32 backBlocked = owner->CheckWallCollision(
+                    (s16)(owner->faceAngle + 0x8000),
+                    0x400,
+                    0x96,
+                    0x1F4,
+                    collisionRatio,
+                    wallNormal,
+                    hitPoint,
+                    verticalSpan,
+                    wallMaterial);
+
+                const s32 sideBlocked = owner->CheckWallCollision(
+                    (s16)(owner->faceAngle + 0x4000),
+                    0x200,
+                    0x96,
+                    0x1F4,
+                    collisionRatio,
+                    wallNormal,
+                    hitPoint,
+                    verticalSpan,
+                    wallMaterial);
+
+                const s32 randomChoice = (s32)rmRangedRandom(100);
+                if (randomChoice < 50 && backBlocked == 0) {
+                    owner->SetDesiredMoveDirection(owner->faceAngle + 0x8000);
+                    owner->moveSpeed = strafeSpeed;
+                    strafeDecision = 2;
+                }
+                else if (randomChoice < 75 && sideBlocked == 0) {
+                    owner->SetDesiredMoveDirection(owner->faceAngle + 0x4000);
+                    owner->moveSpeed = (strafeSpeed * 3) / 2;
+                    strafeDecision = 1;
+                }
+                else {
+                    owner->SetDesiredMoveDirection(owner->faceAngle - 0x4000);
+                    owner->moveSpeed = (strafeSpeed * 3) / 2;
+                    strafeDecision = 3;
+                }
+
+                owner->FaceThingDesired(player);
+                owner->RequestAction(6);
+                return;
+            }
+        }
+
+        self->ComplexAttack();
+        return;
+    }
+
+    if ((s32)rmRangedRandom(100) < 15) {
+        owner->RequestAction(0x0E);
+        return;
+    }
+
+    self->ComplexAttack();
+}
+
+// PSX: _OscarDMS__9Behaviour (BEHAVEB.CPP:1019, 0x8001E0B0)
+void Behaviour::OscarDMS(Behaviour* self) {
+    MARKFUNCTION(0x8001E0B0);
+
+    if (!self || !self->owner) {
+        return;
+    }
+
+    if (g_director->scriptState != 0) {
+        return;
+    }
+
+    if (!self->InActiveZone()) {
+        return;
+    }
+
+    Humanoid* player = Player::s_player;
+    if (!player) {
+        return;
+    }
+
+    Humanoid* owner = self->owner;
+    owner->SetTarget(player);
+
+    const s32 distanceToPlayer = owner->DistanceFromPoint(player->pos);
+    if ((u32)(owner->actionState - 0x20) >= 5u) {
+        self->comboScriptIndex = -1;
+        self->comboScriptCursor = 0;
+    }
+
+    if (IsPlayerAggressiveCombatState(player->actionState)) {
+        self->nextHandlerThisOffset = 0;
+        self->nextHandlerDispatch = -1;
+        self->nextHandler = OscarDMS;
+
+        self->navDecisionCounter = 0;
+        self->handlerThisOffset = 0;
+        self->handlerDispatch = -1;
+        self->handler = BackoffAndTaunt;
+        return;
+    }
+
+    ActiveZone* ownerZone = owner->activeZone;
+    if (ownerZone && self->BreakOffPathAndFight() == 0) {
+        self->currentPath = ownerZone->FindFirstValidPath(owner);
+    }
+
+    if (self->currentPath) {
+        self->InitPathAIState(self->currentPath);
+        self->nextHandlerThisOffset = 0;
+        self->nextHandlerDispatch = -1;
+        self->nextHandler = OscarDMS;
+        return;
+    }
+
+    s32 playerFacingFlag = 0;
+    s32 targetingBossFlag = 0;
+    s32 henchmanSupportFlag = 0;
+
+    owner->FaceThingDesired(player);
+
+    const s32 ownerFacing = owner->orientation.y;
+    const s32 ownerToPlayerFacing = ClipAngle360Local(ownerFacing - player->orientation.y);
+    if ((u32)(ownerToPlayerFacing - OSCAR_ANGLE_WINDOW_START) <= (u32)OSCAR_ANGLE_WINDOW_RANGE) {
+        playerFacingFlag = 1;
+    }
+
+    const LVector ownerPos = owner->pos;
+    if (playerFacingFlag == 0) {
+        if (OscarsHenchman != nullptr) {
+            const LVector henchmanPos = OscarsHenchman->pos;
+            const s32 distanceToHenchman = owner->DistanceFromPoint(henchmanPos);
+            const s32 sideFacing = ownerFacing + 0x4000;
+
+            if (IsPointInFieldOf(henchmanPos, ownerPos, sideFacing, 0x38E, 0x38E)
+                && IsPointInFieldOf(player->pos, ownerPos, ownerFacing, 0x38E, 0x38E)
+                && distanceToPlayer < distanceToHenchman) {
+                henchmanSupportFlag = 1;
+            }
+
+            if (henchmanSupportFlag == 0) {
+                self->navDecision = IsPointInFieldOf(henchmanPos, ownerPos, sideFacing, 0x4000, 0x4000) ? 2 : 3;
+            }
+        }
+        else {
+            self->navDecision = (ownerToPlayerFacing > 0x8000) ? 2 : 3;
+        }
+    }
+
+    if (player->actionState == 0x3E) {
+        if (distanceToPlayer <= OSCAR_CLOSE_DIST) {
+            self->ComplexAttack();
+            return;
+        }
+
+        owner->moveSpeed = GetFaceAngleDataForwardAngle(owner);
+
+        s32 floorDelta = self->LookAheadFloorCheck(0, 0x200, 0x100);
+        if (floorDelta < 0) {
+            floorDelta = -floorDelta;
+        }
+
+        if ((u32)(floorDelta - 0x100) < 0x100u) {
+            owner->RequestAction(3);
+
+            self->nextHandlerThisOffset = 0;
+            self->nextHandlerDispatch = -1;
+            self->nextHandler = OscarDMS;
+
+            self->handlerThisOffset = 0;
+            self->handlerDispatch = -1;
+            self->handler = Jumping;
+            return;
+        }
+
+        owner->SetTarget(player);
+        owner->RequestAction(6);
+        return;
+    }
+
+    if (player->actionState == 0x0B && player->field256 == (uintptr_t)owner) {
+        targetingBossFlag = 1;
+    }
+
+    if (playerFacingFlag != 0 || targetingBossFlag != 0 || OscarsHenchman != nullptr) {
+        if (distanceToPlayer <= OSCAR_CLOSE_DIST) {
+            owner->RequestAction(8);
+            return;
+        }
+
+        owner->moveSpeed = GetFaceAngleDataForwardAngle(owner);
+
+        s32 floorDelta = self->LookAheadFloorCheck(0, 0x200, 0x100);
+        if (floorDelta < 0) {
+            floorDelta = -floorDelta;
+        }
+
+        if ((u32)(floorDelta - 0x100) < 0x100u) {
+            owner->RequestAction(3);
+            owner->moveSpeed = GetFaceAngleDataForwardAngle(owner);
+
+            self->nextHandlerThisOffset = 0;
+            self->nextHandlerDispatch = -1;
+            self->nextHandler = OscarDMS;
+
+            self->handlerThisOffset = 0;
+            self->handlerDispatch = -1;
+            self->handler = Jumping;
+            return;
+        }
+
+        owner->SetTarget(player);
+        owner->RequestAction(6);
+        return;
+    }
+
+    if (distanceToPlayer <= OSCAR_CLOSE_DIST) {
+        self->ComplexAttack();
+        return;
+    }
+
+    if (distanceToPlayer <= OSCAR_MID_DIST) {
+        owner->moveSpeed = GetFaceAngleDataBackAngle(owner);
+        owner->SetDesiredMoveDirection(owner->faceAngle + 0x8000);
+        owner->SetTarget(player);
+        owner->RequestAction(6);
+        return;
+    }
+
+    if (henchmanSupportFlag != 0) {
+        owner->FaceThingDesired(player);
+        owner->RequestAction(0x15);
+        return;
+    }
+
+    s32 floorDelta = 0;
+    if (self->navDecision == 2) {
+        floorDelta = self->LookAheadFloorCheck(-0x4000, 0x96, 0x100);
+        owner->SetDesiredMoveDirection(owner->faceAngle - 0x4000);
+    }
+    else {
+        floorDelta = self->LookAheadFloorCheck(0x4000, 0x96, 0x100);
+        owner->SetDesiredMoveDirection(owner->faceAngle + 0x4000);
+    }
+
+    s32 absFloorDelta = floorDelta;
+    if (absFloorDelta < 0) {
+        absFloorDelta = -absFloorDelta;
+    }
+
+    if ((u32)(absFloorDelta - 0x100) < 0x100u) {
+        if (self->navDecision == 2) {
+            owner->SetDesiredMoveDirection(ownerFacing - 0x4000);
+        }
+        else {
+            owner->SetDesiredMoveDirection(ownerFacing + 0x4000);
+        }
+
+        owner->RequestAction(3);
+        owner->moveSpeed = GetFaceAngleDataForwardAngle(owner);
+
+        self->nextHandlerThisOffset = 0;
+        self->nextHandlerDispatch = -1;
+        self->nextHandler = OscarDMS;
+
+        self->handlerThisOffset = 0;
+        self->handlerDispatch = -1;
+        self->handler = Jumping;
+
+        s32 moveDirection = owner->faceAngle;
+        self->NavigateWorld(moveDirection);
+        return;
+    }
+
+    if (self->navDecision == 2) {
+        if (wallCheck(owner, ownerFacing - 0x4000) != 0 || wallCheck(owner, ownerFacing - 0x6000) != 0) {
+            owner->FaceThingDesired(player);
+            owner->RequestAction(0x15);
+            return;
+        }
+    }
+    else {
+        if (wallCheck(owner, ownerFacing + 0x4000) != 0 || wallCheck(owner, ownerFacing + 0x6000) != 0) {
+            owner->FaceThingDesired(player);
+            owner->RequestAction(0x15);
+            return;
+        }
+    }
+
+    owner->SetTarget(player);
+    owner->moveSpeed = GetFaceAngleDataBackAngle(owner);
+    owner->RequestAction(6);
+
+    s32 moveDirection = owner->faceAngle;
+    self->NavigateWorld(moveDirection);
+}
+
+// PSX: _OscarHenchmanDMS__9Behaviour (BEHAVEB.CPP:1208, 0x8001E7DC)
+void Behaviour::OscarHenchmanDMS(Behaviour* self) {
+    MARKFUNCTION(0x8001E7DC);
+
+    if (!self || !self->owner) {
+        return;
+    }
+
+    if (g_director->scriptState != 0) {
+        return;
+    }
+
+    if (!self->InActiveZone()) {
+        return;
+    }
+
+    Humanoid* player = Player::s_player;
+    if (!player) {
+        return;
+    }
+
+    Humanoid* owner = self->owner;
+    owner->SetTarget(player);
+
+    const s32 distanceToPlayer = owner->DistanceFromPoint(player->pos);
+    if ((u32)(owner->actionState - 0x20) >= 5u) {
+        self->comboScriptIndex = -1;
+        self->comboScriptCursor = 0;
+    }
+
+    if (IsPlayerAggressiveCombatState(player->actionState)) {
+        self->nextHandlerThisOffset = 0;
+        self->nextHandlerDispatch = -1;
+        self->nextHandler = OscarHenchmanDMS;
+
+        self->navDecisionCounter = 0;
+        self->handlerThisOffset = 0;
+        self->handlerDispatch = -1;
+        self->handler = BackoffAndTaunt;
+        return;
+    }
+
+    ActiveZone* ownerZone = owner->activeZone;
+    if (ownerZone && self->BreakOffPathAndFight() == 0) {
+        self->currentPath = ownerZone->FindFirstValidPath(owner);
+    }
+
+    if (self->currentPath) {
+        self->InitPathAIState(self->currentPath);
+        self->nextHandlerThisOffset = 0;
+        self->nextHandlerDispatch = -1;
+        self->nextHandler = OscarHenchmanDMS;
+        return;
+    }
+
+    owner->FaceThingDesired(player);
+
+    const s32 ownerFacing = owner->orientation.y;
+    const s32 ownerToPlayerFacing = ClipAngle360Local(ownerFacing - player->orientation.y);
+    const s32 forwardPressure = ((u32)(ownerToPlayerFacing - OSCAR_HENCH_ANGLE_WINDOW_START)
+                                 <= (u32)OSCAR_HENCH_ANGLE_WINDOW_RANGE)
+        ? 1
+        : 0;
+
+    if (forwardPressure == 0) {
+        self->navDecision = (ownerToPlayerFacing > 0x8000) ? 2 : 3;
+    }
+
+    s32 syncState = 0;
+    if (IsOscarSyncActionState(owner->actionState)) {
+        syncState = IsOscarSyncActionState(player->actionState) ? 1 : 0;
+    }
+
+    if (syncState != 0) {
+        OscarHenchmanSyncCounter = 0;
+        return;
+    }
+
+    if (OscarHenchmanSyncCounter < OSCAR_HENCH_SYNC_COUNTER_MAX) {
+        OscarHenchmanSyncCounter++;
+        return;
+    }
+
+    if (forwardPressure != 0) {
+        if (distanceToPlayer <= OSCAR_CLOSE_DIST) {
+            if (bossOscar && bossOscar->actionState == 0x24) {
+                owner->RequestAction(1);
+            }
+            else {
+                owner->RequestAction(7);
+            }
+            return;
+        }
+
+        owner->moveSpeed = GetFaceAngleDataForwardAngle(owner);
+
+        s32 floorDelta = self->LookAheadFloorCheck(0, 0x200, 0x100);
+        if (floorDelta < 0) {
+            floorDelta = -floorDelta;
+        }
+
+        if ((u32)(floorDelta - 0x100) < 0x100u) {
+            owner->RequestAction(3);
+            owner->moveSpeed = GetFaceAngleDataForwardAngle(owner);
+
+            self->nextHandlerThisOffset = 0;
+            self->nextHandlerDispatch = -1;
+            self->nextHandler = OscarHenchmanDMS;
+
+            self->handlerThisOffset = 0;
+            self->handlerDispatch = -1;
+            self->handler = Jumping;
+            return;
+        }
+
+        owner->SetTarget(player);
+        owner->RequestAction(6);
+        return;
+    }
+
+    if (distanceToPlayer <= OSCAR_CLOSE_DIST) {
+        self->ComplexAttack();
+        return;
+    }
+
+    if (distanceToPlayer <= OSCAR_MID_DIST) {
+        owner->moveSpeed = GetFaceAngleDataBackAngle(owner);
+        owner->SetDesiredMoveDirection(owner->faceAngle + 0x8000);
+        owner->RequestAction(6);
+        return;
+    }
+
+    s32 floorDelta = 0;
+    if (self->navDecision == 2) {
+        floorDelta = self->LookAheadFloorCheck(-0x4000, 0x96, 0x100);
+        owner->SetDesiredMoveDirection(owner->faceAngle - 0x4000);
+    }
+    else {
+        floorDelta = self->LookAheadFloorCheck(0x4000, 0x96, 0x100);
+        owner->SetDesiredMoveDirection(owner->faceAngle + 0x4000);
+    }
+
+    s32 absFloorDelta = floorDelta;
+    if (absFloorDelta < 0) {
+        absFloorDelta = -absFloorDelta;
+    }
+
+    if ((u32)(absFloorDelta - 0x100) < 0x100u) {
+        if (self->navDecision == 2) {
+            owner->SetDesiredMoveDirection(ownerFacing - 0x4000);
+        }
+        else {
+            owner->SetDesiredMoveDirection(ownerFacing + 0x4000);
+        }
+
+        owner->moveSpeed = GetFaceAngleDataForwardAngle(owner);
+        owner->RequestAction(3);
+
+        self->nextHandlerThisOffset = 0;
+        self->nextHandlerDispatch = -1;
+        self->nextHandler = OscarHenchmanDMS;
+
+        self->handlerThisOffset = 0;
+        self->handlerDispatch = -1;
+        self->handler = Jumping;
+        return;
+    }
+
+    if (self->navDecision == 2) {
+        if (wallCheck(owner, ownerFacing - 0x4000) != 0 || wallCheck(owner, ownerFacing - 0x6000) != 0) {
+            owner->FaceThingDesired(player);
+            owner->RequestAction(0x15);
+            return;
+        }
+    }
+    else {
+        if (wallCheck(owner, ownerFacing + 0x4000) != 0 || wallCheck(owner, ownerFacing + 0x6000) != 0) {
+            owner->FaceThingDesired(player);
+            owner->RequestAction(0x15);
+            return;
+        }
+    }
+
+    owner->SetTarget(player);
+    owner->moveSpeed = GetFaceAngleDataBackAngle(owner);
+    owner->RequestAction(6);
+}
+
+// PSX: _DanteDMS_Phase1__9Behaviour (BEHAVEB.CPP:1967, 0x8001EEE0)
+void Behaviour::DanteDMS_Phase1(Behaviour* self) {
+    MARKFUNCTION(0x8001EEE0);
+
+    if (!self || !self->owner) {
+        return;
+    }
+
+    if (!self->InActiveZone()) {
+        return;
+    }
+
+    Humanoid* player = Player::s_player;
+    if (!player) {
+        return;
+    }
+
+    Humanoid* owner = self->owner;
+    const s32 distanceToPlayer = owner->DistanceFromPoint(player->pos);
+
+    if ((u32)(owner->actionState - 0x20) >= 5u) {
+        self->comboScriptIndex = -1;
+        self->comboScriptCursor = 0;
+    }
+
+    if (ShouldAdvanceDantePhase(owner, DANTE_PHASE1_HEALTH_SCALE)) {
+        self->handlerThisOffset = 0;
+        self->handlerDispatch = -1;
+        self->handler = DanteDMS_Phase2;
+    }
+
+    owner->FaceThingDesired(player);
+
+    s32& damageCounter = self->field80To176[23];
+    s32& lastKnownHealth = self->field80To176[24];
+    const s32 currentHealth = (s32)(u32)owner->health;
+    if (lastKnownHealth != 0 && currentHealth < lastKnownHealth) {
+        damageCounter += (lastKnownHealth - currentHealth);
+    }
+    lastKnownHealth = currentHealth;
+
+    s32 floorDelta = self->LookAheadFloorCheck(0, 0x200, 0x100);
+    if ((u32)(floorDelta + 0x400) < 0xA01u) {
+        s32 absFloorDelta = floorDelta;
+        if (absFloorDelta < 0) {
+            absFloorDelta = -absFloorDelta;
+        }
+
+        if (absFloorDelta >= 0x101) {
+            owner->RequestAction(3);
+
+            self->nextHandlerThisOffset = 0;
+            self->nextHandlerDispatch = -1;
+            self->nextHandler = DanteDMS_Phase1;
+
+            self->handlerThisOffset = 0;
+            self->handlerDispatch = -1;
+            self->handler = Jumping;
+        }
+    }
+
+    const s32 ownerInPlayerField = IsPointInFieldOf(owner->pos, player->pos, player->orientation.y, 0x1555, 0x1555) ? 1 : 0;
+    const s32 pressureState = IsDantePhase1PressureState(player->actionState) ? 1 : 0;
+    const s32 playerIsStrafing = (player->actionState == 12) ? 1 : 0;
+
+    if (IsPlayerAggressiveCombatState(player->actionState)) {
+        self->nextHandlerThisOffset = 0;
+        self->nextHandlerDispatch = -1;
+        self->nextHandler = DanteDMS_Phase1;
+
+        self->navDecisionCounter = 0;
+        self->handlerThisOffset = 0;
+        self->handlerDispatch = -1;
+        self->handler = BackoffAndTaunt;
+        return;
+    }
+
+    if (self->CounterAttack() != 0) {
+        owner->RequestAction(0x14);
+        damageCounter = 0;
+
+        if ((u32)(owner->actionState - 0x2E) < 9u) {
+            owner->LoadCombatDialog();
+        }
+        return;
+    }
+
+    if (distanceToPlayer > DANTE_PHASE1_DIST_THRESHOLD) {
+        if (playerIsStrafing != 0 && ownerInPlayerField != 0) {
+            owner->RequestAction(9);
+            return;
+        }
+
+        if (pressureState != 0 && ownerInPlayerField != 0) {
+            owner->RequestAction(8);
+            return;
+        }
+
+        owner->moveSpeed = GetFaceAngleDataForwardAngle(owner);
+        owner->RequestAction(2);
+        return;
+    }
+
+    if ((s32)rmRangedRandom(100) < 5) {
+        owner->RequestAction(0x14);
+        return;
+    }
+
+    self->ComplexAttack();
+}
+
+// PSX: _DanteDMS_Phase2__9Behaviour (BEHAVEB.CPP:2075, 0x8001F2B4)
+void Behaviour::DanteDMS_Phase2(Behaviour* self) {
+    MARKFUNCTION(0x8001F2B4);
+
+    if (!self || !self->owner) {
+        return;
+    }
+
+    Humanoid* owner = self->owner;
+    ActiveZone* ownerZone = owner->activeZone;
+
+    if (!self->InActiveZone()) {
+        return;
+    }
+
+    Humanoid* player = Player::s_player;
+    if (!player) {
+        return;
+    }
+
+    const s32 distanceToPlayer = owner->DistanceFromPoint(player->pos);
+    if ((u32)(owner->actionState - 0x20) >= 5u) {
+        self->comboScriptIndex = -1;
+        self->comboScriptCursor = 0;
+    }
+
+    if (ShouldAdvanceDantePhase(owner, DANTE_PHASE2_HEALTH_SCALE)) {
+        self->handlerThisOffset = 0;
+        self->handlerDispatch = -1;
+        self->handler = DanteDMS_Phase3;
+    }
+
+    owner->FaceThingDesired(player);
+
+    s32 floorDelta = self->LookAheadFloorCheck(0, 0x200, 0x100);
+    if ((u32)(floorDelta + 0x400) < 0xA01u) {
+        s32 absFloorDelta = floorDelta;
+        if (absFloorDelta < 0) {
+            absFloorDelta = -absFloorDelta;
+        }
+
+        if (absFloorDelta >= 0x101) {
+            owner->RequestAction(3);
+
+            self->nextHandlerThisOffset = 0;
+            self->nextHandlerDispatch = -1;
+            self->nextHandler = DanteDMS_Phase2;
+
+            self->handlerThisOffset = 0;
+            self->handlerDispatch = -1;
+            self->handler = Jumping;
+        }
+    }
+
+    SubZoneVolume* deskZone = static_cast<SubZoneVolume*>(ownerZone->subZoneList.FindNode(DANTE_PHASE2_DESK_SUBZONE_NAME));
+    const s32 playerInDeskZone = deskZone->IsInSubZoneVolume(player) ? 1 : 0;
+
+    if (playerInDeskZone != 0) {
+        if (IsPlayerAggressiveCombatState(player->actionState)) {
+            self->nextHandlerThisOffset = 0;
+            self->nextHandlerDispatch = -1;
+            self->nextHandler = DanteDMS_Phase2;
+
+            self->navDecisionCounter = 0;
+            self->handlerThisOffset = 0;
+            self->handlerDispatch = -1;
+            self->handler = BackoffAndTaunt;
+            return;
+        }
+
+        if (distanceToPlayer < DANTE_PHASE2_CLOSE_DIST) {
+            const s32 randomAction = (s32)rmRangedRandom(100);
+            if (randomAction < 5) {
+                owner->RequestAction(0x14);
+                return;
+            }
+
+            if (randomAction < 50) {
+                owner->RequestAction(0x0F);
+                return;
+            }
+
+            self->ComplexAttack();
+            return;
+        }
+
+        owner->SetTarget(player);
+        owner->RequestAction(6);
+        return;
+    }
+
+    if (IsPlayerAggressiveCombatState(player->actionState)) {
+        self->nextHandlerThisOffset = 0;
+        self->nextHandlerDispatch = -1;
+        self->nextHandler = DanteDMS_Phase2;
+
+        self->navDecisionCounter = 0;
+        self->handlerThisOffset = 0;
+        self->handlerDispatch = -1;
+        self->handler = BackoffAndTaunt;
+        return;
+    }
+
+    if (distanceToPlayer < DANTE_PHASE2_CLOSE_DIST) {
+        const s32 randomAction = (s32)rmRangedRandom(100);
+        if (randomAction < 5) {
+            owner->RequestAction(0x14);
+            return;
+        }
+
+        if (randomAction < 30) {
+            owner->RequestAction(0x0E);
+            return;
+        }
+
+        self->ComplexAttack();
+        return;
+    }
+
+    if (deskZone->IsInSubZoneVolume(owner)) {
+        owner->RequestAction(0x1D);
+        return;
+    }
+
+    LinearPath* path = ownerZone->FindFirstValidPath(owner);
+    self->currentPath = path;
+    self->InitPathAIState(path);
+
+    self->nextHandlerThisOffset = 0;
+    self->nextHandlerDispatch = -1;
+    self->nextHandler = DanteDMS_Phase2;
+}
+
+// PSX: _DanteDMS_Phase3__9Behaviour (BEHAVEB.CPP:2184, 0x8001F678)
+void Behaviour::DanteDMS_Phase3(Behaviour* self) {
+    MARKFUNCTION(0x8001F678);
+
+    if (!self || !self->owner) {
+        return;
+    }
+
+    if (!self->InActiveZone()) {
+        return;
+    }
+
+    Humanoid* player = Player::s_player;
+    if (!player) {
+        return;
+    }
+
+    Humanoid* owner = self->owner;
+    owner->SetTarget(player);
+
+    const s32 distanceToPlayer = owner->DistanceFromPoint(player->pos);
+    if ((u32)(owner->actionState - 0x20) >= 5u) {
+        self->comboScriptIndex = -1;
+        self->comboScriptCursor = 0;
+    }
+
+    owner->FaceThingDesired(player);
+
+    s32 floorDelta = self->LookAheadFloorCheck(0, 0x200, 0x100);
+    if ((u32)(floorDelta + 0x400) < 0xA01u) {
+        s32 absFloorDelta = floorDelta;
+        if (absFloorDelta < 0) {
+            absFloorDelta = -absFloorDelta;
+        }
+
+        if (absFloorDelta >= 0x101) {
+            owner->RequestAction(3);
+
+            self->nextHandlerThisOffset = 0;
+            self->nextHandlerDispatch = -1;
+            self->nextHandler = DanteDMS_Phase3;
+
+            self->handlerThisOffset = 0;
+            self->handlerDispatch = -1;
+            self->handler = Jumping;
+        }
+    }
+
+    if (self->CounterAttack() != 0) {
+        owner->RequestAction(0x14);
+        self->field80To176[23] = 0;
+
+        if ((u32)(owner->actionState - 0x2E) < 9u) {
+            owner->LoadCombatDialog();
+        }
+        return;
+    }
+
+    s32 shouldBackAway = 0;
+    if ((u32)(player->actionState - 0x20) < 5u) {
+        shouldBackAway = ((u32)(owner->actionState - 0x20) < 5u) ? 0 : 1;
+    }
+
+    if (shouldBackAway != 0) {
+        owner->SetDesiredMoveDirection(owner->faceAngle + 0x8000);
+        owner->moveSpeed = GetFaceAngleDataBackAngle(owner);
+        owner->RequestAction(6);
+        return;
+    }
+
+    if (distanceToPlayer < DANTE_PHASE3_CLOSE_DIST) {
+        if (IsPlayerAggressiveCombatState(player->actionState)) {
+            self->nextHandlerThisOffset = 0;
+            self->nextHandlerDispatch = -1;
+            self->nextHandler = DanteDMS_Phase3;
+
+            self->navDecisionCounter = 0;
+            self->handlerThisOffset = 0;
+            self->handlerDispatch = -1;
+            self->handler = BackoffAndTaunt;
+            return;
+        }
+
+        if ((s32)rmRangedRandom(100) < 20) {
+            owner->RequestAction(7);
+            return;
+        }
+
+        self->ComplexAttack();
+        return;
+    }
+
+    if (distanceToPlayer < DANTE_PHASE3_MID_DIST) {
+        if (IsPlayerAggressiveCombatState(player->actionState)) {
+            owner->SetDesiredMoveDirection(owner->faceAngle + 0x8000);
+        }
+
+        owner->moveSpeed = GetFaceAngleDataBackAngle(owner);
+        owner->RequestAction(6);
+        return;
+    }
+
+    if (IsPlayerAggressiveCombatState(player->actionState)) {
+        owner->RequestAction(1);
+        return;
+    }
+
+    if (owner->actionState != 0x50 && (s32)rmRangedRandom(100) < 40) {
+        owner->field316 = 0x5A;
+        owner->RequestAction(0x15);
+        return;
+    }
+
+    owner->RequestAction(1);
+    u8* ownerBytes = reinterpret_cast<u8*>(owner);
+    *reinterpret_cast<s32*>(ownerBytes + 0x108) = player->pos.x;
+    *reinterpret_cast<s32*>(ownerBytes + 0x10C) = player->pos.y;
+    *reinterpret_cast<s32*>(ownerBytes + 0x110) = player->pos.z;
+    owner->RequestAction(0x1C);
 }
 
 bool Behaviour::InActiveZone() const {
