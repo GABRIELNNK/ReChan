@@ -254,12 +254,12 @@ public:
         return (commandBits >> GA_GRAB) & 0x3FFF;
     }
 
-    // Check if any pickup/grab bit is set (bits 7, 15, 16, 19)
+    // Check if any pickup/grab bit is set (bits 7, 15, 17, 18)
     inline bool HasAnyPickup() const {
         return ((commandBits >> GA_GRAB) & 1) ||
             ((commandBits >> GA_GRAB_FORWARD) & 1) ||
-            (commandBits & 0x10000) ||
-            ((commandBits >> 19) & 1);
+            ((commandBits >> GA_GRAB_HELD) & 1) ||
+            ((commandBits >> GA_GRAB_FWD_HELD) & 1);
     }
 
     // PSX +356 (s32): current action state number

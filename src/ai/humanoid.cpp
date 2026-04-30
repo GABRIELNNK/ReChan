@@ -67,6 +67,7 @@ static constexpr s32 GRAB_HEIGHT = 384;
 static constexpr s16 BACK_GRAB_RELEASE_SPEED_FRAME = 13;
 static constexpr s32 BACK_GRAB_RECOVERY_START_FRAME = 7;
 static constexpr s32 BACK_GRAB_RECEIVE_PRE_LATCH_FRAMES = 31;
+static constexpr s32 BACK_GRAB_ATTACH_Z = 0x1C2;
 // PSX gp+0x738, passed as Pickup::Release forceMag in _Throw directional release.
 static s32 s_throwPickupReleaseForce = 0;
 static constexpr s32 DROP_PICKUP_DAMAGE_THRESHOLD = 14;
@@ -185,49 +186,51 @@ static s32 GetRelativeAngle(s32 sourceAngle, s32 targetAngle) {
     return delta;
 }
 
-struct ThrowTailBytes {
+struct ThrowMoveData {
     u32 address = 0;
+    LVector releaseVector = {};
+    LVector attachVector = {};
     u8 damage = 0;
     s8 shockFrame = 127;
 };
 
-static constexpr ThrowTailBytes kThrowTailBytes[] = {
-    { 0x800D15E4u, 45, 45 },
-    { 0x800D1620u, 50, 47 },
-    { 0x800D165Cu, 45, 23 },
-    { 0x800D1698u, 45, 22 },
-    { 0x800D1710u, 45, 8 },
-    { 0x800D174Cu, 0, 44 },
-    { 0x800D1788u, 45, 48 },
-    { 0x800D17C4u, 45, 38 },
-    { 0x800D1800u, 35, 127 },
-    { 0x800D183Cu, 35, 127 },
-    { 0x800D1878u, 35, 127 },
-    { 0x800D18B4u, 35, 29 },
-    { 0x800D18F0u, 35, 35 },
-    { 0x800D192Cu, 35, 35 },
-    { 0x800D1968u, 35, 35 },
-    { 0x800D19A4u, 35, 127 },
-    { 0x800D19E0u, 35, 127 },
-    { 0x800D1A1Cu, 35, 127 },
-    { 0x800D1A58u, 35, 127 },
-    { 0x800D1A94u, 35, 127 },
-    { 0x800D1AD0u, 0, 44 },
-    { 0x800D1B0Cu, 35, 127 },
-    { 0x800D1B48u, 35, 127 },
+// PSX throw rows store full 32-bit release/attach vectors that are not preserved
+// by the generic exported fighting-move aggregate. Use exact per-row truth here.
+static constexpr ThrowMoveData kThrowMoveData[] = {
+    { 0x800D15E4u, { 0, 2000, 10000 }, { 125, 0, 400 }, 45, 45 },
+    { 0x800D1620u, { 0, 4000, -6000 }, { 125, 0, 520 }, 50, 47 },
+    { 0x800D165Cu, { 0, 0, 8000 }, { 20, 0, 684 }, 45, 23 },
+    { 0x800D1698u, { 0, 3500, -40000 }, { 20, 0, 400 }, 45, 22 },
+    { 0x800D1710u, { 0, 0, 0 }, { 0, 0, 300 }, 45, 8 },
+    { 0x800D174Cu, { 0, 9500, 40000 }, { 20, 0, 700 }, 0, 44 },
+    { 0x800D1788u, { 0, 0, 14000 }, { 20, 0, 650 }, 45, 48 },
+    { 0x800D17C4u, { -5536, 5000, 2000 }, { 20, 0, 500 }, 45, 38 },
+    { 0x800D1800u, { 0, 0, 14000 }, { 20, 0, 875 }, 35, 127 },
+    { 0x800D183Cu, { 0, 0, 14000 }, { 20, 0, 400 }, 35, 127 },
+    { 0x800D1878u, { 0, 0, 14000 }, { 20, 0, 875 }, 35, 127 },
+    { 0x800D18B4u, { 0, 3000, 30000 }, { 20, 0, 875 }, 35, 29 },
+    { 0x800D18F0u, { 40000, 5000, 5000 }, { 20, 0, 875 }, 35, 35 },
+    { 0x800D192Cu, { 40000, 5000, 5000 }, { 20, 0, 875 }, 35, 35 },
+    { 0x800D1968u, { 40000, 5000, 5000 }, { 20, 0, 875 }, 35, 35 },
+    { 0x800D19A4u, { 0, 0, 14000 }, { 20, 0, 875 }, 35, 127 },
+    { 0x800D19E0u, { 0, 0, 14000 }, { 20, 0, 875 }, 35, 127 },
+    { 0x800D1A1Cu, { 0, 0, 14000 }, { 20, 0, 875 }, 35, 127 },
+    { 0x800D1A58u, { 0, 0, 14000 }, { 20, 0, 675 }, 35, 127 },
+    { 0x800D1A94u, { 0, 0, 14000 }, { 20, 0, 600 }, 35, 127 },
+    { 0x800D1AD0u, { 0, 9500, 40000 }, { 20, 0, 700 }, 0, 44 },
+    { 0x800D1B0Cu, { 0, 0, 14000 }, { 20, 0, 650 }, 35, 127 },
+    { 0x800D1B48u, { -5536, 5000, 2000 }, { 20, 0, 500 }, 35, 127 },
 };
 
-static bool LookupThrowTailBytes(u32 address, u8& outDamage, s8& outShockFrame) {
+static const ThrowMoveData* LookupThrowMoveData(u32 address) {
     s32 low = 0;
-    s32 high = static_cast<s32>(sizeof(kThrowTailBytes) / sizeof(kThrowTailBytes[0])) - 1;
+    s32 high = static_cast<s32>(sizeof(kThrowMoveData) / sizeof(kThrowMoveData[0])) - 1;
 
     while (low <= high) {
         const s32 mid = low + ((high - low) / 2);
-        const ThrowTailBytes& entry = kThrowTailBytes[mid];
+        const ThrowMoveData& entry = kThrowMoveData[mid];
         if (entry.address == address) {
-            outDamage = entry.damage;
-            outShockFrame = entry.shockFrame;
-            return true;
+            return &entry;
         }
 
         if (entry.address < address) {
@@ -238,23 +241,17 @@ static bool LookupThrowTailBytes(u32 address, u8& outDamage, s8& outShockFrame) 
         }
     }
 
-    outDamage = 0;
-    outShockFrame = 127;
-    return false;
+    return nullptr;
 }
 
 static u8 LookupThrowDamageByte(u32 address) {
-    u8 damage = 0;
-    s8 shockFrame = 127;
-    LookupThrowTailBytes(address, damage, shockFrame);
-    return damage;
+    const ThrowMoveData* data = LookupThrowMoveData(address);
+    return data ? data->damage : 0;
 }
 
 static s8 LookupThrowShockFrame(u32 address) {
-    u8 damage = 0;
-    s8 shockFrame = 127;
-    LookupThrowTailBytes(address, damage, shockFrame);
-    return shockFrame;
+    const ThrowMoveData* data = LookupThrowMoveData(address);
+    return data ? data->shockFrame : 127;
 }
 
 // PSX: CalculateFallDamage__Fl (PLAYER.CPP:3161, 0x80032348)
@@ -1924,14 +1921,10 @@ void Humanoid::SetActionState(u32 state, s32 param) {
         case AS_BACK_GRAB:
             if (model) {
                 Model* m = static_cast<Model*>(model);
+                m->SetAnim(79, 0, 0, 0);
                 AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
                 if (anim) {
-                    const s32 currentAnim = anim->animEnum;
-                    m->SetAnim(currentAnim, 0, 1, 0);
-                    AnimStructure* resetAnim = static_cast<AnimStructure*>(m->animStructure);
-                    if (resetAnim) {
-                        resetAnim->SetLoopType(ANIM_LOOP, 1);
-                    }
+                    anim->SetLoopType(ANIM_LOOP, 1);
                 }
             }
             field344 = 0;
@@ -1942,10 +1935,7 @@ void Humanoid::SetActionState(u32 state, s32 param) {
             ReleaseTarget();
             if (model) {
                 Model* m = static_cast<Model*>(model);
-                AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
-                if (anim) {
-                    m->SetAnim(anim->animEnum, 0, 1, 0);
-                }
+                m->SetAnim(9, 2, 0, 0);
             }
             field344 = 0;
             stateDispatch = SD_BACK_GRAB_RELEASE;
@@ -2202,14 +2192,10 @@ void Humanoid::SetActionState(u32 state, s32 param) {
         case AS_BACK_GRAB_RECEIVE:
             if (model) {
                 Model* m = static_cast<Model*>(model);
+                m->SetAnim(80, 0, 0, 0);
                 AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
                 if (anim) {
-                    const s32 currentAnim = anim->animEnum;
-                    m->SetAnim(currentAnim, 0, 1, 0);
-                    AnimStructure* resetAnim = static_cast<AnimStructure*>(m->animStructure);
-                    if (resetAnim) {
-                        resetAnim->SetLoopType(ANIM_LOOP, 1);
-                    }
+                    anim->SetLoopType(ANIM_LOOP, 1);
                 }
             }
             field344 = 0;
@@ -2479,10 +2465,23 @@ void Humanoid::FacePoint(const LVector& point, s32 immediate) {
     s32 dx = point.x - pos.x;
     s32 dz = point.z - pos.z;
 
-    // Compute target angle using atan2(dx, dz) in PSX binary angle units (0-65535)
-    // PSX convention: 0 = +Z, 0x4000 = +X, 0x8000 = -Z, 0xC000 = -X
-    f32 rad = atan2((f32)dx, (f32)dz);
-    s32 targetAngle = RAD2ANGLE(rad) & 0xFFFF;
+    s32 targetAngle = 0;
+    u32 quadrant = (u32)dx >> 31;
+    if (dz < 0) {
+        quadrant += 2;
+    }
+
+    if (quadrant == 1) {
+        targetAngle = (s32)rmATan216((f32)-dx, (f32)dz) + 0xC000;
+    }
+    else if (quadrant >= 2) {
+        if (quadrant < 4) {
+            targetAngle = (s32)rmATan216((f32)-dz, (f32)-dx) + 0x8000;
+        }
+    }
+    else {
+        targetAngle = (s32)rmATan216((f32)-dx, (f32)dz) - 0x4000;
+    }
 
     if (immediate == 0) {
         // Snap directly to target angle
@@ -3036,9 +3035,9 @@ void Humanoid::_Stand() {
             SetActionState(AS_BACKFLIP, 0);
             return;
 
-        case 7:
-        case 15:
-        case 16:
+        case GA_GRAB:
+        case GA_GRAB_FORWARD:
+        case GA_GRAB_HELD:
             if (rightHandObj != 0 || leftHandObj != 0) {
                 const s32 weaponField = rightHandObj ? static_cast<Pickup*>(rightHandObj)->weaponField : 0;
                 if (weaponField != 0) {
@@ -3067,7 +3066,7 @@ void Humanoid::_Stand() {
             SetActionState(AS_PUNCH_ATTACK, 0);
             return;
 
-        case 19:
+        case GA_GRAB_FWD_HELD:
             SetActionState(AS_COMBAT_IDLE, 0);
             return;
 
@@ -3210,9 +3209,9 @@ void Humanoid::_Taunt() {
         case 6:
             SetActionState(AS_BACKFLIP, 0);
             return;
-        case 7:
-        case 15:
-        case 16:
+        case GA_GRAB:
+        case GA_GRAB_FORWARD:
+        case GA_GRAB_HELD:
             if (rightHandObj != 0 || leftHandObj != 0) {
                 const s32 weaponField = rightHandObj ? static_cast<Pickup*>(rightHandObj)->weaponField : 0;
                 if (weaponField != 0) {
@@ -3239,7 +3238,7 @@ void Humanoid::_Taunt() {
         case 20:
             SetActionState(AS_PUNCH_ATTACK, 0);
             return;
-        case 19:
+        case GA_GRAB_FWD_HELD:
             SetActionState(AS_COMBAT_IDLE, 0);
             return;
         case 21:
@@ -3298,9 +3297,9 @@ void Humanoid::_Run() {
         return;
     }
 
-    // Multi-hit combat (bits 7,19,15,16,17,18) -> pickup/throw or combat idle
-    if ((sd >> 7) & 1 || (sd >> 19) & 1 || (sd >> 15) & 1
-        || (sd >> 16) & 1 || (sd >> 17) & 1 || (sd >> 18) & 1) {
+    // Multi-hit combat (bits 7,15,17,18) -> pickup/throw or combat idle
+    if (((sd >> GA_GRAB) & 1) || ((sd >> GA_GRAB_FORWARD) & 1)
+        || ((sd >> GA_GRAB_HELD) & 1) || ((sd >> GA_GRAB_FWD_HELD) & 1)) {
         if (rightHandObj != 0 || leftHandObj != 0) {
             if (rightHandObj && static_cast<Pickup*>(rightHandObj)->weaponField != 0) {
                 SetActionState(AS_COMBAT_IDLE, 0);
@@ -3419,9 +3418,9 @@ void Humanoid::_Straif() {
         return;
     }
 
-    // Grab/combat (bits 7,19,15,16,17,18)
-    if ((sd >> 7) & 1 || (sd >> 19) & 1 || (sd >> 15) & 1
-        || (sd >> 16) & 1 || (sd >> 17) & 1 || (sd >> 18) & 1) {
+    // Grab/combat (bits 7,15,17,18)
+    if (((sd >> GA_GRAB) & 1) || ((sd >> GA_GRAB_FORWARD) & 1)
+        || ((sd >> GA_GRAB_HELD) & 1) || ((sd >> GA_GRAB_FWD_HELD) & 1)) {
         if (rightHandObj || leftHandObj) {
             if (!((s32*)rightHandObj)[79]) {
                 ReleaseTarget();
@@ -4158,12 +4157,12 @@ s32 Humanoid::TestAndSetBackGrab() {
     SetActionState(AS_BACK_GRAB_LATCH, 0);
     target->SetActionState(AS_BACK_GRAB_RECEIVE_PRE_LATCH, 0);
 
-    SVector local = {};
-    SVector world = {};
+    LVector local = { 0, 0, BACK_GRAB_ATTACH_Z };
+    LVector world = {};
     GetObjectToWorldSpaceVector(local, world);
-    target->homePos.x = pos.x + static_cast<s32>(world.x);
-    target->homePos.y = pos.y + static_cast<s32>(world.y);
-    target->homePos.z = pos.z + static_cast<s32>(world.z);
+    target->homePos.x = pos.x + world.x;
+    target->homePos.y = pos.y + world.y;
+    target->homePos.z = pos.z + world.z;
     target->orientation.y = orientation.y;
     return 1;
 }
@@ -5296,19 +5295,24 @@ s32 Humanoid::ProcessBodyThrow(const PsxFightingMoveRaw* move, s32 frame) {
     Player* const player = Player::s_player;
     const bool isPlayerAttacker = (this == static_cast<Humanoid*>(player));
     Humanoid* target = reinterpret_cast<Humanoid*>(field256);
+    const ThrowMoveData* throwData = LookupThrowMoveData(move->address);
     if (frame > 0 && move->throwAttachFrame >= frame && target) {
         FaceThing(target, 0);
     }
 
     if (frame == move->throwAttachFrame) {
         if (target) {
-            SVector local = { move->throwAttachX, move->throwAttachY, move->throwAttachZ, 0 };
-            SVector world = {};
+            LVector local = throwData
+                ? throwData->attachVector
+                : LVector{ static_cast<s32>(move->throwAttachX),
+                           static_cast<s32>(move->throwAttachY),
+                           static_cast<s32>(move->throwAttachZ) };
+            LVector world = {};
             GetObjectToWorldSpaceVector(local, world);
 
-            target->homePos.x = pos.x + static_cast<s32>(world.x);
-            target->homePos.y = pos.y + static_cast<s32>(world.y);
-            target->homePos.z = pos.z + static_cast<s32>(world.z);
+            target->homePos.x = pos.x + world.x;
+            target->homePos.y = pos.y + world.y;
+            target->homePos.z = pos.z + world.z;
 
             if (target->model) {
                 Model* targetModel = static_cast<Model*>(target->model);
@@ -5335,13 +5339,17 @@ s32 Humanoid::ProcessBodyThrow(const PsxFightingMoveRaw* move, s32 frame) {
     if (frame == move->throwReleaseFrame && target) {
         FightingCollision::Set(target, this);
 
-        SVector local = { move->throwVectorX, move->throwVectorY, move->throwVectorZ, 0 };
-        SVector world = {};
+        LVector local = throwData
+            ? throwData->releaseVector
+            : LVector{ static_cast<s32>(move->throwVectorX),
+                       static_cast<s32>(move->throwVectorY),
+                       static_cast<s32>(move->throwVectorZ) };
+        LVector world = {};
         GetObjectToWorldSpaceVector(local, world);
 
-        target->contactForce.x += static_cast<s32>(world.x);
-        target->contactForce.y += static_cast<s32>(world.y);
-        target->contactForce.z += static_cast<s32>(world.z);
+        target->contactForce.x += world.x;
+        target->contactForce.y += world.y;
+        target->contactForce.z += world.z;
         target->SetActionState(AS_THROW_FREE_FALL, 0);
         target->field528 = static_cast<s32>(move->address);
         target->ReleaseTarget();

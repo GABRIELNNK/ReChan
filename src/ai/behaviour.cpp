@@ -2308,10 +2308,10 @@ void Behaviour::PlayerUserControl(Behaviour* self) {
 
     if ((u32)(actionReq - 2) < 3
         || actionReq == GA_STRAFE
-        || actionReq == 19
         || actionReq == GA_GRAB
         || actionReq == GA_GRAB_FORWARD
-        || actionReq == 16) {
+        || actionReq == GA_GRAB_HELD
+        || actionReq == GA_GRAB_FWD_HELD) {
         owner->SetDesiredMoveDirection(targetAngle);
     }
 

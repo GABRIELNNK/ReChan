@@ -1474,10 +1474,11 @@ void Player::_Stand() {
         return;
     }
 
-    // PSX: bits 7,15,16,19 -> pickup/throw or combat idle
+    // PSX command requests for grab-family input: bits 7,15,17,18.
     {
         s32 hasPickupBits = 0;
-        if (((cb >> 7) & 1) || ((cb >> 15) & 1) || (cb & 0x10000) || ((cb >> 19) & 1)) {
+        if (((cb >> GA_GRAB) & 1) || ((cb >> GA_GRAB_FORWARD) & 1)
+            || ((cb >> GA_GRAB_HELD) & 1) || ((cb >> GA_GRAB_FWD_HELD) & 1)) {
             hasPickupBits = 1;
         }
         if (hasPickupBits) {
@@ -1560,11 +1561,12 @@ void Player::_Stand() {
     // PSX: combat bits 7-20 -> punch attack
     {
         s32 hasCombat = 0;
-        if (((cb >> 7) & 1) || ((cb >> 8) & 1) || ((cb >> 9) & 1) ||
-            ((cb >> 10) & 1) || ((cb >> 11) & 1) || ((cb >> 12) & 1) ||
-            ((cb >> 13) & 1) || ((cb >> 14) & 1) || ((cb >> 15) & 1) ||
-            (cb & 0x10000) || ((cb >> 17) & 1) || ((cb >> 18) & 1) ||
-            ((cb >> 19) & 1) || ((cb >> 20) & 1)) {
+        if (((cb >> GA_GRAB) & 1) || ((cb >> GA_PUNCH) & 1) || ((cb >> GA_KICK) & 1) ||
+            ((cb >> GA_BACK_PUNCH) & 1) || ((cb >> GA_BACK_KICK) & 1)
+            || ((cb >> GA_HEAVY_PUNCH) & 1) || ((cb >> GA_HEAVY_KICK) & 1)
+            || ((cb >> GA_SPECIAL_GRAB) & 1) || ((cb >> GA_GRAB_FORWARD) & 1)
+            || ((cb >> GA_GRAB_HELD) & 1) || ((cb >> GA_GRAB_FWD_HELD) & 1)
+            || ((cb >> 20) & 1)) {
             hasCombat = 1;
         }
         if (hasCombat) {
@@ -2064,7 +2066,8 @@ void Player::_Run() {
     // PSX: pickup/throw/backflip section (all fall through to LABEL_13)
     {
         s32 hasPickup = 0;
-        if (((cb >> 7) & 1) || ((cb >> 15) & 1) || (cb & 0x10000)) {
+        if (((cb >> GA_GRAB) & 1) || ((cb >> GA_GRAB_FORWARD) & 1)
+            || ((cb >> GA_GRAB_HELD) & 1) || ((cb >> GA_GRAB_FWD_HELD) & 1)) {
             hasPickup = 1;
         }
         if (hasPickup) {
@@ -2120,11 +2123,12 @@ void Player::_Run() {
         }
         else {
             s32 hasCombat = 0;
-            if (((cb >> 7) & 1) || ((cb >> 8) & 1) || ((cb >> 9) & 1) ||
-                ((cb >> 10) & 1) || ((cb >> 11) & 1) || ((cb >> 12) & 1) ||
-                ((cb >> 13) & 1) || ((cb >> 14) & 1) || ((cb >> 15) & 1) ||
-                (cb & 0x10000) || ((cb >> 17) & 1) || ((cb >> 18) & 1) ||
-                ((cb >> 19) & 1) || ((cb >> 20) & 1)) {
+            if (((cb >> GA_GRAB) & 1) || ((cb >> GA_PUNCH) & 1) || ((cb >> GA_KICK) & 1) ||
+                ((cb >> GA_BACK_PUNCH) & 1) || ((cb >> GA_BACK_KICK) & 1)
+                || ((cb >> GA_HEAVY_PUNCH) & 1) || ((cb >> GA_HEAVY_KICK) & 1)
+                || ((cb >> GA_SPECIAL_GRAB) & 1) || ((cb >> GA_GRAB_FORWARD) & 1)
+                || ((cb >> GA_GRAB_HELD) & 1) || ((cb >> GA_GRAB_FWD_HELD) & 1)
+                || ((cb >> 20) & 1)) {
                 hasCombat = 1;
             }
             if (hasCombat) {
