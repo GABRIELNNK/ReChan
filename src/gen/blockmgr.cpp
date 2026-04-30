@@ -1,6 +1,45 @@
 #include "common.h"
+#include "ai/player.h"
+#include "gen/ai.h"
 #include "gen/blockmgr.h"
 #include "gen/database.h"
+#include "gen/game.h"
+#include "gen/world.h"
+
+static u32 ClampLoadedBlockCount(u32 totalBlockCount) {
+    const u32 maxLoaded = (g_game && g_game->GetWorld() && g_game->GetWorld()->GetCurLevelID() == 7) ? 7u : 6u;
+    return (totalBlockCount < maxLoaded) ? totalBlockCount : maxLoaded;
+}
+
+static const Block* GetBlockByNumber(const std::vector<Block>& blocks, u32 blockNum) {
+    for (u32 index = 0; index < blocks.size(); index++) {
+        if (blocks[index].blockNum == (u16)blockNum) {
+            return &blocks[index];
+        }
+    }
+
+    return nullptr;
+}
+
+static Block* GetBlockByNumber(std::vector<Block>& blocks, u32 blockNum) {
+    for (u32 index = 0; index < blocks.size(); index++) {
+        if (blocks[index].blockNum == (u16)blockNum) {
+            return &blocks[index];
+        }
+    }
+
+    return nullptr;
+}
+
+static bool ContainsBlockNumber(const u16* list, u32 count, u16 blockNum) {
+    for (u32 index = 0; index < count; index++) {
+        if (list[index] == blockNum) {
+            return true;
+        }
+    }
+
+    return false;
+}
 
 // __12BlockManager (BLKMGR.CPP:148)
 BlockManager::BlockManager() {
@@ -78,6 +117,7 @@ void BlockManager::LoadBlocks(u32 blockNum,
     MARKFUNCTION(0x80050A98);
 
     currentBlockNum = blockNum;
+    numBlocks = ClampLoadedBlockCount(totalBlocks);
 
     // Parse each BLK entry into its corresponding block
     for (u32 i = 0; i < blkCount && i < totalBlocks; i++) {
@@ -86,7 +126,7 @@ void BlockManager::LoadBlocks(u32 blockNum,
         }
     }
 
-    // PC: all blocks are loaded. Build the alreadyLoadedList with all block numbers.
+    UpdateToBeLoadedList(blockNum);
     UpdateAlreadyLoadedList();
 
     // PC: on PSX, PopulateBlock is called here inside LoadBlocks.
@@ -98,18 +138,36 @@ void BlockManager::LoadBlocks(u32 blockNum,
 }
 
 // UpdateAlreadyLoadedList__12BlockManager (BLKMGR.CPP)
-// PSX: copies block numbers from loaded block linked list into alreadyLoadedList array.
-// PC: all blocks are loaded, so copy all block numbers.
+// PSX: copies block numbers from the loaded block list into alreadyLoadedList.
+// PC parses BLKs synchronously, so the logical resident list mirrors toBeLoadedList.
 void BlockManager::UpdateAlreadyLoadedList() {
-    alreadyLoadedCount = 0;
-    for (u32 i = 0; i < totalBlocks && alreadyLoadedCount < 8; i++) {
-        alreadyLoadedList[alreadyLoadedCount] = blocks[i].blockNum;
-        alreadyLoadedCount++;
+    alreadyLoadedCount = toBeLoadedCount;
+    for (u32 index = 0; index < 8; index++) {
+        alreadyLoadedList[index] = (index < alreadyLoadedCount) ? toBeLoadedList[index] : 6969;
     }
-    // Also populate drawList = same as alreadyLoadedList on PC (all loaded = all drawable)
-    drawListCount = alreadyLoadedCount;
-    for (u32 i = 0; i < alreadyLoadedCount; i++) {
-        drawList[i] = alreadyLoadedList[i];
+
+    flag2 = 1;
+
+    s32 startBlockNum = (s32)currentBlockNum - 1;
+    if (startBlockNum < 0) {
+        startBlockNum = 0;
+    }
+    else if ((u32)startBlockNum > totalBlocks) {
+        startBlockNum = (s32)totalBlocks;
+    }
+
+    s32 endBlockNum = (s32)currentBlockNum + 1;
+    if (endBlockNum < 0) {
+        endBlockNum = 0;
+    }
+    else if ((u32)endBlockNum > totalBlocks) {
+        endBlockNum = (s32)totalBlocks;
+    }
+
+    for (s32 blockNum = startBlockNum; blockNum <= endBlockNum; blockNum++) {
+        if (InLoadList((u32)blockNum) && !IsValidBlockNumber((u32)blockNum)) {
+            flag2 = 0;
+        }
     }
 }
 
@@ -126,8 +184,8 @@ Block* BlockManager::GetBlock(u32 index) {
 // PC: all blocks are loaded, iterate all blocks.
 bool BlockManager::IsValidBlockNumber(u32 blockNum) const {
     MARKFUNCTION(0x80050C70);
-    for (u32 i = 0; i < totalBlocks; i++) {
-        if (blocks[i].blockNum == (u16)blockNum) {
+    for (u32 index = 0; index < alreadyLoadedCount; index++) {
+        if (alreadyLoadedList[index] == (u16)blockNum && GetBlockByNumber(blocks, blockNum)) {
             return true;
         }
     }
@@ -140,10 +198,10 @@ bool BlockManager::IsValidBlockNumber(u32 blockNum) const {
 // PC: all blocks are loaded, iterate all blocks.
 u16 BlockManager::GetBlockNumber(const LVector& pos) const {
     MARKFUNCTION(0x80050C04);
-    for (u32 i = 0; i < totalBlocks; i++) {
-        const Block& blk = blocks[i];
-        if (blk.PointInBlock(&pos)) {
-            return blk.blockNum;
+    for (u32 index = 0; index < alreadyLoadedCount; index++) {
+        const Block* block = GetBlockByNumber(blocks, alreadyLoadedList[index]);
+        if (block && block->PointInBlock(&pos)) {
+            return block->blockNum;
         }
     }
     return 0x1000;
@@ -158,27 +216,19 @@ bool BlockManager::InActiveList(u32 blockNum) const {
             return true;
         }
     }
-
-    // PC fallback: all parsed blocks are resident (no PSX demand-loading pool yet),
-    // so consider any valid block number as active.
-    return IsValidBlockNumber(blockNum);
+    return false;
 }
 
 // InDrawList__C12BlockManagerUl (BLKMGR.CPP:807, 0x80050CF4)
 // PSX: checks drawList u16 array for blockNum.
 bool BlockManager::InDrawList(u32 blockNum) const {
     MARKFUNCTION(0x80050CF4);
-    if (!drawListCount) {
-        return IsValidBlockNumber(blockNum);
-    }
     for (u32 i = 0; i < drawListCount; i++) {
         if (drawList[i] == (u16)blockNum) {
             return true;
         }
     }
-
-    // PC fallback: all parsed blocks are drawable until demand-loading is reversed.
-    return IsValidBlockNumber(blockNum);
+    return false;
 }
 
 // InLoadList__C12BlockManagerUl (BLKMGR.CPP:785, 0x80050CB4)
@@ -197,8 +247,291 @@ bool BlockManager::InLoadList(u32 blockNum) const {
 // PSX: returns true if player blockNum != currentBlockNum
 bool BlockManager::CrossedBoundary() const {
     MARKFUNCTION(0x800506BC);
-    // PSX: MEMORY[0x54] = player->blockNum
-    // PC: we'd need the player reference, but since all blocks are loaded,
-    // demand loading isn't needed. Return false.
-    return false;
+    if (!Player::s_player) {
+        return false;
+    }
+
+    const u32 playerBlockNum = Player::s_player->blockNum;
+    return playerBlockNum != BLOCK_UNASSIGNED && playerBlockNum != currentBlockNum;
+}
+
+s32 BlockManager::DemandLoading() {
+    MARKFUNCTION(0x800506E8);
+
+    if (!flag3 || !CrossedBoundary() || !Player::s_player) {
+        return 0;
+    }
+
+    currentBlockNum = Player::s_player->blockNum;
+    UpdateToBeLoadedList(currentBlockNum);
+    UpdateAlreadyLoadedList();
+
+    if (g_ai) {
+        g_ai->UnpopulateBlock();
+        g_ai->PopulateBlock();
+    }
+
+    return 0;
+}
+
+bool BlockManager::UpdateToBeLoadedList(u32 blockNum) {
+    MARKFUNCTION(0x80050D94);
+
+    for (u32 index = 0; index < 8; index++) {
+        toBeLoadedList[index] = 6969;
+        alreadyLoadedList[index] = 6969;
+        drawList[index] = 6969;
+    }
+    toBeLoadedCount = 0;
+    alreadyLoadedCount = 0;
+    drawListCount = 0;
+
+    if (numBlocks == 0) {
+        return false;
+    }
+
+    const Block* currentBlock = GetBlockByNumber(blocks, blockNum);
+    if (!currentBlock) {
+        return false;
+    }
+
+    u16 previousBlocks[8] = {};
+    u16 nextBlocks[8] = {};
+
+    const Block* previousFrontier[2] = { currentBlock, nullptr };
+    u32 previousFrontierIndex = 0;
+    u32 previousCount = 0;
+    while (previousCount < 7) {
+        const u32 otherIndex = (previousFrontierIndex + 1) & 1u;
+        const Block* block = previousFrontier[previousFrontierIndex];
+        if (!block) {
+            if (!previousFrontier[otherIndex]) {
+                break;
+            }
+            previousFrontierIndex = otherIndex;
+            continue;
+        }
+
+        if (block != currentBlock && !ContainsBlockNumber(previousBlocks, previousCount, block->blockNum)) {
+            previousBlocks[previousCount++] = block->blockNum;
+        }
+
+        if (block->blockNum == 0) {
+            previousFrontier[previousFrontierIndex] = nullptr;
+            previousFrontierIndex = otherIndex;
+            continue;
+        }
+
+        const s16 branch = (s16)block->unk38;
+        if (branch >= 0 || (previousFrontier[0] && previousFrontier[1])) {
+            previousFrontier[previousFrontierIndex] = GetBlockByNumber(blocks, block->GetPrevBlockNumber());
+        }
+        else {
+            const Block* previousBlock = GetBlockByNumber(blocks, block->GetPrevBlockNumber());
+            const Block* alternateBlock = GetBlockByNumber(blocks, (u32)(~branch));
+            if (previousBlock && previousBlock->lodExtra1 == 2) {
+                previousFrontier[previousFrontierIndex] = previousBlock;
+                previousFrontier[otherIndex] = nullptr;
+            }
+            else if (alternateBlock && alternateBlock->lodExtra1 == 2) {
+                previousFrontier[previousFrontierIndex] = alternateBlock;
+                previousFrontier[otherIndex] = nullptr;
+            }
+            else if (previousBlock && previousBlock->lodExtra1 == 1) {
+                previousFrontier[otherIndex] = previousBlock;
+                previousFrontier[previousFrontierIndex] = alternateBlock;
+            }
+            else if (!alternateBlock || alternateBlock->lodExtra1 != 1) {
+                previousFrontier[otherIndex] = previousBlock;
+                previousFrontier[previousFrontierIndex] = alternateBlock;
+            }
+            else {
+                previousFrontier[otherIndex] = alternateBlock;
+                previousFrontier[previousFrontierIndex] = previousBlock;
+            }
+        }
+
+        previousFrontierIndex = otherIndex;
+    }
+
+    const Block* nextFrontier[2] = { currentBlock, nullptr };
+    u32 nextFrontierIndex = 0;
+    u32 nextCount = 0;
+    while (nextCount < 7) {
+        const u32 otherIndex = (nextFrontierIndex + 1) & 1u;
+        const Block* block = nextFrontier[nextFrontierIndex];
+        if (!block) {
+            if (!nextFrontier[otherIndex]) {
+                break;
+            }
+            nextFrontierIndex = otherIndex;
+            continue;
+        }
+
+        if (block != currentBlock && !ContainsBlockNumber(nextBlocks, nextCount, block->blockNum)) {
+            nextBlocks[nextCount++] = block->blockNum;
+        }
+
+        const u32 nextBlockNum = block->GetNextBlockNumber();
+        const Block* nextBlockCandidate = GetBlockByNumber(blocks, nextBlockNum);
+        if (!nextBlockCandidate) {
+            nextFrontier[nextFrontierIndex] = nullptr;
+        }
+        else {
+            const s16 branch = (s16)block->unk38;
+            if (branch <= 0 || (nextFrontier[0] && nextFrontier[1])) {
+                nextFrontier[nextFrontierIndex] = nextBlockCandidate;
+            }
+            else {
+                const Block* alternateBlock = GetBlockByNumber(blocks, (u32)(branch - 1));
+                if (nextBlockCandidate && nextBlockCandidate->lodExtra0 == 2) {
+                    nextFrontier[nextFrontierIndex] = nextBlockCandidate;
+                    nextFrontier[otherIndex] = nullptr;
+                }
+                else if (alternateBlock && alternateBlock->lodExtra0 == 2) {
+                    nextFrontier[nextFrontierIndex] = alternateBlock;
+                    nextFrontier[otherIndex] = nullptr;
+                }
+                else if (nextBlockCandidate && nextBlockCandidate->lodExtra0 == 1) {
+                    nextFrontier[otherIndex] = nextBlockCandidate;
+                    nextFrontier[nextFrontierIndex] = alternateBlock;
+                }
+                else if (!alternateBlock || alternateBlock->lodExtra0 != 1) {
+                    nextFrontier[otherIndex] = nextBlockCandidate;
+                    nextFrontier[nextFrontierIndex] = alternateBlock;
+                }
+                else {
+                    nextFrontier[otherIndex] = alternateBlock;
+                    nextFrontier[nextFrontierIndex] = nextBlockCandidate;
+                }
+            }
+        }
+
+        nextFrontierIndex = otherIndex;
+    }
+
+    u32 previousLoad = (previousCount < currentBlock->lodFarX) ? previousCount : (u32)currentBlock->lodFarX;
+    u32 nextLoad = (u32)currentBlock->lodNearX;
+    u32 nextSpare = 0;
+    if (nextCount >= nextLoad) {
+        nextSpare = nextCount - nextLoad;
+    }
+    else {
+        nextLoad = nextCount;
+    }
+
+    const u32 loadTotal = previousLoad + nextLoad + 1;
+    if (loadTotal >= numBlocks) {
+        if (loadTotal >= 8) {
+            const u32 overflow = loadTotal - 7;
+            if (nextLoad < overflow) {
+                previousLoad -= overflow - nextLoad;
+                nextLoad = 0;
+            }
+            else {
+                nextLoad -= overflow;
+            }
+        }
+    }
+    else {
+        const u32 deficit = numBlocks - loadTotal;
+        if (nextSpare < deficit) {
+            nextLoad += nextSpare;
+            previousLoad += deficit - nextSpare;
+        }
+        else {
+            nextLoad += deficit;
+        }
+    }
+
+    toBeLoadedCount = 1;
+    toBeLoadedList[0] = (u16)blockNum;
+    for (u32 index = 0; index < previousLoad && toBeLoadedCount < 8; index++) {
+        toBeLoadedList[toBeLoadedCount++] = previousBlocks[index];
+    }
+    for (u32 index = 0; index < nextLoad && toBeLoadedCount < 8; index++) {
+        toBeLoadedList[toBeLoadedCount++] = nextBlocks[index];
+    }
+
+    if (toBeLoadedCount < numBlocks) {
+        u16 minBlockNum = toBeLoadedList[0];
+        for (u32 index = 1; index < toBeLoadedCount; index++) {
+            if (toBeLoadedList[index] < minBlockNum) {
+                minBlockNum = toBeLoadedList[index];
+            }
+        }
+
+        for (s32 filler = (s32)minBlockNum - 1; filler >= 0 && toBeLoadedCount < numBlocks; filler--) {
+            if (GetBlockByNumber(blocks, (u32)filler)) {
+                toBeLoadedList[toBeLoadedCount++] = (u16)filler;
+            }
+        }
+    }
+
+    for (u32 left = 0; left < toBeLoadedCount; left++) {
+        u32 minIndex = left;
+        for (u32 right = left + 1; right < toBeLoadedCount; right++) {
+            if (toBeLoadedList[right] < toBeLoadedList[minIndex]) {
+                minIndex = right;
+            }
+        }
+
+        if (minIndex != left) {
+            const u16 tmp = toBeLoadedList[left];
+            toBeLoadedList[left] = toBeLoadedList[minIndex];
+            toBeLoadedList[minIndex] = tmp;
+        }
+    }
+
+    u32 previousDraw = (previousCount < currentBlock->lodFarY) ? previousCount : (u32)currentBlock->lodFarY;
+    u32 nextDraw = (u32)currentBlock->lodNearY;
+    if (nextCount < nextDraw) {
+        nextDraw = nextCount;
+    }
+    if (previousDraw + nextDraw + 1 >= 8) {
+        const u32 overflow = previousDraw + nextDraw + 1 - 7;
+        if (nextDraw < overflow) {
+            previousDraw -= overflow - nextDraw;
+            nextDraw = 0;
+        }
+        else {
+            nextDraw -= overflow;
+        }
+    }
+
+    drawListCount = 1;
+    drawList[0] = (u16)blockNum;
+    for (u32 index = 0; index < previousDraw && drawListCount < 8; index++) {
+        drawList[drawListCount++] = previousBlocks[index];
+    }
+    for (u32 index = 0; index < nextDraw && drawListCount < 8; index++) {
+        drawList[drawListCount++] = nextBlocks[index];
+    }
+
+    u32 previousActive = (previousCount < currentBlock->lodFarZ) ? previousCount : (u32)currentBlock->lodFarZ;
+    u32 nextActive = (u32)currentBlock->lodNearZ;
+    if (nextCount < nextActive) {
+        nextActive = nextCount;
+    }
+    if (previousActive + nextActive + 1 >= 8) {
+        const u32 overflow = previousActive + nextActive + 1 - 7;
+        if (nextActive < overflow) {
+            previousActive -= overflow - nextActive;
+            nextActive = 0;
+        }
+        else {
+            nextActive -= overflow;
+        }
+    }
+
+    alreadyLoadedCount = 1;
+    alreadyLoadedList[0] = (u16)blockNum;
+    for (u32 index = 0; index < previousActive && alreadyLoadedCount < 8; index++) {
+        alreadyLoadedList[alreadyLoadedCount++] = previousBlocks[index];
+    }
+    for (u32 index = 0; index < nextActive && alreadyLoadedCount < 8; index++) {
+        alreadyLoadedList[alreadyLoadedCount++] = nextBlocks[index];
+    }
+
+    return toBeLoadedCount < numBlocks;
 }

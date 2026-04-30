@@ -315,6 +315,7 @@ public:
     virtual void SetupModelCallbacks();
     virtual s32 MirrorTree();
     void InitSemiTransMode();
+    s32 IsAnimationLoaded(s32 animEnum);
     void PlayDynamicAnim(s32 animEnum);
 };
 

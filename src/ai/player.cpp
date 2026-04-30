@@ -1,6 +1,7 @@
 #include "ai/player.h"
 #include "ai/colfight.h"
 #include "ai/obstacle.h"
+#include "ai/pickup.h"
 #include "gen/model.h"
 #include "gen/mplayer.h"
 #include "gen/animmat.h"
@@ -48,6 +49,9 @@ static constexpr s32 WALL_JUMP_MIN_HEIGHT_ABOVE_FLOOR = 256;
 static constexpr u32 WALL_JUMP_MIN_WALL_HEIGHT = 0;
 static constexpr u32 WALL_JUMP_MIN_COLLISION_RATIO = 0;
 static constexpr s32 WALL_JUMP_MIN_ANGLE = 0;
+static constexpr s32 PICKUP_MOVE_COMPARE_OFFSET = 384;
+static constexpr s32 THROW_FAR_RANGE = 0x4B0;
+static constexpr s32 THROW_FAR_FIELD = (30 << 16) / 360;
 
 // PSX jump parameter tables at 0x800D652C-0x800D6558: [force, gravity, maxFallDivisor]
 static const s32 s_runJumpTap[3] = { 2000,  20480, 20 };  // 0x7D0, 0x5000, 0x14
@@ -340,6 +344,7 @@ void Player::Reset() {
 
     health = 200;
     turnRate = 5500;
+    SetDesiredMoveDirection(orientation.y);
     flags |= TF_DYNAMIC | TF_BIT5 | TF_BIT3;
     // PSX: runSpeed set from humanoid data (GetHumanoidData). Default for Player.
     runSpeed = PLAYER_RUN_FORCE;
@@ -361,6 +366,12 @@ void Player::Reset() {
     debugAnimOverrideLoopType = ANIM_LOOP;
 
     SetActionState(AS_STAND, 0);
+
+    if (behaviour) {
+        behaviour->handlerThisOffset = 0;
+        behaviour->handlerDispatch = -1;
+        behaviour->handler = Behaviour::PlayerUserControl;
+    }
 }
 
 // PSX: Move__6Player (PLAYER.CPP:1408, 0x80030100)
@@ -790,11 +801,21 @@ void Player::SetActionState(u32 state, s32 param) {
             }
 
             // PSX case 44: pickup object - play weapon pickup dialog when present.
+            s32 pickupAnim = 44;
             if (rightHandObj) {
-                s32 dialogID = GetWeaponPickupDialog((s32)rightHandObj->thingType);
+                Pickup* pickup = static_cast<Pickup*>(rightHandObj);
+                pickup->SetPickupMove(pos.y + PICKUP_MOVE_COMPARE_OFFSET);
+                pickupAnim = static_cast<s32>(pickup->GetPickupMove());
+
+                s32 dialogID = GetWeaponPickupDialog((s32)pickup->thingType);
                 if (dialogID != 0 && LoadDialog((u32)dialogID, 0x33) != 0) {
                     PlayDialog((u32)dialogID, 0x3C);
                 }
+            }
+
+            if (model) {
+                Model* m = static_cast<Model*>(model);
+                m->SetAnim(pickupAnim, param, 0, 0);
             }
 
             field344 = 0;
@@ -812,6 +833,15 @@ void Player::SetActionState(u32 state, s32 param) {
 
             // PSX case 45: preload throw voice line for throw release timing.
             LoadDialog(84, 0x33);
+            SetHumanoidTarget(FindFoe(750, 10922, 0));
+            if (!field256) {
+                SetHumanoidTarget(FindFoe(THROW_FAR_RANGE, THROW_FAR_FIELD, 0));
+            }
+
+            if (model && rightHandObj) {
+                Model* m = static_cast<Model*>(model);
+                m->SetAnim(static_cast<s32>(static_cast<Pickup*>(rightHandObj)->GetThrowMove()), param, 0, 0);
+            }
 
             field344 = 0;
             stateDispatch = SD_THROW;

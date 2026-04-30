@@ -1424,6 +1424,7 @@ static bool LoadBlocksForPetalFromStream(
     BlockManager& blockMgr,
     const std::vector<u8>& streamData,
     u32 targetPetal,
+    u32 startBlockNum,
     const char* logTag)
 {
     if (streamData.empty()) {
@@ -1475,9 +1476,9 @@ static bool LoadBlocksForPetalFromStream(
     }
 
     const u32 blkCount = static_cast<u32>(blkPtrs.size());
-    blockMgr.LoadBlocks(0, blkPtrs.data(), blkSizes.data(), blkCount);
+    blockMgr.LoadBlocks(startBlockNum, blkPtrs.data(), blkSizes.data(), blkCount);
 
-    LOG("[%s] Parsed %u BLK entries for petal %u", logTag, blkCount, petalIndex);
+    LOG("[%s] Parsed %u BLK entries for petal %u startBlock=%u", logTag, blkCount, petalIndex, startBlockNum);
     return true;
 }
 // Database::Scan handles WDB parsing now (see database.cpp).
@@ -1946,7 +1947,7 @@ bool World::LoadLevelIndex(u32 levelIndex) {
 
     // PSX: LoadBlocks__12BlockManagerUl(0, startBlockNum)
     // On PC we deferred Parse() in Load() and do it here to match PSX timing.
-    LoadBlocksForPetalFromStream(blockMgr, streamData, currentPetalIndex, "World");
+    LoadBlocksForPetalFromStream(blockMgr, streamData, currentPetalIndex, startBlockNum, "World");
 
     // PopulateBlock is called by LoadBlocks on PSX. On PC we call it explicitly.
     if (g_ai) {
@@ -2258,7 +2259,9 @@ void World::DrawEverythingHandler(const LVector* playerPos) {
     TickAllUVPrimData();
 
     // PSX: DemandLoading when game state == 8
-    // PC: all blocks always loaded, no demand loading needed.
+    if (g_game && g_game->GetState() == GameState::Play) {
+        blockMgr.DemandLoading();
+    }
 
     // Build draw entry array: {Block*, distSq, zDepth}
     // PSX: iterates loaded block linked list (offset +144)
@@ -2699,7 +2702,12 @@ void World::LoadPetal(u32 petalIndex) {
         g_ai->Populate();
     }
 
-    LoadBlocksForPetalFromStream(blockMgr, streamData, currentPetalIndex, "World::LoadPetal");
+    u32 startBlockNum = 0;
+    if (Player::s_player) {
+        startBlockNum = Player::s_player->blockNum;
+    }
+
+    LoadBlocksForPetalFromStream(blockMgr, streamData, currentPetalIndex, startBlockNum, "World::LoadPetal");
 
     if (g_ai) {
         g_ai->PopulateBlock();

@@ -58,6 +58,9 @@ static constexpr s32 NDMS_FLOOR_SAFE_DELTA_THRESHOLD = 0x101;
 static constexpr s32 BREAKOFF_FIELD_LEFT = 0x3555;
 static constexpr s32 BREAKOFF_FIELD_RIGHT = 0x3555;
 
+// PSX global at 0x800DD9B8 set by SetAIHandler for Oscar henchmen paths.
+static Humanoid* OscarsHenchman = nullptr;
+
 static void RestoreDeferredHandlerOrNDMS(Behaviour* self) {
     if (self->nextHandlerDispatch != 0) {
         self->handlerThisOffset = self->nextHandlerThisOffset;
@@ -83,12 +86,12 @@ Behaviour::Behaviour(Humanoid* ownerHumanoid, u32 handlerType, s32 inAiParam) {
     field36 = 0;
     currentPathNodeIndex = 0;
     ndmsThinkCounter = 0;
-    ndmsThinkDelay = 0;
-    ndmsDecision = 0;
+    ndmsThinkDelay = 45;
+    ndmsDecision = 5;
     aiParam = inAiParam;
     field60 = 0;
-    navDecisionCounter = 0;
-    navDecision = 0;
+    navDecisionCounter = 50;
+    navDecision = 2;
     comboScriptCursor = 0;
     comboScriptIndex = -1;
     worldNavCached = 0;
@@ -113,22 +116,10 @@ void Behaviour::SetAIHandler(u32 handlerType) {
     nextHandlerThisOffset = 0;
     nextHandlerDispatch = 0;
     nextHandler = nullptr;
-    ndmsThinkCounter = 0;
-    ndmsThinkDelay = 0;
-    ndmsDecision = 0;
-    field60 = 0;
-    navDecisionCounter = 0;
-    navDecision = 0;
-    comboScriptCursor = 0;
-    comboScriptIndex = -1;
-    worldNavCached = 0;
-    worldNavCachedTicks = 0;
-    worldNavBlocked = 0;
-    worldNavDirection = 0;
-    ndmsRangeBand = 0;
 
-    if (g_ai && owner && owner->behaviourNameHash != 0) {
-        animConfigPtr = static_cast<BehaviourAttrib*>(g_ai->behaviourList.FindNodeCRC(owner->behaviourNameHash));
+    const u32 behaviourHash = owner ? owner->behaviourNameHash : 0;
+    if (g_ai && behaviourHash != 0) {
+        animConfigPtr = static_cast<BehaviourAttrib*>(g_ai->behaviourList.FindNodeCRC(behaviourHash));
     }
     else {
         animConfigPtr = nullptr;
@@ -142,9 +133,26 @@ void Behaviour::SetAIHandler(u32 handlerType) {
     handlerDispatch = -1;
     handler = Idle;
 
-    if (handlerType == AITypes::TT_PLAYER) {
+    if (owner && behaviourHash == p3dHash("OscarHenchmen")) {
+		// TODO
+        OscarsHenchman = owner;
+        return;
+    }
+
+    switch (handlerType) {
+    case AITypes::TT_PLAYER:
         padPort = 0;
         handler = PlayerUserControl;
+        break;
+    case AITypes::TT_GRONTAR:
+    case AITypes::TT_PAUL:
+    case AITypes::TT_OSCAR:
+    case AITypes::TT_DANTE:
+    case AITypes::TT_BUTCH:
+        // TODO
+        break;
+    default:
+        break;
     }
 }
 

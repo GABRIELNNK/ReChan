@@ -68,10 +68,26 @@
         9, 43, 45, 65, 66, 1, 5, 6, -1, 6, 30, 43, 46, 65, 67, 5, 84, 84386293, 88, 0
     };
 
-    static s32 victory_poor[2] = { 15, 0 };
-    static s32 victory_ok[2] = { 15, 0 };
-    static s32 victory_good[2] = { 15, 0 };
-    static s32 victory_perfect[2] = { 15, 0 };
+    static s32 victory_poor[28] = {
+        15, 0, 347, 16, 0, 347, 115, 0, 65, 3,
+        -2146647188, 3, -2146598624, 117, 21, 84386293, 347, 3, -2146598496, 106,
+        -2146603324, 118, 73, 76, 1, 3, -2146598436, 4
+    };
+    static s32 victory_ok[28] = {
+        15, 0, 348, 16, 0, 348, 115, 0, 62, 3,
+        -2146647188, 3, -2146598624, 117, 21, 84386293, 348, 3, -2146598496, 106,
+        -2146603312, 118, 73, 76, 1, 3, -2146598436, 4
+    };
+    static s32 victory_good[28] = {
+        15, 0, 349, 16, 0, 349, 115, 0, 61, 3,
+        -2146647188, 3, -2146598624, 117, 21, 84386293, 349, 3, -2146598496, 106,
+        -2146603284, 118, 73, 76, 1, 3, -2146598436, 4
+    };
+    static s32 victory_perfect[28] = {
+        15, 0, 350, 16, 0, 350, 115, 0, 60, 3,
+        -2146647188, 3, -2146598624, 117, 21, 84386293, 350, 3, -2146598496, 106,
+        -2146603272, 118, 73, 76, 1, 3, -2146598436, 4
+    };
 
     static s32 death[35] = {
         9, 43, 45, 73, 74, 6, -1, 6, 30,
@@ -336,6 +352,12 @@
         268447933, 268447941, 268447951, 268497114, 268497124, 268542186, 268509435, 0
     };
 
+    // PSX: fade script at 0x800CC36C.
+    // Called by victory_poor/ok/good/perfect before tally/dialog branches.
+    static s32 fade[8] = {
+        98, 101, 10, 100, 0, 5, 105, 4
+    };
+
     // Boss NIS helper scripts (subroutines called by intro/victory scripts)
     static s32 boss_setup[18] = {
         9, 20, 73, 74, 42, 84386293, 14, 84386293, 1, 14,
@@ -489,6 +511,9 @@
         registerCompiledOverlayScript(0x80020998u, boss_victory_done, ScriptArrayWordCount(boss_victory_done));
         registerCompiledOverlayScript(0x800209D4u, boss_widescreen_only, ScriptArrayWordCount(boss_widescreen_only));
 
+        RegisterScriptRegion(0x800CC36Cu, fade, ScriptArrayWordCount(fade));
+        RegisterScriptRegion(ToVirtualAddress(fade), fade, ScriptArrayWordCount(fade));
+
         RegisterScriptRegion(0x800D8208u, victory_poor, ScriptArrayWordCount(victory_poor));
         RegisterScriptRegion(0x800D8278u, victory_ok, ScriptArrayWordCount(victory_ok));
         RegisterScriptRegion(0x800D82E8u, victory_good, ScriptArrayWordCount(victory_good));
@@ -625,7 +650,13 @@
                 continue;
             }
 
-            if (candidate->uniqueID == (u16)ref || candidate->nameCRC == ref) {
+            if (candidate->nameCRC == ref) {
+                return candidate;
+            }
+
+            // Director script refs are typically CRCs. Only treat the ref as a
+            // 16-bit unique ID when the script value is explicitly in UID range.
+            if (ref <= 0xFFFFu && candidate->uniqueID == (u16)ref) {
                 return candidate;
             }
         }
@@ -1716,27 +1747,38 @@ void Director::ProcessCameraFunc() {
 
     switch (op) {
         case DirectorCameraCmd::EnableNisCamera:
+            if (camera) {
+                // PSX: lookAtMode = 1; then dispatch Camera::Think() via vtable slot.
+                camera->SetLookAtMode(1);
+                camera->Think();
+            }
             break;
 
         case DirectorCameraCmd::ClearCameraFlag:
+            if (camera) {
+                camera->SetCollisionEnabled(0);
+            }
             break;
 
         case DirectorCameraCmd::SetCameraFlag:
+            if (camera) {
+                camera->SetCollisionEnabled(1);
+            }
             break;
 
         case DirectorCameraCmd::CopyP3DFov:
             if (camera) {
-                // PSX: reads fovA from the embedded tMatrixCamera, converts back
-                // to game "fov" units via rmDiv16i(fovA, 87162)
+                // PSX: GetFOV from global G_2ptcam, then SetFOV(rmDiv16i(fovA, 87162)).
                 s32 fovA, fovB;
-                camera->GetP3DCamera()->GetFOV(&fovA, &fovB);
+                G_2ptcam.GetFOV(&fovA, &fovB);
                 camera->SetFOV(rmDiv16i(fovA, 87162));
             }
             break;
 
         case DirectorCameraCmd::ResetCameraFov:
             if (camera) {
-                camera->SetCurFOV(10);
+                // PSX: SetCurFOV(theCamera->curFOV)
+                camera->SetCurFOV(camera->GetCurFOV());
             }
             break;
 
@@ -1774,7 +1816,21 @@ void Director::ProcessCameraFunc() {
             const s32 selector = *scriptPtr;
             scriptPtr += 1;
 
-            if (selector == 0 || selector == 1 || selector == 2) {
+            s32 shakeX = 80;
+            s32 shakeY = 80;
+            s32 shakeZ = 80;
+
+            if (selector == 0) {
+                shakeX = *scriptPtr;
+                scriptPtr += 1;
+            }
+            else if (selector == 1) {
+                shakeY = *scriptPtr;
+                scriptPtr += 1;
+            }
+            else {
+                // PSX treats any non-0/1 selector as Z strength.
+                shakeZ = *scriptPtr;
                 scriptPtr += 1;
             }
 
@@ -1782,6 +1838,7 @@ void Director::ProcessCameraFunc() {
             scriptPtr += 1;
 
             if (camera) {
+                camera->SetShakeStrength(shakeX, shakeY, shakeZ);
                 camera->ShakeCamera(frames);
             }
             break;
@@ -1789,16 +1846,40 @@ void Director::ProcessCameraFunc() {
 
         case DirectorCameraCmd::LookAtNisPoint:
         {
-            scriptPtr += 1;
             if (camera) {
-                const LVector target = { nisPointX, nisPointY, nisPointZ };
+                camera->SetCollisionEnabled(0);
+            }
+
+            const s32 pointID = *scriptPtr;
+            scriptPtr += 1;
+
+            WorldPointNode* nisPoint = WorldPoints_GetNISPoint(static_cast<u32>(pointID));
+
+            if (camera && nisPoint) {
+                LVector target = nisPoint->pos;
+
+                World* world = g_game ? g_game->GetWorld() : nullptr;
+                const bool isChinaLevel2 = (world && world->GetCurLevelID() == 3 && world->GetCurrentPetalIndex() == 2);
+                if (isChinaLevel2) {
+                    target.z -= 812;
+                }
+                else {
+                    target.x -= 812;
+                    target.y -= 108;
+                }
+
                 camera->LookAtTarget(&target);
             }
+
             break;
         }
 
         case DirectorCameraCmd::SetCameraAndLookAt:
         {
+            if (camera) {
+                camera->SetCollisionEnabled(0);
+            }
+
             const LVector position = { scriptPtr[0], scriptPtr[1], scriptPtr[2] };
             const LVector target = { scriptPtr[3], scriptPtr[4], scriptPtr[5] };
             scriptPtr += 6;
@@ -1811,9 +1892,8 @@ void Director::ProcessCameraFunc() {
         }
 
         default:
-            LogDirectorUnknownCommand("Camera", opPtr, static_cast<s32>(op));
-            ASSERT(false && "Unknown Director camera opcode");
-            break;
+            // PSX default path just returns for unknown camera tokens.
+            return;
     }
 }
 
@@ -1844,6 +1924,15 @@ void Director::ProcessHudFunc() {
             break;
 
         case DirectorHudCmd::DisplayTally:
+        {
+            const s32 tallyType = *scriptPtr;
+            scriptPtr += 1;
+            if (g_hud) {
+                g_hud->DisplayTally(tallyType);
+            }
+            break;
+        }
+
         case DirectorHudCmd::ShowBossHealth:
             scriptPtr += 1;
             break;

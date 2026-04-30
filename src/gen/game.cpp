@@ -845,12 +845,12 @@ bool Game::gsEndLevelState(Game* game) {
 bool Game::gsEndLevelLoopState(Game* game) {
     MARKFUNCTION(0x8002B6B0); // gsEndLevelLoopState
 
-    // PSX: Time::Step, animLoopDSTACK, MenuDraw(null)
-    // PSX: checks HUD fields (108, 344, 472) to determine if animations done
-    // PSX: when all done, SetState(EndLevelExit=11)
+    MenuDraw(nullptr);
 
-    // For now, transition immediately since animations aren't implemented
-    game->SetState(GameState::EndLevelExit);
+    if (!g_hud || (!g_hud->visible && !g_hud->takes.isPlaying && !g_hud->dragon.isPlaying)) {
+        game->SetState(GameState::EndLevelExit);
+    }
+
     return true;
 }
 

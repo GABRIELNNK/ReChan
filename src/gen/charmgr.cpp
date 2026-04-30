@@ -688,7 +688,7 @@ void CharacterManager::CloseCharacter(u32 type) {
 
 // PSX: LoadCharacter__16CharacterManagerUsP14CharMgrCallback (CHARMGR.CPP:496, 0x80039830)
 // PSX: Full async CD pipeline. PC: synchronous file read from .RR.
-// Finds CharFile, allocates slot (0 for player, 1-3 for NPCs), reads P3D model data.
+// Reuses an existing NPC slot, while player type 0 still reloads slot 0 to refresh Jackie resources.
 void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
     MARKFUNCTION(0x80039830);
 
@@ -699,8 +699,16 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
         return;
     }
 
+    s32 slotIdx = FindSlot(type);
+    if (type != 0 && slotIdx >= 0) {
+        slots[slotIdx].loadCount++;
+        if (callback) {
+            callback->Callback();
+        }
+        return;
+    }
+
     // Find slot - PSX: type 0 -> slot 0, else search slots 1-3 for empty
-    s32 slotIdx;
     if (type == 0) {
         slotIdx = 0;
     }
@@ -719,8 +727,10 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
         }
     }
 
-    // PSX: rrIdx = slotIdx * 2 + 3 (resource index for P3D model data)
-    s32 rrIdx = slotIdx * 2 + 3;
+    // PSX: player slot 0 uses RR pair 2/3, while NPC slots 1-3 use ordinal
+    // 0-2 to select RR pairs 2/3, 4/5, 6/7.
+    const s32 resourceSlot = (type == 0) ? slotIdx : (slotIdx - 1);
+    s32 rrIdx = resourceSlot * 2 + 3;
 
     if (!IsValidRRResourceIndex(cf, rrIdx) || !IsValidRRResourceIndex(cf, rrIdx - 1)) {
         LOG("[CharMgr] LoadCharacter: invalid RR resources for type %u (slot %d, rrIdx %d)", type, slotIdx, rrIdx);

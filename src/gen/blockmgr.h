@@ -52,6 +52,12 @@ public:
     // PSX: CrossedBoundary (BLKMGR.CPP:486, 0x800506BC)
     bool CrossedBoundary() const;
 
+    // PSX: DemandLoading (BLKMGR.CPP:519, 0x800506E8)
+    s32 DemandLoading();
+
+    // PSX: UpdateToBeLoadedList (BLKMGR.CPP:852, 0x80050D94)
+    bool UpdateToBeLoadedList(u32 blockNum);
+
     // PSX: UpdateAlreadyLoadedList (updates alreadyLoadedList from loaded blocks)
     void UpdateAlreadyLoadedList();
 

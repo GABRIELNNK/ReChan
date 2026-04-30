@@ -1,16 +1,20 @@
+#include "gen/common.h"
 #include "fe/hditem.h"
 #include "fe/oxscrmgr.h"
 #include "xclib/xclib.h"
 #include "xclib/xccolour.h"
+#include "gen/control.h"
 #include "gen/scoremgr.h"
 #include "gen/game.h"
 #include "gen/world.h"
+#include "ai/player.h"
+#include "snd/fesnd.h"
 #include "p3d/p3dmath.h"
-#include <cstdio>
 
 static char s_dragonCountBuf[32];
 static const char s_hdHitSingular[] = "hit";
 static const char s_hdHitPlural[] = "hits";
+static s32 s_hdTallyFastForward = 0;
 
 static void ApplyHdHitsColor(xcTextPrim* textPrim, s16 colorR, s16 colorG, s16 colorB) {
     if (!textPrim) {
@@ -446,6 +450,318 @@ void hdHits::SetVisible(s32 /*vis*/) {
     }
 }
 
+// PSX: DoScoreTally__7hdTallyPcb (HDITEM.CPP:794, 0x800900A0)
+static s32 DoScoreTally(hdTally* tally, char* scoreBuf, bool fastForward) {
+    MARKFUNCTION(0x800900A0);
+
+    if (fastForward) {
+        std::snprintf(scoreBuf, 12, "%d", tally->targetScore);
+        return 1;
+    }
+
+    const s32 target = tally->targetScore;
+    const s32 current = tally->currentScore;
+    if (current >= target) {
+        if (target == 0) {
+            scoreBuf[0] = '0';
+            scoreBuf[1] = 0;
+        }
+        return 1;
+    }
+
+    if ((target - current) < 452) {
+        tally->currentScore = target;
+    }
+    else {
+        tally->currentScore = current + 451;
+    }
+
+    std::snprintf(scoreBuf, 12, "%d", tally->currentScore);
+    return 0;
+}
+
+// PSX: UpdateCombo__7hdTallyb (HDITEM.CPP:831, 0x8009013C)
+static s32 UpdateCombo(hdTally* tally, bool fastForward) {
+    MARKFUNCTION(0x8009013C);
+
+    if (tally->frameCounter != 0) {
+        tally->frameCounter -= 1;
+        tally->comboOvl.SetVisible(1);
+        if (tally->frameCounter == 0 || fastForward) {
+            if (!s_hdTallyFastForward && g_frontEndSound) {
+                g_frontEndSound->ProcessSoundEvent(26);
+            }
+
+            tally->currentScore = 0;
+            tally->frameCounter = 0;
+            tally->targetScore = g_scoreManager ? g_scoreManager->currentComboScore : 0;
+        }
+    }
+
+    if (tally->frameCounter == 0 && DoScoreTally(tally, tally->comboScoreBuf, fastForward)) {
+        if (g_frontEndSound) {
+            g_frontEndSound->ProcessSoundEvent(27);
+        }
+        tally->state = 0;
+        tally->frameCounter = 15;
+    }
+
+    return tally->frameCounter;
+}
+
+// PSX: UpdateFight__7hdTallyb (HDITEM.CPP:867, 0x80090220)
+static s32 UpdateFight(hdTally* tally, bool fastForward) {
+    MARKFUNCTION(0x80090220);
+
+    if (tally->frameCounter != 0) {
+        tally->frameCounter -= 1;
+        tally->comboOvl.SetVisible(1);
+        if (tally->frameCounter == 0 || fastForward) {
+            if (!s_hdTallyFastForward && g_frontEndSound) {
+                g_frontEndSound->ProcessSoundEvent(28);
+            }
+
+            tally->currentScore = 0;
+            tally->frameCounter = 0;
+            tally->targetScore = g_scoreManager ? g_scoreManager->currentFightScore : 0;
+        }
+    }
+
+    if (tally->frameCounter == 0 && DoScoreTally(tally, tally->fightScoreBuf, fastForward)) {
+        if (g_frontEndSound) {
+            g_frontEndSound->ProcessSoundEvent(29);
+        }
+        tally->state = 2;
+        tally->frameCounter = 15;
+    }
+
+    return tally->frameCounter;
+}
+
+// PSX: UpdateStyle__7hdTallyb (HDITEM.CPP:902, 0x80090308)
+static s32 UpdateStyle(hdTally* tally, bool fastForward) {
+    MARKFUNCTION(0x80090308);
+
+    if (tally->frameCounter != 0) {
+        tally->frameCounter -= 1;
+        tally->comboOvl.SetVisible(1);
+        if (tally->frameCounter == 0 || fastForward) {
+            if (!s_hdTallyFastForward && g_frontEndSound) {
+                g_frontEndSound->ProcessSoundEvent(30);
+            }
+
+            tally->currentScore = 0;
+            tally->frameCounter = 0;
+            tally->delayCounter = 15;
+            tally->targetScore = g_scoreManager ? g_scoreManager->currentStyleScore : 0;
+        }
+    }
+
+    if (tally->frameCounter == 0 && DoScoreTally(tally, tally->styleScoreBuf, fastForward)) {
+        if (tally->delayCounter == 15 && g_frontEndSound) {
+            g_frontEndSound->ProcessSoundEvent(31);
+        }
+
+        if (tally->delayCounter == 0) {
+            tally->state = 3;
+            tally->frameCounter = 15;
+        }
+        else {
+            tally->delayCounter -= 1;
+        }
+    }
+
+    return tally->frameCounter;
+}
+
+// PSX: UpdateGrade__7hdTallyb (HDITEM.CPP:948, 0x8009041C)
+static s32 UpdateGrade(hdTally* tally, bool fastForward) {
+    MARKFUNCTION(0x8009041C);
+
+    if (tally->frameCounter != 0) {
+        tally->frameCounter -= 1;
+        tally->gradeOvl.SetVisible(1);
+        if (tally->frameCounter == 0 || fastForward) {
+            const u8 grade = g_scoreManager ? g_scoreManager->CalcGrade() : 0;
+            const s32 livesBefore = Player::s_player ? Player::s_player->livesLeft : 0;
+            const s32 bonusLives = g_scoreManager ? g_scoreManager->CalcGradeXTakes(grade) : 0;
+
+            if (Player::s_player) {
+                Player::s_player->SetLivesLeft(livesBefore + bonusLives);
+            }
+
+            if (tally->gradeOvl.overlay && tally->rawData) {
+                xcTextPrim* gradeText = (xcTextPrim*)tally->gradeOvl.overlay->GetTextObj((u32)-1623425080, tally->rawData);
+                if (gradeText) {
+                    gradeText->paletteIdx = grade;
+                }
+            }
+
+            if (tally->takesOvlPtr && Player::s_player) {
+                tally->takesOvlPtr->SetNumber(Player::s_player->livesLeft - 1);
+            }
+
+            tally->frameCounter = 0;
+            tally->delayCounter = 30;
+
+            if (!s_hdTallyFastForward && g_frontEndSound) {
+                g_frontEndSound->ProcessSoundEvent(22);
+            }
+        }
+    }
+
+    if (tally->frameCounter == 0) {
+        if (tally->delayCounter == 0 || fastForward) {
+            s32 nextState = 4;
+            World* world = g_game ? g_game->GetWorld() : nullptr;
+            if (world && world->GetCurLevelID() == 6) {
+                if (tally->doneOvl.overlay && tally->rawData && g_scoreManager) {
+                    xcTextPrim* doneText = (xcTextPrim*)tally->doneOvl.overlay->GetTextObj(499091404u, tally->rawData);
+                    if (doneText) {
+                        doneText->paletteIdx = (u8)(g_scoreManager->GetTotalGoldDragon()
+                            + (g_scoreManager->CalcGDrags(g_scoreManager->currentCollectCount) ? 1 : 0) >= 20);
+                    }
+                }
+                nextState = 7;
+            }
+
+            tally->state = nextState;
+            tally->frameCounter = 15;
+        }
+        else {
+            tally->delayCounter -= 1;
+        }
+    }
+
+    return tally->frameCounter;
+}
+
+// PSX: UpdateRdragon__7hdTallyb (HDITEM.CPP:1013, 0x800905DC)
+static s32 UpdateRdragon(hdTally* tally, bool fastForward) {
+    MARKFUNCTION(0x800905DC);
+
+    if (tally->frameCounter != 0) {
+        tally->frameCounter -= 1;
+        tally->rdragonOvl.SetVisible(1);
+        if (tally->frameCounter == 0 || fastForward) {
+            if (!s_hdTallyFastForward && g_frontEndSound) {
+                g_frontEndSound->ProcessSoundEvent(23);
+            }
+
+            tally->frameCounter = 0;
+            const s32 collectCount = g_scoreManager ? g_scoreManager->currentCollectCount : 0;
+            std::snprintf(tally->rdragonBuf, sizeof(tally->rdragonBuf), "%d", collectCount);
+            tally->delayCounter = (g_scoreManager && g_scoreManager->CalcGDrags(collectCount)) ? 10 : 30;
+        }
+    }
+
+    if (tally->frameCounter == 0) {
+        if (tally->delayCounter == 0 || fastForward) {
+            const bool hasGoldDragon = g_scoreManager && g_scoreManager->CalcGDrags(g_scoreManager->currentCollectCount);
+            tally->state = hasGoldDragon ? 5 : 6;
+            tally->frameCounter = hasGoldDragon ? 1 : 15;
+        }
+        else {
+            tally->delayCounter -= 1;
+        }
+    }
+
+    return tally->frameCounter;
+}
+
+// PSX: UpdateRdragonBonus__7hdTallyb (HDITEM.CPP:1069, 0x80090718)
+static s32 UpdateRdragonBonus(hdTally* tally, bool fastForward) {
+    MARKFUNCTION(0x80090718);
+
+    if (tally->frameCounter != 0) {
+        tally->frameCounter -= 1;
+        tally->rdragonOvl.SetVisible(1);
+        if (tally->frameCounter == 0 || fastForward) {
+            if (!s_hdTallyFastForward && g_frontEndSound) {
+                g_frontEndSound->ProcessSoundEvent(25);
+            }
+
+            tally->rdragonBonusOvl.SetVisible(1);
+            tally->movieBonusOvl.SetVisible(1);
+            tally->delayCounter = 30;
+            tally->frameCounter = 0;
+        }
+    }
+
+    if (tally->delayCounter == 0 || fastForward) {
+        tally->state = 6;
+        tally->frameCounter = 15;
+    }
+    else {
+        tally->delayCounter -= 1;
+    }
+
+    return tally->frameCounter;
+}
+
+// PSX: UpdateGdragon__7hdTallyb (HDITEM.CPP:1106, 0x800907F0)
+static s32 UpdateGdragon(hdTally* tally, bool fastForward) {
+    MARKFUNCTION(0x800907F0);
+
+    if (tally->frameCounter != 0) {
+        tally->frameCounter -= 1;
+        tally->gdragonOvl.SetVisible(1);
+        if (tally->frameCounter == 0 || fastForward) {
+            if (!s_hdTallyFastForward && g_frontEndSound) {
+                g_frontEndSound->ProcessSoundEvent(24);
+            }
+
+            tally->movieBonusOvl.SetVisible(0);
+            const s32 totalGoldDragons = g_scoreManager ? g_scoreManager->GetTotalGoldDragon() : 0;
+            const s32 levelGoldDragon = (g_scoreManager && g_scoreManager->CalcGDrags(g_scoreManager->currentCollectCount)) ? 1 : 0;
+            std::snprintf(tally->gdragonBuf, sizeof(tally->gdragonBuf), "%d", totalGoldDragons + levelGoldDragon);
+            tally->delayCounter = 30;
+            tally->frameCounter = 0;
+        }
+    }
+
+    if (tally->frameCounter == 0) {
+        if (tally->delayCounter == 0 || fastForward) {
+            tally->state = 8;
+            tally->frameCounter = 15;
+        }
+        else {
+            tally->delayCounter -= 1;
+        }
+    }
+
+    return tally->frameCounter;
+}
+
+// PSX: UpdateMovieBonus__7hdTallyb (HDITEM.CPP:1144, 0x80090914)
+static s32 UpdateMovieBonus(hdTally* tally, bool fastForward) {
+    MARKFUNCTION(0x80090914);
+
+    if (tally->frameCounter != 0) {
+        tally->frameCounter -= 1;
+        if (tally->frameCounter == 0 || fastForward) {
+            if (!s_hdTallyFastForward && g_frontEndSound) {
+                g_frontEndSound->ProcessSoundEvent(25);
+            }
+
+            tally->doneOvl.SetVisible(1);
+            tally->delayCounter = 30;
+            tally->frameCounter = 0;
+        }
+    }
+
+    if (tally->frameCounter == 0) {
+        if (tally->delayCounter == 0 || fastForward) {
+            tally->state = 8;
+        }
+        else {
+            tally->delayCounter -= 1;
+        }
+    }
+
+    return tally->frameCounter;
+}
+
 hdTally::hdTally() {
     MARKFUNCTION(0x8008FDB4);
     state = 0;
@@ -518,38 +834,144 @@ void hdTally::Show(s32 vis) {
 
 void hdTally::Start(s32 tally) {
     MARKFUNCTION(0x80090C58);
+
     fightOvl.SetVisible(1);
     if (tally) {
+        if (gradeOvl.overlay && rawData) {
+            xcTextPrim* gradeText = (xcTextPrim*)gradeOvl.overlay->GetTextObj((u32)-1623425080, rawData);
+            if (gradeText) {
+                gradeText->paletteIdx = 8;
+            }
+        }
+
         fightScoreBuf[0] = ' ';
         fightScoreBuf[1] = 0;
         comboScoreBuf[0] = ' ';
         comboScoreBuf[1] = 0;
         styleScoreBuf[0] = ' ';
         styleScoreBuf[1] = 0;
+        rdragonBuf[0] = ' ';
+        rdragonBuf[1] = 0;
+        gdragonBuf[0] = ' ';
+        gdragonBuf[1] = 0;
         state = 1;
         frameCounter = 15;
+
+        if (takesOvlPtr) {
+            takesOvlPtr->SetPauseState(1, 1);
+            takesOvlPtr->Play();
+        }
+
+        if (g_frontEndSound) {
+            g_frontEndSound->ProcessSoundEvent(21);
+        }
     } else {
         state = 9;
     }
+
+    MenuColorStart(doneColor);
 }
 
 void hdTally::Update() {
     MARKFUNCTION(0x80090AC0);
-    // State machine for tally animation.
-    // States 0-8 handle score countup, grade display, dragon display, done.
-    // For now, stub the update - will be filled as needed.
-    if (state == 8) {
-        DoDoneStuff();
+
+    bool fastForward = false;
+    if (state != 8 && state != 9) {
+        if (g_inputManager) {
+            g_inputManager->Step();
+
+            const u32 controlVal = g_inputManager->GetControlVal(0);
+            const u8* playerMap = g_inputManager->PlayerMapArray();
+            const u32 mappedMask = playerMap ? (1u << playerMap[6]) : 0;
+
+            fastForward = (controlVal & mappedMask) != 0;
+            if ((controlVal & PsxPad::Start) != 0) {
+                if (g_frontEndSound) {
+                    g_frontEndSound->ProcessSoundEvent(FE_SND_MENU_OPEN);
+                }
+                s_hdTallyFastForward = 1;
+            }
+        }
+
+        if (s_hdTallyFastForward) {
+            fastForward = true;
+        }
+    }
+
+    switch (state) {
+        case 0:
+            UpdateFight(this, fastForward);
+            break;
+
+        case 1:
+            UpdateCombo(this, fastForward);
+            break;
+
+        case 2:
+            UpdateStyle(this, fastForward);
+            break;
+
+        case 3:
+            UpdateGrade(this, fastForward);
+            break;
+
+        case 4:
+            UpdateRdragon(this, fastForward);
+            break;
+
+        case 5:
+            UpdateRdragonBonus(this, fastForward);
+            break;
+
+        case 6:
+            UpdateGdragon(this, fastForward);
+            break;
+
+        case 7:
+            UpdateMovieBonus(this, fastForward);
+            break;
+
+        case 8:
+            DoDoneStuff();
+            s_hdTallyFastForward = 0;
+            break;
+
+        default:
+            break;
     }
 }
 
 void hdTally::DoDoneStuff() {
     MARKFUNCTION(0x800909D0);
+
+    MenuColorNext(doneColor);
     if (doneTextPrim) {
-        MenuColorNext(doneColor);
         doneTextPrim->colorR = doneColor.GetRed8();
         doneTextPrim->colorG = doneColor.GetGreen8();
         doneTextPrim->colorB = doneColor.GetBlue8();
+        doneTextPrim->colorA = doneColor.GetAlpha8();
+    }
+
+    if (!g_inputManager) {
+        return;
+    }
+
+    g_inputManager->Step();
+    const u32 controlVal = g_inputManager->GetControlVal(0);
+    const u8* playerMap = g_inputManager->PlayerMapArray();
+    u32 doneMask = PsxPad::Start;
+    if (playerMap) {
+        doneMask |= 1u << playerMap[6];
+    }
+
+    if ((controlVal & doneMask) != 0) {
+        if (g_frontEndSound) {
+            g_frontEndSound->ProcessSoundEvent(20);
+        }
+        state = 9;
+        if (takesOvlPtr) {
+            takesOvlPtr->SetPauseState(0, 1);
+        }
     }
 }
 

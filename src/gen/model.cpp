@@ -512,6 +512,22 @@ AnimStructure* SModel::ApplyBlending(TransformAnim* animation, s32 blendFrames, 
 }
 
 // PSX: ApplyAnimToModel__6SModellllll (MODEL.CPP:1098, 0x8006EEAC)
+// PSX: IsAnimationLoaded__6SModell (MODEL.CPP:1062, 0x8006EE4C)
+s32 SModel::IsAnimationLoaded(s32 animEnum) {
+    MARKFUNCTION(0x8006EE4C);
+
+    if (!g_characterManager) {
+        return 0;
+    }
+
+    const u32 thingType = backPtr ? static_cast<u32>(backPtr->thingType) : 0;
+    if (g_characterManager->GetAnimation(thingType, animEnum)) {
+        return 1;
+    }
+
+    return g_characterManager->GetAnimation(0, animEnum) ? 1 : 0;
+}
+
 void SModel::ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 p4, s32 p5) {
     MARKFUNCTION(0x8006EEAC);
     if (!g_characterManager) {

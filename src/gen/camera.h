@@ -44,6 +44,8 @@ public:
     void SetTrackingTime(const LVector* t);
     void SetLookAtTarget(Thing* thing, u16 mode);
     void SetLookAtMode(s32 mode) { lookAtMode = mode; }
+    void SetCollisionEnabled(s32 enabled) { hasCollision = enabled; }
+    void SetShakeStrength(s32 x, s32 y, s32 z) { shakeStrength = { x, y, z }; }
     void ShakeCamera(s32 frames);
 
     // Camera animation (used by Director for cutscene cameras)

@@ -947,7 +947,9 @@ void Humanoid::Activate() {
 void Humanoid::Deactivate() {
     MARKFUNCTION(0x80063270);
     Thing::Deactivate();
-    FightingCollision::RemoveHumanoid(this);
+    if ((flags & TF_ACTIVATED) == 0) {
+        FightingCollision::RemoveHumanoid(this);
+    }
 }
 
 // PSX: Move__8Humanoid (HUMANOID.CPP:1544)
