@@ -55,8 +55,6 @@ struct SoundMenuState {
 };
 
 static SoundMenuState g_soundState;
-static char s_pauseGoldDragonBuf[8] = {};
-static u32 s_pauseGoldDragonToken = 0;
 static s32 s_pauseHudDragonShowState = 0;
 
 // PSX: __8gameMenu (Overlay4 0x80010100)
@@ -88,19 +86,16 @@ void gameMenu::Activate() {
     if (overlay && sec) {
         u8* raw = sec->rawData;
         auto* goldDragonText = reinterpret_cast<xcTextPrim*>(overlay->GetTextObj(HASH_PAUSE_GOLD_DRAGON_TEXT, raw));
-        if (goldDragonText && goldDragonText->numStrings != 0) {
+        if (goldDragonText) {
             s32 totalGoldDragon = g_scoreManager ? g_scoreManager->GetTotalGoldDragon() : 0;
             if (totalGoldDragon > 99) {
                 totalGoldDragon = 99;
             }
 
-            std::snprintf(s_pauseGoldDragonBuf, sizeof(s_pauseGoldDragonBuf), "%d", totalGoldDragon);
-            if (s_pauseGoldDragonToken == 0) {
-                s_pauseGoldDragonToken = xcRegisterRuntimeString(s_pauseGoldDragonBuf);
+            char* goldDragonStr = (char*)sec->FindString(goldDragonText->GetStringHash());
+            if (goldDragonStr) {
+                std::snprintf(goldDragonStr, 8, "%d", totalGoldDragon);
             }
-
-            u8 idx = (goldDragonText->paletteIdx < goldDragonText->numStrings) ? goldDragonText->paletteIdx : 0;
-            goldDragonText->StringHashes()[idx] = s_pauseGoldDragonToken;
         }
     }
 
