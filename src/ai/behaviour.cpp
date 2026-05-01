@@ -1882,7 +1882,7 @@ s32 Behaviour::BreakOffPathAndFight() {
         return 0;
     }
 
-    if (owner->DistanceFromPointXZ(player->pos) <= PATH_BREAKOFF_DIST_THRESHOLD) {
+    if (owner->DistanceFromPointXZ(player->pos) >= PATH_BREAKOFF_DIST_THRESHOLD) {
         return 0;
     }
 

@@ -99,7 +99,9 @@ enum StateDispatch : u16 {
     SD_FLOATING = 274,
     SD_THROW = 39,
     SD_PICKUP = 40,
-    // PSX vtable indices 41-48 used by Player-specific handlers
+    // PSX state 70/71 dispatch target (vtable slot 41) for knockdown recovery.
+    SD_COLLAPSE_RECOVER = 41,
+    // PSX vtable indices 41-48 include shared and Player-specific handlers.
     SD_GET_UP = 43,   // PSX case 68: get up from knockdown
     SD_HORIZONTAL_POLE = 44,   // PSX case 18: horizontal pole swing setup/state
     SD_LEDGE_LATCH = 45,   // PSX case 23: ledge latch

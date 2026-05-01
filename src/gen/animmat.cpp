@@ -370,8 +370,13 @@ static void HeadTrack(Humanoid* owner, STreeJoint* joint, const Mat4& currentMat
         return;
     }
 
+    Mat4 modelWorld;
+    BuildModelWorldMatrix(model, modelWorld);
+
+    Mat4 worldCurrent = modelWorld * currentMatrix;
+
     Mat4 inverseCurrent;
-    p3dInverseOrthMatrixLocal(currentMatrix, inverseCurrent);
+    p3dInverseOrthMatrixLocal(worldCurrent, inverseCurrent);
 
     LVector localTarget = {};
     p3dVecTimesMatrixLocal(targetPos, inverseCurrent, localTarget);
@@ -682,6 +687,7 @@ s32 AnimationMatrices::CopyMatrix(u32 joint, const Mat4& jointMatrix) {
         return 0;
     }
 
+    // PSX CopyMatrix captures the current port/world matrix for the joint.
     Humanoid* owner = static_cast<Humanoid*>(GetHumanoid());
     Model* model = owner ? static_cast<Model*>(owner->model) : nullptr;
     if (model) {

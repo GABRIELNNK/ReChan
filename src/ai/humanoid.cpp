@@ -80,6 +80,18 @@ static constexpr u32 PLAYER_BACK_GRAB_KICK_ROOT_ADDRESS = 0x800CEE6Cu;
 // PSX gp+1948, data block default at 0x800DD0E8.
 static s32 freeFormFightingMode = 0;
 
+// PSX gp+1764 (0x800DD030): gravityReduction
+static s32 s_gravityReduction = 3;
+// PSX gp+1860 (0x800DD094): soundFrame
+static s32 s_flyingBackGravityScale = 20;
+
+static s32 GetFlyingBackFallDivisor() {
+    if (s_gravityReduction == 0) {
+        return 18;
+    }
+    return 18 / s_gravityReduction;
+}
+
 static bool IsActiveZoneStillRegistered(const ActiveZone* zone) {
     if (!zone || !g_ai) {
         return false;
@@ -343,9 +355,10 @@ struct PsxFightingJointRaw {
     u8 SoundEvent() const { return static_cast<u8>((word0 >> 8) & 0xFFu); }
     u8 Damage() const { return static_cast<u8>((word0 >> 16) & 0xFFu); }
     s8 HitForce() const { return static_cast<s8>((word0 >> 24) & 0xFFu); }
-    s16 ForceX() const { return static_cast<s16>(word1 & 0xFFFFu); }
-    s16 ForceY() const { return static_cast<s16>((word1 >> 16) & 0xFFFFu); }
-    s16 ForceZ() const { return static_cast<s16>(word2 & 0xFFFFu); }
+    // PSX: RC9_RMVECT16 is a 3x s32 vector at +4,+8,+12.
+    s32 ForceX() const { return static_cast<s32>(word1); }
+    s32 ForceY() const { return static_cast<s32>(word2); }
+    s32 ForceZ() const { return static_cast<s32>(word3); }
     s8 AttackStartFrame() const { return static_cast<s8>(word4 & 0xFFu); }
     s8 AttackEndFrame() const { return static_cast<s8>((word4 >> 8) & 0xFFu); }
     s8 SoundFrame() const { return static_cast<s8>((word4 >> 16) & 0xFFu); }
@@ -1349,7 +1362,7 @@ void Humanoid::HandleCollisionReactionStates(s32 hitType, s32 impactRegion) {
                 case 3:
                 case 12:
                 case 17:
-                    maxFallDivisor = 18;
+                    maxFallDivisor = GetFlyingBackFallDivisor();
                     SetActionState(57, 0);
                     DropPickup(1, 1);
                     break;
@@ -1370,7 +1383,7 @@ void Humanoid::HandleCollisionReactionStates(s32 hitType, s32 impactRegion) {
 
                 default:
                     if (hitType == 2 && !humanoidData) {
-                        maxFallDivisor = 18;
+                        maxFallDivisor = GetFlyingBackFallDivisor();
                         SetActionState(57, 0);
                         DropPickup(1, 1);
                         break;
@@ -1400,7 +1413,7 @@ void Humanoid::HandleCollision(Thing* other, s32 damage, ...) {
 
     s32 impactRegion = 17;
     s32 hitType = 1;
-    const SVector* impulse = nullptr;
+    const LVector* impulse = nullptr;
     s32 forceMagnitude = 0;
     s32 hitPoints = 0;
 
@@ -1419,7 +1432,7 @@ void Humanoid::HandleCollision(Thing* other, s32 damage, ...) {
                 hitType = va_arg(args, s32);
                 break;
             case static_cast<u32>(COLLISION_TAG_IMPULSE):
-                impulse = va_arg(args, const SVector*);
+                impulse = va_arg(args, const LVector*);
                 break;
             case static_cast<u32>(COLLISION_TAG_FORCE):
                 forceMagnitude = va_arg(args, s32);
@@ -1475,9 +1488,9 @@ void Humanoid::HandleCollision(Thing* other, s32 damage, ...) {
     }
 
     if (impulse) {
-        contactForce.x += static_cast<s32>(impulse->x);
-        contactForce.y += static_cast<s32>(impulse->y);
-        contactForce.z += static_cast<s32>(impulse->z);
+        contactForce.x += impulse->x;
+        contactForce.y += impulse->y;
+        contactForce.z += impulse->z;
     }
 
     HandleCollisionReactionStates(hitType, impactRegion);
@@ -2221,7 +2234,7 @@ void Humanoid::SetActionState(u32 state, s32 param) {
             break;
         case AS_FLYING_BACK_CHECK:
             field344 = 0;
-            stateDispatch = SD_COLLAPSE;
+            stateDispatch = SD_COLLAPSE_RECOVER;
             field348 = 8;
             if (model) {
                 Model* m = static_cast<Model*>(model);
@@ -2230,7 +2243,7 @@ void Humanoid::SetActionState(u32 state, s32 param) {
             break;
         case AS_SPIN_BACK_RECOVER:
             field344 = 0;
-            stateDispatch = SD_COLLAPSE;
+            stateDispatch = SD_COLLAPSE_RECOVER;
             field348 = 8;
             break;
         case AS_DEAD:
@@ -2322,6 +2335,7 @@ void Humanoid::ProcessAction() {
         case SD_GOT_HIT_MED:  _GotHitMed(); break;
         case SD_GOT_HIT_LOW:  _GotHitLow(); break;
         case SD_COLLAPSE:     _Collapse(); break;
+        case SD_COLLAPSE_RECOVER: _Collapse(); break;
         case SD_DEAD:         _Dead(); break;
         case SD_KILLED:       Killed(); break;
         case SD_SPIN_BACK:    _SpinBack(); break;
@@ -3019,7 +3033,7 @@ void Humanoid::_Stand() {
             return;
 
         case 2:
-            SetActionState(AS_RUN, moveSpeed);
+            SetActionState(AS_RUN, ANIM_BLEND);
             return;
 
         case 3:
@@ -3204,7 +3218,7 @@ void Humanoid::_Taunt() {
 
     switch (cmd) {
         case 2:
-            SetActionState(AS_RUN, runSpeed);
+            SetActionState(AS_RUN, ANIM_BLEND);
             return;
         case 6:
             SetActionState(AS_BACKFLIP, 0);
@@ -4419,15 +4433,15 @@ void Humanoid::_SpinBack() {
 }
 
 // PSX: _FlyingBack__8Humanoid (HUMANOID.CPP:5397, 0x80068BC8)
-// Scale velocity by global knockback factor, check animation complete
+// Scale gravity by global knockback factor, check animation complete
 // for landing transition, check ground for ground-check transition.
 void Humanoid::_FlyingBack() {
     MARKFUNCTION(0x80068BC8);
 
-    // PSX: velocity.x *= gp+1860 (knockback damping factor)
+    // PSX: gravity *= gp+1860
     // PSX: maxFallDivisor = 18 / gp+1764
-    // Global values not reversed - use defaults
-    maxFallDivisor = 18;
+    gravity *= s_flyingBackGravityScale;
+    maxFallDivisor = GetFlyingBackFallDivisor();
 
     if (!model) {
         return;
@@ -4454,7 +4468,8 @@ void Humanoid::_FlyingBack() {
 void Humanoid::_Floating() {
     MARKFUNCTION(0x80068C9C);
 
-    maxFallDivisor = 18;
+    gravity *= s_flyingBackGravityScale;
+    maxFallDivisor = GetFlyingBackFallDivisor();
 
     if (flags & TF_ON_GROUND) {
         SetActionState(AS_FLYING_BACK_CHECK, 0);
@@ -5125,8 +5140,8 @@ s32 Humanoid::ProcessFightingMoveStrikeJoint(
         PlayCombatKnockDownDialog(soundEvent);
         ReleaseTarget();
 
-        SVector localForce = { joint->ForceX(), joint->ForceY(), joint->ForceZ(), 0 };
-        SVector worldForce = {};
+        LVector localForce = { joint->ForceX(), joint->ForceY(), joint->ForceZ() };
+        LVector worldForce = {};
         GetObjectToWorldSpaceVector(localForce, worldForce);
 
         const s32 impactRegion = victim->GetImpactRegion(attack.endA);
