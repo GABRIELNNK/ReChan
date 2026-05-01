@@ -216,7 +216,7 @@ void Thing::Deactivate() {
         }
     }
 
-    if (!wasActivated) {
+    if (wasActivated) {
         if (!(flags & TF_ACTIVATED)) {
             if (flags & TF_MODEL_CREATED) {
                 DeleteModel();

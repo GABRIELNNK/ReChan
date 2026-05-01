@@ -766,6 +766,11 @@ void AI::Populate() {
 
             Player* player = Player::s_player;
             if (player) {
+                World* world = g_game ? g_game->GetWorld() : nullptr;
+                if (world && world->ConsumePlayerResetOnLoad()) {
+                    player->Reset();
+                }
+
                 player->ClearFloorHeight();
                 player->homePos = pt->pos;
                 player->pos = pt->pos;

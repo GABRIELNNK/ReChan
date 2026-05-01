@@ -1908,6 +1908,8 @@ bool World::LoadLevelIndex(u32 levelIndex) {
     // loads backgrounds, resets Director, and sets up the level script.
     // We inline the steps we can handle here.
 
+    blockMgr.SetDeathVolumeFlag(1);
+
     // PSX: Init__17FightingCollision, InsertHumanoid (player)
     FightingCollision::Init();
     if (Player::s_player) {
@@ -2705,6 +2707,8 @@ void World::LoadPetal(u32 petalIndex) {
     targetPetalIndex = petalIndex;
     currentPetalIndex = petalIndex;
 
+    blockMgr.SetDeathVolumeFlag(1);
+
     // Petal load is a new level segment; clear per-level score/collect state first.
     if (g_scoreManager) {
         g_scoreManager->HandleLevelBegin();
@@ -2806,6 +2810,8 @@ s32 DeletePlayerBlendAndAnimData() {
 // PSX: ResetLevel__5World (WORLD.CPP:1918, 0x80046DE0)
 void World::ResetLevel() {
     MARKFUNCTION(0x80046DE0);
+
+    pendingPlayerReset = true;
 
     if (Player::s_player) {
         Player::s_player->checkpoint.SetValidState(0);

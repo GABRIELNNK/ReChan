@@ -1,6 +1,11 @@
 #pragma once
+#include "gen/config.h"
 #include "fe/oxscrmgr.h"
 #include "fe/hditem.h"
+
+#if FIX_ASPECT_RATIO
+#include "fe/extra/hudwsfix.h"
+#endif
 
 class Humanoid;
 struct ThingHandle;
@@ -49,6 +54,12 @@ public:
     hdTally tally;                  // +584
 
     struct Handler* displayHandler = nullptr;
+
+#if FIX_ASPECT_RATIO
+private:
+    HUDWidescreenPatches widescreenPatches;
+public:
+#endif
 
     // Static boss name buffer (PSX: szBossStatic)
     static char szBossStatic[32];
