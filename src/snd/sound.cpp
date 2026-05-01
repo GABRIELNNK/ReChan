@@ -31,11 +31,15 @@ Sound::Sound() {
 // PSX: _._5Sound (SOUND.CPP, 0x800597E8)
 Sound::~Sound() {
     MARKFUNCTION(0x800597E8);
+    if (g_sound == this) {
+        g_sound = nullptr;
+    }
 }
 
 // PSX: InternalOpen__5Sound (0x80059818) - allocates callback nodes for load/unload
 void Sound::InternalOpen() {
     MARKFUNCTION(0x80059818);
+    g_sound = this;
     // PC: initialize audio engine and load sound data
     // PSX: soundLoadFunc callback calls SetupSound() later; PC: call directly
     AudioEngine::Init();
@@ -47,6 +51,9 @@ void Sound::InternalClose() {
     // PC: shutdown audio engine
     CleanupSound();
     AudioEngine::Shutdown();
+    if (g_sound == this) {
+        g_sound = nullptr;
+    }
 }
 
 // PSX: SetupSound__5Sound (0x800598D8) - loads sound data

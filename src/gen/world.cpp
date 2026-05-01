@@ -1856,6 +1856,19 @@ bool World::LoadLevelIndex(u32 levelIndex) {
 
     targetLevelIndex = levelIndex;
 
+    // PSX callers keep target petal in-range for the destination level.
+    // Clamp here so subsequent sound/block indexing stays consistent.
+    u32 levelPetalCount = 1;
+    if (levelList && levelIndex < (u32)levelCount) {
+        s32 count = levelList[levelIndex * 2 + 1];
+        if (count > 0) {
+            levelPetalCount = (u32)count;
+        }
+    }
+    if (targetPetalIndex >= levelPetalCount) {
+        targetPetalIndex = 0;
+    }
+
     // PSX: EstimateLoadTime, StartLogo, FillMeter(100)
     StartLogo("RUNFIRST.TIM");
     FillMeter(100);
@@ -1907,6 +1920,9 @@ bool World::LoadLevelIndex(u32 levelIndex) {
     if (Player::s_player && Player::s_player->checkpoint.IsValid()) {
         startBlockNum = (u32)Player::s_player->checkpoint.field24;
         hasCheckpoint = true;
+        if (g_scoreManager) {
+            g_scoreManager->HandleCheckpointBegin();
+        }
     }
 
     // PSX: WorldEffects, PWorldEffects, ParticleSystem
@@ -2114,6 +2130,7 @@ bool World::Load(const std::string& lcfPath) {
     if (petalIdx >= (u32)wdbIndices.size()) {
         petalIdx = 0;
     }
+    targetPetalIndex = petalIdx;
 
     // Determine entry range for this petal: [wdbIndex, nextWdbIndex)
     u32 petalStart = wdbIndices[petalIdx];
@@ -2673,6 +2690,12 @@ void World::LoadPetal(u32 petalIndex) {
     StartLogo("RUNFIRST.TIM");
     FillMeter(100);
 
+    // Keep petal selection valid for this level before indexing sound tables.
+    s32 petalCount = GetCurLevelPetals();
+    if (petalCount <= 0 || petalIndex >= (u32)petalCount) {
+        petalIndex = 0;
+    }
+
     // PSX: rsEvent(4, petalSoundIDs[currentLevelIndex][petalIndex] - 1, 0, 0)
     if (petalSoundIDs && currentLevelIndex < (u32)levelCount) {
         s32 soundLocation = (s32)petalSoundIDs[currentLevelIndex][petalIndex] - 1;
@@ -2709,6 +2732,11 @@ void World::LoadPetal(u32 petalIndex) {
 
         u32 pi = petalIndex;
         if (pi >= (u32)wdbIndices.size()) pi = 0;
+        if (pi != petalIndex) {
+            petalIndex = pi;
+            targetPetalIndex = pi;
+            currentPetalIndex = pi;
+        }
 
         u32 petalStart = wdbIndices[pi];
         u32 petalEnd = (pi + 1 < (u32)wdbIndices.size())
@@ -2779,7 +2807,11 @@ s32 DeletePlayerBlendAndAnimData() {
 void World::ResetLevel() {
     MARKFUNCTION(0x80046DE0);
 
-    // PSX also resets checkpoint validity and dead pool state here.
+    if (Player::s_player) {
+        Player::s_player->checkpoint.SetValidState(0);
+    }
+
+    // PSX also resets dead pool state here.
     if (g_director) {
         g_director->LevelReset();
     }

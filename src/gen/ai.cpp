@@ -20,6 +20,7 @@
 #include "ai/player.h"
 #include "ai/humanoid.h"
 #include "ai/fevolume.h"
+#include "ai/hpole.h"
 #include "ai/activezn.h"
 #include "ai/arrow.h"
 #include "ai/collect.h"
@@ -328,6 +329,9 @@ void AI::AddThingNoTagList(const char* name, u16 type,
             }
             else if (type == AITypes::TT_LADDER) {
                 thing = new Ladder(pos, type);
+            }
+            else if (type == AITypes::TT_HORIZONTALPOLE) {
+                thing = new HorizontalPole(pos, type);
             }
             else if (type == AITypes::TT_TRAPDOOR) {
                 thing = new TrapDoor(pos, type);

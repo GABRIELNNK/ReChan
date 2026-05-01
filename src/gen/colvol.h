@@ -33,6 +33,7 @@ struct OriginalGeo;
 
 void FillCollisionBox(tagCollisionBox& box, const DBVolume& vol);
 bool FillCollisionBox(tagCollisionBox& box, const OriginalGeo& geo);
+bool FillCollisionBox(tagCollisionBox& box, const LVector& origin, const LVector* points, u32 pointCount);
 void SetCollisionBoxExtent(tagCollisionBox& box);
 
 // PSX: CheckStaticHorizontalBoxPointCollision (COLVOL.CPP:283, 0x800AA0D4)

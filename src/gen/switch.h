@@ -4,8 +4,8 @@
 #include "gen/cclist.h"
 
 class Thing;
-class DBRoot;
-class DBVolume;
+struct DBRoot;
+struct DBVolume;
 
 using SwitchGameFunc = s32(*)(Thing*, u32, const char**);
 using SwitchFuncResolver = bool(*)(const char* funcName, SwitchGameFunc& outFunc, u32& outBucket);

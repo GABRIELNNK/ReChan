@@ -32,6 +32,43 @@ const tagCollisionBox INVALID_COLLISION_BOX = {
     -0x7FFF, 0
 };
 
+// PSX: FillVectorArray__8ObstacleP10tagLVectorRC6DBLine (OBSTACLE.CPP:447, 0x8007AEF0)
+bool FillVectorArray(LVector* out, const DBLine& line) {
+    MARKFUNCTION(0x8007AEF0);
+    return FillVectorArray(out, 2u, line);
+}
+
+// PSX: FillVectorArray__8ObstacleP10tagLVectorUlRC6DBLine (OBSTACLE.CPP:472, 0x8007AF14)
+bool FillVectorArray(LVector* out, u32 count, const DBLine& line) {
+    MARKFUNCTION(0x8007AF14);
+
+    bool result = count < line.vertexCount;
+    u32 index = 0;
+
+    if (count >= line.vertexCount) {
+        DBLineVertex* vertex = static_cast<DBLineVertex*>(line.vertices.head);
+        while (true) {
+            result = index < count;
+            if (index >= count) {
+                break;
+            }
+
+            index++;
+            if (!vertex) {
+                break;
+            }
+
+            out->x = vertex->x;
+            out->y = vertex->y;
+            out->z = vertex->z;
+            vertex = static_cast<DBLineVertex*>(vertex->next);
+            out++;
+        }
+    }
+
+    return result;
+}
+
 // PSX: FillCollisionBox__8ObstacleR15tagCollisionBoxRC6DBRootUl (OBSTACLE.CPP:530, 0x8007AF6C)
 bool ObstacleFillCollisionBox(tagCollisionBox& box, const DBRoot* root, u32 attribNum) {
     const DBAttrib* attrib = root->FindAttrib(attribNum);

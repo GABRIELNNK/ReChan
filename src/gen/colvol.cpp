@@ -25,6 +25,57 @@ bool FillCollisionBox(tagCollisionBox& box, const OriginalGeo& geo) {
     return true;
 }
 
+// PSX: FillCollisionBox__FR15tagCollisionBoxRC10tagLVectorPC10tagLVectorUl (COLVOL.CPP:200, 0x800A9D8C)
+bool FillCollisionBox(tagCollisionBox& box, const LVector& origin, const LVector* points, u32 pointCount) {
+    MARKFUNCTION(0x800A9D8C);
+
+    const s32 firstX = points[0].x - origin.x;
+    const s32 firstY = points[0].y - origin.y;
+    const s32 firstZ = points[0].z - origin.z;
+
+    box.minX = (s16)firstX;
+    box.minY = (s16)firstY;
+    box.minZ = (s16)firstZ;
+    box.maxX = (s16)firstX;
+    box.maxY = (s16)firstY;
+    box.maxZ = (s16)firstZ;
+
+    for (u32 i = 1; i < pointCount; i++) {
+        const s32 dx = points[i].x - origin.x;
+        const s32 dy = points[i].y - origin.y;
+        const s32 dz = points[i].z - origin.z;
+
+        if (dx >= (s32)box.minX) {
+            if ((s32)box.maxX < dx) {
+                box.maxX = (s16)dx;
+            }
+        }
+        else {
+            box.minX = (s16)dx;
+        }
+
+        if (dy >= (s32)box.minY) {
+            if ((s32)box.maxY < dy) {
+                box.maxY = (s16)dy;
+            }
+        }
+        else {
+            box.minY = (s16)dy;
+        }
+
+        if (dz >= (s32)box.minZ) {
+            if ((s32)box.maxZ < dz) {
+                box.maxZ = (s16)dz;
+            }
+        }
+        else {
+            box.minZ = (s16)dz;
+        }
+    }
+
+    return true;
+}
+
 void SetCollisionBoxExtent(tagCollisionBox& box) {
     s16 v = -box.minX;
     if (-box.minX < -box.minZ) {

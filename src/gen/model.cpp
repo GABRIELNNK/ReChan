@@ -588,9 +588,6 @@ void SModel::ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 p4,
         as->flip->Reset();
     }
     as->SetLoopType(loopType, 1);
-    if (as->flip) {
-        as->ForceFrame(0);
-    }
     as->humanoidCB = {};
 }
 
@@ -775,12 +772,12 @@ void EModel::Show(u32 flags) {
 
 // HumanoidModel
 
-// PSX: SetAnim__13HumanoidModelllil (MHUMAN.CPP:166, 0x8006E248)
+// PSX: SetAnim__13HumanoidModelllil (MHUMAN.CPP:119, 0x8006E1B0)
 // Routes anims to ApplyAnimToModel. Transition anims (37-38) get
 // special blend-from-current-frame handling. High enum anims default to
 // RunToLast unless explicitly routed to Loop/HoldFirst by the PSX tree.
 void HumanoidModel::SetAnim(s32 animEnum, s32 a3, s32 force, s32 extra) {
-    MARKFUNCTION(0x8006E248);
+    MARKFUNCTION(0x8006E1B0);
 
     AnimStructure* as = (AnimStructure*)animStructure;
     // Early exit: if not forcing and anim already matches, no-op
@@ -792,14 +789,14 @@ void HumanoidModel::SetAnim(s32 animEnum, s32 a3, s32 force, s32 extra) {
     s32 thingType = backPtr->thingType;
 
     if (animEnum == 0) {
-        ApplyAnimToModel(thingType, animEnum, ANIM_HOLD_FIRST, 0, 0);
+        ApplyAnimToModel(thingType, animEnum, ANIM_HOLD_FIRST, a3, extra);
         return;
     }
 
     if (animEnum == 1 || animEnum == 2 || animEnum == 4 || animEnum == 15 || animEnum == 22
         || animEnum == 43 || animEnum == 45 || animEnum == 49 || animEnum == 50
         || animEnum == 314 || animEnum == 315) {
-        ApplyAnimToModel(thingType, animEnum, ANIM_LOOP, 0, 0);
+        ApplyAnimToModel(thingType, animEnum, ANIM_LOOP, a3, extra);
         return;
     }
 
@@ -818,7 +815,7 @@ void HumanoidModel::SetAnim(s32 animEnum, s32 a3, s32 force, s32 extra) {
     }
 
     // PSX default path uses RunToLast for all remaining humanoid anims.
-    ApplyAnimToModel(thingType, animEnum, ANIM_RUN_TO_LAST, 0, 0);
+    ApplyAnimToModel(thingType, animEnum, ANIM_RUN_TO_LAST, a3, extra);
 }
 
 // PSX: _13HumanoidModel (MHUMAN.CPP:45, 0x8006E020)

@@ -7,6 +7,7 @@
 
 class ActiveZone;
 class Pickup;
+class Obstacle;
 struct FightingComboNode;
 struct PsxFightingMoveRaw;
 struct PsxFightingJointRaw;
@@ -35,6 +36,7 @@ enum ActionState : u32 {
     AS_PUSH_OBJECT = 19,      // PSX Player case 19: push object
     AS_SLOPE_SLIDE = 20,      // PSX Player case 20: slope slide
     AS_TABLE_ROLL = 21,       // PSX Player case 21: table roll
+    AS_PUSH = 22,             // PSX Player case 22: push/contact state
     AS_LEDGE_LATCH = 23,      // PSX: ledge hang sequence
     AS_LEDGE_PULLUP = 24,     // PSX: ledge pull-up sequence
     AS_LADDER_CLIMB_DOWN = 25, // PSX 0x19: climbing down on ladder (entered from top)
@@ -114,6 +116,7 @@ enum StateDispatch : u16 {
     SD_INACTIVE_IDLE = 253,
     SD_PUSH_OBJECT = 254,
     SD_TABLE_ROLL = 255,
+    SD_PUSH = 256,
     SD_KILLED = 257,
     SD_DO_STAND = 258,
     SD_LADDER_LATCH_TOP = 259,
@@ -289,6 +292,9 @@ public:
     s32 field412 = 0;
     s32 field416 = 0;
 
+    // PSX +420 (ptr): current HorizontalPole obstacle pointer
+    Obstacle* field420 = nullptr;
+
     // PSX +424,+428,+432: reserved (combat state)
     s32 field424 = 0;
     s32 field428 = 0;
@@ -338,8 +344,8 @@ public:
     // PSX +492 (s32): distant target range (16000)
     s32 distantTargetRange = 16000;
 
-    // PSX +496 (s32): reserved
-    s32 field496 = 0;
+    // PSX +496 (ptr): obstacle interaction pointer (DynamicObstacle sets this)
+    Obstacle* field496 = nullptr;
     // PSX +500 (ptr): right hand held object (Pickup*)
     Thing* rightHandObj = nullptr;
     // PSX +504 (ptr): left hand held object (Pickup*)

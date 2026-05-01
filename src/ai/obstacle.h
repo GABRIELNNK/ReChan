@@ -5,6 +5,7 @@
 class Humanoid;
 class Obstacle;
 class Pickup;
+struct DBLine;
 struct tSphere;
 
 // Obstacle (116 bytes on PSX) - base class for interactive objects
@@ -65,6 +66,14 @@ public:
 
 // Global zero delta velocity (PSX: 0x800CE818)
 extern const LVector ZERO_DELTA_VELOCITY;
+
+// PSX: FillVectorArray__8ObstacleP10tagLVectorRC6DBLine (0x8007AEF0)
+// Copies two DBLine vertices into out[0..1].
+bool FillVectorArray(LVector* out, const DBLine& line);
+
+// PSX: FillVectorArray__8ObstacleP10tagLVectorUlRC6DBLine (0x8007AF14)
+// Copies up to count vertices from DBLine into out[]; return value matches PSX helper.
+bool FillVectorArray(LVector* out, u32 count, const DBLine& line);
 
 // Obstacle animation table (PSX: g_animTable at 0x800E0E58, g_animCount at GP+0xF38)
 // Populated by Obstacle::Load during petal loading, cleared by ClearPetalAnimList.

@@ -693,14 +693,14 @@ void DynamicThing::Move() {
     movement.y = velocity.y + half_lfy;
     movement.z = velocity.z + half_lfz;
 
-    // Step 6: clamp movement magnitude to health (XZ only, Y untouched)
+    // Step 6: clamp movement magnitude to maxSpeed (XZ only, Y untouched)
     s32 mag = (s32)rmMag3((f32)movement.x, (f32)movement.y, (f32)movement.z);
-    if (health < mag) {
+    if (maxSpeed < mag) {
         LVector normalized;
         rmV3Normalize(&normalized, &movement);
-        movement.x = (s32)(((s64)normalized.x * health) >> 16);
+        movement.x = (s32)(((s64)normalized.x * maxSpeed) >> 16);
         // movement.y intentionally NOT clamped
-        movement.z = (s32)(((s64)normalized.z * health) >> 16);
+        movement.z = (s32)(((s64)normalized.z * maxSpeed) >> 16);
     }
 
     // Step 7: add accumulated force back to movement
@@ -770,25 +770,18 @@ void DynamicThing::UpdatePosition() {
 // PSX: builds rotation matrix from SVector (Euler angles), rotates {0,0,magnitude}
 // to get world-space force, adds to contactForce.
 // direction is packed as int32[3] on PSX stack; as s16*: [rotX, 0, rotY, 0, rotZ, 0]
-// p3dBuildRotMatrixZYX uses s16[0]=rotX, s16[2]=rotY, s16[4]=rotZ
-// For all known callers, only rotY (stored at SVector.z) is non-zero.
+// p3dBuildRotMatrixZYX uses s16[0]=rotX, s16[2]=rotY, s16[4]=rotZ.
 void DynamicThing::AddForce(s32 magnitude, const SVector* direction) {
     MARKFUNCTION(0x80061B44);
     if (!direction) return;
 
-    // PSX: p3dBuildRotMatrixZYX(*a3, a3[2], a3[4], matrix)
-    // a3[0] = SVector.x = rotX around X axis
-    // a3[2] = SVector.z = rotY around Y axis
-    // a3[4] = beyond SVector = rotZ around Z axis (typically 0)
-    // Then rotates {0, 0, magnitude} by this matrix and adds to contactForce.
-    s16 rotY = direction->z;
-    f32 angle = ANGLE2RAD(rotY);
-    f32 sinA = std::sin(angle);
-    f32 cosA = std::cos(angle);
+    Mat4 matrix;
+    p3dBuildRotMatrixZYX(direction->x, direction->z, direction->pad, matrix);
 
-    // {0, 0, magnitude} rotated by Y-axis: x = sin * mag, z = cos * mag
-    contactForce.x += (s32)(sinA * (f32)magnitude);
-    contactForce.z += (s32)(cosA * (f32)magnitude);
+    Vec3 rotated = p3dVecTimesRotMatrix(Vec3(0.0f, 0.0f, (f32)magnitude), matrix);
+    contactForce.x += (s32)rotated.x;
+    contactForce.y += (s32)rotated.y;
+    contactForce.z += (s32)rotated.z;
 }
 
 // PSX: Land__12DynamicThing (THING.CPP:794)

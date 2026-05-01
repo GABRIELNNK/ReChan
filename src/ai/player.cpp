@@ -468,6 +468,7 @@ void Player::SetActionState(u32 state, s32 param) {
             SetIdleAnimation(param, 1);
             field616 = 0;
             idleTimer = 0;
+            field420 = nullptr;
             field424 = 0;
             playerFlags |= PF_COMBAT_READY;
             flags |= TF_DYNAMIC;
@@ -704,6 +705,7 @@ void Player::SetActionState(u32 state, s32 param) {
             field616 = 0;
             actionStateFlag = 1;
             field424 = -38000;
+            field420 = nullptr;
             actionState = (s32)state;
             return;
         }
@@ -1062,10 +1064,10 @@ void Player::DoWallJump() {
 void Player::FallingPhysics() {
     MARKFUNCTION(0x80032368);
 
-    // bits 2(move), 4(jump+dir) - GA_JUMP (bit 3) alone means no directional input
+    // PSX checks bits 2(move), 3(jump), and 4(jump+dir) for in-air steering.
     u32 cb = (u32)commandBits;
     s32 hasInput = 0;
-    if (((cb >> 2) & 1) || ((cb >> 4) & 1)) {
+    if (((cb >> 2) & 1) || ((cb >> 4) & 1) || ((cb >> 3) & 1)) {
         hasInput = 1;
     }
 
@@ -1797,7 +1799,13 @@ handleLanding:
 void Player::_Jump() {
     MARKFUNCTION(0x80031C68);
 
-    s32 jumpHeld = (commandBits & CB_JUMP) ? 1 : 0;
+    s32 jumpHeld = 0;
+    if (g_inputManager && behaviour) {
+        Button* jumpButton = g_inputManager->GetButtonForBit((u16)behaviour->padPort, 6);
+        if (jumpButton && jumpButton->duration) {
+            jumpHeld = 1;
+        }
+    }
     Model* m = model ? static_cast<Model*>(model) : nullptr;
     AnimStructure* anim = (m != nullptr) ? static_cast<AnimStructure*>(m->animStructure) : nullptr;
 
@@ -2441,14 +2449,15 @@ void Player::_HorizontalPoleSwing() {
         AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
         if (anim) {
             s32 halfFrame = ((anim->endFrame >> 16) + (anim->endFrame >> 31)) >> 1;
-            if (halfFrame < anim->currentFrame) {
+            s32 currentFrame = (s16)((u32)anim->currentFrame >> 16);
+            if (halfFrame < currentFrame) {
                 field616++;
             }
 
             // PSX: switch animation based on angular velocity direction
             s32 targetAnim = (field424 >= 0) ? PLAYER_ANIM_POLE_SWING_FWD : PLAYER_ANIM_POLE_SWING_BACK;
             if (anim->animEnum != targetAnim) {
-                m->ApplyAnimToModel(0, targetAnim, ANIM_HOLD_FIRST, 0, 0);
+                m->SetAnim(targetAnim, 3, 0, 0);
                 actionStateFlag = 1;
             }
         }
@@ -2457,7 +2466,7 @@ void Player::_HorizontalPoleSwing() {
     // PSX: check if swing passed through bottom (angle range check)
     s32 wantSound = 0;
     if (actionStateFlag) {
-        if ((u32)newAngleX < 5461 || (u32)newAngleX > 0xE38F) {
+        if ((u32)(newAngleX - 5461) > 0xD8E3u) {
             actionStateFlag = 0;
             if (humanoidSound) {
                 humanoidSound->PoleSwing();
@@ -2494,7 +2503,7 @@ void Player::_HorizontalPoleSwing() {
         SetActionState(AS_FLIP, 0);
         if (model) {
             Model* m = static_cast<Model*>(model);
-            m->ApplyAnimToModel(0, PLAYER_ANIM_FORWARD_FLIP, ANIM_LOOP, 0, 0);
+            m->SetAnim(PLAYER_ANIM_FORWARD_FLIP, 0, 0, 0);
         }
 
         // PSX: launch direction depends on swing side
@@ -2861,7 +2870,7 @@ void Player::_TableRoll() {
         maxFallDivisor = 0;
     }
 
-    if (anim->loopCount > 0) {
+    if (anim->loopCount != 0) {
         flags2 &= ~0x70u;
         SetActionState(AS_STAND, 0);
         RestorePositionFromBip01();
