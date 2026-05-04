@@ -324,11 +324,103 @@ void xcFont::SetScale(float x, float y) {
     scaleY = y;
 }
 
+void xcFont::WrapText(const char* text, f32 maxWidth, char* out, s32 outSize) const {
+    s32 outPos = 0;
+    f32 lineWidth = 0.0f;
+    bool lineStart = true;
+    s32 srcPos = 0;
+
+    while (text[srcPos] && outPos < outSize - 1) {
+        s32 peekPos = srcPos;
+        u16 ch = NextPsxChar(text, peekPos);
+        if (!ch) break;
+
+        if (ch == '\n') {
+            srcPos = peekPos;
+            if (outPos < outSize - 1) out[outPos++] = '\n';
+            lineWidth = 0.0f;
+            lineStart = true;
+            continue;
+        }
+
+        if (ch == ' ') {
+            srcPos = peekPos;
+            // Emit space only if not at line start and more non-space chars follow.
+            s32 nextPeek = srcPos;
+            u16 nextCh = NextPsxChar(text, nextPeek);
+            if (!lineStart && nextCh && nextCh != ' ' && nextCh != '\n') {
+                if (outPos < outSize - 1) out[outPos++] = ' ';
+                lineWidth += (f32)spaceWidth * scaleX;
+            }
+            continue;
+        }
+
+        // Measure the upcoming word.
+        f32 wordWidth = 0.0f;
+        s32 wordEnd = srcPos;
+        while (text[wordEnd]) {
+            s32 tmp = wordEnd;
+            u16 wch = NextPsxChar(text, tmp);
+            if (!wch || wch == ' ' || wch == '\n') break;
+            const xcSpriteLetter* spr = (wch < 256) ? FindLetter((u8)wch) : FindLetter(wch);
+            wordWidth += (spr ? (f32)spr->w : (f32)spaceWidth) * scaleX;
+            wordEnd = tmp;
+        }
+
+        // Wrap if word doesn't fit on current line.
+        if (!lineStart && lineWidth + wordWidth > maxWidth) {
+            if (outPos < outSize - 1) out[outPos++] = '\n';
+            lineWidth = 0.0f;
+            lineStart = true;
+        }
+
+        // Emit word bytes verbatim.
+        s32 wordLen = wordEnd - srcPos;
+        s32 copyLen = wordLen < (outSize - 1 - outPos) ? wordLen : (outSize - 1 - outPos);
+        memcpy(out + outPos, text + srcPos, copyLen);
+        outPos += copyLen;
+        lineWidth += wordWidth;
+        lineStart = false;
+        srcPos = wordEnd;
+    }
+    out[outPos] = '\0';
+}
+
+s32 xcFont::CountWrappedLines(const char* text, f32 maxWidth) const {
+    if (!text || !text[0])
+        return 1;
+
+    const char* scan = text;
+    char wrapped[512];
+    if (maxWidth > 0.0f) {
+        WrapText(text, maxWidth, wrapped, (s32)sizeof(wrapped));
+        scan = wrapped;
+    }
+
+    s32 lines = 1;
+    for (s32 i = 0; scan[i] != '\0'; i++) {
+        if (scan[i] == '\n')
+            lines++;
+    }
+    return lines;
+}
+
 // PC: Draw text at 512x240 overlay coordinates with xcJustify flags
 // PSX: xcFontDC::Draw + PushJustTrans + MakePolys (XCFONTDC.CPP)
 void xcFont::DrawText(const char* text, f32 screenX, f32 screenY,
                       u32 color, u8 justify, s32 lineSpacing) const {
     if (!text || !sprites || numTextures == 0) return;
+
+    // Word-wrap: preprocess text into wrapped lines, then draw normally.
+    if (wrapX > 0.0f) {
+        char wrapped[512];
+        WrapText(text, wrapX, wrapped, (s32)sizeof(wrapped));
+        const float savedWrap = wrapX;
+        const_cast<xcFont*>(this)->wrapX = 0.0f;
+        DrawText(wrapped, screenX, screenY, color, justify, lineSpacing);
+        const_cast<xcFont*>(this)->wrapX = savedWrap;
+        return;
+    }
 
     u8 cr = (u8)(color & 0xFF);
     u8 cg = (u8)((color >> 8) & 0xFF);

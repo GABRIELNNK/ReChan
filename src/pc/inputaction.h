@@ -138,9 +138,20 @@ public:
 
     // True if gamepad is the active input device (for UI glyph display, etc.)
     bool IsGamepadActive() const { return gamepadActive; }
+    bool HadKeyboardInputThisFrame() const { return hadKeyboardInputThisFrame; }
+    bool HadGamepadInputThisFrame() const { return hadGamepadInputThisFrame; }
 
     // True if any action was just pressed this frame (for "press any button" screens)
     bool AnyJustPressed() const;
+
+    // Mouse state cached during Update()
+    void GetMousePosition(double& x, double& y) const;
+    bool IsMouseButtonDown(s32 button) const;
+    bool IsMouseButtonTriggered(s32 button) const;
+
+    // Mouse wheel accumulation (fed by window proc)
+    void AddScrollDelta(s32 delta) { scrollDelta += delta; }
+    s32 ConsumeScrollDelta();
 
     // Rebinding
     void SetKeyBinding(Action action, int key);
@@ -160,10 +171,17 @@ private:
 
     bool gamepadActive = false;
     bool keysRegistered = false;
+    bool hadKeyboardInputThisFrame = false;
+    bool hadGamepadInputThisFrame = false;
     s32 moveX = 0;
     s32 moveY = 0;
     s32 lookX = 0;
     s32 lookY = 0;
+    double mouseX = 0.0;
+    double mouseY = 0.0;
+    bool mouseDown[3] = {};
+    bool mousePrev[3] = {};
+    s32 scrollDelta = 0;
 
     bool PollAction(Action action, PlatformInput* platform) const;
 };

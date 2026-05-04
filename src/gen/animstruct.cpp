@@ -1,4 +1,5 @@
 #include "gen/animstruct.h"
+#include "gen/paramanim.h"
 #include "gen/model.h"
 #include "gen/time.h"
 #include "gen/charmgr.h"
@@ -434,6 +435,9 @@ void AnimStructure::ReAttachTree(s32 type, s32 animEnum) {
     }
     TransformAnim* newAnim = (TransformAnim*)g_characterManager->GetAnimation((u32)type, animEnum);
     if (!newAnim) {
+        return;
+    }
+    if (IsCameraParamAnim(newAnim)) {
         return;
     }
     // PSX: reattaches flip to new animation

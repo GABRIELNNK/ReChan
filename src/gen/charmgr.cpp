@@ -376,6 +376,18 @@ const char* g_charNameTable[] = {
 };
 
 
+// PC platform: pending-free list for TransformAnim objects.
+// On PSX the BIOS heap only overwrites the first 4 bytes of a freed block with
+// a free-list next-pointer, leaving the rest of the data (including rotChannels
+// at offset 16) intact for the remainder of the frame.  On Windows the CRT heap
+// destructs the object immediately, freeing the rotChannels array and potentially
+// corrupting the freed block, which causes a UAF crash in AnimateEverythingHandler
+// (UpdateJoints) when DynamicAnimUnload fires during handlerSet1 of the same frame.
+// Deferring the actual delete until EndFrameHandler (after AnimateEverythingHandler)
+// restores the PSX allocator's same-frame-safe-read guarantee.
+static void* s_pendingFreeAnims[CHAR_MAX_ANIMS] = {};
+static s32   s_pendingFreeCount = 0;
+
 // Free functions
 // PSX: FreeAnimMemory (CHARMGR.CPP:201, 0x800395F8)
 void FreeAnimMemory(void* ptr) {
@@ -384,8 +396,20 @@ void FreeAnimMemory(void* ptr) {
         delete static_cast<CameraParamAnim*>(ptr);
         return;
     }
+    // Defer TransformAnim deletion until FlushPendingFree() to prevent same-frame UAF.
+    if (s_pendingFreeCount < CHAR_MAX_ANIMS) {
+        s_pendingFreeAnims[s_pendingFreeCount++] = ptr;
+    } else {
+        delete static_cast<TransformAnim*>(ptr);
+    }
+}
 
-    delete static_cast<TransformAnim*>(ptr);
+void CharacterManager::FlushPendingFree() {
+    for (s32 i = 0; i < s_pendingFreeCount; ++i) {
+        delete static_cast<TransformAnim*>(s_pendingFreeAnims[i]);
+        s_pendingFreeAnims[i] = nullptr;
+    }
+    s_pendingFreeCount = 0;
 }
 
 static u32 GetLoadedAnimationNameUID(const void* animation) {

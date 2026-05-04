@@ -442,6 +442,7 @@ bool glDisplay::InitDisplay(const pddiDisplayInit& init) {
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+    io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange; // Don't let ImGui override GLFW cursor mode
     ImGui::StyleColorsDark();
 
     if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
@@ -568,7 +569,7 @@ void glDisplay::SetFullscreen(bool fullscreen) {
         GLFWmonitor* monitor = glfwGetPrimaryMonitor();
         const GLFWvidmode* vidMode = glfwGetVideoMode(monitor);
         glfwSetWindowMonitor(window, monitor, 0, 0,
-                             vidMode->width, vidMode->height,
+                             windowedW, windowedH,
                              vidMode->refreshRate);
     }
     else {
@@ -582,6 +583,44 @@ bool glDisplay::IsFullscreen() {
     return window && glfwGetWindowMonitor(window) != nullptr;
 }
 
+void glDisplay::SetBorderless(bool enabled) {
+    if (!window)
+        return;
+
+    if (borderless == enabled)
+        return;
+
+    // Borderless applies in windowed mode; keep desired state when in fullscreen.
+    if (IsFullscreen()) {
+        borderless = enabled;
+        return;
+    }
+
+    if (enabled) {
+        glfwGetWindowPos(window, &windowedX, &windowedY);
+        glfwGetWindowSize(window, &windowedW, &windowedH);
+
+        GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+        if (monitor) {
+            const GLFWvidmode* vidMode = glfwGetVideoMode(monitor);
+            int mx = 0, my = 0;
+            glfwGetMonitorPos(monitor, &mx, &my);
+            glfwSetWindowAttrib(window, GLFW_DECORATED, GLFW_FALSE);
+            glfwSetWindowPos(window, mx, my);
+            if (vidMode) {
+                glfwSetWindowSize(window, vidMode->width, vidMode->height);
+            }
+        }
+    }
+    else {
+        glfwSetWindowAttrib(window, GLFW_DECORATED, GLFW_TRUE);
+        glfwSetWindowSize(window, windowedW, windowedH);
+        glfwSetWindowPos(window, windowedX, windowedY);
+    }
+
+    borderless = enabled;
+}
+
 void glDisplay::SetResolution(int w, int h) {
     if (!window)
         return;
@@ -592,9 +631,35 @@ void glDisplay::SetResolution(int w, int h) {
         glfwSetWindowMonitor(window, monitor, 0, 0, w, h, vidMode->refreshRate);
     }
     else {
+        if (borderless) {
+            GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+            if (monitor) {
+                const GLFWvidmode* vidMode = glfwGetVideoMode(monitor);
+                int mx = 0, my = 0;
+                glfwGetMonitorPos(monitor, &mx, &my);
+                glfwSetWindowPos(window, mx, my);
+                if (vidMode) {
+                    glfwSetWindowSize(window, vidMode->width, vidMode->height);
+                }
+            }
+            return;
+        }
+
         glfwSetWindowSize(window, w, h);
         windowedW = w;
         windowedH = h;
+
+        // Center on primary monitor work area
+        GLFWmonitor* primaryMonitor = glfwGetPrimaryMonitor();
+        if (primaryMonitor) {
+            int workX = 0, workY = 0, workW = 0, workH = 0;
+            glfwGetMonitorWorkarea(primaryMonitor, &workX, &workY, &workW, &workH);
+            int centeredX = workX + (workW - w) / 2;
+            int centeredY = workY + (workH - h) / 2;
+            if (centeredX < workX) centeredX = workX;
+            if (centeredY < workY) centeredY = workY;
+            glfwSetWindowPos(window, centeredX, centeredY);
+        }
     }
 }
 
@@ -611,7 +676,7 @@ void glDisplay::SetTitle(const char* title) {
 }
 
 void glDisplay::SetWindowPos(int x, int y) {
-    if (window && !IsFullscreen()) {
+    if (window && !IsFullscreen() && !borderless) {
         glfwSetWindowPos(window, x, y);
         windowedX = x;
         windowedY = y;

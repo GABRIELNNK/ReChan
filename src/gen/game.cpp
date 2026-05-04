@@ -40,6 +40,14 @@
 #include "pddi/pddidev.h"
 #include "pc/settings.h"
 
+#if CUSTOM_TEXT
+#include "extra/customtext.h"
+#endif
+
+#if CUSTOM_MENU
+#include "extra/fecustommenumgr.h"
+#endif
+
 // Global game pointer
 Game* g_game = nullptr;
 
@@ -137,6 +145,11 @@ Game::~Game() {
 void Game::InternalOpen() {
     MARKFUNCTION(0x800C9D08);
 
+#if CUSTOM_TEXT
+    // PC: Initialize custom text system (new localization system)
+    g_customText.Init();
+#endif
+
     // PSX creates managers in this order:
     // 1. tCellAlligator (8204) - memory allocator (not needed on PC)
     // 2. oxScreenManager (48) + FontInit - screen/font (TODO)
@@ -233,6 +246,11 @@ void Game::InternalOpen() {
 // PSX: InternalClose__4Game (GAME.CPP:3003)
 void Game::InternalClose() {
     MARKFUNCTION(0x8002A184);
+
+#if CUSTOM_TEXT
+    // Shutdown custom text system
+    g_customText.Shutdown();
+#endif
 
     // Destroy player entity
     if (Player::s_player) {
@@ -398,10 +416,69 @@ static s32 MenuDraw(MenuMgr* menuMgr) {
     return result;
 }
 
+#if CUSTOM_MENU
+static void HideTitlePressStartText(TitleScreen* title) {
+    if (title && title->pressStartText) {
+        title->pressStartText->colorA = 0;
+    }
+}
+
+static void CustomMenuRender(feCustomMenuMgr* menuMgr) {
+    Game::DrawEverythingHandlerCB(nullptr);
+    DrawDirectorOverlays(nullptr);
+    if (g_hud) {
+        g_hud->Display();
+    }
+    if (menuMgr) {
+        menuMgr->Render();
+    }
+}
+
+static s32 CustomMenuDraw(feCustomMenuMgr* menuMgr) {
+    s32 result = menuMgr ? menuMgr->Invoke() : 1;
+    feCustomMenuMgr* renderMgr = menuMgr;
+    if (result == 8 || result == 4) {
+        renderMgr->Deactivate();
+        renderMgr = nullptr;
+    }
+    g_display->BeginFrame();
+    CustomMenuRender(renderMgr);
+    g_display->EndFrame();
+    return result;
+}
+
+static s32 CustomTitleMenuDraw(Game* game, feCustomMenuMgr* menuMgr) {
+    s32 result = menuMgr ? menuMgr->Invoke() : 1;
+    feCustomMenuMgr* renderMgr = menuMgr;
+    if (result == 8 || result == 4) {
+        renderMgr->Deactivate();
+        renderMgr = nullptr;
+    }
+
+    g_display->BeginFrame();
+    TitleScreen* title = game ? game->GetTitleScreen() : nullptr;
+    if (title) {
+        HideTitlePressStartText(title);
+        title->Render();
+    }
+    if (renderMgr) {
+        renderMgr->Render();
+    }
+    g_display->EndFrame();
+    return result;
+}
+#endif
+
 // PSX: EndFrameHandler (GAME.CPP:2205, pri=-64 in handlerSet2)
 // Noop on PSX - Display's dispEndFrameHandler does the real work.
 void Game::EndFrameHandler(Handler*) {
     MARKFUNCTION(0x8002B420);
+    // PC platform: flush TransformAnim objects deferred by FreeAnimMemory.
+    // Runs after AnimateEverythingHandler (pri=-48), ensuring animations freed
+    // during handlerSet1 (Director/Think) remain valid for UpdateJoints this frame.
+    if (g_characterManager) {
+        g_characterManager->FlushPendingFree();
+    }
 }
 
 bool Game::Step() {
@@ -508,6 +585,13 @@ bool Game::gsTitleState(Game* game) {
     game->titleScreen = new TitleScreen();
     game->titleScreen->Init("XC/TITLE.1", g_oxFontFile);
 
+#if CUSTOM_MENU
+    if (!g_feCustomMenuMgr) {
+        g_feCustomMenuMgr = new feCustomMenuMgr();
+        g_feCustomMenuMgr->Init(&g_customText);
+    }
+#endif
+
     if (g_inputManager) {
         g_inputManager->Step();
         g_inputManager->GetControlVal(0);
@@ -523,6 +607,7 @@ bool Game::gsTitleState(Game* game) {
     // PSX: reset idle timers
     game->titleIdleTimer = 0;
     game->titleIdleBase = 0;
+    game->titleStartLatch = false;
 
     // PSX: ClearEasterEggs()
 
@@ -561,6 +646,9 @@ bool Game::gsTitleLoopState(Game* game) {
         g_display->BeginFrame();
         if (game->titleScreen) {
             game->titleScreen->Update();
+#if CUSTOM_MENU
+            HideTitlePressStartText(game->titleScreen);
+#endif
             game->titleScreen->Render();
         }
 
@@ -604,19 +692,36 @@ bool Game::gsTitleLoopState(Game* game) {
         return true;
     }
 
-    g_display->BeginFrame();
-    if (game->titleScreen) {
-        game->titleScreen->Update();
-        game->titleScreen->Render();
-    }
-    g_display->EndFrame();
-
     u32 buttons = 0;
     if (g_inputManager) {
         g_inputManager->Step();
         buttons = g_inputManager->GetControlVal(0);
     }
     game->controlVal[0] = (s32)buttons;
+    const bool escDown = (p3d::display && p3d::display->IsKeyDown(KEY_ESCAPE));
+    const bool startDown = ((buttons & PsxPad::Start) != 0) && !escDown;
+
+#if CUSTOM_MENU
+    if (g_feCustomMenuMgr && g_feCustomMenuMgr->IsActive()) {
+        const s32 menuResult = CustomTitleMenuDraw(game, g_feCustomMenuMgr);
+        if (menuResult == 4) {
+            rsEvent(RS_STOP_MUSIC, 0, 0, 0);
+            FadeBegin();
+            game->titleFadeType = 1;
+        }
+        if (!startDown) {
+            game->titleStartLatch = false;
+        }
+        return true;
+    }
+#endif
+
+    g_display->BeginFrame();
+    if (game->titleScreen) {
+        game->titleScreen->Update();
+        game->titleScreen->Render();
+    }
+    g_display->EndFrame();
 
     // PSX: attract mode timer check (gp+128 - gp+124) >= 900
     s32 elapsed = game->titleIdleTimer - game->titleIdleBase;
@@ -627,7 +732,20 @@ bool Game::gsTitleLoopState(Game* game) {
         return true;
     }
 
-    if ((buttons & PsxPad::Start) != 0) {
+    if (startDown) {
+#if CUSTOM_MENU
+        if (g_feCustomMenuMgr) {
+            if (!game->titleStartLatch) {
+                if (g_frontEndSound) {
+                    g_frontEndSound->ProcessSoundEvent(FE_SND_MENU_OPEN);
+                }
+                g_feCustomMenuMgr->Activate(MenuPage_Title);
+                game->titleIdleBase = game->titleIdleTimer;
+                game->titleStartLatch = true;
+            }
+            return true;
+        }
+#endif
         // PSX: ProcessSoundEvent(gp[72], 8)
         if (g_frontEndSound) {
             g_frontEndSound->ProcessSoundEvent(FE_SND_MENU_OPEN);
@@ -638,6 +756,7 @@ bool Game::gsTitleLoopState(Game* game) {
         game->titleFadeType = 1;
     }
     else {
+        game->titleStartLatch = false;
         game->titleIdleTimer++;
     }
 
@@ -699,6 +818,9 @@ bool Game::gsOpenFEState(Game* game) {
         game->SetState(GameState::QueueLevelLoad);
     }
     else {
+#if CUSTOM_MENU
+        g_feCustomMenuMgr->Activate();
+#endif
         // No level selected - show FE menu
         game->SetState(GameState::FE);
     }
@@ -759,6 +881,10 @@ bool Game::gsPrePlayState(Game* game) {
         }
     }
 
+    // PC
+    if (g_display)
+        g_display->SetCursorCaptured(true);
+    
     // PSX: SetState(Play=8)
     game->SetState(GameState::Play);
 
@@ -826,6 +952,14 @@ bool Game::gsPlayState(Game* game) {
     if (game->state == GameState::Play) {
         s32 canPause = (!g_director || g_director->scriptState == 0);
         if (canPause && (game->controlVal[0] & PsxPad::Start) != 0) {
+#if CUSTOM_MENU
+            {
+                World* world = game->GetWorld();
+                const bool isHub = (world && world->GetCurLevelID() == 7);
+                g_feCustomMenuMgr->Activate(isHub ? MenuPage_Frontend : MenuPage_Pause);
+            }
+#endif
+
             LOG("[Game] Pause requested from Play");
             game->SetState(GameState::Menu);
             Shock(ShockEnum::SHOCK_CLEAR);
@@ -897,6 +1031,9 @@ bool Game::gsDbgMenuState(Game*) {
 bool Game::gsMenuState(Game* game) {
     MARKFUNCTION(0x80029EF8); // gsMenuState
 
+#if CUSTOM_MENU
+    s32 result = CustomMenuDraw(g_feCustomMenuMgr);
+#else
     // PSX: GetCurLevelID(world)
     // PSX: level 7 (boss): menuMgr = gp[48] (feMenuMgr)
     // PSX: else: menuMgr = gp[52] (gameMenu)
@@ -908,6 +1045,7 @@ bool Game::gsMenuState(Game* game) {
 
     // PSX: result = MenuDraw(menuMgr)
     s32 result = MenuDraw(menuMgr);
+#endif
     if (result == 4 || result == 8) {
         LOG("[Game] Pause menu result=%d", result);
     }
@@ -1389,6 +1527,14 @@ cleanup:
 // Destroys feMenuMgr, gameMenu, and HUD via virtual destructor.
 void Game::FreeXconFE() {
     MARKFUNCTION(0x8002C7A4);
+#if CUSTOM_MENU
+    if (g_feCustomMenuMgr) {
+        g_feCustomMenuMgr->Shutdown();
+        delete g_feCustomMenuMgr;
+        g_feCustomMenuMgr = nullptr;
+    }
+#endif
+
     if (g_feMenuMgr) {
         delete g_feMenuMgr;
         g_feMenuMgr = nullptr;
@@ -1469,6 +1615,13 @@ void Game::LoadXconFE() {
 
     // PSX: hud->Init("xc/hud.1", gp[56])
     g_hud->Init("XC/HUD.1", g_oxFontFile);
+
+#if CUSTOM_MENU
+    if (!g_feCustomMenuMgr) {
+        g_feCustomMenuMgr = new feCustomMenuMgr();
+        g_feCustomMenuMgr->Init(&g_customText);
+    }
+#endif
 }
 
 // PSX: fade globals (gp+3388, gp+3392)

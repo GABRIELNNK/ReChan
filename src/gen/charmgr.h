@@ -131,6 +131,10 @@ public:
     s32 LookUpAnimation(u32 type, const char* name);
     void PurgeLevel();
 
+    // PC: flush deferred TransformAnim deletions queued by FreeAnimMemory.
+    // Called from EndFrameHandler after AnimateEverythingHandler completes.
+    void FlushPendingFree();
+
     void InternalReset() override;
     void InternalOpen() override;
     void InternalClose() override;

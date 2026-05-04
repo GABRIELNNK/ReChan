@@ -1,4 +1,4 @@
-#include "common.h"
+﻿#include "common.h"
 #include "p3d/context.h"
 #include "p3d/input.h"
 #include "p3d/inventory.h"
@@ -13,6 +13,8 @@
 #include "pc/inputaction.h"
 #include "gen/game.h"
 #include "gen/time.h"
+#include "gen/display.h"
+#include "extra/fecustommenumgr.h"
 #include "radlib/rtask.h"
 #include "ai/player.h"
 
@@ -30,6 +32,9 @@ static bool OnWndProc(const pddiWndMessage& msg) {
                     p3d::input->SetEnabled(true);
                 if (AudioEngine::IsInitialized())
                     AudioEngine::SetMasterVolume(sSavedMasterVolume);
+                // Re-capture mouse only when the menu is not open
+                if (g_display && (!g_feCustomMenuMgr || !g_feCustomMenuMgr->IsActive()))
+                    g_display->SetCursorCaptured(true);
             }
             else {
                 // Lost focus
@@ -39,6 +44,15 @@ static bool OnWndProc(const pddiWndMessage& msg) {
                     sSavedMasterVolume = AudioEngine::GetMasterVolume();
                     AudioEngine::SetMasterVolume(0.0f);
                 }
+                // Always release mouse when losing focus
+                if (g_display)
+                    g_display->SetCursorCaptured(false);
+            }
+            break;
+        case PDDI_WND_SCROLL:
+            if (g_actionInput && g_feCustomMenuMgr && g_feCustomMenuMgr->IsActive()) {
+                const s32 dir = (msg.fparam2 > 0.0) ? 1 : -1;
+                g_actionInput->AddScrollDelta(dir);
             }
             break;
         default:
@@ -61,7 +75,6 @@ int main() {
     if (!ctx)
         return 1;
 
-    p3d::display->ShowCursor(false);
     p3d::display->SetWndProc(OnWndProc);
     p3d::display->SetOverlayCallback(DebugUI::Draw);
 
@@ -115,6 +128,11 @@ int main() {
 
         bool running = game.Step();
         if (!running) {
+#if QUIT_GAME_CLOSES_GAME
+            if (game.GetState() == GameState::End) {
+                break;
+            }
+#endif
             // PSX: SetLivesLeft(g_player, savedLives)
             Player::s_player->SetLivesLeft(4);
             game.SetState(GameState::QueueLevelLoad);

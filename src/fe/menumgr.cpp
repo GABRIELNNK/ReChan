@@ -388,11 +388,11 @@ u32 MenuMgr::FilterHostMenuButtons(u32 buttons) const {
 
         if (sharedEsc) {
             if (screenStackDepth > 1) {
+                // Going deeper: ESC acts as Triangle (back), suppress Start
                 buttons &= ~PsxPad::Start;
             }
-            else {
-                buttons &= ~PsxPad::Triangle;
-            }
+            // At depth 1: keep both Start and Triangle; the specific menu decides
+            // which one to act on (e.g. level select ignores Start but responds to Triangle)
         }
     }
 #endif

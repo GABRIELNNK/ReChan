@@ -7,12 +7,17 @@
 #include "pddi/pddidev.h"
 
 Display* g_display = nullptr;
+s32 Display::s_defaultScreenMode = ScreenMode_Windowed;
+s32 Display::s_defaultVsync = 1;
 
 // PSX: __7Display (0x800C9A30) / _7Display (overlay, 0x8012BAD0)
 Display::Display() {
     MARKFUNCTION(0x800C9A30);
     g_display = this;
     pri = 60; // PSX: byte at offset 18 = 60
+    screenMode = s_defaultScreenMode;
+    vsync = s_defaultVsync;
+    resolutionIndex = 0;
 }
 
 // PSX: __7Display (DISPLAY.CPP:67, 0x800DB408)
@@ -24,6 +29,19 @@ Display::~Display() {
 
 // PSX: InternalOpen__7Display (overlay, 0x8012BAE4)
 // Calls platOpen which creates the camera, sets view layers, viewport, lighting.
+void Display::SetCursorCaptured(bool captured) {
+    if (p3d::display) {
+        p3d::display->ShowCursor(!captured);
+        p3d::display->ClipCursor(captured);
+    }
+}
+
+void Display::SetCursorVisible(bool visible) {
+    if (p3d::display) {
+        p3d::display->ShowCursor(visible);
+    }
+}
+
 void Display::InternalOpen() {
     MARKFUNCTION(0x8012BAE4);
 
@@ -46,6 +64,7 @@ void Display::InternalOpen() {
     // PC: tView doesn't have layer system, viewport is full-screen by default.
 
     frameCounter = 0;
+    SetCursorCaptured(true);
 }
 
 // PSX: InternalClose__7Display (DISPLAY.CPP:76, 0x800DB418)
@@ -54,6 +73,7 @@ void Display::InternalClose() {
     // PSX: platClose -> theCamera = 0
     // PSX doesn't free the camera here (memory allocator handles it).
     // PC: we own it, so delete it.
+    SetCursorCaptured(false);
     view.SetCamera(nullptr);
     if (theCamera) {
         delete theCamera;
@@ -65,6 +85,87 @@ void Display::InternalClose() {
 void Display::InternalReset() {
     MARKFUNCTION(0x800DB428);
     // PSX: platReset - empty
+}
+
+void Display::SetFullscreen(s32 enabled) {
+    SetScreenMode(enabled ? ScreenMode_Fullscreen : ScreenMode_Windowed);
+}
+
+void Display::SetScreenMode(s32 mode) {
+    if (mode < (s32)ScreenMode_Fullscreen) mode = (s32)ScreenMode_Fullscreen;
+    if (mode > (s32)ScreenMode_Windowed) mode = (s32)ScreenMode_Windowed;
+
+    screenMode = mode;
+    s_defaultScreenMode = screenMode;
+
+    if (p3d::display) {
+        if (screenMode == ScreenMode_Fullscreen) {
+            p3d::display->SetBorderless(false);
+            p3d::display->SetFullscreen(true);
+        }
+        else if (screenMode == ScreenMode_Borderless) {
+            p3d::display->SetFullscreen(false);
+            p3d::display->SetBorderless(true);
+        }
+        else {
+            p3d::display->SetBorderless(false);
+            p3d::display->SetFullscreen(false);
+        }
+    }
+}
+
+void Display::SetVsync(s32 enabled) {
+    vsync = enabled ? 1 : 0;
+    s_defaultVsync = vsync;
+    if (p3d::display) {
+        p3d::display->SetVSync(vsync != 0);
+    }
+}
+
+s32 Display::GetResolutionCount() const {
+    if (!p3d::display) {
+        return 0;
+    }
+    pddiVideoMode modes[128];
+    return BuildUniqueVideoModes(p3d::display, modes, 128);
+}
+
+bool Display::GetResolutionMode(s32 index, pddiVideoMode& mode) const {
+    if (!p3d::display) {
+        return false;
+    }
+    pddiVideoMode modes[128];
+    const s32 count = BuildUniqueVideoModes(p3d::display, modes, 128);
+    if (index < 0 || index >= count) {
+        return false;
+    }
+    mode = modes[index];
+    return true;
+}
+
+void Display::SetResolutionIndex(s32 index) {
+    if (!p3d::display) {
+        return;
+    }
+
+    pddiVideoMode modes[128];
+    const s32 count = BuildUniqueVideoModes(p3d::display, modes, 128);
+    if (count <= 0) {
+        return;
+    }
+
+    if (index < 0) index = 0;
+    if (index >= count) index = count - 1;
+
+    const pddiVideoMode mode = modes[index];
+    p3d::display->SetResolution(mode.width, mode.height);
+
+    resolutionIndex = index;
+    screenWidth = mode.width;
+    screenHeight = mode.height;
+    if (mode.height > 0) {
+        aspectRatio = (f32)mode.width / (f32)mode.height;
+    }
 }
 
 // PSX: BeginFrame__7Display (PSXDISP.CPP:75, 0x80026CA0)
@@ -116,4 +217,43 @@ void Display::dispEndFrameHandler(Handler*) {
     if (g_display) {
         g_display->EndFrame();
     }
+}
+
+s32 Display::BuildUniqueVideoModes(pddiDisplay* display, pddiVideoMode* outModes, s32 maxModes) {
+    if (!display || !outModes || maxModes <= 0) {
+        return 0;
+    }
+
+    const s32 rawCount = (s32)display->GetVideoModeCount();
+    s32 uniqueCount = 0;
+
+    for (s32 i = 0; i < rawCount; i++) {
+        pddiVideoMode mode;
+        display->GetVideoMode(i, mode);
+        if (mode.width <= 0 || mode.height <= 0) {
+            continue;
+        }
+
+        s32 existing = -1;
+        for (s32 j = 0; j < uniqueCount; j++) {
+            if (outModes[j].width == mode.width && outModes[j].height == mode.height) {
+                existing = j;
+                break;
+            }
+        }
+
+        if (existing >= 0) {
+            // Keep the highest refresh variant for this resolution.
+            if (mode.refreshRate > outModes[existing].refreshRate) {
+                outModes[existing] = mode;
+            }
+            continue;
+        }
+
+        if (uniqueCount < maxModes) {
+            outModes[uniqueCount++] = mode;
+        }
+    }
+
+    return uniqueCount;
 }

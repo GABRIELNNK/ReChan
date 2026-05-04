@@ -16,6 +16,13 @@ class TitleScreen;
 class GameOverScreen;
 class tTexture;
 
+enum class GameResult : s32 {
+    None = 0,
+    Menu = 1,
+    StateChange = 4,
+    ResumePlay = 8,
+};
+
 enum class GameState : s32 {
     Null = 0,
     Intro,
@@ -86,6 +93,7 @@ public:
     HandlerSet& GetHandlerSet1() { return handlerSet1; }
     HandlerSet& GetHandlerSet2() { return handlerSet2; }
     s32 GetControlVal(s32 pad) const { return controlVal[pad]; }
+    TitleScreen* GetTitleScreen() const { return titleScreen; }
 
     // PSX handler callbacks (registered in Game constructor)
     // On PSX these are free functions; public so MenuRender/MenuDraw can call them.
@@ -115,6 +123,7 @@ private:
     GameOverScreen* gameOverScreen = nullptr;    // PSX: gp+64
     s32 titleIdleTimer = 0;                     // PSX: gp+128
     s32 titleIdleBase = 0;                      // PSX: gp+124
+    bool titleStartLatch = false;               // PC: Start edge latch for title menu toggle
     s32 firstBoot = 1;                          // PSX: gp+80
 
     // PC: per-frame fade state (PSX uses blocking inline loops)

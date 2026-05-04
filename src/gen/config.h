@@ -20,3 +20,12 @@
 // When ESC is bound to both menu back and menu open/close,
 // let it back out of submenu pages before closing the whole menu.
 #define ESC_BACKS_OUT_SUBMENUS_FIRST 1
+
+// Custom text files with localization support, parsed from game directory (requires .txt files for each language).
+#define CUSTOM_TEXT 1
+
+// Custom reimplementation of the game menus, allowing mouse support and custom settings. (Requires CUSTOM_TEXT for the text strings)
+#define CUSTOM_MENU 1
+
+// Treat GameState::End as an application-exit request in main loop so game actually closes instead of returning to title screen.
+#define QUIT_GAME_CLOSES_GAME 1

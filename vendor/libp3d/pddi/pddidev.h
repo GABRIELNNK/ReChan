@@ -120,6 +120,8 @@ public:
     virtual void GetVideoMode(int index, pddiVideoMode& mode) = 0;
     virtual void SetFullscreen(bool fullscreen) = 0;
     virtual bool IsFullscreen() = 0;
+    virtual void SetBorderless(bool borderless) = 0;
+    virtual bool IsBorderless() = 0;
     virtual void SetResolution(int w, int h) = 0;
     virtual void SetVSync(bool enabled) = 0;
     virtual void SetWindowPos(int x, int y) = 0;

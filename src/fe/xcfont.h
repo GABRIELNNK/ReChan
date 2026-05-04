@@ -52,6 +52,7 @@ public:
     s32* texHeights = nullptr;
     float scaleX = 1.0f;
     float scaleY = 1.0f;
+    float wrapX = 0.0f;  // max line width in screen pixels; 0 = disabled
 
     xcFont(const u8* rawData);
     ~xcFont();
@@ -60,6 +61,8 @@ public:
     const xcSpriteLetter* FindLetter(u16 ch) const;
 
     void SetScale(float x, float y);
+    void SetWrapX(float val) { wrapX = val; }
+    s32 CountWrappedLines(const char* text, f32 maxWidth) const;
     void DrawText(const char* text, f32 screenX, f32 screenY,
                   u32 color = 0xFFFFFFFF, u8 justify = 0, s32 lineSpacing = 0) const;
 
@@ -67,6 +70,7 @@ public:
     f32 MeasureText(const char* text) const;
 
 private:
+    void WrapText(const char* text, f32 maxWidth, char* out, s32 outSize) const;
     // PC: decode PSX raw image+palette data to RGBA texture
     static tTexture* DecodeImageWithPalette(const u8* pixelData,
         s32 rectW, s32 rectH, const u8* paletteData, s32* outW, s32* outH);

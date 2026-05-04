@@ -88,6 +88,12 @@ void ActionInput::Update(PlatformInput* platform) {
         return;
     }
 
+    for (s32 i = 0; i < 3; i++) {
+        mousePrev[i] = mouseDown[i];
+        mouseDown[i] = platform->IsMouseButtonDown(i);
+    }
+    platform->GetMousePosition(mouseX, mouseY);
+
     // Ensure all bound keyboard keys are tracked for HasAnyKeyboardInput()
     if (!keysRegistered) {
         for (s32 i = 0; i < ACTION_COUNT; i++) {
@@ -101,11 +107,15 @@ void ActionInput::Update(PlatformInput* platform) {
     // Switch active device based on last input used
     bool gpConnected = platform->IsGamepadConnected();
     if (!gpConnected) {
+        hadKeyboardInputThisFrame = platform->HasAnyKeyboardInput();
+        hadGamepadInputThisFrame = false;
         gamepadActive = false;
     }
     else {
         bool hasKb = platform->HasAnyKeyboardInput();
         bool hasGp = platform->HasAnyGamepadInput();
+        hadKeyboardInputThisFrame = hasKb;
+        hadGamepadInputThisFrame = hasGp;
         if (hasGp) {
             gamepadActive = true;
         }
@@ -297,4 +307,29 @@ void ActionInput::GetPadAnalog(u8& lx, u8& ly, u8& rx, u8& ry) const {
     ly = AxisToPadByte(moveY);
     rx = AxisToPadByte(lookX);
     ry = AxisToPadByte(lookY);
+}
+
+void ActionInput::GetMousePosition(double& x, double& y) const {
+    x = mouseX;
+    y = mouseY;
+}
+
+bool ActionInput::IsMouseButtonDown(s32 button) const {
+    if (button < 0 || button >= 3) {
+        return false;
+    }
+    return mouseDown[button];
+}
+
+bool ActionInput::IsMouseButtonTriggered(s32 button) const {
+    if (button < 0 || button >= 3) {
+        return false;
+    }
+    return mouseDown[button] && !mousePrev[button];
+}
+
+s32 ActionInput::ConsumeScrollDelta() {
+    const s32 delta = scrollDelta;
+    scrollDelta = 0;
+    return delta;
 }

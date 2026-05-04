@@ -115,6 +115,8 @@ public:
     void GetVideoMode(int index, pddiVideoMode& mode) override;
     void SetFullscreen(bool fullscreen) override;
     bool IsFullscreen() override;
+    void SetBorderless(bool borderless) override;
+    bool IsBorderless() override { return borderless; }
     void SetResolution(int w, int h) override;
     void SetVSync(bool enabled) override;
     void SetWindowPos(int x, int y) override;
@@ -146,6 +148,7 @@ private:
     int fbHeight = 0;
     int windowedX = 100, windowedY = 100;
     int windowedW = 960, windowedH = 720;
+    bool borderless = false;
     bool cursorVisible = true;
     bool cursorClipped = false;
     bool focused = true;

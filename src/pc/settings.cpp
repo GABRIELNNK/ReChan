@@ -2,6 +2,7 @@
 #include "pc/log.h"
 #include "gen/ccfile.h"
 #include "gen/control.h"
+#include "gen/display.h"
 #include "snd/sound.h"
 #include "snd/rsevent.h"
 
@@ -13,6 +14,9 @@
 
 GameSettings g_settings;
 
+static constexpr s32 kFallbackScreenWidth = 1280;
+static constexpr s32 kFallbackScreenHeight = 720;
+
 struct SettingDef {
     const char* section;
     const char* key;
@@ -22,6 +26,50 @@ struct SettingDef {
     s32 (*GetValue)();
     void (*SetValue)(s32 value);
 };
+
+static void GetResolutionDimensions(s32& outWidth, s32& outHeight) {
+    outWidth = kFallbackScreenWidth;
+    outHeight = kFallbackScreenHeight;
+
+    if (g_display) {
+        outWidth = g_display->GetScreenWidth();
+        outHeight = g_display->GetScreenHeight();
+    }
+}
+
+static void ApplyResolutionDimensions(s32 width, s32 height) {
+    if (!g_display || width <= 0 || height <= 0) {
+        return;
+    }
+
+    const s32 count = g_display->GetResolutionCount();
+    if (count <= 0) {
+        return;
+    }
+
+    s32 bestIndex = 0;
+    s64 bestScore = 0x7fffffffffffffffLL;
+
+    for (s32 i = 0; i < count; i++) {
+        pddiVideoMode mode;
+        if (!g_display->GetResolutionMode(i, mode)) {
+            continue;
+        }
+
+        const s64 dw = (s64)mode.width - (s64)width;
+        const s64 dh = (s64)mode.height - (s64)height;
+        const s64 score = dw * dw + dh * dh;
+        if (score < bestScore) {
+            bestScore = score;
+            bestIndex = i;
+            if (score == 0) {
+                break;
+            }
+        }
+    }
+
+    g_display->SetResolutionIndex(bestIndex);
+}
 
 static char* TrimInPlace(char* text) {
     while (*text == ' ' || *text == '\t' || *text == '\r' || *text == '\n') {
@@ -167,6 +215,38 @@ static void SetShockEnabledSetting(s32 value) {
     SetShock(value ? 1 : 0);
 }
 
+static s32 GetScreenModeSetting() {
+    if (g_display) {
+        return g_display->GetScreenMode();
+    }
+    return Display::GetDefaultScreenMode();
+}
+
+static void SetScreenModeSetting(s32 v) {
+    if (g_display) {
+        g_display->SetScreenMode(v);
+    }
+    else {
+        Display::SetDefaultScreenMode(v);
+    }
+}
+
+static s32 GetVsyncSetting() {
+    if (g_display) {
+        return g_display->GetVsync();
+    }
+    return Display::GetDefaultVsync();
+}
+
+static void SetVsyncSetting(s32 v) {
+    if (g_display) {
+        g_display->SetVsync(v);
+    }
+    else {
+        Display::SetDefaultVsync(v);
+    }
+}
+
 static const SettingDef kSettingDefs[] = {
     { "audio", "music_volume",   100, 0, 100, GetMusicVolume,   SetMusicVolume },
     { "audio", "effects_volume", 100, 0, 100, GetEffectsVolume, SetEffectsVolume },
@@ -174,6 +254,8 @@ static const SettingDef kSettingDefs[] = {
     { "audio", "stereo",           1, 0,   1, GetStereoEnabled, SetStereoEnabled },
     { "controls", "player_config", 0, 0,   2, GetPlayerConfigSetting, SetPlayerConfigSetting },
     { "controls", "shock",         0, 0,   1, GetShockEnabledSetting, SetShockEnabledSetting },
+    { "display", "screen_mode",     2, 0,   2, GetScreenModeSetting,  SetScreenModeSetting },
+    { "display", "vsync",          1, 0,   1, GetVsyncSetting,       SetVsyncSetting },
 };
 
 static constexpr u32 kSettingDefCount = (u32)(sizeof(kSettingDefs) / sizeof(kSettingDefs[0]));
@@ -207,6 +289,22 @@ static std::string BuildIniText() {
         snprintf(line, sizeof(line), "%s = %d\n", def.key, def.GetValue());
         text += line;
     }
+
+    s32 screenWidth = kFallbackScreenWidth;
+    s32 screenHeight = kFallbackScreenHeight;
+    GetResolutionDimensions(screenWidth, screenHeight);
+
+    if (!currentSection || strcmp(currentSection, "display") != 0) {
+        if (!text.empty()) {
+            text += "\n";
+        }
+        text += "[display]\n";
+    }
+    char displayLine[128];
+    snprintf(displayLine, sizeof(displayLine), "screen_width = %d\n", screenWidth);
+    text += displayLine;
+    snprintf(displayLine, sizeof(displayLine), "screen_height = %d\n", screenHeight);
+    text += displayLine;
 
     return text;
 }
@@ -277,6 +375,10 @@ bool GameSettings::Load(const char* path) {
     if (loadedFromFile) {
         LOG("[Settings] Load: opened '%s' (len=%d)", path, file.GetLength());
         char currentSection[64] = {};
+        s32 pendingWidth = -1;
+        s32 pendingHeight = -1;
+        bool sawWidth = false;
+        bool sawHeight = false;
 
         char line[256];
         while (file.ReadString(line, sizeof(line)) > 0) {
@@ -304,6 +406,31 @@ bool GameSettings::Load(const char* path) {
             *eq = '\0';
             char* key = TrimInPlace(trimmed);
             char* valueText = TrimInPlace(eq + 1);
+
+            if (strcmp(currentSection, "display") == 0) {
+                s32 parsedValue = 0;
+                if (strcmp(key, "screen_width") == 0) {
+                    if (ParseSettingValue(valueText, parsedValue) && parsedValue > 0) {
+                        pendingWidth = parsedValue;
+                        sawWidth = true;
+                    }
+                    else {
+                        LOG("[Settings] Load: bad value for [display] screen_width = '%s'", valueText);
+                    }
+                    continue;
+                }
+                if (strcmp(key, "screen_height") == 0) {
+                    if (ParseSettingValue(valueText, parsedValue) && parsedValue > 0) {
+                        pendingHeight = parsedValue;
+                        sawHeight = true;
+                    }
+                    else {
+                        LOG("[Settings] Load: bad value for [display] screen_height = '%s'", valueText);
+                    }
+                    continue;
+                }
+            }
+
             s32 defIndex = FindSettingDefIndex(currentSection, key);
             if (defIndex < 0) {
                 LOG("[Settings] Load: unknown key [%s] %s", currentSection, key);
@@ -322,9 +449,21 @@ bool GameSettings::Load(const char* path) {
         }
 
         file.Close();
+
+        if (sawWidth && sawHeight) {
+            ApplyResolutionDimensions(pendingWidth, pendingHeight);
+            LOG("[Settings] Load: [display] screen_width = %d", pendingWidth);
+            LOG("[Settings] Load: [display] screen_height = %d", pendingHeight);
+        }
+        else {
+            ApplyResolutionDimensions(kFallbackScreenWidth, kFallbackScreenHeight);
+            LOG("[Settings] Load: [display] screen_width/screen_height missing, fallback = %dx%d", kFallbackScreenWidth, kFallbackScreenHeight);
+        }
     }
     else {
         LOG("[Settings] Load: file '%s' not found, using defaults", path);
+        ApplyResolutionDimensions(kFallbackScreenWidth, kFallbackScreenHeight);
+        LOG("[Settings] Load: [display] fallback = %dx%d", kFallbackScreenWidth, kFallbackScreenHeight);
     }
 
     for (u32 i = 0; i < kSettingDefCount; i++) {
