@@ -614,14 +614,11 @@ static bool CheckXZStaticBoxCylinderCollision(
 static constexpr s32 OBSTACLE_CORRECT_BUFFER = 4;
 static constexpr s32 OBSTACLE_YMAX_BUFFER = 0x40;
 static constexpr s32 CORRECT_THING_OBSTACLE_BOX_Y_MAX_OFFSET = 9;
-static s32 CORRECT_THING_POSITION_PUSHABLE_CHEAT = 0;
+static s32 CORRECT_THING_POSITION_RADIUS_BIAS = 0;
 static constexpr s32 CORRECT_THING_POSITION_EXTRA = 0x20;
 
-// DEBUG: set by Platform::HandleHumanoidCollision to enable logging inside CorrectThingPositionObstacle
-static bool s_debugCTP = false;
-
-void SetCorrectThingPositionDebug(bool enabled) {
-    s_debugCTP = enabled;
+void SetCorrectThingPositionRadiusBias(s32 value) {
+    CORRECT_THING_POSITION_RADIUS_BIAS = value;
 }
 
 // PSX: CorrectThingPosition__8ObstacleRC10tagLVectorT1llRC15tagCollisionBoxT1T1lllR10tagLVectorR9_RMVECT16T11_ (0x8007B398)
@@ -745,10 +742,10 @@ bool CorrectThingPositionObstacle(
             }
         }
 
-        if (localB.x + CORRECT_THING_POSITION_PUSHABLE_CHEAT >= (s32)box.minX &&
-            (s32)box.maxX >= localB.x - CORRECT_THING_POSITION_PUSHABLE_CHEAT &&
-            localB.z + CORRECT_THING_POSITION_PUSHABLE_CHEAT >= (s32)box.minZ &&
-            (s32)box.maxZ >= localB.z - CORRECT_THING_POSITION_PUSHABLE_CHEAT) {
+        if (localB.x + CORRECT_THING_POSITION_RADIUS_BIAS >= (s32)box.minX &&
+            (s32)box.maxX >= localB.x - CORRECT_THING_POSITION_RADIUS_BIAS &&
+            localB.z + CORRECT_THING_POSITION_RADIUS_BIAS >= (s32)box.minZ &&
+            (s32)box.maxZ >= localB.z - CORRECT_THING_POSITION_RADIUS_BIAS) {
             if (localA.y < (s32)box.minY) {
                 pushY = -1;
                 distY = (s32)box.minY - (localA.y + yMaxOffset);
@@ -778,25 +775,6 @@ bool CorrectThingPositionObstacle(
 
         if (pushX != 0 || pushY != 0 || pushZ != 0) {
             corrected = true;
-
-            if (s_debugCTP) {
-                bool pushYGuard = (localB.x + CORRECT_THING_POSITION_PUSHABLE_CHEAT >= (s32)box.minX &&
-                    (s32)box.maxX >= localB.x - CORRECT_THING_POSITION_PUSHABLE_CHEAT &&
-                    localB.z + CORRECT_THING_POSITION_PUSHABLE_CHEAT >= (s32)box.minZ &&
-                    (s32)box.maxZ >= localB.z - CORRECT_THING_POSITION_PUSHABLE_CHEAT);
-                LOG("[CTP] localA=(%d,%d,%d) localB=(%d,%d,%d) box=(%d,%d,%d,%d,%d,%d)",
-                    localA.x, localA.y, localA.z, localB.x, localB.y, localB.z,
-                    box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ);
-                LOG("[CTP] push=(%d,%d,%d) dist=(%d,%d,%d) centre=(%d,%d) pushYGuard=%d radius=%d",
-                    pushX, pushY, pushZ, distX, distY, distZ, centreX, centreZ, pushYGuard, radius);
-                const char* winner = "none";
-                if (distX < distZ) {
-                    winner = (distZ >= distY) ? "Z" : "Y";
-                } else {
-                    winner = (distX >= distY) ? "X" : "Y";
-                }
-                LOG("[CTP] winner=%s target=(%d,%d,%d)", winner, targetX, targetY, targetZ);
-            }
 
             if (distX < distZ) {
                 if (distZ >= distY) {
@@ -834,7 +812,7 @@ bool CorrectThingPositionObstacle(
     outPushedPos.y = basisB.y + (s32)box.maxY;
     outPushedPos.z = outPos.z - MulShift16(radius, outNormal.z);
 
-    CORRECT_THING_POSITION_PUSHABLE_CHEAT = 0;
+    CORRECT_THING_POSITION_RADIUS_BIAS = 0;
     return corrected;
 }
 
@@ -1140,4 +1118,13 @@ void Obstacle_LoadAnimChunk(const u8* body, u32 bodySize) {
     if (GEffect_FindEffectAnim(animHash, &effectAnim)) {
         Obstacle_AddAnimation(effectAnim);
     }
+}
+
+// PSX: MovePassengersBasic__8Obstacle (OBSTACLE.CPP:2348, 0x8007D40C)
+void Obstacle::MovePassengersBasic() {
+    MARKFUNCTION(0x8007D40C);
+    // JUMPOUT: passenger linked-list traversal; iterates subNode passenger list,
+    // clamps each passenger's homeY to obstacle top (pos.y + collBox.maxY - 2),
+    // calls DynamicThing::Land() if velY <= 0, then restores homePos/velocity.
+    // Implementation deferred pending DynamicThing passenger/ticket system confirmation.
 }

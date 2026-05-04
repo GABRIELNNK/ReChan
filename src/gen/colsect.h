@@ -44,6 +44,10 @@ struct CollisionSector {
     static s32 FillWorldWallArray(
         const LVector& searchMin, const LVector& searchMax,
         Wall** outArray, s32 maxCount);
+    static s32 CheckWorldWallCollision(
+        const LVector& oldPos, const LVector& newPos,
+        s32 radius, s32 height, s32 arg5,
+        s32& outRatio, LVector& outNormal, LVector& outHitPoint, s32& outWallHorizontal);
     static s32 CheckArrayWallCollision(
         Wall** walls, s32 count,
         const LVector& oldPos, const LVector& newPos,

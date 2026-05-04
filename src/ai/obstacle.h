@@ -25,6 +25,9 @@ public:
     // PSX +114: shadow flag (1 = has shadow)
     u8 shadowFlag = 1;
 
+    // PSX +115: alive flag (0 = dead/destroyed; set to 1 by destructible subclass ctors)
+    u8 aliveFlag = 0;
+
     Obstacle(const LVector* pos, u16 type);
     ~Obstacle() override;
 
@@ -38,6 +41,7 @@ public:
     void AnalyzeMesh(DBRoot* root) override;
     void AllocateAndCreateShadow();
     void UpdateShadowFloorHeight();
+    void MovePassengersBasic();
 
     virtual void FillSphere(tSphere& sphere) const;
     virtual void HandlePickupCollision(Thing* pickup);

@@ -21,7 +21,7 @@ bool CorrectThingPositionObstacle(
     LVector& outNormal,
     LVector& outPushedPos);
 
-void SetCorrectThingPositionDebug(bool enabled);
+void SetCorrectThingPositionRadiusBias(s32 value);
 
 inline s32 MulShift16(s32 a, s32 b) {
     return (s32)(((s64)a * (s64)b) >> 16);

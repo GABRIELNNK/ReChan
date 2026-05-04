@@ -317,6 +317,8 @@ void Player::Think() {
     ProcessAction();
     Move();
 
+    field368 = 0;
+
     // Combo tracking
     if (hitCombo < 3) {
         // not enough for combo
@@ -711,9 +713,13 @@ void Player::SetActionState(u32 state, s32 param) {
         }
         case AS_PUSH_OBJECT:
         {
-            // PSX case 19: stateDispatch=-1, PushObject handler
+            // PSX case 19: stateDispatch=-1, PushObject handler, anim=41 loopType=3.
             field344 = 0;
             stateDispatch = SD_PUSH_OBJECT;
+            if (model) {
+                Model* m = static_cast<Model*>(model);
+                m->SetAnim(41, 3, 0, 0);
+            }
             actionState = (s32)state;
             return;
         }
@@ -752,6 +758,15 @@ void Player::SetActionState(u32 state, s32 param) {
             maxFallDivisor = 0;
             field344 = 0;
             stateDispatch = SD_TABLE_ROLL;
+            actionState = (s32)state;
+            return;
+        }
+        case AS_PUSH:
+        {
+            // PSX case 22: direct Push handler. This is a lightweight state swap
+            // that preserves the current push presentation while switching logic.
+            field344 = 0;
+            stateDispatch = SD_PUSH;
             actionState = (s32)state;
             return;
         }
@@ -936,6 +951,7 @@ void Player::ProcessAction() {
         case SD_HARDLAND:      _HardLand(); return;
         case SD_FLIP:          _Flip(); return;
         case SD_INACTIVE_IDLE: _InactiveIdle(); return;
+        case SD_PUSH:          _Push(); return;
         case SD_PUSH_OBJECT:   _PushObject(); return;
         case SD_TABLE_ROLL:    _TableRoll(); return;
         case SD_DO_STAND:      _DoStand(); return;
@@ -2268,13 +2284,13 @@ void Player::_PushObject() {
         return;
     }
 
-    // PSX: bit 3 (jump) or bit 4 (taunt) -> Stand
+    // PSX: bit 3 (jump) or bit 4 (taunt) -> state 6
     s32 hasJumpOrTaunt = 0;
     if (((cb >> 3) & 1) || ((cb >> 4) & 1)) {
         hasJumpOrTaunt = 1;
     }
     if (hasJumpOrTaunt) {
-        SetActionState(AS_STAND, 0);
+        SetActionState(AS_PAUSE, 0);
         return;
     }
 
@@ -2295,7 +2311,7 @@ void Player::_PushObject() {
         return;
     }
 
-    SetActionState(AS_STAND, 0);
+    SetActionState(AS_RUN, 0);
 }
 
 // PSX: _Teetering__6Player (PLAYER.CPP:3659, 0x80032C70)

@@ -32,6 +32,18 @@
 #include "ai/platform.h"
 #include "ai/teleporter.h"
 #include "ai/trigger.h"
+#include "ai/conveyor.h"
+#include "ai/slippery.h"
+#include "ai/explosive.h"
+#include "ai/destroy.h"
+#include "ai/crusher.h"
+#include "ai/kicknroll.h"
+#include "ai/untouchable.h"
+#include "ai/generator.h"
+#include "ai/blast.h"
+#include "ai/pushable.h"
+#include "ai/pendulum.h"
+#include "ai/table.h"
 
 
 AI* g_ai = nullptr;
@@ -341,6 +353,57 @@ void AI::AddThingNoTagList(const char* name, u16 type,
             }
             else if (type == AITypes::TT_PLATFORM) {
                 thing = new Platform(pos, type);
+            }
+            else if (type == AITypes::TT_CONVEYOR) {
+                thing = new Conveyor(pos, type);
+            }
+            else if (type == AITypes::TT_SLIPPERYFLOOR) {
+                thing = new SlipperyFloor(pos, type);
+            }
+            else if (type == AITypes::TT_EXPLOSIVE || type == AITypes::TT_EXPLOSIVE_OBJ) {
+                thing = new Explosive(pos, type);
+            }
+            else if (type == AITypes::TT_DESTRUCTIBLE || type == AITypes::TT_DESTRUCTIBLE_DP) {
+                thing = new DestructibleThing(pos, type);
+            }
+            else if (type == AITypes::TT_CRUSHER) {
+                thing = new Crusher(pos, type);
+            }
+            else if (type == AITypes::TT_KNOCKDOWN) {
+                thing = new KnockDown(pos, type);
+            }
+            else if (type == AITypes::TT_STACK) {
+                thing = new Stack(pos, type);
+            }
+            else if (type == AITypes::TT_KICKNROLL) {
+                thing = new KickNRoll(pos, type);
+            }
+            else if (type == AITypes::TT_UNTOUCHABLE) {
+                thing = new Untouchable(pos, type);
+            }
+            else if (type == AITypes::TT_GENERATOR) {
+                thing = new Generator(pos, type);
+            }
+            else if (type == AITypes::TT_ENEMYGENERATOR) {
+                thing = new EnemyGenerator(pos, type);
+            }
+            else if (type == AITypes::TT_BLAST) {
+                thing = new Blast(pos, type);
+            }
+            else if (type == AITypes::TT_THROWGENERATOR) {
+                thing = new ThrowingGenerator(pos, type);
+            }
+            else if (type == AITypes::TT_PUSHABLE) {
+                thing = new Pushable(pos, type);
+            }
+            else if (type == AITypes::TT_PENDULUM) {
+                thing = new Pendulum(pos, type);
+            }
+            else if (type == AITypes::TT_TABLE) {
+                thing = new Table(pos, type);
+            }
+            else if (type == AITypes::TT_CHAIR) {
+                thing = new Chair(pos, type);
             }
             // Type 472 = Arrow (hub navigational arrow)
             else if (type == AITypes::TT_ARROW) {

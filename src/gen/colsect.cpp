@@ -12,6 +12,9 @@ static Floor* g_floorPtrScratch[64];
 // Scratch buffer for wall pointer collection used by ledge prototype checks
 static Wall* g_wallPtrScratch[64];
 
+// PSX: temporary world-wall query pointer array (0x800DFCB8).
+static Wall* g_worldWallQueryScratch[64];
+
 // PSX: __15CollisionSector (COLSECT.CPP:415) 0x80042278
 CollisionSector::CollisionSector() {
     MARKFUNCTION(0x80042278);
@@ -349,6 +352,52 @@ bool CollisionSector::LedgePrototype(
 // Wall collision result globals
 WallCollisionInfo g_wallCollisionInfo;  // PSX: 0x800E00C8
 Wall* g_colHitWall = nullptr;           // PSX: gp+1160
+
+// PSX: CheckWorldWallCollision__15CollisionSectorRC10tagLVectorT1lllRlR9_RMVECT16R10tagLVectorRl
+// (COLSECT.CPP:657) 0x80041038
+s32 CollisionSector::CheckWorldWallCollision(
+    const LVector& oldPos, const LVector& newPos,
+    s32 radius, s32 height, s32 arg5,
+    s32& outRatio, LVector& outNormal, LVector& outHitPoint, s32& outWallHorizontal) {
+    MARKFUNCTION(0x80041038);
+
+    LVector searchMin = {};
+    LVector searchMax = {};
+    searchMin.x = (oldPos.x < newPos.x) ? oldPos.x : newPos.x;
+    searchMin.y = (oldPos.y < newPos.y) ? oldPos.y : newPos.y;
+    searchMin.z = (oldPos.z < newPos.z) ? oldPos.z : newPos.z;
+    searchMax.x = (oldPos.x > newPos.x) ? oldPos.x : newPos.x;
+    searchMax.y = (oldPos.y > newPos.y) ? oldPos.y : newPos.y;
+    searchMax.z = (oldPos.z > newPos.z) ? oldPos.z : newPos.z;
+
+    searchMin.x -= radius;
+    searchMin.z -= radius;
+    searchMax.x += radius;
+    searchMax.z += radius;
+    searchMin.y += height;
+    searchMax.y += arg5;
+
+    s32 wallCount = FillWorldWallArray(searchMin, searchMax, g_worldWallQueryScratch, 64);
+    if (wallCount > 64) {
+        wallCount = 64;
+    }
+
+    const s32 hit = CheckArrayWallCollision(
+        g_worldWallQueryScratch,
+        wallCount,
+        oldPos,
+        newPos,
+        radius,
+        height,
+        arg5,
+        0);
+
+    outRatio = g_wallCollisionInfo.collisionRatio;
+    outNormal = g_wallCollisionInfo.wallNormal;
+    outHitPoint = g_wallCollisionInfo.hitPoint;
+    outWallHorizontal = g_wallCollisionInfo.wallHorizontal;
+    return hit;
+}
 
 // PSX: FillWorldWallArray__15CollisionSectorRC10tagLVectorT1PPC4Walli (COLSECT.CPP:863) 0x800411F8
 // Collect Wall pointers overlapping with the search AABB from all sectors
