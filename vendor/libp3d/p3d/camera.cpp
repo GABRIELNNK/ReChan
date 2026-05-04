@@ -67,7 +67,7 @@ void tCamera::SetState() {
         if (h > 0) aspect = (f32)w / (f32)h;
     }
 
-    Mat4 proj = Perspective(vfov_rad, aspect, nearPlaneF, farPlaneF);
+    Mat4 proj = PerspectiveReversedZ(vfov_rad, aspect, nearPlaneF, farPlaneF);
 
     // Standard GL perspective (looks along -Z). The Z-negate in the view
     // matrix (SetCameraMatrix) converts PSX +Z forward to GL -Z forward,

@@ -32,8 +32,8 @@ layout(location=1) in vec3 aColor;
 layout(location=2) in vec2 aUV;
 layout(location=3) in vec2 aTexInfo;
 uniform mat4 uMVP;
-out vec3 vColor;
-out vec2 vUV;
+noperspective out vec3 vColor;
+noperspective out vec2 vUV;
 flat out vec2 vTexInfo;
 void main() {
     vColor = aColor;
@@ -45,8 +45,8 @@ void main() {
 
 static const char* k3DFrag = R"(
 #version 450 core
-in vec3 vColor;
-in vec2 vUV;
+noperspective in vec3 vColor;
+noperspective in vec2 vUV;
 flat in vec2 vTexInfo;
 uniform usampler2D uVRAM;
 uniform int uHasVRAM;
@@ -435,6 +435,9 @@ bool glDisplay::InitDisplay(const pddiDisplayInit& init) {
     std::printf("OpenGL %s on %s\n",
                 reinterpret_cast<const char*>(glGetString(GL_VERSION)),
                 reinterpret_cast<const char*>(glGetString(GL_RENDERER)));
+
+    glClipControl(GL_LOWER_LEFT, GL_ZERO_TO_ONE);
+    glClearDepth(0.0);
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -862,8 +865,10 @@ void glContext::Clear(int flags) {
                      clearColour.b / 255.0f, clearColour.a / 255.0f);
         mask |= GL_COLOR_BUFFER_BIT;
     }
-    if (flags & PDDI_BUFFER_DEPTH)
+    if (flags & PDDI_BUFFER_DEPTH) {
+        glClearDepth(0.0);
         mask |= GL_DEPTH_BUFFER_BIT;
+    }
     if (mask)
         glClear(mask);
 }
@@ -903,7 +908,7 @@ void glContext::EnableZBuffer(bool enable) {
     cachedZBuffer = enable;
     if (enable) {
         glEnable(GL_DEPTH_TEST);
-        glDepthFunc(GL_LEQUAL);
+        glDepthFunc(GL_GEQUAL);
     }
     else
         glDisable(GL_DEPTH_TEST);
