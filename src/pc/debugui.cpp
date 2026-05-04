@@ -19,6 +19,7 @@
 #include "gen/ai.h"
 #include "ai/obstacle.h"
 #include "gen/display.h"
+#include "extra/fecustommenumgr.h"
 #include "pc/log.h"
 
 static bool sEnabled = false;
@@ -35,6 +36,35 @@ static bool sInputRoutingOverride = false;
 static s32 sInputRoutingSelection = 0; // 0 = Camera input, 1 = Player input
 static char sConsoleNoteInput[1024] = {};
 static char sLastConsoleNote[1024] = {};
+static bool sCursorForcedByDebugUI = false;
+
+static void ApplyCursorPolicy() {
+    if (!g_display) {
+        return;
+    }
+
+    if (sEnabled) {
+        // Debug UI requires a usable mouse pointer: no clipping/capture and visible cursor.
+        g_display->SetCursorCaptured(false);
+        g_display->SetCursorVisible(true);
+        sCursorForcedByDebugUI = true;
+        return;
+    }
+
+    if (!sCursorForcedByDebugUI) {
+        return;
+    }
+
+    // Restore whichever mode owns the cursor outside Debug UI.
+    if (g_feCustomMenuMgr && g_feCustomMenuMgr->IsActive()) {
+        g_display->SetCursorCaptured(false);
+        g_display->SetCursorVisible(false);
+    }
+    else {
+        g_display->SetCursorCaptured(true);
+    }
+    sCursorForcedByDebugUI = false;
+}
 
 static bool ShouldBlockGameInputFromImGui() {
     if (!sEnabled || !ImGui::GetCurrentContext()) {
@@ -308,6 +338,8 @@ void DebugUI::Draw() {
     if (ImGui::IsKeyPressed(ImGuiKey_M, false) && ImGui::GetIO().KeyCtrl) {
         sEnabled = !sEnabled;
     }
+
+    ApplyCursorPolicy();
 
     if (ImGui::IsKeyPressed(ImGuiKey_B, false) && ImGui::GetIO().KeyCtrl) {
         Camera* cam = g_display->GetCamera();

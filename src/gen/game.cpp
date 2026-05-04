@@ -1174,8 +1174,8 @@ bool Game::gsQueueLevelLoad(Game* game) {
     }
 
     tMatrixCamera* cam = g_display->GetCamera()->GetP3DCamera();
-    cam->SetNearPlane(100.0f);
-    cam->SetFarPlane(500000.0f);
+    cam->SetNearPlane(1.0f);
+    cam->SetFarPlane(65535.0f);
 
     g_display->GetView().SetCamera(g_display->GetCamera()->GetP3DCamera());
     g_display->GetView().SetBackgroundColour(pddiColour(0, 0, 0));

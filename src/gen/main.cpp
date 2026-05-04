@@ -32,9 +32,16 @@ static bool OnWndProc(const pddiWndMessage& msg) {
                     p3d::input->SetEnabled(true);
                 if (AudioEngine::IsInitialized())
                     AudioEngine::SetMasterVolume(sSavedMasterVolume);
-                // Re-capture mouse only when the menu is not open
-                if (g_display && (!g_feCustomMenuMgr || !g_feCustomMenuMgr->IsActive()))
-                    g_display->SetCursorCaptured(true);
+                // Re-capture mouse only when no UI that needs a free cursor is active.
+                if (g_display) {
+                    if (DebugUI::IsEnabled()) {
+                        g_display->SetCursorCaptured(false);
+                        g_display->SetCursorVisible(true);
+                    }
+                    else if (!g_feCustomMenuMgr || !g_feCustomMenuMgr->IsActive()) {
+                        g_display->SetCursorCaptured(true);
+                    }
+                }
             }
             else {
                 // Lost focus

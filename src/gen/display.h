@@ -12,6 +12,17 @@ enum ScreenMode : s32 {
     ScreenMode_Windowed = 2,
 };
 
+struct ChanProjectionState {
+    s32 centerX = 160;
+    s32 centerY = 120;
+    s32 width = 320;
+    s32 height = 240;
+    f32 projectionDistanceX = 800.0f;
+    f32 projectionDistanceY = 800.0f;
+    u16 nearClip = 1;
+    u16 farClip = 0xFFFF;
+};
+
 // PSX: Display (32 bytes) extends Manager(28) + no extra fields on PSX
 // On PC we store the global tView and camera pointer here.
 class Display : public Manager {
@@ -40,6 +51,7 @@ public:
     s32 GetScreenWidth() const { return screenWidth; }
     s32 GetScreenHeight() const { return screenHeight; }
     f32 GetAspectRatio() const { return aspectRatio; }
+    ChanProjectionState GetChanProjectionState() const;
 
     s32 GetFullscreen() const { return screenMode == ScreenMode_Fullscreen ? 1 : 0; }
     void SetFullscreen(s32 enabled);

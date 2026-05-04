@@ -25,6 +25,7 @@
 #include "fe/hud.h"
 #include "fe/loadanim.h"
 #include "p3d/hash.h"
+#include "p3d/p3dmath.h"
 #include "p3d/context.h"
 #include "p3d/stream.h"
 #include "p3d/texture.h"
@@ -2221,35 +2222,36 @@ void World::Render(const LVector* playerPos) {
 }
 
 // TransformVector - PC equivalent of PSX tPort::TransformVector
-// Multiplies world-space point by the current view matrix (GTE rotation + translation)
+// Multiplies world-space point by the current view matrix, then converts the
+// result back into tPort space (+Y down, +Z forward).
 static void TransformVector(const Mat4& vm, s32 inX, s32 inY, s32 inZ,
                             s32* outX, s32* outY, s32* outZ) {
     f32 ox, oy, oz;
     Mat4TransformPoint(vm, (f32)inX, (f32)inY, (f32)inZ, ox, oy, oz);
     *outX = static_cast<s32>(ox);
-    *outY = static_cast<s32>(oy);
-    *outZ = static_cast<s32>(oz);
+    *outY = static_cast<s32>(-oy);
+    *outZ = static_cast<s32>(-oz);
 }
 
 // chanp3dClipCode - PC equivalent of PSX chanp3dClipCode
-// Computes 6-bit clip code for a view-space point against the frustum
-// bit 0: left, bit 1: right, bit 2: bottom, bit 3: top, bit 4: near, bit 5: far
-static u32 chanp3dClipCode(const Mat4& pm, s32 vx, s32 vy, s32 vz) {
-    f32 fx = static_cast<f32>(vx);
-    f32 fy = static_cast<f32>(vy);
-    f32 fz = static_cast<f32>(vz);
-    // Transform to homogeneous clip space
-    f32 cx = pm.m[0] * fx + pm.m[4] * fy + pm.m[8] * fz + pm.m[12];
-    f32 cy = pm.m[1] * fx + pm.m[5] * fy + pm.m[9] * fz + pm.m[13];
-    f32 cz = pm.m[2] * fx + pm.m[6] * fy + pm.m[10] * fz + pm.m[14];
-    f32 cw = pm.m[3] * fx + pm.m[7] * fy + pm.m[11] * fz + pm.m[15];
+// Projects a tPort-space point into screen space and computes PSX-style clip bits.
+// bit 0: left, bit 1: right, bit 2: top, bit 3: bottom, bit 4: near, bit 5: far
+static u32 chanp3dClipCode(const ChanProjectionState& portState, s32 vx, s32 vy, s32 vz) {
     u32 code = 0;
-    if (cx < -cw) code |= 0x01; // left
-    if (cx > cw) code |= 0x02; // right
-    if (cy < -cw) code |= 0x04; // bottom
-    if (cy > cw) code |= 0x08; // top
-    if (cz < -cw) code |= 0x10; // near
-    if (cz > cw) code |= 0x20; // far
+
+    if (vz < static_cast<s32>(portState.nearClip)) code |= 0x10;
+    if (vz > static_cast<s32>(portState.farClip)) code |= 0x20;
+    if (vz <= 0) return code | 0x10;
+
+    s32 sx = portState.centerX + static_cast<s32>((static_cast<f32>(vx) * portState.projectionDistanceX) / static_cast<f32>(vz));
+    s32 sy = portState.centerY + static_cast<s32>((static_cast<f32>(vy) * portState.projectionDistanceY) / static_cast<f32>(vz));
+
+    if (sx < 0) code |= 0x01;
+    else if (sx >= portState.width) code |= 0x02;
+
+    if (sy < 0) code |= 0x04;
+    else if (sy >= portState.height) code |= 0x08;
+
     return code;
 }
 
@@ -2396,9 +2398,12 @@ void World::computeBlockToPointDistances(const Block* block, const LVector* play
     // s5 = &block->posX (block position at offset +4)
     const s32* pos = &block->posX; // pos[0]=X, pos[1]=Y, pos[2]=Z
 
-    // Get view and projection matrices (PC equivalent of GTE state)
+    // Get view matrix and current tPort projection state.
     const Mat4& vm = p3d::context->GetViewMatrix();
-    const Mat4& pm = p3d::context->GetProjectionMatrix();
+    ChanProjectionState portState;
+    if (g_display) {
+        portState = g_display->GetChanProjectionState();
+    }
 
     s32 minDistSq = 0; // s7
     s32 maxZDepth = 0; // s6
@@ -2412,7 +2417,7 @@ void World::computeBlockToPointDistances(const Block* block, const LVector* play
         s32 wx = pos[0] + bbox[0], wy = pos[1] + bbox[1], wz = pos[2] + bbox[2];
         TransformVector(vm, wx, wy, wz, &tvx, &tvy, &tvz);
         s32 svx = tvx, svy = tvy, svz = tvz; // save pre-project coords
-        clipCodes[0] = chanp3dClipCode(pm, tvx, tvy, tvz);
+        clipCodes[0] = chanp3dClipCode(portState, tvx, tvy, tvz);
         minDistSq = vecLengthSquared(svx, svy, svz);
         s32 z = svz;
         if (z > 0xFFFF) z = 0xFFFF;
@@ -2424,7 +2429,7 @@ void World::computeBlockToPointDistances(const Block* block, const LVector* play
         s32 wx = pos[0] + bbox[3], wy = pos[1] + bbox[1], wz = pos[2] + bbox[2];
         TransformVector(vm, wx, wy, wz, &tvx, &tvy, &tvz);
         s32 svx = tvx, svy = tvy, svz = tvz;
-        clipCodes[1] = chanp3dClipCode(pm, tvx, tvy, tvz);
+        clipCodes[1] = chanp3dClipCode(portState, tvx, tvy, tvz);
         s32 d = vecLengthSquared(svx, svy, svz);
         if (d < minDistSq) minDistSq = d;
         s32 z = svz;
@@ -2437,7 +2442,7 @@ void World::computeBlockToPointDistances(const Block* block, const LVector* play
         s32 wx = pos[0] + bbox[0], wy = pos[1] + bbox[4], wz = pos[2] + bbox[2];
         TransformVector(vm, wx, wy, wz, &tvx, &tvy, &tvz);
         s32 svx = tvx, svy = tvy, svz = tvz;
-        clipCodes[2] = chanp3dClipCode(pm, tvx, tvy, tvz);
+        clipCodes[2] = chanp3dClipCode(portState, tvx, tvy, tvz);
         s32 d = vecLengthSquared(svx, svy, svz);
         if (d < minDistSq) minDistSq = d;
         s32 z = svz;
@@ -2450,7 +2455,7 @@ void World::computeBlockToPointDistances(const Block* block, const LVector* play
         s32 wx = pos[0] + bbox[3], wy = pos[1] + bbox[4], wz = pos[2] + bbox[2];
         TransformVector(vm, wx, wy, wz, &tvx, &tvy, &tvz);
         s32 svx = tvx, svy = tvy, svz = tvz;
-        clipCodes[3] = chanp3dClipCode(pm, tvx, tvy, tvz);
+        clipCodes[3] = chanp3dClipCode(portState, tvx, tvy, tvz);
         s32 d = vecLengthSquared(svx, svy, svz);
         if (d < minDistSq) minDistSq = d;
         s32 z = svz;
@@ -2463,7 +2468,7 @@ void World::computeBlockToPointDistances(const Block* block, const LVector* play
         s32 wx = pos[0] + bbox[0], wy = pos[1] + bbox[1], wz = pos[2] + bbox[5];
         TransformVector(vm, wx, wy, wz, &tvx, &tvy, &tvz);
         s32 svx = tvx, svy = tvy, svz = tvz;
-        clipCodes[4] = chanp3dClipCode(pm, tvx, tvy, tvz);
+        clipCodes[4] = chanp3dClipCode(portState, tvx, tvy, tvz);
         s32 d = vecLengthSquared(svx, svy, svz);
         if (d < minDistSq) minDistSq = d;
         s32 z = svz;
@@ -2476,7 +2481,7 @@ void World::computeBlockToPointDistances(const Block* block, const LVector* play
         s32 wx = pos[0] + bbox[3], wy = pos[1] + bbox[1], wz = pos[2] + bbox[5];
         TransformVector(vm, wx, wy, wz, &tvx, &tvy, &tvz);
         s32 svx = tvx, svy = tvy, svz = tvz;
-        clipCodes[5] = chanp3dClipCode(pm, tvx, tvy, tvz);
+        clipCodes[5] = chanp3dClipCode(portState, tvx, tvy, tvz);
         s32 d = vecLengthSquared(svx, svy, svz);
         if (d < minDistSq) minDistSq = d;
         s32 z = svz;
@@ -2489,7 +2494,7 @@ void World::computeBlockToPointDistances(const Block* block, const LVector* play
         s32 wx = pos[0] + bbox[0], wy = pos[1] + bbox[4], wz = pos[2] + bbox[5];
         TransformVector(vm, wx, wy, wz, &tvx, &tvy, &tvz);
         s32 svx = tvx, svy = tvy, svz = tvz;
-        clipCodes[6] = chanp3dClipCode(pm, tvx, tvy, tvz);
+        clipCodes[6] = chanp3dClipCode(portState, tvx, tvy, tvz);
         s32 d = vecLengthSquared(svx, svy, svz);
         if (d < minDistSq) minDistSq = d;
         s32 z = svz;
@@ -2502,7 +2507,7 @@ void World::computeBlockToPointDistances(const Block* block, const LVector* play
         s32 wx = pos[0] + bbox[3], wy = pos[1] + bbox[4], wz = pos[2] + bbox[5];
         TransformVector(vm, wx, wy, wz, &tvx, &tvy, &tvz);
         s32 svx = tvx, svy = tvy, svz = tvz;
-        clipCodes[7] = chanp3dClipCode(pm, tvx, tvy, tvz);
+        clipCodes[7] = chanp3dClipCode(portState, tvx, tvy, tvz);
         s32 d = vecLengthSquared(svx, svy, svz);
         if (d < minDistSq) minDistSq = d;
         s32 z = svz;

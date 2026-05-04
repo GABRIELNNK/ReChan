@@ -1,3 +1,4 @@
+#include "gen/common.h"
 #include "gen/display.h"
 #include "gen/camera.h"
 #include "gen/config.h"
@@ -27,6 +28,44 @@ Display::~Display() {
     g_display = nullptr;
 }
 
+ChanProjectionState Display::GetChanProjectionState() const {
+    ChanProjectionState state;
+    f32 cameraAspect = DEFAULT_ASPECT_RATIO;
+
+    if (screenWidth > 0) {
+        state.width = screenWidth;
+        state.centerX = screenWidth / 2;
+    }
+    if (screenHeight > 0) {
+        state.height = screenHeight;
+        state.centerY = screenHeight / 2;
+    }
+
+#if FIX_ASPECT_RATIO
+    if (aspectRatio > 0.0f) {
+        cameraAspect = aspectRatio;
+    }
+#endif
+
+    tCamera* camera = theCamera ? theCamera->GetP3DCamera() : nullptr;
+    if (!camera) {
+        return state;
+    }
+
+    s32 fovX = 0x3333;
+    s32 fovY = 0x2666;
+    camera->GetFOV(&fovX, &fovY);
+    camera->GetClipPlanes(&state.nearClip, &state.farClip);
+
+    const f32 tanHalfY = static_cast<f32>(fovY) * (1.0f / 65536.0f);
+    if (tanHalfY > 0.0f) {
+        state.projectionDistanceY = static_cast<f32>(state.centerY) / tanHalfY;
+        state.projectionDistanceX = static_cast<f32>(state.centerX) / (cameraAspect * tanHalfY);
+    }
+
+    return state;
+}
+
 // PSX: InternalOpen__7Display (overlay, 0x8012BAE4)
 // Calls platOpen which creates the camera, sets view layers, viewport, lighting.
 void Display::SetCursorCaptured(bool captured) {
@@ -54,8 +93,8 @@ void Display::InternalOpen() {
     theCamera->Reset();
 
     tMatrixCamera* p3dCam = theCamera->GetP3DCamera();
-    p3dCam->SetNearPlane(100.0f);
-    p3dCam->SetFarPlane(500000.0f);
+    p3dCam->SetNearPlane(1.0f);
+    p3dCam->SetFarPlane(65535.0f);
     view.SetCamera(p3dCam);
     view.SetBackgroundColour(pddiColour(0, 0, 0));
     view.SetClearMask(PDDI_BUFFER_ALL);
