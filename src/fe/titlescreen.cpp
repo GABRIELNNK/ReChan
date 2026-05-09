@@ -1,4 +1,5 @@
 #include "fe/titlescreen.h"
+#include "gen/common.h"
 #include "xclib/xclib.h"
 
 // PSX: __11TitleScreen (Overlay4 0x800118F0, FEMNUMGR.CPP:726)

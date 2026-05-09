@@ -3,6 +3,10 @@
 #include "gen/game.h"
 #include "gen/world.h"
 #include "gen/scoremgr.h"
+#include "gen/time.h"
+#if CUSTOM_MENU
+#include "extra/customtext.h"
+#endif
 #include "xclib/xclib.h"
 #include "ai/humanoid.h"
 #include "ai/player.h"
@@ -16,6 +20,25 @@ char HUD::szBossStatic[32] = {};
 
 // PSX: gp+1084 - screen names table
 static const char* s_hudScreenNames[] = { "HUD", nullptr };
+
+static void SetAllTextPrimStrings(xcTextPrim* text, u32 stringToken) {
+    if (!text || text->numStrings == 0) {
+        return;
+    }
+
+    u32* hashes = text->StringHashes();
+    for (u8 i = 0; i < text->numStrings; i++) {
+        hashes[i] = stringToken;
+    }
+}
+
+static s32 ScoreHubPromptTextPrim(const xcTextPrim* text) {
+    if (!text) {
+        return -1;
+    }
+
+    return ((s32)text->colorA << 16) + ((s32)text->colorR << 8) + (s32)text->colorG + (s32)text->colorB;
+}
 
 // PSX: _3HUD (HUD.CPP:318, 0x8003F44C)
 HUD::HUD() {
@@ -41,10 +64,21 @@ void HUD::InternalReset() {
 void HUD::Display() {
     MARKFUNCTION(0x8003F67C);
     // PSX: EnterLayer(view0, 4)
+#if HIGH_FPS_PLAY_PRESENTATION
+    const bool isPlayRenderOnlyFrame =
+        (g_game && g_game->GetState() == GameState::Play && g_time && !g_time->DidPlayLogicStepThisFrame());
+    if (!isPlayRenderOnlyFrame) {
+        if (tally.state == 9) {
+            GetGameData();
+        }
+        Update();
+    }
+#else
     if (tally.state == 9) {
         GetGameData();
     }
     Update();
+#endif
     if (section) {
 #if FIX_ASPECT_RATIO
         widescreenPatches.DrawSection(section);
@@ -184,26 +218,28 @@ void HUD::DebugDisplay(s32 flag) {
     if (flag) {
         return;
     }
+
     u8* raw = section ? section->rawData : nullptr;
     if (!raw) {
         return;
     }
+
     xcOverlayData* ovl = FindOverlay((u32)0x050794E7);
     if (!ovl) {
         return;
     }
+
     static u32 emptyToken = xcRegisterRuntimeString("");
-    u32 textHashes[4] = {
-        (u32)(-1157722119),
-        (u32)1069371927,
-        (u32)337565664,
-        (u32)1823646459
-    };
-    for (s32 i = 0; i < 4; i++) {
-        xcTextPrim* text = (xcTextPrim*)ovl->GetTextObj(textHashes[i], raw);
-        if (text) {
-            text->StringHashes()[text->paletteIdx] = emptyToken;
+    const xcOverlayItem* items = ovl->GetItems();
+    for (u32 i = 0; i < ovl->primCount; i++) {
+        u8* primData = raw + items[i].dataOffset;
+        xcPrimHeader* hdr = reinterpret_cast<xcPrimHeader*>(primData);
+        if (hdr->subtype == 5 || hdr->type != XC_PRIM_TEXT) {
+            continue;
         }
+
+        xcTextPrim* text = reinterpret_cast<xcTextPrim*>(primData);
+        SetAllTextPrimStrings(text, emptyToken);
     }
 }
 

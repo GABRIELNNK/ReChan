@@ -1,8 +1,12 @@
 #include "fe/xcfont.h"
 #include "gen/common.h"
+#include "gen/psxcolor_helpers.h"
 #include "xclib/xclib.h"
 #include "pc/tim.h"
 #include "p3d/texture.h"
+#if CUSTOM_MENU
+#include "extra/prompticons.h"
+#endif
 
 static bool IsPsxLeadByte(u8 ch) {
     return (ch >= 0x81 && ch <= 0x9F) || (ch >= 0xE0 && ch <= 0xFC);
@@ -23,17 +27,22 @@ static u16 NextPsxChar(const char* text, s32& offset) {
     return (u16)b0;
 }
 
+#if CUSTOM_MENU
+static bool TryReadInlinePrompt(const char* text, s32 offset, s32* outConsumed, PromptIcons::ResolvedPrompt* outPrompt) {
+    Action action = ACTION_COUNT;
+    if (!PromptIcons::ParseInlineActionToken(text, offset, outConsumed, &action)) {
+        return false;
+    }
+
+    if (outPrompt) {
+        PromptIcons::ResolveActionPrompt(action, *outPrompt);
+    }
+    return true;
+}
+#endif
+
 // PSX: gp[56] global oxFontFile instance
 oxFontFile* g_oxFontFile = nullptr;
-
-// PSX ABGR1555 to RGBA8888 (shared with xclib.cpp)
-static inline u32 psxColorToRGBA(u16 c) {
-    if (c == 0) return 0; // transparent black
-    u32 r = (c & 0x1F) << 3;
-    u32 g = ((c >> 5) & 0x1F) << 3;
-    u32 b = ((c >> 10) & 0x1F) << 3;
-    return (255u << 24) | (b << 16) | (g << 8) | r;
-}
 
 // PSX: __6xcFontPv (XCFONT.CPP:92, 0x800915A0)
 // Constructs xcFont from raw PHO data.
@@ -359,6 +368,20 @@ void xcFont::WrapText(const char* text, f32 maxWidth, char* out, s32 outSize) co
         f32 wordWidth = 0.0f;
         s32 wordEnd = srcPos;
         while (text[wordEnd]) {
+#if CUSTOM_MENU
+            s32 promptConsumed = 0;
+            PromptIcons::ResolvedPrompt prompt;
+            if (TryReadInlinePrompt(text, wordEnd, &promptConsumed, &prompt)) {
+                if (prompt.HasIcon()) {
+                    wordWidth += PromptIcons::GetDrawWidth(prompt, (f32)lineHeight * scaleY);
+                }
+                else if (prompt.HasFallback()) {
+                    wordWidth += MeasureText(prompt.fallback);
+                }
+                wordEnd += promptConsumed;
+                continue;
+            }
+#endif
             s32 tmp = wordEnd;
             u16 wch = NextPsxChar(text, tmp);
             if (!wch || wch == ' ' || wch == '\n') break;
@@ -462,6 +485,23 @@ void xcFont::DrawText(const char* text, f32 screenX, f32 screenY,
 
     s32 pos = 0;
     while (true) {
+#if CUSTOM_MENU
+        s32 promptConsumed = 0;
+        PromptIcons::ResolvedPrompt prompt;
+        if (TryReadInlinePrompt(text, pos, &promptConsumed, &prompt)) {
+            if (prompt.HasIcon()) {
+                const f32 drawHeight = (f32)lineHeight * scaleY;
+                PromptIcons::DrawPrompt(prompt, curX, curY, drawHeight, ca);
+                curX += PromptIcons::GetDrawWidth(prompt, drawHeight);
+            }
+            else if (prompt.HasFallback()) {
+                DrawText(prompt.fallback, curX, curY, color, 0, lineSpacing);
+                curX += MeasureText(prompt.fallback);
+            }
+            pos += promptConsumed;
+            continue;
+        }
+#endif
         u16 ch = NextPsxChar(text, pos);
         if (!ch) {
             break;
@@ -526,6 +566,22 @@ f32 xcFont::MeasureText(const char* text) const {
     f32 width = 0;
     s32 pos = 0;
     while (true) {
+#if CUSTOM_MENU
+        s32 promptConsumed = 0;
+        PromptIcons::ResolvedPrompt prompt;
+        if (TryReadInlinePrompt(text, pos, &promptConsumed, &prompt)) {
+            if (prompt.HasIcon()) {
+                const f32 promptWidth = PromptIcons::GetDrawWidth(prompt, (f32)lineHeight * scaleY);
+                width += (scaleX != 0.0f) ? (promptWidth / scaleX) : 0.0f;
+            }
+            else if (prompt.HasFallback()) {
+                const f32 fallbackWidth = MeasureText(prompt.fallback);
+                width += (scaleX != 0.0f) ? (fallbackWidth / scaleX) : 0.0f;
+            }
+            pos += promptConsumed;
+            continue;
+        }
+#endif
         u16 ch = NextPsxChar(text, pos);
         if (!ch || ch == '\n') {
             break;
@@ -559,7 +615,7 @@ tTexture* xcFont::DecodeImageWithPalette(const u8* pixelData,
     u32 palette[16];
     for (s32 i = 0; i < 16; i++) {
         u16 c = *(const u16*)(paletteData + i * 2);
-        palette[i] = psxColorToRGBA(c);
+        palette[i] = PsxAbgr1555ToRgba8888(c);
     }
     LOG("[xcFont] palette: %04X %04X %04X %04X %04X %04X %04X %04X",
         *(const u16*)(paletteData + 0), *(const u16*)(paletteData + 2),

@@ -5,6 +5,7 @@
 #include "gen/database.h"
 #include "gen/game.h"
 #include "gen/world.h"
+#include "gen/weffect.h"
 
 static u32 ClampLoadedBlockCount(u32 totalBlockCount) {
     const u32 maxLoaded = (g_game && g_game->GetWorld() && g_game->GetWorld()->GetCurLevelID() == 7) ? 7u : 6u;
@@ -270,6 +271,9 @@ s32 BlockManager::DemandLoading() {
         g_ai->UnpopulateBlock();
         g_ai->PopulateBlock();
     }
+
+    WEffect_UnPopulateWEffects(-1);
+    WEffect_PopulateWEffects();
 
     return 0;
 }

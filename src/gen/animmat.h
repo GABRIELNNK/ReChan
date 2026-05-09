@@ -35,6 +35,7 @@ struct AnimationMatrices {
     // -1 = not yet resolved, -2 = bone not found in skeleton.
     s32 boneJointIndex[AM_NUM_SLOTS];
     bool bonesCached = false;
+    bool captureEnabled = true;
 
     AnimationMatrices();
     void SetHumanoid(void* owner);
@@ -51,6 +52,8 @@ struct AnimationMatrices {
     // Returns prev/cur frame bone translations for attack collision sweep
     s32 GetAttack(u32 joint, LVector& outPrev, LVector& outCur) const;
     s32 GetWeaponAttack(u32 joint, const LVector& localOffset, LVector& outPrev, LVector& outCur) const;
+    void SetCaptureEnabled(s32 enable);
+    s32 CaptureEnabled() const;
 
     void SetupCallbacks(Model* model);
     void SetupExtraCallbacks(Model* model);

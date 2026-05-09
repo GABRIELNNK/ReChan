@@ -14,6 +14,7 @@
 #include "gen/camera.h"
 #include "gen/model.h"
 #include "gen/path.h"
+#include "gen/psxmath_helpers.h"
 #include "pc/debugui.h"
 #include "p3d/p3dmath.h"
 
@@ -136,10 +137,6 @@ static Thing* FindBossSpotLight() {
     }
 
     return g_ai->FindThing(p3dHash(PAUL_SPOTLIGHT_NAME));
-}
-
-static s32 ClipAngle360Local(s32 angle) {
-    return angle & ANGLE_FULL_ROTATION;
 }
 
 static s32 GetFaceAngleDataValue(const Humanoid* humanoid, s32 offset) {
@@ -1115,7 +1112,7 @@ void Behaviour::OscarDMS(Behaviour* self) {
     owner->FaceThingDesired(player);
 
     const s32 ownerFacing = owner->orientation.y;
-    const s32 ownerToPlayerFacing = ClipAngle360Local(ownerFacing - player->orientation.y);
+    const s32 ownerToPlayerFacing = PsxClipAngle360(ownerFacing - player->orientation.y);
     if ((u32)(ownerToPlayerFacing - OSCAR_ANGLE_WINDOW_START) <= (u32)OSCAR_ANGLE_WINDOW_RANGE) {
         playerFacingFlag = 1;
     }
@@ -1348,7 +1345,7 @@ void Behaviour::OscarHenchmanDMS(Behaviour* self) {
     owner->FaceThingDesired(player);
 
     const s32 ownerFacing = owner->orientation.y;
-    const s32 ownerToPlayerFacing = ClipAngle360Local(ownerFacing - player->orientation.y);
+    const s32 ownerToPlayerFacing = PsxClipAngle360(ownerFacing - player->orientation.y);
     const s32 forwardPressure = ((u32)(ownerToPlayerFacing - OSCAR_HENCH_ANGLE_WINDOW_START)
                                  <= (u32)OSCAR_HENCH_ANGLE_WINDOW_RANGE)
         ? 1

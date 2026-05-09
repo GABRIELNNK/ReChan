@@ -2,10 +2,10 @@
 #include "core.h"
 #include "p3d/lvector.h"
 
-class pddiPrimBuffer;
 struct DBVolume;
 struct DBAttrib;
 struct CollisionSector;
+struct tPrimGeom;
 
 struct Block {
     // +0: parsed flag (1 if data has prims, 0 otherwise)
@@ -50,8 +50,8 @@ struct Block {
     u32 unk60;
     // +64: data pointer (BLK entry data)
     const u8* data;
-    // +68: tPrimGeom / pddiPrimBuffer (PC replacement)
-    pddiPrimBuffer* primBuffer;
+    // +68: tPrimGeom
+    tPrimGeom* primGeom;
     // +72: collision sector pointer
     CollisionSector* collision;
     // +76: texture page animation frame counter
@@ -78,3 +78,13 @@ struct Block {
     void LoadPrim(const u8* primData, u32 primSize);            // 0x8005328C
     void Destroy();
 };
+
+// PSX globals in BLOCK.obj small-data region:
+//   0x800DCF1C splat_fog_near
+//   0x800DCF20 splat_fog_far
+//   0x800DCF24 splat_fog_color
+//   0x800DCF28 splat_dynamic_light
+extern u32 splat_fog_near;
+extern u32 splat_fog_far;
+extern u32 splat_fog_color;
+extern u32 splat_dynamic_light;

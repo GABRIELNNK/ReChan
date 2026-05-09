@@ -103,7 +103,8 @@ public:
     ~InputManager() override;
 
     void ServiceInput(u32 buttons, u16 padIndex);
-    void ServiceHostPads(const ActionInput* actionInput);
+    void ServiceHostPads(const ActionInput* actionInput, bool commitNow = true);
+    void CommitHostPads();
     void Step();
 
     // Returns processed button bitmask for pad port (via Control::GetMask)
@@ -132,6 +133,14 @@ private:
     s32 controlValFlags[2] = {};   // per-frame query flags (PSX: at +1484)
     u8 playerConfig = 0;
     u8 reverseMap[16] = {};
+
+    u32 sampledButtons[2] = {};
+    u32 sampledPressLatch[2] = {};
+    u16 sampledPadType[2] = {};
+    u8 sampledAnalogLX[2] = { 128, 128 };
+    u8 sampledAnalogLY[2] = { 128, 128 };
+    u8 sampledAnalogRX[2] = { 128, 128 };
+    u8 sampledAnalogRY[2] = { 128, 128 };
 
     void UpdateReverseMap();
 };

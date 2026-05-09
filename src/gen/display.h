@@ -61,6 +61,9 @@ public:
     s32 GetVsync() const { return vsync; }
     void SetVsync(s32 enabled);
 
+    s32 GetMSAA() const { return msaa; }
+    void SetMSAA(s32 samples);
+
     s32 GetResolutionIndex() const { return resolutionIndex; }
     s32 GetResolutionCount() const;
     bool GetResolutionMode(s32 index, pddiVideoMode& mode) const;
@@ -78,6 +81,8 @@ public:
     }
     static s32 GetDefaultVsync() { return s_defaultVsync; }
     static void SetDefaultVsync(s32 enabled) { s_defaultVsync = enabled ? 1 : 0; }
+    static s32 GetDefaultMSAA() { return s_defaultMsaa; }
+    static void SetDefaultMSAA(s32 samples);
 
 private:
     // PSX: view0 - global static tView with 7 layers
@@ -96,10 +101,12 @@ private:
 
     s32 screenMode = ScreenMode_Windowed;
     s32 vsync = 1;
+    s32 msaa = 0;
     s32 resolutionIndex = 0;
 
     static s32 s_defaultScreenMode;
     static s32 s_defaultVsync;
+    static s32 s_defaultMsaa;
 };
 
 // PSX: theDisplay (gp+3556)

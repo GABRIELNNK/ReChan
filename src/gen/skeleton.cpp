@@ -1,18 +1,16 @@
 #include "common.h"
+#include "gen/geometry.h"
 #include "gen/skeleton.h"
 #include "gen/model.h"
 #include "gen/game.h"
 #include "gen/world.h"
+#include "p3d/byteread.h"
 #include "p3d/context.h"
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
 #include <cstring>
 #include <cstdlib>
 #include <vector>
-
-static u16 ReadU16(const u8* p) { return p[0] | (p[1] << 8); }
-static u32 ReadU32(const u8* p) { return p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24); }
-static s16 ReadS16(const u8* p) { return (s16)(p[0] | (p[1] << 8)); }
 
 // P3D chunk IDs
 static constexpr u16 CHUNK_P3D_CONTAINER = 0xFF04;
@@ -54,9 +52,9 @@ static CompositeAnimData* ParseCompositeAnimChunk(const u8* data, u32 size) {
 
     CompositeAnimData* compositeAnim = new CompositeAnimData();
     compositeAnim->nameUID = nameUID;
-    compositeAnim->field12 = ReadU16(data + pos);
+    compositeAnim->field12 = p3dReadU16LE(data + pos);
     pos += 2;
-    compositeAnim->numParts = ReadU16(data + pos);
+    compositeAnim->numParts = p3dReadU16LE(data + pos);
     pos += 2;
 
     if (compositeAnim->numParts != 0) {
@@ -70,9 +68,9 @@ static CompositeAnimData* ParseCompositeAnimChunk(const u8* data, u32 size) {
             return nullptr;
         }
 
-        part.field0 = ReadU16(data + pos);
+        part.field0 = p3dReadU16LE(data + pos);
         pos += 2;
-        part.field1 = ReadU16(data + pos);
+        part.field1 = p3dReadU16LE(data + pos);
         pos += 2;
     }
 
@@ -91,8 +89,8 @@ STreeData* ParseP3DStreamFull(const u8* data, u32 size, CompositeAnimData** outC
     STreeData* skeleton = nullptr;
     CompositeAnimData* compositeAnim = nullptr;
 
-    u16 rootId = ReadU16(data);
-    u32 rootSize = ReadU32(data + 2);
+    u16 rootId = p3dReadU16LE(data);
+    u32 rootSize = p3dReadU32LE(data + 2);
     if (rootId != CHUNK_P3D_CONTAINER) {
         return nullptr;
     }
@@ -101,8 +99,8 @@ STreeData* ParseP3DStreamFull(const u8* data, u32 size, CompositeAnimData** outC
     u32 cend = (rootSize < size) ? rootSize : size;
 
     while (cpos + 6 <= cend) {
-        u16 chunkId = ReadU16(data + cpos);
-        u32 chunkSize = ReadU32(data + cpos + 2);
+        u16 chunkId = p3dReadU16LE(data + cpos);
+        u32 chunkSize = p3dReadU32LE(data + cpos + 2);
         if (chunkSize < 6 || cpos + chunkSize > cend) {
             break;
         }
@@ -117,10 +115,10 @@ STreeData* ParseP3DStreamFull(const u8* data, u32 size, CompositeAnimData** outC
             }
 
             if (tp + 12 <= tend) {
-                s16 rx = ReadS16(data + tp); tp += 2;
-                s16 ry = ReadS16(data + tp); tp += 2;
-                s16 rw = ReadS16(data + tp); tp += 2;
-                s16 rh = ReadS16(data + tp); tp += 2;
+                s16 rx = p3dReadS16LE(data + tp); tp += 2;
+                s16 ry = p3dReadS16LE(data + tp); tp += 2;
+                s16 rw = p3dReadS16LE(data + tp); tp += 2;
+                s16 rh = p3dReadS16LE(data + tp); tp += 2;
                 tp += 4; // type
 
                 if (rw > 0 && rh > 0 && rw <= 1024 && rh <= 512 &&
@@ -202,10 +200,10 @@ void ApplyAnimFrame0(STreeData* skeleton, const u8* rawAnimData, u32 rawAnimSize
         return;
     }
 
-    s32 numRotCh = (s32)ReadU32(rawAnimData + 24);
-    s32 numTransCh = (s32)ReadU32(rawAnimData + 28);
-    u32 rotArrayDwordOff = ReadU32(rawAnimData + 32);
-    u32 transArrayDwordOff = ReadU32(rawAnimData + 36);
+    s32 numRotCh = (s32)p3dReadU32LE(rawAnimData + 24);
+    s32 numTransCh = (s32)p3dReadU32LE(rawAnimData + 28);
+    u32 rotArrayDwordOff = p3dReadU32LE(rawAnimData + 32);
+    u32 transArrayDwordOff = p3dReadU32LE(rawAnimData + 36);
 
     u32 rotArrayByteOff = rotArrayDwordOff * 4;
     u32 transArrayByteOff = transArrayDwordOff * 4;
@@ -221,15 +219,15 @@ void ApplyAnimFrame0(STreeData* skeleton, const u8* rawAnimData, u32 rawAnimSize
 
     // Process rotation channels
     for (s32 i = 0; i < numRotCh; i++) {
-        u32 chDwordOff = ReadU32(rawAnimData + rotArrayByteOff + i * 4);
+        u32 chDwordOff = p3dReadU32LE(rawAnimData + rotArrayByteOff + i * 4);
         u32 chByteOff = chDwordOff * 4;
         if (chByteOff + 20 > rawAnimSize) {
             continue;
         }
 
         const u8* ch = rawAnimData + chByteOff;
-        u32 jointParam = ReadU32(ch + 0);
-        u32 keyType = ReadU32(ch + 4);
+        u32 jointParam = p3dReadU32LE(ch + 0);
+        u32 keyType = p3dReadU32LE(ch + 4);
 
         // Map animation parameter index to actual joint index
         if (jointParam >= skeleton->numMapEntries) {
@@ -243,26 +241,26 @@ void ApplyAnimFrame0(STreeData* skeleton, const u8* rawAnimData, u32 rawAnimSize
 
         if (keyType == 11) {
             // tStatic3DOFKeyList: values at +8, +12, +16
-            s32 vx = (s32)ReadU32(ch + 8);
-            s32 vy = (s32)ReadU32(ch + 12);
-            s32 vz = (s32)ReadU32(ch + 16);
+            s32 vx = (s32)p3dReadU32LE(ch + 8);
+            s32 vy = (s32)p3dReadU32LE(ch + 12);
+            s32 vz = (s32)p3dReadU32LE(ch + 16);
             joint.rotationX = (s16)vx;
             joint.rotationY = (s16)vy;
             joint.rotationZ = (s16)vz;
         }
         else if (keyType == 5) {
             // tJoint3DOFangle: read first keyframe value (packed u32)
-            u32 numKeys = ReadU32(ch + 8);
+            u32 numKeys = p3dReadU32LE(ch + 8);
             if (numKeys == 0) {
                 continue;
             }
-            u32 valDwordOff = ReadU32(ch + 16);
+            u32 valDwordOff = p3dReadU32LE(ch + 16);
             u32 valByteOff = valDwordOff * 4;
             if (valByteOff + 4 > rawAnimSize) {
                 continue;
             }
             // PSX CHANNEL.CPP packing for tJoint3DOFangle.
-            u32 packed = ReadU32(rawAnimData + valByteOff);
+            u32 packed = p3dReadU32LE(rawAnimData + valByteOff);
             joint.rotationX = (s16)((packed << 5) & 0xFFFF);
             joint.rotationY = (s16)((packed >> 6) & 0xFFE0);
             joint.rotationZ = (s16)((packed >> 16) & 0xFFC0);
@@ -270,13 +268,13 @@ void ApplyAnimFrame0(STreeData* skeleton, const u8* rawAnimData, u32 rawAnimSize
         else if (keyType == 3) {
             // tJoint1DOFangle: +8=numKeys, +12=keyTimesOff(u8), +16=dofIndex,
             // +20=keyValuesOff(s16). Evaluate at frame 0.
-            u32 numKeys = ReadU32(ch + 8);
+            u32 numKeys = p3dReadU32LE(ch + 8);
             if (numKeys == 0) {
                 continue;
             }
-            u32 keyTimesOff = ReadU32(ch + 12);
-            u32 dofIndex = ReadU32(ch + 16);
-            u32 keyValsOff = ReadU32(ch + 20);
+            u32 keyTimesOff = p3dReadU32LE(ch + 12);
+            u32 dofIndex = p3dReadU32LE(ch + 16);
+            u32 keyValsOff = p3dReadU32LE(ch + 20);
             u32 keyTimesByteOff = keyTimesOff * 4;
             u32 keyValsByteOff = keyValsOff * 4;
             if (keyTimesByteOff + numKeys > rawAnimSize) {
@@ -300,7 +298,7 @@ void ApplyAnimFrame0(STreeData* skeleton, const u8* rawAnimData, u32 rawAnimSize
                 }
             }
 
-            s16 val = ReadS16(rawAnimData + keyValsByteOff + bracket * 2);
+            s16 val = p3dReadS16LE(rawAnimData + keyValsByteOff + bracket * 2);
             if (dofIndex == 0) {
                 joint.rotationX = val;
             }
@@ -318,15 +316,15 @@ void ApplyAnimFrame0(STreeData* skeleton, const u8* rawAnimData, u32 rawAnimSize
 
     // Process translation channels
     for (s32 i = 0; i < numTransCh; i++) {
-        u32 chDwordOff = ReadU32(rawAnimData + transArrayByteOff + i * 4);
+        u32 chDwordOff = p3dReadU32LE(rawAnimData + transArrayByteOff + i * 4);
         u32 chByteOff = chDwordOff * 4;
         if (chByteOff + 20 > rawAnimSize) {
             continue;
         }
 
         const u8* ch = rawAnimData + chByteOff;
-        u32 jointParam = ReadU32(ch + 0);
-        u32 keyType = ReadU32(ch + 4);
+        u32 jointParam = p3dReadU32LE(ch + 0);
+        u32 keyType = p3dReadU32LE(ch + 4);
 
         if (jointParam >= skeleton->numMapEntries) {
             continue;
@@ -339,24 +337,24 @@ void ApplyAnimFrame0(STreeData* skeleton, const u8* rawAnimData, u32 rawAnimSize
 
         if (keyType == 12) {
             // tStatic3DOFKeyList: values at +8, +12, +16
-            joint.translationX = (s32)ReadU32(ch + 8);
-            joint.translationY = (s32)ReadU32(ch + 12);
-            joint.translationZ = (s32)ReadU32(ch + 16);
+            joint.translationX = (s32)p3dReadU32LE(ch + 8);
+            joint.translationY = (s32)p3dReadU32LE(ch + 12);
+            joint.translationZ = (s32)p3dReadU32LE(ch + 16);
         }
         else if (keyType == 8) {
             // tJoint3DOFlpPSX: read first keyframe (3 x s16)
-            u32 numKeys = ReadU32(ch + 8);
+            u32 numKeys = p3dReadU32LE(ch + 8);
             if (numKeys == 0) {
                 continue;
             }
-            u32 valDwordOff = ReadU32(ch + 16);
+            u32 valDwordOff = p3dReadU32LE(ch + 16);
             u32 valByteOff = valDwordOff * 4;
             if (valByteOff + 6 > rawAnimSize) {
                 continue;
             }
-            joint.translationX = ReadS16(rawAnimData + valByteOff + 0);
-            joint.translationY = ReadS16(rawAnimData + valByteOff + 2);
-            joint.translationZ = ReadS16(rawAnimData + valByteOff + 4);
+            joint.translationX = p3dReadS16LE(rawAnimData + valByteOff + 0);
+            joint.translationY = p3dReadS16LE(rawAnimData + valByteOff + 2);
+            joint.translationZ = p3dReadS16LE(rawAnimData + valByteOff + 4);
         }
         else {
             LOG("[Anim] Trans channel %d: unknown type %u", i, keyType);
@@ -377,19 +375,23 @@ void ApplyAnimFrame0(STreeData* skeleton, const u8* rawAnimData, u32 rawAnimSize
 }
 
 void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 primGeomSize) {
+    if (original && !original->primGeom) {
+        original->primGeom = CloneRawPrimGeom(primGeomData, primGeomSize);
+    }
+
     STreeData* skeleton = original->skeleton;
     if (!skeleton || !primGeomData || primGeomSize < 108) {
         return;
     }
 
     // Parse tPrimGeom header
-    u32 vertListOff = ReadU32(primGeomData + 0x10) << 2;
-    u16 numVerts = ReadU16(primGeomData + 0x14);
-    u16 numPolys = ReadU16(primGeomData + 0x16);
-    u32 primListOff = ReadU32(primGeomData + 0x40) << 2;
-    u32 polyDataOff = ReadU32(primGeomData + 0x54) << 2;
-    u32 loopCtOff = ReadU32(primGeomData + 0x60) << 2;
-    s16 numLoops = ReadS16(primGeomData + 0x66);
+    u32 vertListOff = p3dReadU32LE(primGeomData + 0x10) << 2;
+    u16 numVerts = p3dReadU16LE(primGeomData + 0x14);
+    u16 numPolys = p3dReadU16LE(primGeomData + 0x16);
+    u32 primListOff = p3dReadU32LE(primGeomData + 0x40) << 2;
+    u32 polyDataOff = p3dReadU32LE(primGeomData + 0x54) << 2;
+    u32 loopCtOff = p3dReadU32LE(primGeomData + 0x60) << 2;
+    s16 numLoops = p3dReadS16LE(primGeomData + 0x66);
 
     if (numVerts == 0 || numPolys == 0) {
         return;
@@ -413,7 +415,7 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
     u16 polyAccum = 0;
     if (loopCtOff + numLoops * 4 <= primGeomSize) {
         for (int i = 0; i < numLoops; i++) {
-            u32 val = ReadU32(primGeomData + loopCtOff + i * 4);
+            u32 val = p3dReadU32LE(primGeomData + loopCtOff + i * 4);
             LoopInfo li;
             li.vertCount = (u16)(val & 0xFFFF);
             li.polyCount = (u16)((val >> 16) & 0xFFFF);
@@ -444,6 +446,11 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
     // Collect SkinVertex data (joint-local space) + indices
     std::vector<SkinVertex> skinVerts;
     std::vector<u16> allIndices;
+    std::vector<u32> primStart;
+    std::vector<u8> primVertCount;
+    bool usesSemiTrans = false;
+    bool hasSemiTransMode = false;
+    u8 semiTransMode = 0;
 
     u32 primCursor = primListOff;
     u32 polyIdx = 0;
@@ -454,13 +461,16 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
 
         for (u16 lp = 0; lp < loopPolyCount && polyIdx < numPolys; lp++, polyIdx++) {
             if (primCursor + 8 > primGeomSize) break;
-            u32 otTag = ReadU32(primGeomData + primCursor);
+            u32 otTag = p3dReadU32LE(primGeomData + primCursor);
             u8 wordCount = (u8)((otTag >> 24) & 0xFF);
             u32 pktSize = (wordCount + 1) * 4;
             if (primCursor + pktSize > primGeomSize) break;
 
             const u8* pkt = primGeomData + primCursor;
             u8 cmd = pkt[7];
+            if ((cmd & 0x2u) != 0u) {
+                usesSemiTrans = true;
+            }
             u8 cmdBase = cmd & 0xFC;
 
             const u8* poly = polys + polyIdx * 4;
@@ -471,13 +481,15 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
                 if (idx >= numVerts) idx = 0;
                 const u8* vp = verts + idx * 8;
                 SkinVertex sv;
-                sv.lx = (f32)ReadS16(vp + 0);
-                sv.ly = (f32)ReadS16(vp + 2);
-                sv.lz = (f32)ReadS16(vp + 4);
+                sv.lx = (f32)p3dReadS16LE(vp + 0);
+                sv.ly = (f32)p3dReadS16LE(vp + 2);
+                sv.lz = (f32)p3dReadS16LE(vp + 4);
                 sv.r = 0.7f; sv.g = 0.7f; sv.b = 0.7f;
                 sv.u = 0.0f; sv.v = 0.0f;
                 sv.tpage = -1.0f; sv.cba = 0.0f;
                 sv.jointIdx = vertJointMap[idx];
+                sv.sourceIndex = static_cast<u16>(idx);
+                sv.padSourceIndex = 0;
                 return sv;
             };
 
@@ -493,8 +505,13 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
                 if (pktSize < 52) { primCursor += pktSize; continue; }
                 SkinVertex v0 = makeSkinVert(vi0), v1 = makeSkinVert(vi1);
                 SkinVertex v2 = makeSkinVert(vi2), v3 = makeSkinVert(vi3);
-                f32 tp = (f32)ReadU16(pkt + 26);
-                f32 cb = (f32)ReadU16(pkt + 14);
+                const u16 tpage = p3dReadU16LE(pkt + 26);
+                f32 tp = (f32)tpage;
+                f32 cb = (f32)p3dReadU16LE(pkt + 14);
+                if ((cmd & 0x2u) != 0u && !hasSemiTransMode) {
+                    semiTransMode = static_cast<u8>((tpage >> 5) & 3u);
+                    hasSemiTransMode = true;
+                }
                 auto [r0, g0, b0] = readRGB(4);
                 auto [r1, g1, b1] = readRGB(16);
                 auto [r2, g2, b2] = readRGB(28);
@@ -506,6 +523,8 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
                 v2.u = pkt[36]; v2.v = pkt[37]; v2.tpage = tp; v2.cba = cb;
                 v3.u = pkt[48]; v3.v = pkt[49]; v3.tpage = tp; v3.cba = cb;
                 u16 base = (u16)skinVerts.size();
+                primStart.push_back(base);
+                primVertCount.push_back(4);
                 skinVerts.push_back(v0); skinVerts.push_back(v1);
                 skinVerts.push_back(v2); skinVerts.push_back(v3);
                 allIndices.push_back(base); allIndices.push_back(base + 1); allIndices.push_back(base + 2);
@@ -516,8 +535,13 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
                 if (pktSize < 40) { primCursor += pktSize; continue; }
                 SkinVertex v0 = makeSkinVert(vi0), v1 = makeSkinVert(vi1);
                 SkinVertex v2 = makeSkinVert(vi2), v3 = makeSkinVert(vi3);
-                f32 tp = (f32)ReadU16(pkt + 22);
-                f32 cb = (f32)ReadU16(pkt + 14);
+                const u16 tpage = p3dReadU16LE(pkt + 22);
+                f32 tp = (f32)tpage;
+                f32 cb = (f32)p3dReadU16LE(pkt + 14);
+                if ((cmd & 0x2u) != 0u && !hasSemiTransMode) {
+                    semiTransMode = static_cast<u8>((tpage >> 5) & 3u);
+                    hasSemiTransMode = true;
+                }
                 auto [r0, g0, b0] = readRGB(4);
                 v0.r = r0; v0.g = g0; v0.b = b0; v1.r = r0; v1.g = g0; v1.b = b0;
                 v2.r = r0; v2.g = g0; v2.b = b0; v3.r = r0; v3.g = g0; v3.b = b0;
@@ -526,6 +550,8 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
                 v2.u = pkt[28]; v2.v = pkt[29]; v2.tpage = tp; v2.cba = cb;
                 v3.u = pkt[36]; v3.v = pkt[37]; v3.tpage = tp; v3.cba = cb;
                 u16 base = (u16)skinVerts.size();
+                primStart.push_back(base);
+                primVertCount.push_back(4);
                 skinVerts.push_back(v0); skinVerts.push_back(v1);
                 skinVerts.push_back(v2); skinVerts.push_back(v3);
                 allIndices.push_back(base); allIndices.push_back(base + 1); allIndices.push_back(base + 2);
@@ -535,8 +561,13 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
             else if (cmdBase == 0x34) {
                 if (pktSize < 40) { primCursor += pktSize; continue; }
                 SkinVertex v0 = makeSkinVert(vi0), v1 = makeSkinVert(vi1), v2 = makeSkinVert(vi2);
-                f32 tp = (f32)ReadU16(pkt + 26);
-                f32 cb = (f32)ReadU16(pkt + 14);
+                const u16 tpage = p3dReadU16LE(pkt + 26);
+                f32 tp = (f32)tpage;
+                f32 cb = (f32)p3dReadU16LE(pkt + 14);
+                if ((cmd & 0x2u) != 0u && !hasSemiTransMode) {
+                    semiTransMode = static_cast<u8>((tpage >> 5) & 3u);
+                    hasSemiTransMode = true;
+                }
                 auto [r0, g0, b0] = readRGB(4);
                 auto [r1, g1, b1] = readRGB(16);
                 auto [r2, g2, b2] = readRGB(28);
@@ -547,6 +578,8 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
                 v1.u = pkt[24]; v1.v = pkt[25]; v1.tpage = tp; v1.cba = cb;
                 v2.u = pkt[36]; v2.v = pkt[37]; v2.tpage = tp; v2.cba = cb;
                 u16 base = (u16)skinVerts.size();
+                primStart.push_back(base);
+                primVertCount.push_back(3);
                 skinVerts.push_back(v0); skinVerts.push_back(v1); skinVerts.push_back(v2);
                 allIndices.push_back(base); allIndices.push_back(base + 1); allIndices.push_back(base + 2);
 
@@ -554,8 +587,13 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
             else if (cmdBase == 0x24) {
                 if (pktSize < 32) { primCursor += pktSize; continue; }
                 SkinVertex v0 = makeSkinVert(vi0), v1 = makeSkinVert(vi1), v2 = makeSkinVert(vi2);
-                f32 tp = (f32)ReadU16(pkt + 22);
-                f32 cb = (f32)ReadU16(pkt + 14);
+                const u16 tpage = p3dReadU16LE(pkt + 22);
+                f32 tp = (f32)tpage;
+                f32 cb = (f32)p3dReadU16LE(pkt + 14);
+                if ((cmd & 0x2u) != 0u && !hasSemiTransMode) {
+                    semiTransMode = static_cast<u8>((tpage >> 5) & 3u);
+                    hasSemiTransMode = true;
+                }
                 auto [r0, g0, b0] = readRGB(4);
                 v0.r = r0; v0.g = g0; v0.b = b0;
                 v1.r = r0; v1.g = g0; v1.b = b0;
@@ -564,6 +602,8 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
                 v1.u = pkt[20]; v1.v = pkt[21]; v1.tpage = tp; v1.cba = cb;
                 v2.u = pkt[28]; v2.v = pkt[29]; v2.tpage = tp; v2.cba = cb;
                 u16 base = (u16)skinVerts.size();
+                primStart.push_back(base);
+                primVertCount.push_back(3);
                 skinVerts.push_back(v0); skinVerts.push_back(v1); skinVerts.push_back(v2);
                 allIndices.push_back(base); allIndices.push_back(base + 1); allIndices.push_back(base + 2);
 
@@ -585,6 +625,8 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
                     v2.r = r0; v2.g = g0; v2.b = b0; v3.r = r0; v3.g = g0; v3.b = b0;
                 }
                 u16 base = (u16)skinVerts.size();
+                primStart.push_back(base);
+                primVertCount.push_back(4);
                 skinVerts.push_back(v0); skinVerts.push_back(v1);
                 skinVerts.push_back(v2); skinVerts.push_back(v3);
                 allIndices.push_back(base); allIndices.push_back(base + 1); allIndices.push_back(base + 2);
@@ -608,6 +650,8 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
                     v2.r = r0; v2.g = g0; v2.b = b0;
                 }
                 u16 base = (u16)skinVerts.size();
+                primStart.push_back(base);
+                primVertCount.push_back(3);
                 skinVerts.push_back(v0); skinVerts.push_back(v1); skinVerts.push_back(v2);
                 allIndices.push_back(base); allIndices.push_back(base + 1); allIndices.push_back(base + 2);
             }
@@ -624,10 +668,19 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
     SkinData* sd = new SkinData();
     sd->numVerts = (u32)skinVerts.size();
     sd->numIndices = (u32)allIndices.size();
+    sd->numPrims = (u32)primStart.size();
+    sd->usesSemiTrans = usesSemiTrans;
+    sd->semiTransMode = semiTransMode;
     sd->verts = new SkinVertex[sd->numVerts];
     sd->indices = new u16[sd->numIndices];
+    sd->primStart = new u32[sd->numPrims];
+    sd->primVertCount = new u8[sd->numPrims];
     memcpy(sd->verts, skinVerts.data(), sd->numVerts * sizeof(SkinVertex));
     memcpy(sd->indices, allIndices.data(), sd->numIndices * sizeof(u16));
+    if (sd->numPrims > 0) {
+        memcpy(sd->primStart, primStart.data(), sd->numPrims * sizeof(u32));
+        memcpy(sd->primVertCount, primVertCount.data(), sd->numPrims * sizeof(u8));
+    }
     original->skinData = sd;
 
     // Build initial mesh from current joint transforms
@@ -667,3 +720,4 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
     LOG("[Skeleton] Built skinned mesh: %u verts, %u indices across %u joints",
         sd->numVerts, sd->numIndices, skeleton->numJoints);
 }
+

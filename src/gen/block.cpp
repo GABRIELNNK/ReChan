@@ -2,10 +2,23 @@
 #include "gen/database.h"
 #include "gen/geometry.h"
 #include "gen/colsect.h"
+#include "gen/uvdata.h"
+#include "p3d/byteread.h"
 #include "p3d/context.h"
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
 #include "pc/log.h"
+
+u32 splat_fog_near = 0;
+u32 splat_fog_far = 0;
+u32 splat_fog_color = 0;
+u32 splat_dynamic_light = 0;
+
+static u32 s_lastLoggedSplatFogNear = 0xFFFFFFFFu;
+static u32 s_lastLoggedSplatFogFar = 0xFFFFFFFFu;
+static u32 s_lastLoggedSplatFogColor = 0xFFFFFFFFu;
+static u32 s_lastLoggedSplatDynamicLight = 0xFFFFFFFFu;
+static u32 s_seenGMFogCall = 0;
 
 Block::Block() {
     MARKFUNCTION(0x80052B64); // __5Block
@@ -17,9 +30,9 @@ Block::~Block() {
 }
 
 void Block::Destroy() {
-    if (primBuffer) {
-        primBuffer->Release();
-        primBuffer = nullptr;
+    if (primGeom) {
+        delete primGeom;
+        primGeom = nullptr;
     }
 
     if (collision) {
@@ -136,6 +149,14 @@ void Block::Init(const DBVolume* vol) {
     {
         const DBAttrib* a = vol->FindAttrib(24);
         if (a) unk60 = a->value;
+    }
+
+    if (fogMinDist != 0 || fogMaxDist != 0 || fogColor != 0) {
+        LOG("[Block] Fog attrs block=%u near=%u far=%u col=0x%06X",
+            blockNum,
+            fogMinDist,
+            fogMaxDist,
+            fogColor & 0xFFFFFFu);
     }
 
     // Attrib 25: override lodNearY, lodNearZ
@@ -313,7 +334,7 @@ u32 Block::GetPrevBlockNumber() const {
 bool Block::Draw(const LVector* drawPos) {
     MARKFUNCTION(0x800530F8);
 
-    if (!primBuffer) return false;
+    if (!primGeom) return false;
 
     // TransMatrix: set world translation from the passed position
     // (DrawEverythingHandler passes block pos modified by OffsetToPreventSeams)
@@ -324,9 +345,73 @@ bool Block::Draw(const LVector* drawPos) {
                          static_cast<f32>(drawPos->z));
     p3d::context->SetWorldMatrix(world);
 
-    // PSX: Update UVPrimData/CBVPrimData, then RP_ZCullGClip/RP_ZCullGMFog
-    // PC: direct draw
-    p3d::context->DrawPrimBuffer(primBuffer);
+    UpdateUVPrimData(blockNum, primGeom);
+    UpdateCBVPrimData(blockNum, primGeom);
+
+    const u16 blockFogNear = fogMinDist;
+    const u16 blockFogFar = fogMaxDist;
+    const u32 blockFogColor = fogColor;
+
+    const u16 globalFogNear = static_cast<u16>(splat_fog_near);
+    const u16 globalFogFar = static_cast<u16>(splat_fog_far);
+    const u32 globalFogColor = splat_fog_color;
+
+    if (s_lastLoggedSplatFogNear != splat_fog_near ||
+        s_lastLoggedSplatFogFar != splat_fog_far ||
+        s_lastLoggedSplatFogColor != splat_fog_color ||
+        s_lastLoggedSplatDynamicLight != splat_dynamic_light) {
+        LOG("[Block] splat globals changed: near=%u far=%u col=0x%06X dyn=0x%08X",
+            splat_fog_near,
+            splat_fog_far,
+            splat_fog_color & 0xFFFFFFu,
+            splat_dynamic_light);
+        s_lastLoggedSplatFogNear = splat_fog_near;
+        s_lastLoggedSplatFogFar = splat_fog_far;
+        s_lastLoggedSplatFogColor = splat_fog_color;
+        s_lastLoggedSplatDynamicLight = splat_dynamic_light;
+    }
+
+    u16 fogFar = 0;
+    if (blockFogFar != 0) {
+        fogFar = (globalFogFar != 0) ? globalFogFar : blockFogFar;
+    }
+    else if (globalFogFar != 0) {
+        fogFar = globalFogFar;
+    }
+    else {
+        const int drew = RP_ZCullGClip(primGeom, drawPos);
+        if (!drew) {
+            LOG("[Block] GClip draw dropped: block=%u primGeom=%p", blockNum, primGeom);
+        }
+        return true;
+    }
+
+    const u16 fogNear = (globalFogNear != 0) ? globalFogNear : blockFogNear;
+    const u32 fogCol = (globalFogColor != 0) ? globalFogColor : blockFogColor;
+    if (!s_seenGMFogCall) {
+        LOG("[Block] First GMFog draw: block=%u near=%u far=%u col=0x%06X gNear=%u gFar=%u gCol=0x%06X dyn=0x%08X",
+            blockNum,
+            fogNear,
+            fogFar,
+            fogCol & 0xFFFFFFu,
+            globalFogNear,
+            globalFogFar,
+            globalFogColor & 0xFFFFFFu,
+            splat_dynamic_light);
+        s_seenGMFogCall = 1;
+    }
+    const int drew = RP_ZCullGMFog(primGeom, drawPos, fogNear, fogFar, fogCol);
+    if (!drew) {
+        LOG("[Block] GMFog draw dropped: block=%u primGeom=%p near=%u far=%u col=0x%06X gNear=%u gFar=%u gCol=0x%06X",
+            blockNum,
+            primGeom,
+            fogNear,
+            fogFar,
+            fogCol & 0xFFFFFFu,
+            globalFogNear,
+            globalFogFar,
+            globalFogColor & 0xFFFFFFu);
+    }
 
     return true;
 }
@@ -338,5 +423,67 @@ bool Block::Draw(const LVector* drawPos) {
 void Block::LoadPrim(const u8* primData, u32 primSize) {
     MARKFUNCTION(0x8005328C);
 
-    primBuffer = ParseBLKPrims(primData, primSize);
+    if (primGeom) {
+        delete primGeom;
+        primGeom = nullptr;
+    }
+
+    if (!primData || primSize < 108) {
+        return;
+    }
+
+    tPrimGeom* geom = new tPrimGeom();
+    geom->ownedRawData = new u8[primSize];
+    geom->ownedRawSize = primSize;
+    memcpy(geom->ownedRawData, primData, primSize);
+
+    const u8* raw = geom->ownedRawData;
+
+    u32 vertListOff = p3dReadU32LE(raw + 0x10) << 2;
+    u32 primListOff = p3dReadU32LE(raw + 0x40) << 2;
+    u32 primListAltOff = p3dReadU32LE(raw + 0x44) << 2;
+    u32 primData48Off = p3dReadU32LE(raw + 0x48) << 2;
+    u32 primData4COff = p3dReadU32LE(raw + 0x4C) << 2;
+    u32 gmFogWriteOff = p3dReadU32LE(raw + 0x50) << 2;
+    u32 polyDataOff = p3dReadU32LE(raw + 0x54) << 2;
+    u32 gmFogColourOff = p3dReadU32LE(raw + 0x58) << 2;
+    u32 primData5COff = p3dReadU32LE(raw + 0x5C) << 2;
+    u32 loopVertOff = p3dReadU32LE(raw + 0x60) << 2;
+    u32 loopPrimOff = p3dReadU32LE(raw + 0x68) << 2;
+
+    geom->SetVertexList((vertListOff < primSize) ? (raw + vertListOff) : nullptr);
+    geom->numVerts = p3dReadU16LE(raw + 0x14);
+    geom->numPolys = p3dReadU16LE(raw + 0x16);
+
+    geom->bboxMinX = p3dReadS32LE(raw + 0x18);
+    geom->bboxMinY = p3dReadS32LE(raw + 0x1C);
+    geom->bboxMinZ = p3dReadS32LE(raw + 0x20);
+    geom->bboxMaxX = p3dReadS32LE(raw + 0x24);
+    geom->bboxMaxY = p3dReadS32LE(raw + 0x28);
+    geom->bboxMaxZ = p3dReadS32LE(raw + 0x2C);
+    geom->sphereX = p3dReadS32LE(raw + 0x30);
+    geom->sphereY = p3dReadS32LE(raw + 0x34);
+    geom->sphereZ = p3dReadS32LE(raw + 0x38);
+    geom->sphereRadius = p3dReadS32LE(raw + 0x3C);
+
+    geom->primList = (primListOff < primSize) ? (raw + primListOff) : nullptr;
+    geom->primListAlt = (primListAltOff < primSize) ? (raw + primListAltOff) : nullptr;
+    geom->primData48 = (primData48Off < primSize) ? (raw + primData48Off) : nullptr;
+    geom->primData4C = (primData4COff < primSize) ? (raw + primData4COff) : nullptr;
+    geom->gmFogWriteList = (gmFogWriteOff < primSize) ? (raw + gmFogWriteOff) : nullptr;
+    geom->polyData = (polyDataOff < primSize) ? (raw + polyDataOff) : nullptr;
+    geom->gmFogColourList = (gmFogColourOff < primSize) ? (raw + gmFogColourOff) : nullptr;
+    geom->primData5C = (primData5COff < primSize) ? (raw + primData5COff) : nullptr;
+    geom->loopVertData = (loopVertOff < primSize) ? (raw + loopVertOff) : nullptr;
+    geom->geoType = p3dReadU16LE(raw + 0x64);
+    geom->numLoops = p3dReadU16LE(raw + 0x66);
+    geom->loopPrimData = (loopPrimOff < primSize) ? (raw + loopPrimOff) : nullptr;
+
+    if (!geom->GetVertexList() || !geom->primList || !geom->polyData || !geom->loopVertData || !geom->loopPrimData) {
+        delete geom;
+        return;
+    }
+
+    primGeom = geom;
 }
+

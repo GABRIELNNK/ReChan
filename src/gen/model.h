@@ -17,10 +17,19 @@ class pddiPrimBuffer;
 class Thing;
 class AnimStructure;
 class SModel;
+class Model;
+class AmbientLight;
+class HardwareLight;
+struct MiscAnimNode;
 struct AnimationMatrices;
 struct BlendPoseState;
+struct STreeJoint;
 struct STreeData;
 struct TransformAnim;
+struct tPrimGeom;
+
+using STreeXformVertsCallback = u32 (*)(tPrimGeom*, STreeJoint*, u32*, u16*);
+using STreeFixUpPolysCallback = s32 (*)(tPrimGeom*, void*, u32, u32);
 
 struct ModelFloorHeightState {
     s32 current = (s32)0x80000001;
@@ -38,15 +47,40 @@ struct SkinVertex {
     f32 u, v;                // texture coords
     f32 tpage, cba;          // PSX texture info
     u32 jointIdx;            // owning joint index
+    u16 sourceIndex = 0;     // original tPrimGeom vertex index
+    u16 padSourceIndex = 0;
 };
 
 struct SkinData {
     SkinVertex* verts = nullptr;
     u16* indices = nullptr;
+    u32* primStart = nullptr;
+    u8* primVertCount = nullptr;
     u32 numVerts = 0;
     u32 numIndices = 0;
+    u32 numPrims = 0;
+    bool usesSemiTrans = false;
+    u8 semiTransMode = 0;
 
-    ~SkinData() { delete[] verts; delete[] indices; }
+    ~SkinData() {
+        delete[] verts;
+        delete[] indices;
+        delete[] primStart;
+        delete[] primVertCount;
+    }
+};
+
+struct GeoRenderVertex {
+    f32 x;
+    f32 y;
+    f32 z;
+    f32 r;
+    f32 g;
+    f32 b;
+    f32 u;
+    f32 v;
+    f32 tpage;
+    f32 cba;
 };
 
 // PSX tCompositeAnim data loaded from character P3D chunk 0x4007.
@@ -56,6 +90,7 @@ struct CompositeAnimPartData {
     u16 field0 = 0;
     u16 field1 = 0;
     u32 animNameUID = 0;
+    MiscAnimNode* animNode = nullptr;
 };
 
 struct CompositeAnimData {
@@ -106,6 +141,12 @@ struct OriginalSTree : public OriginalBasic {
     // Skeleton data (parsed from P3D 0x6122/0x6121 chunks)
     STreeData* skeleton = nullptr;
 
+    // Raw PSX primitive geometry retained so STree render callbacks can be
+    // reinstated without reloading the source RR data.
+    tPrimGeom* primGeom = nullptr;
+    STreeXformVertsCallback xformVertsCallback = nullptr;
+    STreeFixUpPolysCallback fixUpPolysCallback = nullptr;
+
     // CPU skinning data (local-space verts + joint indices)
     SkinData* skinData = nullptr;
     bool activeTreeInUse = false;
@@ -124,6 +165,16 @@ struct OriginalGeo : public OriginalBasic {
     pddiPrimBuffer* meshBuffer = nullptr;
     s32 bboxMin[3] = {};
     s32 bboxMax[3] = {};
+    bool usesSemiTrans = false;
+    u8 semiTransMode = 0;
+    GeoRenderVertex* dynamicVerts = nullptr;
+    u32 dynamicVertCount = 0;
+    u32* dynamicPrimStart = nullptr;
+    u8* dynamicPrimVertCount = nullptr;
+    u32* dynamicPrimMaterialUID = nullptr;
+    u8* dynamicPrimCmd = nullptr;
+    u32* dynamicPrimPacketOffset = nullptr;
+    u32 dynamicPrimCount = 0;
 
     OriginalGeo();
     ~OriginalGeo() override;
@@ -134,6 +185,12 @@ struct OriginalGeo : public OriginalBasic {
 // existing Geo path until dedicated ETree data decoding is implemented.
 struct OriginalETree : public OriginalBasic {
     pddiPrimBuffer* meshBuffer = nullptr;
+    OriginalGeo** geoParts = nullptr;
+    u32* geoPartJointHashes = nullptr;
+    u32* geoPartHashes = nullptr;
+    u16 geoPartCount = 0;
+    bool usesSemiTrans = false;
+    u8 semiTransMode = 0;
 
     OriginalETree();
     ~OriginalETree() override;
@@ -196,11 +253,16 @@ struct DrawableGeo : public DrawableBasic {
 // DrawableETree - wraps OriginalETree for EModel rendering.
 struct DrawableETree : public DrawableBasic {
     OriginalETree* original = nullptr;
+    u8* geoPartVisible = nullptr;
+    Model* ownerModel = nullptr;
 
     DrawableETree(OriginalETree* orig);
     ~DrawableETree() override;
 
     void Display(u32 flags) override;
+    void SetOwnerModel(Model* owner) { ownerModel = owner; }
+    void SetGeoPartVisibleByHash(u32 hash, bool visible);
+    void ResetGeoPartVisibility();
 };
 
 // Model - base class for per-entity 3D models (96 bytes on PSX)
@@ -285,6 +347,12 @@ public:
     virtual void HandleDecFrame(AnimStructure* anim);
     virtual void HandleLoopDesired(AnimStructure* anim);
     virtual void HandleRunToLastBlend(AnimStructure* anim);
+
+    void DeleteAnimStructures();
+    AmbientLight* AllocateAmbientLight();
+    void DeleteAmbientLight();
+    HardwareLight* AllocateHardwareLights(u32 count);
+    void DeleteHardwareLights();
 
     // PSX: DeleteDrawable (called from destructor)
     void DeleteDrawable();

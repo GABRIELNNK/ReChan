@@ -23,6 +23,15 @@ bool CorrectThingPositionObstacle(
 
 void SetCorrectThingPositionRadiusBias(s32 value);
 
+void ObstacleBuildRenderTransform(
+    const Thing* owner,
+    const LVector& logicPos,
+    const LVector& logicOrientation,
+    LVector& outPos,
+    LVector& outOrientation);
+
+void ObstacleForgetRenderTransform(const Thing* owner);
+
 inline s32 MulShift16(s32 a, s32 b) {
     return (s32)(((s64)a * (s64)b) >> 16);
 }

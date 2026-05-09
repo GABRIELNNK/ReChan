@@ -1,6 +1,7 @@
 #include "gen/animstruct.h"
 #include "gen/paramanim.h"
 #include "gen/model.h"
+#include "gen/levelmgr.h"
 #include "gen/time.h"
 #include "gen/charmgr.h"
 #include "ai/humanoid.h"
@@ -27,6 +28,38 @@ static void BlendTreePose(s32 weight, const BlendPoseState* blendPose, STreeData
         joint.rotationY = (s16)(pose.rotationY + (s32)(((s64)weight * (s64)(s32)(s16)(joint.rotationY - pose.rotationY)) >> 16));
         joint.rotationZ = (s16)(pose.rotationZ + (s32)(((s64)weight * (s64)(s32)(s16)(joint.rotationZ - pose.rotationZ)) >> 16));
     }
+}
+
+static STreeData* ResolveTransformAnimPuppetTree(const TransformAnim* animation) {
+    if (!animation || !g_levelManager) {
+        return nullptr;
+    }
+
+    OriginalBasic* original = nullptr;
+    const s32 targetHash = static_cast<s32>(animation->targetNameUID);
+    switch (animation->targetType) {
+        case 0:
+            original = g_levelManager->FindSTree(targetHash);
+            if (!original) {
+                original = g_levelManager->FindETree(targetHash);
+            }
+            break;
+        case 1:
+            original = g_levelManager->FindSTree(targetHash);
+            break;
+        case 2:
+            original = g_levelManager->FindETree(targetHash);
+            break;
+        default:
+            break;
+    }
+
+    if (!original || original->GetType() != 1) {
+        return nullptr;
+    }
+
+    OriginalSTree* stree = static_cast<OriginalSTree*>(original);
+    return stree->skeleton;
 }
 
 // PSX: _13AnimStructurelP10tAnimationlP5ModelP13DrawableBasic (0x80070740)
@@ -66,6 +99,16 @@ AnimStructure::AnimStructure(s32 m, void* anim, s32 lt, Model* mdl, void* drawab
                 endFrame = (animation->numFrames - 1) << 16;
             }
 
+            flip->Reset();
+        }
+    }
+    else if ((mode == 1 || mode == 2) && animation) {
+        // PSX mode 1/2 path calls tAnimation::MakePuppet.
+        // For tTransformAnim this resolves target tree by targetType/targetNameUID.
+        STreeData* skeleton = ResolveTransformAnimPuppetTree(animation);
+        if (skeleton) {
+            flip = new TransformFlip();
+            flip->Attach(skeleton, animation);
             flip->Reset();
         }
     }

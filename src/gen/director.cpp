@@ -1,6 +1,7 @@
 #include "common.h"
 #include "gen/director.h"
 #include "gen/ai.h"
+#include "gen/effects.h"
 #include "gen/model.h"
 #include "ai/behaviour.h"
 #include "ai/obstacle.h"
@@ -1889,7 +1890,7 @@ void Director::ProcessCameraFunc() {
             scriptPtr += 6;
 
             if (camera) {
-                camera->SetPosition(position.x, position.y, position.z);
+                camera->SetPositionAndPrev(position.x, position.y, position.z);
                 camera->LookAtTarget(&target);
             }
             break;
@@ -2866,6 +2867,6 @@ void DrawDirectorOverlays(Handler* h) {
     if (g_director) {
         g_director->HandleWideScreen();
         g_director->DrawWideScreenPolys();
-        // PSX: DrawEffects__7Effectsi(4096) - requires Effects class (gEffectsList, effect types)
+        Effects_DrawEffects(4096);
     }
 }

@@ -92,11 +92,11 @@ int main() {
     rFrameCount60 = 0;
 
     Game game;
-    game.Open();
-
     if (!g_actionInput) {
         g_actionInput = new ActionInput();
     }
+
+    game.Open();
 
     game.SetState(GameState::Intro);
 
@@ -112,7 +112,13 @@ int main() {
         f32 realDt = (f32)(frameStart - prevTime);
         prevTime = frameStart;
         g_time->Tick(realDt);
+#if HIGH_FPS_PLAY_PRESENTATION
+        if (game.GetState() != GameState::Play) {
+            g_time->Step();
+        }
+#else
         g_time->Step();
+#endif
 
         rFrameCount = 1;
         rFrameCount60 = 1;
@@ -130,7 +136,13 @@ int main() {
             const ActionInput* actionInputForGame = DebugUI::ShouldBlockGameInput()
                 ? nullptr
                 : g_actionInput;
-            g_inputManager->ServiceHostPads(actionInputForGame);
+            bool commitInputNow = true;
+#if HIGH_FPS_PLAY_PRESENTATION
+            if (game.GetState() == GameState::Play) {
+                commitInputNow = false;
+            }
+#endif
+            g_inputManager->ServiceHostPads(actionInputForGame, commitInputNow);
         }
 
         bool running = game.Step();

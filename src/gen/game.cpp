@@ -2,6 +2,7 @@
 #include "common.h"
 #include "gen/game.h"
 #include "gen/display.h"
+#include "gen/envmgr.h"
 #include "gen/camera.h"
 #include "gen/world.h"
 #include "gen/block.h"
@@ -13,7 +14,9 @@
 #include "gen/ai.h"
 #include "gen/model.h"
 #include "gen/director.h"
+#include "gen/effects.h"
 #include "gen/scoremgr.h"
+#include "gen/savegame.h"
 #include "gen/control.h"
 #include "snd/sound.h"
 #include "snd/rsevent.h"
@@ -170,7 +173,10 @@ void Game::InternalOpen() {
     managerList.AddNodePri(world);
     g_blockManager = world->GetBlockManager();
 
-    // 6. EnvironmentManager (140) - environment effects (TODO)
+    // 6. EnvironmentManager (140) - environment effects
+    EnvironmentManager* environmentMgr = new EnvironmentManager();
+    environmentMgr->SetName("EnvironmentManager", 0);
+    managerList.AddNodePri(environmentMgr);
 
     // 7. Display (32) - owns tView, BeginFrame/EndFrame, frame counter
     Display* disp = new Display();
@@ -336,11 +342,17 @@ static void AnimateLoop(ccList& list) {
 
 void Game::AnimateEverythingHandler(Handler*) {
     MARKFUNCTION(0x8002B2F0);
+#if HIGH_FPS_PLAY_PRESENTATION
+    if (g_game && g_game->GetState() == GameState::Play && g_time && !g_time->DidPlayLogicStepThisFrame()) {
+        return;
+    }
+#endif
     if (!g_ai) return;
     AnimateLoop(g_ai->humanoidList);
     AnimateLoop(g_ai->pickupList);
     AnimateLoop(g_ai->inactivePickupList);
     AnimateLoop(g_ai->moveList);
+    Effects_UpdateAll();
 }
 
 // PSX: DrawEverythingHandler__FP7Handler (GAME.CPP:2211, 0x8002A98C)
@@ -362,6 +374,10 @@ void Game::DrawEverythingHandlerCB(Handler*) {
     p3d::context->SetCullMode(PDDI_CULL_NONE);
 
     if (g_director) {
+#if HIGH_FPS_PLAY_PRESENTATION
+        const bool isPlayRenderOnlyFrame = (g_game && g_game->GetState() == GameState::Play && g_time && !g_time->DidPlayLogicStepThisFrame());
+        if (!isPlayRenderOnlyFrame)
+#endif
         g_director->updateVramAnims();
     }
 
@@ -501,6 +517,14 @@ void Game::SetState(GameState s) {
     else
         stateFunc = nullptr;
     state = s;
+
+#if HIGH_FPS_PLAY_PRESENTATION
+    if (state == GameState::Play || prevState == GameState::Play) {
+        if (g_time) {
+            g_time->ResetPlayPresentationState();
+        }
+    }
+#endif
 
     // PSX: for states that require input (TitleLoop=3, Play=8, EndGameLoop=26),
     // check if a pad is connected. If not, redirect to Error state.
@@ -679,11 +703,13 @@ bool Game::gsTitleLoopState(Game* game) {
                 }
                 FreeXconFSImage();
                 LoadXconFE();
-                game->PlayMovie("prolog.str", 1, 0);
+                if (!SaveGameHasPendingLoad()) {
+                    game->PlayMovie("prolog.str", 1, 0);
+                    g_frontEndSound->ProcessSoundEvent(FE_SND_MENU_ACCEPT);
+                }
                 if (g_characterManager) {
                     g_characterManager->LoadCharTexture((u32)AITypes::TT_PLAYER);
                 }
-                g_frontEndSound->ProcessSoundEvent(FE_SND_MENU_ACCEPT);
                 LOG("[Game] TitleLoop: fade complete -> OpenFE");
                 game->titleFadeType = 0;
                 game->SetState(GameState::OpenFE);
@@ -700,6 +726,30 @@ bool Game::gsTitleLoopState(Game* game) {
     game->controlVal[0] = (s32)buttons;
     const bool escDown = (p3d::display && p3d::display->IsKeyDown(KEY_ESCAPE));
     const bool startDown = ((buttons & PsxPad::Start) != 0) && !escDown;
+
+    if (game->titleAutoStart) {
+        rsEvent(RS_STOP_MUSIC, 0, 0, 0);
+        rsEvent(RS_UNLOAD_LEVEL, 0, 0, 0);
+        game->field136 = 1;
+        if (game->titleScreen) {
+            delete game->titleScreen;
+            game->titleScreen = nullptr;
+        }
+        FreeXconFSImage();
+        LoadXconFE();
+        game->titleAutoStart = false;
+        if (!SaveGameHasPendingLoad()) {
+            game->PlayMovie("prolog.str", 1, 0);
+        }
+        if (g_characterManager) {
+            g_characterManager->LoadCharTexture((u32)AITypes::TT_PLAYER);
+        }
+        g_frontEndSound->ProcessSoundEvent(FE_SND_MENU_ACCEPT);
+        LOG("[Game] TitleLoop: auto-start -> OpenFE");
+        game->titleFadeType = 0;
+        game->SetState(GameState::OpenFE);
+        return true;
+    }
 
 #if CUSTOM_MENU
     if (g_feCustomMenuMgr && g_feCustomMenuMgr->IsActive()) {
@@ -805,6 +855,14 @@ bool Game::gsOpenFEState(Game* game) {
         g_feInitialized = 1;
     }
 
+    if (SaveGameApplyPendingLoad(game)) {
+        if (g_time) {
+            g_time->frameCounter = 0;
+        }
+        game->SetState(GameState::QueueLevelLoad);
+        return true;
+    }
+
     // PSX: check gp[44] (selectedLevel). If a level was previously
     // selected (e.g. returning from game over), go straight to loading.
     if (g_selectedLevel != -1) {
@@ -881,6 +939,8 @@ bool Game::gsPrePlayState(Game* game) {
         }
     }
 
+    SaveGameApplyPendingLives();
+
     // PC
     if (g_display)
         g_display->SetCursorCaptured(true);
@@ -924,13 +984,81 @@ bool Game::gsPrePlayState(Game* game) {
 bool Game::gsPlayState(Game* game) {
     MARKFUNCTION(0x80029C6C); // gsPlayState
 
+#if HIGH_FPS_PLAY_PRESENTATION
+    s32 logicSteps = 1;
+    if (g_time) {
+        logicSteps = g_time->BeginPlayFixedStep();
+    }
+
+    if (g_directorActive) {
+        for (s32 i = 0; i < logicSteps; ++i) {
+            if (g_inputManager) {
+                g_inputManager->CommitHostPads();
+                g_inputManager->Step();
+                for (s16 padIndex = 0; padIndex < 2; ++padIndex) {
+                    game->controlVal[padIndex] = g_inputManager->GetControlVal((u16)padIndex);
+                }
+            }
+
+            if (g_time) {
+                g_time->Step();
+            }
+            if (g_director) {
+                g_director->Process();
+            }
+        }
+
+        if (g_display && g_display->GetCamera()) {
+            g_display->GetCamera()->UpdateHighFPS();
+        }
+
+        ProcessHandlerList(game->handlerSet2.handlerList);
+        return true;
+    }
+
+    for (s32 i = 0; i < logicSteps; ++i) {
+        if (g_inputManager) {
+            g_inputManager->CommitHostPads();
+            g_inputManager->Step();
+            for (s16 padIndex = 0; padIndex < 2; ++padIndex) {
+                game->controlVal[padIndex] = g_inputManager->GetControlVal((u16)padIndex);
+            }
+        }
+
+        if (g_time) {
+            g_time->Step();
+        }
+        ProcessHandlerList(game->handlerSet1.handlerList);
+    }
+
+    // PSX pause gate: director script must be idle. Keep this on logic ticks only.
+    if (logicSteps > 0 && game->state == GameState::Play) {
+        s32 canPause = (!g_director || g_director->scriptState == 0);
+        if (canPause && (game->controlVal[0] & PsxPad::Start) != 0) {
+#if CUSTOM_MENU
+            {
+                World* world = game->GetWorld();
+                const bool isHub = (world && world->GetCurLevelID() == 7);
+                g_feCustomMenuMgr->Activate(isHub ? MenuPage_Frontend : MenuPage_Pause);
+            }
+#endif
+
+            LOG("[Game] Pause requested from Play");
+            game->SetState(GameState::Menu);
+            Shock(ShockEnum::SHOCK_CLEAR);
+        }
+    }
+
+    if (g_display && g_display->GetCamera()) {
+        g_display->GetCamera()->UpdateHighFPS();
+    }
+
+    ProcessHandlerList(game->handlerSet2.handlerList);
+    return true;
+#else
     if (g_directorActive) {
         if (g_director) {
             g_director->Process();
-        }
-
-        if (g_ai) {
-            g_ai->MoveCamera();
         }
 
         ProcessHandlerList(game->handlerSet2.handlerList);
@@ -968,6 +1096,7 @@ bool Game::gsPlayState(Game* game) {
 
     // PSX: Update__7Profile() - PSX profiling system, not applicable on PC
     return true;
+#endif
 }
 
 bool Game::gsEndLevelState(Game* game) {

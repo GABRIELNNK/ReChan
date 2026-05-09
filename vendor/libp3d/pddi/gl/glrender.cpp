@@ -51,16 +51,25 @@ flat in vec2 vTexInfo;
 uniform usampler2D uVRAM;
 uniform int uHasVRAM;
 uniform float uAlphaScale;
+uniform int uUseZeroTexelKey;
+uniform int uTexInfoOverrideEnabled;
+uniform vec2 uTexInfoOverride;
 out vec4 FragColor;
 void main() {
     float tpageF = vTexInfo.x;
+    float cbaF = vTexInfo.y;
+    if (uTexInfoOverrideEnabled != 0) {
+        tpageF = uTexInfoOverride.x;
+        cbaF = uTexInfoOverride.y;
+    }
+
     if (uHasVRAM == 0 || tpageF < 0.0) {
         FragColor = vec4(vColor, uAlphaScale);
         return;
     }
 
     uint tpage = uint(tpageF);
-    uint cba = uint(vTexInfo.y);
+    uint cba = uint(cbaF);
 
     uint tx = tpage & 0xFu;
     uint ty = (tpage >> 4u) & 1u;
@@ -76,24 +85,34 @@ void main() {
     uint py = uint(mod(vUV.y + 256.0, 256.0));
 
     uint clutWord;
+    bool zeroTexel = false;
     if (depth == 0u) {
         uint wordX = pageX + px / 4u;
         uint word = texelFetch(uVRAM, ivec2(wordX, pageY + py), 0).r;
         uint palIdx = (word >> ((px % 4u) * 4u)) & 0xFu;
+        zeroTexel = (palIdx == 0u);
         clutWord = texelFetch(uVRAM, ivec2(clutX + palIdx, clutY), 0).r;
     } 
     else if (depth == 1u) {
         uint wordX = pageX + px / 2u;
         uint word = texelFetch(uVRAM, ivec2(wordX, pageY + py), 0).r;
         uint palIdx = (px & 1u) != 0u ? (word >> 8u) & 0xFFu : word & 0xFFu;
+        zeroTexel = (palIdx == 0u);
         clutWord = texelFetch(uVRAM, ivec2(clutX + palIdx, clutY), 0).r;
     } 
     else {
         clutWord = texelFetch(uVRAM, ivec2(pageX + px, pageY + py), 0).r;
+        zeroTexel = (clutWord == 0u);
     }
 
-    // Magenta (R=31,G=0,B=31) is the transparency key
-    if ((clutWord & 0x7FFFu) == 0x7C1Fu) discard;
+    // World/block content in this renderer commonly uses magenta keying,
+    // while blended effect paths use zero texel keying.
+    if (uUseZeroTexelKey != 0) {
+        if (zeroTexel) discard;
+    }
+    else {
+        if ((clutWord & 0x7FFFu) == 0x7C1Fu) discard;
+    }
 
     float r = float(clutWord & 0x1Fu) / 31.0;
     float g = float((clutWord >> 5u) & 0x1Fu) / 31.0;
@@ -423,14 +442,13 @@ bool glDisplay::InitDisplay(const pddiDisplayInit& init) {
 
     glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
 
-    if (init.msaa > 0) {
-        glEnable(GL_MULTISAMPLE);
-    }
-
     if (!gladLoadGL(glfwGetProcAddress)) {
         std::fprintf(stderr, "GLAD: failed to load OpenGL\n");
         return false;
     }
+
+    glGetIntegerv(GL_MAX_SAMPLES, &maxMsaaSamples);
+    SetMSAA(init.msaa);
 
     std::printf("OpenGL %s on %s\n",
                 reinterpret_cast<const char*>(glGetString(GL_VERSION)),
@@ -469,8 +487,20 @@ bool glDisplay::ShouldClose() {
     return glfwWindowShouldClose(window);
 }
 
+int glDisplay::GetWidth() {
+    SyncFramebufferSize();
+    return fbWidth;
+}
+
+int glDisplay::GetHeight() {
+    SyncFramebufferSize();
+    return fbHeight;
+}
+
 void glDisplay::PollEvents() {
     glfwPollEvents();
+    SyncFramebufferSize();
+
     if (imguiInitialized && !imguiFrameStarted) {
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
@@ -580,6 +610,8 @@ void glDisplay::SetFullscreen(bool fullscreen) {
                              windowedX, windowedY,
                              windowedW, windowedH, 0);
     }
+
+    SyncFramebufferSize();
 }
 
 bool glDisplay::IsFullscreen() {
@@ -603,17 +635,7 @@ void glDisplay::SetBorderless(bool enabled) {
         glfwGetWindowPos(window, &windowedX, &windowedY);
         glfwGetWindowSize(window, &windowedW, &windowedH);
 
-        GLFWmonitor* monitor = glfwGetPrimaryMonitor();
-        if (monitor) {
-            const GLFWvidmode* vidMode = glfwGetVideoMode(monitor);
-            int mx = 0, my = 0;
-            glfwGetMonitorPos(monitor, &mx, &my);
-            glfwSetWindowAttrib(window, GLFW_DECORATED, GLFW_FALSE);
-            glfwSetWindowPos(window, mx, my);
-            if (vidMode) {
-                glfwSetWindowSize(window, vidMode->width, vidMode->height);
-            }
-        }
+        glfwSetWindowAttrib(window, GLFW_DECORATED, GLFW_FALSE);
     }
     else {
         glfwSetWindowAttrib(window, GLFW_DECORATED, GLFW_TRUE);
@@ -622,6 +644,7 @@ void glDisplay::SetBorderless(bool enabled) {
     }
 
     borderless = enabled;
+    SyncFramebufferSize();
 }
 
 void glDisplay::SetResolution(int w, int h) {
@@ -634,20 +657,6 @@ void glDisplay::SetResolution(int w, int h) {
         glfwSetWindowMonitor(window, monitor, 0, 0, w, h, vidMode->refreshRate);
     }
     else {
-        if (borderless) {
-            GLFWmonitor* monitor = glfwGetPrimaryMonitor();
-            if (monitor) {
-                const GLFWvidmode* vidMode = glfwGetVideoMode(monitor);
-                int mx = 0, my = 0;
-                glfwGetMonitorPos(monitor, &mx, &my);
-                glfwSetWindowPos(window, mx, my);
-                if (vidMode) {
-                    glfwSetWindowSize(window, vidMode->width, vidMode->height);
-                }
-            }
-            return;
-        }
-
         glfwSetWindowSize(window, w, h);
         windowedW = w;
         windowedH = h;
@@ -664,11 +673,54 @@ void glDisplay::SetResolution(int w, int h) {
             glfwSetWindowPos(window, centeredX, centeredY);
         }
     }
+
+    SyncFramebufferSize();
 }
 
 void glDisplay::SetVSync(bool enabled) {
     if (window) {
         glfwSwapInterval(enabled ? 1 : 0);
+    }
+}
+
+int glDisplay::ClampMSAASamples(int samples) const {
+    if (samples <= 0) {
+        return 0;
+    }
+
+    static const int kAllowedSamples[] = { 2, 4, 8, 16 };
+    int closest = kAllowedSamples[0];
+    int closestDist = (samples > closest) ? (samples - closest) : (closest - samples);
+
+    for (u32 i = 1; i < (u32)(sizeof(kAllowedSamples) / sizeof(kAllowedSamples[0])); i++) {
+        const int candidate = kAllowedSamples[i];
+        const int dist = (samples > candidate) ? (samples - candidate) : (candidate - samples);
+        if (dist < closestDist) {
+            closest = candidate;
+            closestDist = dist;
+        }
+    }
+
+    if (maxMsaaSamples > 0 && closest > maxMsaaSamples) {
+        int fallback = 0;
+        for (u32 i = 0; i < (u32)(sizeof(kAllowedSamples) / sizeof(kAllowedSamples[0])); i++) {
+            if (kAllowedSamples[i] <= maxMsaaSamples) {
+                fallback = kAllowedSamples[i];
+            }
+        }
+        closest = fallback;
+    }
+
+    return closest;
+}
+
+void glDisplay::SetMSAA(int samples) {
+    msaaSamples = ClampMSAASamples(samples);
+    if (msaaSamples > 0) {
+        glEnable(GL_MULTISAMPLE);
+    }
+    else {
+        glDisable(GL_MULTISAMPLE);
     }
 }
 
@@ -727,7 +779,40 @@ void glDisplay::SetWndProc(pddiWndProc proc) {
     wndProc = std::move(proc);
 }
 
-void glDisplay::GetViewport(int& x, int& y, int& w, int& h) const {
+void glDisplay::QueryFramebufferSize(int& width, int& height) const {
+    width = 0;
+    height = 0;
+
+    if (!window) {
+        return;
+    }
+
+    glfwGetFramebufferSize(window, &width, &height);
+}
+
+void glDisplay::SyncFramebufferSize() {
+    int w = 0;
+    int h = 0;
+    QueryFramebufferSize(w, h);
+
+    if (w == fbWidth && h == fbHeight) {
+        return;
+    }
+
+    fbWidth = w;
+    fbHeight = h;
+
+    if (wndProc) {
+        pddiWndMessage msg{};
+        msg.event = PDDI_WND_RESIZE;
+        msg.param1 = w;
+        msg.param2 = h;
+        wndProc(msg);
+    }
+}
+
+void glDisplay::GetViewport(int& x, int& y, int& w, int& h) {
+    SyncFramebufferSize();
     x = 0;
     y = 0;
     w = fbWidth;
@@ -834,6 +919,7 @@ glContext::glContext(glDisplay* disp)
 }
 
 glContext::~glContext() {
+    DestroyMSAAFramebuffer();
     if (quadVBO) glDeleteBuffers(1, &quadVBO);
     if (quadVAO) glDeleteVertexArrays(1, &quadVAO);
     if (gouraudVBO) glDeleteBuffers(1, &gouraudVBO);
@@ -842,9 +928,90 @@ glContext::~glContext() {
     if (program3D) glDeleteProgram(program3D);
 }
 
+void glContext::DestroyMSAAFramebuffer() {
+    if (msaaDepthStencilRbo) {
+        glDeleteRenderbuffers(1, &msaaDepthStencilRbo);
+        msaaDepthStencilRbo = 0;
+    }
+    if (msaaColorRbo) {
+        glDeleteRenderbuffers(1, &msaaColorRbo);
+        msaaColorRbo = 0;
+    }
+    if (msaaFbo) {
+        glDeleteFramebuffers(1, &msaaFbo);
+        msaaFbo = 0;
+    }
+    msaaWidth = 0;
+    msaaHeight = 0;
+    activeMsaaSamples = 0;
+}
+
+void glContext::EnsureMSAAFramebuffer(s32 samples, s32 width, s32 height) {
+    if (samples <= 0 || width <= 0 || height <= 0) {
+        DestroyMSAAFramebuffer();
+        return;
+    }
+
+    if (msaaFbo && activeMsaaSamples == samples && msaaWidth == width && msaaHeight == height) {
+        return;
+    }
+
+    DestroyMSAAFramebuffer();
+
+    glGenFramebuffers(1, &msaaFbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, msaaFbo);
+
+    glGenRenderbuffers(1, &msaaColorRbo);
+    glBindRenderbuffer(GL_RENDERBUFFER, msaaColorRbo);
+    glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_RGBA8, width, height);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, msaaColorRbo);
+
+    glGenRenderbuffers(1, &msaaDepthStencilRbo);
+    glBindRenderbuffer(GL_RENDERBUFFER, msaaDepthStencilRbo);
+    glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_DEPTH24_STENCIL8, width, height);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, msaaDepthStencilRbo);
+
+    const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    if (status != GL_FRAMEBUFFER_COMPLETE) {
+        std::fprintf(stderr, "GL: MSAA framebuffer incomplete (status=0x%X)\n", status);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        DestroyMSAAFramebuffer();
+        return;
+    }
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    msaaWidth = width;
+    msaaHeight = height;
+    activeMsaaSamples = samples;
+}
+
 void glContext::BeginFrame() {
     int vx, vy, vw, vh;
     display->GetViewport(vx, vy, vw, vh);
+
+    usingMsaaFramebuffer = false;
+    multisampleEnabled = true;
+    resolvedForOverlay = false;
+    const s32 desiredSamples = display ? display->GetMSAA() : 0;
+    if (desiredSamples > 0 && vw > 0 && vh > 0) {
+        EnsureMSAAFramebuffer(desiredSamples, vw, vh);
+        if (msaaFbo) {
+            glBindFramebuffer(GL_FRAMEBUFFER, msaaFbo);
+            usingMsaaFramebuffer = true;
+        }
+        else {
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        }
+    }
+    else {
+        if (msaaFbo) {
+            DestroyMSAAFramebuffer();
+        }
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
+
+    UpdateMultisampleState();
+
     glViewport(vx, vy, vw, vh);
     glScissor(vx, vy, vw, vh);
     glEnable(GL_SCISSOR_TEST);
@@ -853,6 +1020,18 @@ void glContext::BeginFrame() {
 
 void glContext::EndFrame() {
     glDisable(GL_SCISSOR_TEST);
+
+    if (usingMsaaFramebuffer && msaaFbo && !resolvedForOverlay) {
+        int vx, vy, vw, vh;
+        display->GetViewport(vx, vy, vw, vh);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, msaaFbo);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+        glBlitFramebuffer(vx, vy, vx + vw, vy + vh,
+                          vx, vy, vx + vw, vy + vh,
+                          GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
+
     glFlush();
 }
 
@@ -923,21 +1102,32 @@ void glContext::SetBlendMode(pddiBlendMode mode) {
         case PDDI_BLEND_NONE:
             glDisable(GL_BLEND);
             glBlendEquation(GL_FUNC_ADD);
+            glDepthMask(GL_TRUE);
             break;
         case PDDI_BLEND_ALPHA:
             glEnable(GL_BLEND);
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
             glBlendEquation(GL_FUNC_ADD);
+            glDepthMask(GL_FALSE);
             break;
         case PDDI_BLEND_ADD:
             glEnable(GL_BLEND);
             glBlendFunc(GL_ONE, GL_ONE);
             glBlendEquation(GL_FUNC_ADD);
+            glDepthMask(GL_FALSE);
             break;
         case PDDI_BLEND_SUBTRACT:
             glEnable(GL_BLEND);
             glBlendFunc(GL_ONE, GL_ONE);
             glBlendEquation(GL_FUNC_REVERSE_SUBTRACT);
+            glDepthMask(GL_FALSE);
+            break;
+        case PDDI_BLEND_PSX_QUARTER:
+            glEnable(GL_BLEND);
+            glBlendColor(0.0f, 0.0f, 0.0f, 0.25f);
+            glBlendFunc(GL_CONSTANT_ALPHA, GL_ONE);
+            glBlendEquation(GL_FUNC_ADD);
+            glDepthMask(GL_FALSE);
             break;
     }
     stateDirty = false;
@@ -945,6 +1135,50 @@ void glContext::SetBlendMode(pddiBlendMode mode) {
 
 void glContext::SetScissor(int x, int y, int w, int h) {
     glScissor(x, y, w, h);
+}
+
+void glContext::SetMultisampleEnabled(bool enable) {
+    multisampleEnabled = enable;
+    UpdateMultisampleState();
+}
+
+void glContext::ResolveForOverlayPass() {
+    if (!usingMsaaFramebuffer || !msaaFbo || resolvedForOverlay) {
+        return;
+    }
+
+    int vx, vy, vw, vh;
+    display->GetViewport(vx, vy, vw, vh);
+
+    const bool hadScissor = glIsEnabled(GL_SCISSOR_TEST) == GL_TRUE;
+    if (hadScissor) {
+        glDisable(GL_SCISSOR_TEST);
+    }
+
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, msaaFbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    glBlitFramebuffer(vx, vy, vx + vw, vy + vh,
+                      vx, vy, vx + vw, vy + vh,
+                      GL_COLOR_BUFFER_BIT, GL_NEAREST);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    if (hadScissor) {
+        glEnable(GL_SCISSOR_TEST);
+    }
+
+    usingMsaaFramebuffer = false;
+    resolvedForOverlay = true;
+    UpdateMultisampleState();
+}
+
+void glContext::UpdateMultisampleState() {
+    if (usingMsaaFramebuffer && multisampleEnabled) {
+        glEnable(GL_MULTISAMPLE);
+    }
+    else {
+        glDisable(GL_MULTISAMPLE);
+    }
 }
 
 void glContext::DrawQuad(pddiBaseShader* shader,
@@ -1073,6 +1307,11 @@ void glContext::SetVRAMHandle(u32 h) {
     vramHandle = h;
 }
 
+void glContext::SetTexInfoOverride(bool enabled, u32 texInfoWord) {
+    texInfoOverrideEnabled = enabled;
+    texInfoOverrideWord = texInfoWord;
+}
+
 u32 glContext::CreateVRAMTexture(int w, int h, const u16* data) {
     u32 tex;
     glGenTextures(1, &tex);
@@ -1099,6 +1338,8 @@ void glContext::DrawPrimBuffer(pddiPrimBuffer* buffer) {
 
     const float alphaScale = (cachedBlendMode == PDDI_BLEND_ALPHA) ? 0.5f : 1.0f;
     glUniform1f(glGetUniformLocation(program3D, "uAlphaScale"), alphaScale);
+    const int useZeroTexelKey = (cachedBlendMode != PDDI_BLEND_NONE) ? 1 : 0;
+    glUniform1i(glGetUniformLocation(program3D, "uUseZeroTexelKey"), useZeroTexelKey);
 
     Mat4 mvp = projection * (viewMatrix * worldMatrix);
     glUniformMatrix4fv(glGetUniformLocation(program3D, "uMVP"),
@@ -1106,6 +1347,18 @@ void glContext::DrawPrimBuffer(pddiPrimBuffer* buffer) {
 
     int hasVRAM = vramHandle ? 1 : 0;
     glUniform1i(glGetUniformLocation(program3D, "uHasVRAM"), hasVRAM);
+
+    const int texInfoOverride = texInfoOverrideEnabled ? 1 : 0;
+    glUniform1i(glGetUniformLocation(program3D, "uTexInfoOverrideEnabled"), texInfoOverride);
+    if (texInfoOverride != 0) {
+        const float tpage = static_cast<float>((texInfoOverrideWord >> 16) & 0xFFFFu);
+        const float cba = static_cast<float>(texInfoOverrideWord & 0xFFFFu);
+        glUniform2f(glGetUniformLocation(program3D, "uTexInfoOverride"), tpage, cba);
+    }
+    else {
+        glUniform2f(glGetUniformLocation(program3D, "uTexInfoOverride"), -1.0f, 0.0f);
+    }
+
     if (vramHandle) {
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, vramHandle);

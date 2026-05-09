@@ -10,24 +10,19 @@
 #include "gen/database.h"
 #include "gen/game.h"
 #include "gen/blockmgr.h"
+#include "gen/geffect.h"
 #include "gen/levelmgr.h"
 #include "gen/model.h"
 #include "gen/path.h"
+#include "gen/switch.h"
+#include "gen/psxmath_helpers.h"
+#include "gen/world.h"
 #include "snd/platsnd.h"
 #include "snd/sndfact.h"
 #include "p3d/p3dmath.h"
 
 static inline u32 PtrToken32(const void* p) {
     return static_cast<u32>(reinterpret_cast<u64>(p));
-}
-
-static inline s32 MulShift16Signed(s32 a, s32 b) {
-    return (s32)(((s64)a * (s64)b) >> 16);
-}
-
-static inline s32 AbsDiffS32(s32 a, s32 b) {
-    const s32 d = a - b;
-    return (d < 0) ? -d : d;
 }
 
 static void RotateAroundY(s32 centreX, s32 centreZ, s32 angle, s32& ioX, s32& ioZ) {
@@ -37,8 +32,8 @@ static void RotateAroundY(s32 centreX, s32 centreZ, s32 angle, s32& ioX, s32& io
     const s32 cosA = rmSin16(0x4000 - angle);
     const s32 sinNegA = rmSin16(-angle);
 
-    const s32 xFix = MulShift16Signed(dx, cosA) - MulShift16Signed(dz, sinNegA);
-    const s32 zFix = MulShift16Signed(dx, sinNegA) + MulShift16Signed(dz, cosA);
+    const s32 xFix = PsxMulShift16Signed(dx, cosA) - PsxMulShift16Signed(dz, sinNegA);
+    const s32 zFix = PsxMulShift16Signed(dx, sinNegA) + PsxMulShift16Signed(dz, cosA);
 
     ioX = (xFix >> 16) + centreX;
     ioZ = (zFix >> 16) + centreZ;
@@ -60,13 +55,6 @@ static s32 ScaleAttribToPlatformFixed(s32 value) {
     s32 out = ((s32)(prod >> 32) + shifted) >> 8;
     out -= (shifted >> 31);
     return out;
-}
-
-static s32 PathPitchFromNormY(s32 normY16) {
-    f32 y = (f32)normY16 * FIX16_INV;
-    if (y < -1.0f) y = -1.0f;
-    if (y > 1.0f) y = 1.0f;
-    return RAD2ANGLE(std::asin(y));
 }
 
 static s32 PathYawFromNormXZ(s32 normX16, s32 normZ16) {
@@ -585,7 +573,7 @@ void Platform::Think() {
 
             // PSX: sound check after countdown (0x80021A54)
             if (platformSound) {
-                if (velocity.x != 0 || velocity.y != 0 || velocity.z != 0) {
+                if (rmMag3ff(velocity.x, velocity.y, velocity.z) > 0) {
                     platformSound->BeginMove();
                 }
             }
@@ -606,7 +594,7 @@ void Platform::Think() {
 
             // PSX: sound check after Move (0x80021AF0)
             if (platformSound) {
-                if (velocity.x != 0 || velocity.y != 0 || velocity.z != 0) {
+                if (rmMag3ff(velocity.x, velocity.y, velocity.z) > 0) {
                     platformSound->BeginMove();
                 }
             }
@@ -647,7 +635,8 @@ void Platform::Think() {
 
                 // PSX: trigger notification if field9C and bit 13 (0x80021C54)
                 if (field9C != 0 && (platformFlags & 0x2000)) {
-                    // TODO: trigger by name notification
+                    LVector effectPos = pos;
+                    GEffect_Create((u32)field9C, &effectPos, nullptr, nullptr, 0, 0, 0);
                 }
 
                 if (platformSound) {
@@ -734,7 +723,7 @@ void Platform::Move() {
             const s32 normX = rmDiv16i(dir.x, magXZ);
             const s32 normZ = rmDiv16i(dir.z, magXZ);
 
-            const s32 pitchSignal = PathPitchFromNormY(normY);
+            const s32 pitchSignal = PsxAsin16FromFix16Clamped(normY);
             const s32 yawSignal = PathYawFromNormXZ(normX, normZ);
 
             if (pathSignal == SIGNAL_SENTINEL) {
@@ -820,9 +809,13 @@ void Platform::HandlePathNodeTransition() {
 
     const s32 a11 = GetCurrentNodeAttrib(splinePath, 11);
     if (a11 != ATTR_SENTINEL) {
-        // TODO: PSX resolves a11 through theWorldMgr +0x6C (World switch list)
-        // then calls vtable +0x0C with this platform as argument (switch accept/trigger path).
-        // World switch-list structures are not yet represented in PC code with matching layout.
+        World* world = g_game ? g_game->GetWorld() : nullptr;
+        if (world != nullptr) {
+            WDBSwitch* sw = world->FindPrimarySwitchByCRC((u32)a11);
+            if (sw != nullptr) {
+                sw->Execute(this);
+            }
+        }
     }
 
     const s32 a13 = GetCurrentNodeAttrib(splinePath, 13);
@@ -964,17 +957,17 @@ void Platform::Teeter() {
         const s32 cosY = rmSin16(0x4000 - tiltY);
         const s32 sinNegY = rmSin16(-tiltY);
 
-        const s32 rotXWorld = MulShift16Signed(relX, cosY) + MulShift16Signed(relZ, sinNegY) + centreX;
-        const s32 rotZWorld = MulShift16Signed(relX, -sinNegY) + MulShift16Signed(relZ, cosY) + centreZ;
+        const s32 rotXWorld = PsxMulShift16Signed(relX, cosY) + PsxMulShift16Signed(relZ, sinNegY) + centreX;
+        const s32 rotZWorld = PsxMulShift16Signed(relX, -sinNegY) + PsxMulShift16Signed(relZ, cosY) + centreZ;
 
         const s32 passengerMass = passenger->stateCounter * passenger->maxFallDivisor;
         const s32 denom = stateCounter;
         if (denom != 0) {
-            const s32 torqueX = MulShift16Signed(passengerMass, rmSin16(tiltX + 0x4000));
-            const s32 torqueZ = MulShift16Signed(passengerMass, rmSin16(tiltZ + 0x4000));
+            const s32 torqueX = PsxMulShift16Signed(passengerMass, rmSin16(tiltX + 0x4000));
+            const s32 torqueZ = PsxMulShift16Signed(passengerMass, rmSin16(tiltZ + 0x4000));
 
-            deltaX += MulShift16Signed(torqueX, rotZWorld - tiltData[2] - pos.z) / denom;
-            deltaZ += -MulShift16Signed(torqueZ, rotXWorld - tiltData[0] - pos.x) / denom;
+            deltaX += PsxMulShift16Signed(torqueX, rotZWorld - tiltData[2] - pos.z) / denom;
+            deltaZ += -PsxMulShift16Signed(torqueZ, rotXWorld - tiltData[0] - pos.x) / denom;
         }
 
         hadPassenger = true;
@@ -1002,8 +995,8 @@ void Platform::Teeter() {
         tiltData[5] = 0;
     }
 
-    tiltX += MulShift16Signed(-tiltX, 0x11EB);
-    tiltZ += MulShift16Signed(-tiltZ, 0x11EB);
+    tiltX += PsxMulShift16Signed(-tiltX, 0x11EB);
+    tiltZ += PsxMulShift16Signed(-tiltZ, 0x11EB);
 
     orientation.x = tiltX;
     orientation.z = tiltZ;
@@ -1012,7 +1005,7 @@ void Platform::Teeter() {
         return;
     }
 
-    const s32 tiltMeasure = MulShift16Signed(rmSin16(tiltZ + 0x4000), rmSin16(tiltX + 0x4000));
+    const s32 tiltMeasure = PsxMulShift16Signed(rmSin16(tiltZ + 0x4000), rmSin16(tiltX + 0x4000));
 
     if (platformFlags & 0x08000000) {
         if (!(platformFlags & 0x10000000)) {
@@ -1050,7 +1043,7 @@ void Platform::Bob() {
     const LVector oldRot = orientation;
 
     const s16 phase = (s16)rmDiv16i(bobData[2], bobData[1]);
-    const s32 newY = initialRot.y + MulShift16Signed(bobData[6], rmSin16(phase));
+    const s32 newY = initialRot.y + PsxMulShift16Signed(bobData[6], rmSin16(phase));
 
     prevVelocity.y += newY - oldPos.y;
 
@@ -1060,8 +1053,8 @@ void Platform::Bob() {
     const s32 oldTiltVelX = bobData[3];
     const s32 oldTiltVelZ = bobData[5];
 
-    bobData[3] = MulShift16Signed(bobData[0], rmSin16(phase));
-    bobData[5] = MulShift16Signed(bobData[0], rmSin16(phase + 0x2AAA));
+    bobData[3] = PsxMulShift16Signed(bobData[0], rmSin16(phase));
+    bobData[5] = PsxMulShift16Signed(bobData[0], rmSin16(phase + 0x2AAA));
 
     orientation = oldRot;
     orientation.x += oldTiltVelX - bobData[3];
@@ -1172,10 +1165,10 @@ bool Platform::HandleEnvironmentCollision(LVector& nextPos) {
         Humanoid* hum = static_cast<Humanoid*>(static_cast<ccNode*>(node));
         const s32 reach = hum->collBboxMin.x + radius;
 
-        if (AbsDiffS32(nextPos.x, hum->pos.x) > reach) {
+        if (PsxAbsDiffS32(nextPos.x, hum->pos.x) > reach) {
             continue;
         }
-        if (AbsDiffS32(nextPos.z, hum->pos.z) > reach) {
+        if (PsxAbsDiffS32(nextPos.z, hum->pos.z) > reach) {
             continue;
         }
 
@@ -1605,7 +1598,7 @@ void Platform::SetPlatformToPathNode(const char* name) {
     const s32 normX = rmDiv16i(dir.x, magXZ);
     const s32 normZ = rmDiv16i(dir.z, magXZ);
 
-    const s32 pitchSignal = PathPitchFromNormY(normY);
+    const s32 pitchSignal = PsxAsin16FromFix16Clamped(normY);
     const s32 yawSignal = PathYawFromNormXZ(normX, normZ);
 
     const s32 oldRotY = orientation.y;

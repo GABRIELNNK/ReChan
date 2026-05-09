@@ -1,0 +1,307 @@
+#include "gen/savegame.h"
+
+#include "gen/ccfile.h"
+#include "gen/game.h"
+#include "gen/world.h"
+#include "gen/scoremgr.h"
+#include "ai/player.h"
+#include <filesystem>
+#include <ctime>
+#include <cstdio>
+#include <cstring>
+
+static constexpr u32 kSaveMagic = 0x53415645u;    // SAVE
+static constexpr u32 kSaveVersion = 1;
+static constexpr const char* kSaveDir = "userfiles";
+static constexpr const char* kSavePathFmt = "userfiles/CHANsf%d.sav";
+
+struct SaveGameBlob {
+    u32 magic = kSaveMagic;
+    u32 version = kSaveVersion;
+    s64 savedUnixTime = 0;
+    u32 levelIndex = 0;
+    u32 petalIndex = 0;
+    s32 livesLeft = Player::kMaxLives;
+    PetalStats petalStats[21] = {};
+    s32 drunkenMasterUnlocked = 0;
+    s32 currentFightScore = 0;
+    s32 currentComboScore = 0;
+    s32 currentStyleScore = 0;
+    u8 currentGrade = 0;
+    u8 currentCollectCount = 0;
+    u8 currentGoldDragons = 0;
+    u8 reserved = 0;
+};
+
+static bool s_pendingLoadActive = false;
+static u32 s_pendingLevelIndex = 0;
+static u32 s_pendingPetalIndex = 0;
+static bool s_pendingLivesActive = false;
+static s32 s_pendingLivesLeft = Player::kMaxLives;
+
+static s32 ClampLivesForLoad(s32 lives) {
+    if (lives < 1) {
+        return 1;
+    }
+    if (lives > Player::kMaxLives) {
+        return Player::kMaxLives;
+    }
+    return lives;
+}
+
+static bool BuildSlotPath(s32 slotIndex, char* outPath, s32 outPathLen) {
+    if (!outPath || outPathLen <= 0) {
+        return false;
+    }
+
+    if (slotIndex < 0 || slotIndex >= SAVEGAME_SLOT_COUNT) {
+        return false;
+    }
+
+    snprintf(outPath, outPathLen, kSavePathFmt, slotIndex + 1);
+    return true;
+}
+
+static void EnsureSaveDirectoryExists() {
+    std::error_code ec;
+    std::filesystem::create_directories(kSaveDir, ec);
+}
+
+static bool ReadSlotBlob(s32 slotIndex, SaveGameBlob* outBlob) {
+    if (!outBlob) {
+        return false;
+    }
+
+    char path[64] = {};
+    if (!BuildSlotPath(slotIndex, path, (s32)sizeof(path))) {
+        return false;
+    }
+
+    ccFile file;
+    if (!file.Open(path, ccFile::OPEN_READ)) {
+        return false;
+    }
+
+    if (file.GetLength() < (s32)sizeof(SaveGameBlob)) {
+        file.Close();
+        return false;
+    }
+
+    SaveGameBlob blob = {};
+    const s32 bytesRead = file.Read(&blob, (u32)sizeof(SaveGameBlob));
+    file.Close();
+
+    if (bytesRead != (s32)sizeof(SaveGameBlob)) {
+        return false;
+    }
+
+    if (blob.magic != kSaveMagic || blob.version != kSaveVersion) {
+        return false;
+    }
+
+    *outBlob = blob;
+    return true;
+}
+
+static bool WriteSlotBlob(s32 slotIndex, const SaveGameBlob& blobIn) {
+    char path[64] = {};
+    if (!BuildSlotPath(slotIndex, path, (s32)sizeof(path))) {
+        return false;
+    }
+
+    EnsureSaveDirectoryExists();
+
+    ccFile file;
+    if (!file.Open(path, ccFile::OPEN_WRITE)) {
+        return false;
+    }
+
+    SaveGameBlob blob = blobIn;
+    const s32 bytesWritten = file.Write(&blob, (u32)sizeof(SaveGameBlob));
+    file.Close();
+    return bytesWritten == (s32)sizeof(SaveGameBlob);
+}
+
+static void FormatSaveDate(s64 unixTime, char* outText, s32 outTextLen) {
+    if (!outText || outTextLen <= 0) {
+        return;
+    }
+
+    outText[0] = '\0';
+    if (unixTime <= 0) {
+        return;
+    }
+
+    const time_t t = (time_t)unixTime;
+    tm localTm = {};
+#if defined(_WIN32)
+    if (localtime_s(&localTm, &t) != 0) {
+        return;
+    }
+#else
+    if (!localtime_r(&t, &localTm)) {
+        return;
+    }
+#endif
+
+    strftime(outText, (size_t)outTextLen, "%Y-%m-%d %H:%M", &localTm);
+}
+
+static bool BuildRuntimeBlob(SaveGameBlob* outBlob) {
+    if (!outBlob || !g_game || !g_scoreManager) {
+        return false;
+    }
+
+    World* world = g_game->GetWorld();
+    if (!world) {
+        return false;
+    }
+
+    SaveGameBlob blob = {};
+    blob.magic = kSaveMagic;
+    blob.version = kSaveVersion;
+    blob.savedUnixTime = (s64)std::time(nullptr);
+
+    u32 levelIndex = world->GetCurrentLevelIndex();
+    u32 petalIndex = world->GetCurrentPetalIndex();
+    if (levelIndex == 0xFFFFFFFFu) {
+        levelIndex = world->GetTargetLevelIndex();
+        petalIndex = world->GetTargetPetalIndex();
+    }
+
+    blob.levelIndex = levelIndex;
+    blob.petalIndex = petalIndex;
+
+    const s32 lives = Player::s_player ? Player::s_player->GetLivesLeft() : Player::kMaxLives;
+    blob.livesLeft = lives;
+
+    memcpy(blob.petalStats, g_scoreManager->petalStats, sizeof(blob.petalStats));
+    blob.drunkenMasterUnlocked = g_scoreManager->drunkenMasterUnlocked;
+    blob.currentFightScore = g_scoreManager->currentFightScore;
+    blob.currentComboScore = g_scoreManager->currentComboScore;
+    blob.currentStyleScore = g_scoreManager->currentStyleScore;
+    blob.currentGrade = g_scoreManager->currentGrade;
+    blob.currentCollectCount = g_scoreManager->currentCollectCount;
+    blob.currentGoldDragons = g_scoreManager->currentGoldDragons;
+
+    *outBlob = blob;
+    return true;
+}
+
+static void ApplyLoadedScoreState(const SaveGameBlob& blob) {
+    if (!g_scoreManager) {
+        return;
+    }
+
+    memcpy(g_scoreManager->petalStats, blob.petalStats, sizeof(blob.petalStats));
+    g_scoreManager->drunkenMasterUnlocked = blob.drunkenMasterUnlocked;
+    g_scoreManager->currentFightScore = blob.currentFightScore;
+    g_scoreManager->currentComboScore = blob.currentComboScore;
+    g_scoreManager->currentStyleScore = blob.currentStyleScore;
+    g_scoreManager->currentGrade = blob.currentGrade;
+    g_scoreManager->currentCollectCount = blob.currentCollectCount;
+    g_scoreManager->currentGoldDragons = blob.currentGoldDragons;
+
+    g_scoreManager->checkpointFightScore = g_scoreManager->currentFightScore;
+    g_scoreManager->checkpointComboScore = g_scoreManager->currentComboScore;
+    g_scoreManager->checkpointStyleScore = g_scoreManager->currentStyleScore;
+
+    g_scoreManager->checkpointGradeCollect = 0;
+    u8* packed = reinterpret_cast<u8*>(&g_scoreManager->checkpointGradeCollect);
+    packed[0] = g_scoreManager->currentGrade;
+    packed[1] = g_scoreManager->currentCollectCount;
+    packed[2] = g_scoreManager->currentGoldDragons;
+}
+
+bool SaveGameQuerySlotInfo(s32 slotIndex, SaveGameSlotInfo* outInfo) {
+    if (!outInfo) {
+        return false;
+    }
+
+    outInfo->occupied = false;
+    outInfo->dateText[0] = '\0';
+
+    SaveGameBlob blob = {};
+    if (!ReadSlotBlob(slotIndex, &blob)) {
+        return false;
+    }
+
+    outInfo->occupied = true;
+    FormatSaveDate(blob.savedUnixTime, outInfo->dateText, (s32)sizeof(outInfo->dateText));
+    return true;
+}
+
+bool SaveGameWriteSlot(s32 slotIndex) {
+    SaveGameBlob blob = {};
+    if (!BuildRuntimeBlob(&blob)) {
+        return false;
+    }
+
+    return WriteSlotBlob(slotIndex, blob);
+}
+
+bool SaveGameDeleteSlot(s32 slotIndex) {
+    char path[64] = {};
+    if (!BuildSlotPath(slotIndex, path, (s32)sizeof(path))) {
+        return false;
+    }
+
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+    return !ec;
+}
+
+bool SaveGameLoadSlot(s32 slotIndex) {
+    SaveGameBlob blob = {};
+    if (!ReadSlotBlob(slotIndex, &blob)) {
+        return false;
+    }
+
+    ApplyLoadedScoreState(blob);
+
+    s_pendingLevelIndex = blob.levelIndex;
+    s_pendingPetalIndex = blob.petalIndex;
+    s_pendingLivesLeft = ClampLivesForLoad(blob.livesLeft);
+    s_pendingLoadActive = true;
+    s_pendingLivesActive = true;
+
+    if (Player::s_player) {
+        Player::s_player->SetLivesLeft(s_pendingLivesLeft);
+    }
+
+    return true;
+}
+
+bool SaveGameHasPendingLoad() {
+    return s_pendingLoadActive;
+}
+
+bool SaveGameApplyPendingLoad(Game* game) {
+    if (!s_pendingLoadActive || !game) {
+        return false;
+    }
+
+    World* world = game->GetWorld();
+    if (!world) {
+        return false;
+    }
+
+    world->SetTargetLevelPetal(s_pendingLevelIndex, s_pendingPetalIndex);
+    world->ResetLevel();
+    s_pendingLoadActive = false;
+
+    if (Player::s_player) {
+        Player::s_player->SetLivesLeft(s_pendingLivesLeft);
+    }
+
+    return true;
+}
+
+void SaveGameApplyPendingLives() {
+    if (!s_pendingLivesActive || !Player::s_player) {
+        return;
+    }
+
+    Player::s_player->SetLivesLeft(ClampLivesForLoad(s_pendingLivesLeft));
+    s_pendingLivesActive = false;
+}

@@ -8,23 +8,31 @@
 #include "gen/database.h"
 #include "gen/display.h"
 #include "gen/director.h"
+#include "gen/envmgr.h"
 #include "gen/game.h"
 #include "gen/blockmgr.h"
 #include "gen/geometry.h"
+#include "gen/effects.h"
 #include "gen/geffect.h"
 #include "gen/levelmgr.h"
 #include "gen/model.h"
 #include "gen/mplayer.h"
+#include "gen/paldata.h"
+#include "gen/scaledata.h"
 #include "gen/switch.h"
 #include "gen/skeleton.h"
 #include "gen/animmgr.h"
+#include "gen/particle.h"
+#include "gen/pweffect.h"
 #include "gen/scoremgr.h"
+#include "gen/weffect.h"
 #include "snd/rsevent.h"
 #include "snd/snddrct.h"
 #include "fe/hdmenu.h"
 #include "fe/hud.h"
 #include "fe/loadanim.h"
 #include "p3d/hash.h"
+#include "p3d/byteread.h"
 #include "p3d/p3dmath.h"
 #include "p3d/context.h"
 #include "p3d/stream.h"
@@ -47,8 +55,11 @@ static void UploadRawTextureToWorldVRAM(s16 x, s16 y, s16 w, s16 h, const u8* ra
 
 #include <fstream>
 #include <filesystem>
+#include <algorithm>
 #include <cstring>
+#include <cstdlib>
 #include <unordered_map>
+#include <vector>
 
 // Global block manager pointer (PSX: gp scope, set by World)
 BlockManager* g_blockManager = nullptr;
@@ -63,6 +74,14 @@ u8 g_arrowInside = 0;
 // DynamicThing physics globals (PSX: gp+1740, gp+1744)
 s32 g_maxFallSpeed = 0x4000;
 s32 g_dampingFactor = 0xCCCC;
+
+// PSX: BLOCK_DRAW_SEAM_OFFSET_CODE (0x800DC9A8)
+// Layout in PSX data: { code, differenceFactor, max, reserved }
+// Defaults: { 1, 0x400, 0x10, 0 }
+static s32 BLOCK_DRAW_SEAM_OFFSET_CODE[4] = { 1, 0x400, 0x10, 0 };
+
+static u32 g_wEffectChunkCount = 0;
+static u32 g_particleSystemChunkCount = 0;
 
 // PSX BGR555 to RGBA8
 static void PsxToRGBA(u16 c, u8& r, u8& g, u8& b, u8& a) {
@@ -136,170 +155,853 @@ void PsxVRAM::DecodePage(u16 tpage, u16 cba, u8* out) const {
     }
 }
 
-static u16 ReadU16(const u8* p) { return static_cast<u16>(p[0] | (p[1] << 8)); }
-static u32 ReadU32(const u8* p) { return p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24); }
-static s16 ReadS16(const u8* p) { return static_cast<s16>(p[0] | (p[1] << 8)); }
-static s32 ReadS32(const u8* p) { return static_cast<s32>(p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24)); }
+static void LoadWEffectChunkStub(const u8* body, u32 bodySize) {
+    g_wEffectChunkCount++;
 
-static bool IsValidTransformKeyType(u32 keyType) {
-    switch (keyType) {
-        case KEY_JOINT_1DOF_ANGLE:
-        case KEY_JOINT_3DOF_ANGLE:
-        case KEY_JOINT_3DOF_LP_PSX:
-        case KEY_STATIC_3DOF_ANGLE:
-        case KEY_STATIC_3DOF_POS:
-            return true;
-        default:
-            return false;
+    WEffect_LoadChunk(body, bodySize);
+}
+
+static void LoadParticleSystemChunk(const u8* body, u32 bodySize) {
+    g_particleSystemChunkCount++;
+
+    if (!ParticleSystem_LoadChunk(body, bodySize)) {
+        LOG("[World] Failed loading ParticleSystem chunk 0x8A30 (entry=%u, size=%u)",
+            g_particleSystemChunkCount,
+            bodySize);
     }
 }
 
-static bool IsLikelyTransformAnimHeader(const u8* data, u32 dataSize, u32 offset) {
-    if (!data || offset + 40 > dataSize) {
+static bool ReadChunkPStringHash(const u8* body, u32 bodySize, u32& cursor, u32* outHash) {
+    if (!body || cursor >= bodySize) {
         return false;
     }
 
-    const u8* h = data + offset;
-    const u32 nameUID = ReadU32(h + 0);
-    const u32 vtableOff = ReadU32(h + 8);
-    const u32 numFrames = ReadU32(h + 12);
-    const u32 numRot = ReadU32(h + 24);
-    const u32 numTrans = ReadU32(h + 28);
-    const u32 rotArrayOff = ReadU32(h + 32) * 4;
-    const u32 transArrayOff = ReadU32(h + 36) * 4;
-    const u32 remaining = dataSize - offset;
-
-    if (nameUID == 0) {
-        return false;
-    }
-    if (vtableOff != 0) {
-        return false;
-    }
-    if (numFrames == 0 || numFrames > 1024) {
-        return false;
-    }
-    if ((numRot + numTrans) == 0 || numRot > 256 || numTrans > 256) {
-        return false;
-    }
-    if (rotArrayOff < 40 || transArrayOff < 40) {
-        return false;
-    }
-    if ((rotArrayOff & 3) != 0 || (transArrayOff & 3) != 0) {
-        return false;
-    }
-    if (rotArrayOff + (numRot * 4) > remaining) {
-        return false;
-    }
-    if (transArrayOff + (numTrans * 4) > remaining) {
+    const u8 nameLen = body[cursor++];
+    if (cursor + nameLen > bodySize) {
         return false;
     }
 
+    if (outHash) {
+        char nameBuf[256];
+        const u32 copyLen = (nameLen < 255) ? nameLen : 255;
+        std::memcpy(nameBuf, body + cursor, copyLen);
+        nameBuf[copyLen] = '\0';
+        *outHash = p3dHash(nameBuf);
+    }
+
+    cursor += nameLen;
     return true;
 }
 
-static bool IsLikelyTransformAnim(const TransformAnim* anim) {
+static FrameListAnim* ParseFrameListAnimRaw(const u8* rawData, u32 rawSize) {
+    if (!rawData || rawSize < 24) {
+        return nullptr;
+    }
+
+    FrameListAnim* frameList = new FrameListAnim();
+    frameList->nameUID = p3dReadU32LE(rawData + 0);
+    frameList->numFrames = static_cast<s32>(p3dReadU32LE(rawData + 12));
+    frameList->targetUID = p3dReadU32LE(rawData + 20);
+    frameList->rawSize = rawSize;
+
+    if (frameList->numFrames <= 0 || frameList->numFrames > 4096) {
+        delete frameList;
+        return nullptr;
+    }
+
+    const u32 frameArrayOff = p3dReadU32LE(rawData + 16) * 4u;
+    if (frameArrayOff + static_cast<u32>(frameList->numFrames) * 4u > rawSize) {
+        delete frameList;
+        return nullptr;
+    }
+
+    frameList->rawData = static_cast<u8*>(std::malloc(rawSize));
+    if (!frameList->rawData) {
+        delete frameList;
+        return nullptr;
+    }
+    std::memcpy(frameList->rawData, rawData, rawSize);
+
+    frameList->frameOffsets = new u32[frameList->numFrames];
+    for (s32 i = 0; i < frameList->numFrames; i++) {
+        const u32 frameOff = p3dReadU32LE(frameList->rawData + frameArrayOff + i * 4u) * 4u;
+        if (frameOff >= rawSize) {
+            delete frameList;
+            return nullptr;
+        }
+        frameList->frameOffsets[i] = frameOff;
+    }
+
+    return frameList;
+}
+
+static SequenceAnim* ParseSequenceAnimRaw(const u8* rawData, u32 rawSize) {
+    if (!rawData || rawSize < 20) {
+        return nullptr;
+    }
+
+    SequenceAnim* sequence = new SequenceAnim();
+    sequence->nameUID = p3dReadU32LE(rawData + 0);
+    const u32 packedFrames = p3dReadU32LE(rawData + 12);
+    sequence->numFrames = static_cast<s32>(packedFrames);
+
+    const u32 numParts = (packedFrames >> 8) + 1u;
+
+    if (16u + numParts * 4u > rawSize) {
+        delete sequence;
+        return nullptr;
+    }
+
+    sequence->numParts = numParts;
+    sequence->parts = new SequenceAnimPart[numParts]();
+    for (u32 i = 0; i < numParts; i++) {
+        sequence->parts[i].animHash = p3dReadU32LE(rawData + 16u + i * 4u);
+    }
+
+    return sequence;
+}
+
+static CompositeAnimData* ParseCompositeAnimChunkBody(const u8* body, u32 bodySize) {
+    if (!body || bodySize < 5) {
+        return nullptr;
+    }
+
+    u32 cursor = 0;
+    u32 nameHash = 0;
+    if (!ReadChunkPStringHash(body, bodySize, cursor, &nameHash) || cursor + 4 > bodySize) {
+        return nullptr;
+    }
+
+    CompositeAnimData* composite = new CompositeAnimData();
+    composite->nameUID = nameHash;
+    composite->field12 = p3dReadU16LE(body + cursor);
+    cursor += 2;
+    composite->numParts = p3dReadU16LE(body + cursor);
+    cursor += 2;
+
+    if (composite->numParts > 0) {
+        composite->parts = new CompositeAnimPartData[composite->numParts]();
+    }
+
+    for (u32 partIndex = 0; partIndex < composite->numParts; partIndex++) {
+        CompositeAnimPartData& part = composite->parts[partIndex];
+        if (!ReadChunkPStringHash(body, bodySize, cursor, &part.animNameUID) || cursor + 4 > bodySize) {
+            delete composite;
+            return nullptr;
+        }
+
+        part.field0 = p3dReadU16LE(body + cursor);
+        cursor += 2;
+        part.field1 = p3dReadU16LE(body + cursor);
+        cursor += 2;
+    }
+
+    return composite;
+}
+
+static bool ShouldKeepParamChannel(s32 animType, s32 paramID) {
+    if (animType == 257) {
+        return paramID == 257 || (paramID >= 273 && paramID < 275);
+    }
+
+    if (animType >= 258) {
+        return animType == 768 || animType < 0;
+    }
+
+    if (animType > 0 && animType < 3) {
+        switch (paramID) {
+            case 1:
+            case 2:
+            case 17:
+            case 18:
+            case 33:
+            case 34:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    return animType < 0;
+}
+
+static ParamAnimData* ParseParamAnimChunkBody(const u8* body, u32 bodySize) {
+    if (!body || bodySize < 18) {
+        return nullptr;
+    }
+
+    u32 cursor = 0;
+    u32 nameHash = 0;
+    if (!ReadChunkPStringHash(body, bodySize, cursor, &nameHash) || cursor + 16 > bodySize) {
+        return nullptr;
+    }
+
+    cursor += 4; // unknown/load flags field
+    const s32 animType = p3dReadS32LE(body + cursor);
+    cursor += 4;
+
+    // target name string is stored but not required for CBV multiplier eval.
+    if (!ReadChunkPStringHash(body, bodySize, cursor, nullptr) || cursor + 8 > bodySize) {
+        return nullptr;
+    }
+
+    s32 numFrames = p3dReadS32LE(body + cursor);
+    cursor += 4;
+    cursor += 4; // expected param count
+
+    std::vector<u8> keyTimes;
+    std::vector<s32> keyValues;
+
+    while (cursor + 6 <= bodySize) {
+        const u16 subChunkId = p3dReadU16LE(body + cursor);
+        const u32 subChunkSize = p3dReadU32LE(body + cursor + 2);
+        if (subChunkSize < 6 || cursor + subChunkSize > bodySize) {
+            break;
+        }
+
+        if (subChunkId == 0x4301) {
+            const u8* paramBody = body + cursor + 6;
+            const u32 paramBodySize = subChunkSize - 6;
+            u32 paramCursor = 0;
+
+            if (!ReadChunkPStringHash(paramBody, paramBodySize, paramCursor, nullptr) || paramCursor + 8 > paramBodySize) {
+                cursor += subChunkSize;
+                continue;
+            }
+
+            paramCursor += 4; // unknown
+            const s32 paramID = p3dReadS32LE(paramBody + paramCursor);
+            paramCursor += 4;
+
+            if (!ShouldKeepParamChannel(animType, paramID)) {
+                cursor += subChunkSize;
+                continue;
+            }
+
+            std::vector<u8> candidateTimes;
+            std::vector<s32> candidateValues;
+
+            while (paramCursor + 6 <= paramBodySize) {
+                const u16 valueChunkId = p3dReadU16LE(paramBody + paramCursor);
+                const u32 valueChunkSize = p3dReadU32LE(paramBody + paramCursor + 2);
+                if (valueChunkSize < 6 || paramCursor + valueChunkSize > paramBodySize) {
+                    break;
+                }
+
+                const u8* valueBody = paramBody + paramCursor + 6;
+                const u32 valueBodySize = valueChunkSize - 6;
+
+                if (valueChunkId == 0x4203 && valueBodySize >= 4) {
+                    const u32 count = p3dReadU32LE(valueBody + 0);
+                    if (count > 0 && 4u + count * 2u <= valueBodySize) {
+                        candidateTimes.resize(count);
+                        for (u32 i = 0; i < count; i++) {
+                            candidateTimes[i] = static_cast<u8>(p3dReadU16LE(valueBody + 4 + i * 2u));
+                        }
+                    }
+                }
+                else if ((valueChunkId == 0x4210 || valueChunkId == 0x4283) && valueBodySize >= 8) {
+                    const u32 count = p3dReadU32LE(valueBody + 0);
+                    if (count > 0 && 8u + count * 4u <= valueBodySize) {
+                        candidateValues.resize(count);
+                        for (u32 i = 0; i < count; i++) {
+                            candidateValues[i] = p3dReadS32LE(valueBody + 8 + i * 4u);
+                        }
+                    }
+                }
+                else if (valueChunkId == 0x4213 && valueBodySize >= 8) {
+                    const u32 count = p3dReadU32LE(valueBody + 0);
+                    if (count > 0 && 8u + count * 2u <= valueBodySize) {
+                        candidateValues.resize(count);
+                        for (u32 i = 0; i < count; i++) {
+                            candidateValues[i] = static_cast<s32>(p3dReadU16LE(valueBody + 8 + i * 2u));
+                        }
+                    }
+                }
+
+                paramCursor += valueChunkSize;
+            }
+
+            const u32 keyCount = static_cast<u32>(std::min(candidateTimes.size(), candidateValues.size()));
+            if (keyCount > 0) {
+                keyTimes = candidateTimes;
+                keyValues = candidateValues;
+                keyTimes.resize(keyCount);
+                keyValues.resize(keyCount);
+                break;
+            }
+        }
+
+        cursor += subChunkSize;
+    }
+
+    if (keyTimes.empty() || keyValues.empty()) {
+        return nullptr;
+    }
+
+    ParamAnimData* paramAnim = new ParamAnimData();
+    paramAnim->nameUID = nameHash;
+    paramAnim->animType = animType;
+    paramAnim->numFrames = numFrames;
+    paramAnim->keyCount = static_cast<u32>(keyTimes.size());
+    paramAnim->keyTimes = new u8[paramAnim->keyCount];
+    paramAnim->keyValues = new s32[paramAnim->keyCount];
+    for (u32 i = 0; i < paramAnim->keyCount; i++) {
+        paramAnim->keyTimes[i] = keyTimes[i];
+        paramAnim->keyValues[i] = keyValues[i];
+    }
+
+    if (paramAnim->numFrames <= 0 && paramAnim->keyCount > 0) {
+        paramAnim->numFrames = static_cast<s32>(paramAnim->keyTimes[paramAnim->keyCount - 1]) + 1;
+    }
+
+    return paramAnim;
+}
+
+static bool RegisterParamAnimChunk(const u8* chunkBody, u32 chunkBodySize, u8 animType) {
+    if (!chunkBody || chunkBodySize < 18) {
+        return true;
+    }
+
+    ParamAnimData* paramAnim = ParseParamAnimChunkBody(chunkBody, chunkBodySize);
+    if (!paramAnim) {
+        return true;
+    }
+
+    if (!g_animMgr || paramAnim->nameUID == 0) {
+        delete paramAnim;
+        return true;
+    }
+
+    if (g_animMgr->GetMiscAnim(paramAnim->nameUID)) {
+        delete paramAnim;
+        return true;
+    }
+
+    MiscAnimNode* node = new MiscAnimNode();
+    node->hash = paramAnim->nameUID;
+    node->type = animType;
+    node->paramAnim = paramAnim;
+    g_animMgr->AddAnim(node);
+    return true;
+}
+
+static CBVParamAnimData* ParseCBVParamAnimChunkBody(const u8* body, u32 bodySize) {
+    if (!body || bodySize < 20) {
+        return nullptr;
+    }
+
+    u32 cursor = 0;
+    u32 nameHash = 0;
+    u32 targetHash = 0;
+    u32 blendHash = 0;
+    if (!ReadChunkPStringHash(body, bodySize, cursor, &nameHash)
+        || !ReadChunkPStringHash(body, bodySize, cursor, &targetHash)
+        || !ReadChunkPStringHash(body, bodySize, cursor, &blendHash)
+        || cursor + 8 > bodySize) {
+        return nullptr;
+    }
+
+    // PSX tCBVParamAnimLoader reads two longs after the three pstrings and
+    // uses the second one as mode (first is an unused/reserved field).
+    cursor += 4; // reserved/unused
+    const s32 mode = p3dReadS32LE(body + cursor);
+    cursor += 4;
+
+    u32 valueRows = 0;
+    u32 valueCols = 0;
+    std::vector<u32> values;
+    std::vector<u32> offsets;
+
+    while (cursor + 6 <= bodySize) {
+        const u16 subChunkId = p3dReadU16LE(body + cursor);
+        const u32 subChunkSize = p3dReadU32LE(body + cursor + 2);
+        if (subChunkSize < 6 || cursor + subChunkSize > bodySize) {
+            break;
+        }
+
+        const u8* subBody = body + cursor + 6;
+        const u32 subBodySize = subChunkSize - 6;
+
+        if (subChunkId == 0x6022 && subBodySize >= 8) {
+            const u32 rows = p3dReadU32LE(subBody + 0);
+            const u32 cols = p3dReadU32LE(subBody + 4);
+            if (rows > 0 && cols > 0 && rows <= (0xFFFFFFFFu / cols)) {
+                const u32 valueCount = rows * cols;
+                if (8u + valueCount * 4u > subBodySize) {
+                    cursor += subChunkSize;
+                    continue;
+                }
+
+                valueRows = rows;
+                valueCols = cols;
+                values.resize(valueCount);
+                for (u32 i = 0; i < valueCount; i++) {
+                    values[i] = p3dReadU32LE(subBody + 8 + i * 4u);
+                }
+            }
+        }
+        else if (subChunkId == 0x6023 && subBodySize >= 4) {
+            const u32 count = p3dReadU32LE(subBody + 0);
+            if (count > 0 && 4u + count * 4u <= subBodySize) {
+                offsets.resize(count);
+                for (u32 i = 0; i < count; i++) {
+                    offsets[i] = p3dReadU32LE(subBody + 4 + i * 4u);
+                }
+            }
+        }
+
+        cursor += subChunkSize;
+    }
+
+    if (nameHash == 0 || values.empty() || offsets.empty() || valueCols == 0) {
+        return nullptr;
+    }
+
+    CBVParamAnimData* cbvParamAnim = new CBVParamAnimData();
+    cbvParamAnim->nameUID = nameHash;
+    cbvParamAnim->targetUID = targetHash;
+    cbvParamAnim->blendAnimUID = blendHash;
+    cbvParamAnim->mode = mode;
+    cbvParamAnim->valueRows = valueRows;
+    cbvParamAnim->valueCols = valueCols;
+    cbvParamAnim->numEntries = static_cast<u32>(offsets.size());
+
+    cbvParamAnim->values = new u32[values.size()];
+    for (u32 i = 0; i < values.size(); i++) {
+        cbvParamAnim->values[i] = values[i];
+    }
+
+    cbvParamAnim->primOffsets = new u32[offsets.size()];
+    for (u32 i = 0; i < offsets.size(); i++) {
+        cbvParamAnim->primOffsets[i] = offsets[i];
+    }
+
+    return cbvParamAnim;
+}
+
+static bool RegisterCBVParamAnimChunk(const u8* chunkBody, u32 chunkBodySize, u8 animType) {
+    if (!chunkBody || chunkBodySize < 20) {
+        return true;
+    }
+
+    CBVParamAnimData* cbvParamAnim = ParseCBVParamAnimChunkBody(chunkBody, chunkBodySize);
+    if (!cbvParamAnim) {
+        return true;
+    }
+
+    if (!g_animMgr || cbvParamAnim->nameUID == 0 || cbvParamAnim->numEntries == 0) {
+        delete cbvParamAnim;
+        return true;
+    }
+
+    if (g_animMgr->GetMiscAnim(cbvParamAnim->nameUID)) {
+        delete cbvParamAnim;
+        return true;
+    }
+
+    MiscAnimNode* node = new MiscAnimNode();
+    node->hash = cbvParamAnim->nameUID;
+    node->type = animType;
+    node->cbvParamAnim = cbvParamAnim;
+    g_animMgr->AddAnim(node);
+    return true;
+}
+
+static ClutAnimData* ParseClutAnimChunkBody(const u8* body, u32 bodySize) {
+    if (!body || bodySize < 5) {
+        return nullptr;
+    }
+
+    u32 cursor = 0;
+    u32 nameHash = 0;
+    u32 materialHash = 0;
+    u32 primHash = 0;
+    if (!ReadChunkPStringHash(body, bodySize, cursor, &nameHash)
+        || !ReadChunkPStringHash(body, bodySize, cursor, &materialHash)
+        || !ReadChunkPStringHash(body, bodySize, cursor, &primHash)
+        || cursor + 2 > bodySize) {
+        return nullptr;
+    }
+
+    const u16 mode = p3dReadU16LE(body + cursor);
+    cursor += 2;
+
+    std::vector<u16> frames;
+    std::vector<u16> offsets;
+
+    while (cursor + 6 <= bodySize) {
+        const u16 subChunkId = p3dReadU16LE(body + cursor);
+        const u32 subChunkSize = p3dReadU32LE(body + cursor + 2);
+        if (subChunkSize < 6 || cursor + subChunkSize > bodySize) {
+            break;
+        }
+
+        const u8* subBody = body + cursor + 6;
+        const u32 subBodySize = subChunkSize - 6;
+
+        if ((subChunkId == 0x600C || subChunkId == 0x600D) && subBodySize >= 2) {
+            const u32 count = p3dReadU16LE(subBody + 0);
+            if (count > 0 && 2u + count * 2u <= subBodySize) {
+                std::vector<u16>& out = (subChunkId == 0x600C) ? frames : offsets;
+                out.resize(count);
+                for (u32 i = 0; i < count; i++) {
+                    out[i] = p3dReadU16LE(subBody + 2u + i * 2u);
+                }
+            }
+        }
+
+        cursor += subChunkSize;
+    }
+
+    if (nameHash == 0 || frames.empty()) {
+        return nullptr;
+    }
+
+    ClutAnimData* clutAnim = new ClutAnimData();
+    clutAnim->nameUID = nameHash;
+    clutAnim->materialUID = materialHash;
+    clutAnim->primUID = primHash;
+    clutAnim->mode = mode;
+    clutAnim->numFrames = static_cast<s32>(frames.size());
+    clutAnim->frames = new u16[frames.size()];
+    for (u32 i = 0; i < frames.size(); i++) {
+        clutAnim->frames[i] = frames[i];
+    }
+
+    if (!offsets.empty()) {
+        clutAnim->numOffsets = static_cast<s32>(offsets.size());
+        clutAnim->offsets = new u16[offsets.size()];
+        for (u32 i = 0; i < offsets.size(); i++) {
+            clutAnim->offsets[i] = offsets[i];
+        }
+    }
+
+    return clutAnim;
+}
+
+static bool RegisterClutAnimChunk(const u8* chunkBody, u32 chunkBodySize, u8 animType) {
+    if (!chunkBody || chunkBodySize < 5) {
+        return true;
+    }
+
+    ClutAnimData* clutAnim = ParseClutAnimChunkBody(chunkBody, chunkBodySize);
+    if (!clutAnim) {
+        return true;
+    }
+
+    if (!g_animMgr || clutAnim->nameUID == 0) {
+        delete clutAnim;
+        return true;
+    }
+
+    if (g_animMgr->GetMiscAnim(clutAnim->nameUID)) {
+        delete clutAnim;
+        return true;
+    }
+
+    MiscAnimNode* node = new MiscAnimNode();
+    node->hash = clutAnim->nameUID;
+    node->type = animType;
+    node->clutAnim = clutAnim;
+    g_animMgr->AddAnim(node);
+    return true;
+}
+
+static bool RegisterTransformAnimChunk(const u8* chunkBody,
+                                       u32 chunkBodySize,
+                                       const u8* permData,
+                                       u32& permCursor,
+                                       u32 permSize,
+                                       u8 animType)
+{
+    if (!chunkBody || chunkBodySize < 5 || !permData) {
+        return true;
+    }
+
+    u32 cursor = 0;
+    u32 chunkNameHash = 0;
+    if (!ReadChunkPStringHash(chunkBody, chunkBodySize, cursor, &chunkNameHash) || cursor + 4 > chunkBodySize) {
+        LOG("[World] Malformed transform anim chunk (0x6400)");
+        return false;
+    }
+
+    const u32 rawSize = p3dReadU32LE(chunkBody + cursor);
+    if (permCursor + rawSize > permSize) {
+        LOG("[World] Transform anim perm overflow at %u (size=%u total=%u)", permCursor, rawSize, permSize);
+        return false;
+    }
+
+    TransformAnim* anim = nullptr;
+    if (rawSize >= 40) {
+        u8* rawCopy = static_cast<u8*>(std::malloc(rawSize));
+        if (rawCopy) {
+            std::memcpy(rawCopy, permData + permCursor, rawSize);
+            anim = TransformAnim::Parse(rawCopy, rawSize);
+            if (anim) {
+                anim->ownedRawData = rawCopy;
+                if (chunkNameHash != 0) {
+                    anim->nameUID = chunkNameHash;
+                }
+            }
+            else {
+                std::free(rawCopy);
+            }
+        }
+    }
+
+    permCursor += rawSize;
+
     if (!anim) {
-        return false;
-    }
-    if (anim->nameUID == 0 || anim->numFrames <= 0 || anim->numFrames > 1024) {
-        return false;
-    }
-    if (anim->numRotChannels < 0 || anim->numRotChannels > 256) {
-        return false;
-    }
-    if (anim->numTransChannels < 0 || anim->numTransChannels > 256) {
-        return false;
-    }
-    if ((anim->numRotChannels + anim->numTransChannels) == 0) {
-        return false;
+        return true;
     }
 
-    // Require channel key types to look like real transform animation data.
-    for (s32 i = 0; i < anim->numRotChannels; i++) {
-        if (!anim->rotChannels || !anim->rotChannels[i].chData) {
-            return false;
-        }
-        if (!IsValidTransformKeyType(anim->rotChannels[i].keyType)) {
-            return false;
-        }
-    }
-    for (s32 i = 0; i < anim->numTransChannels; i++) {
-        if (!anim->transChannels || !anim->transChannels[i].chData) {
-            return false;
-        }
-        if (!IsValidTransformKeyType(anim->transChannels[i].keyType)) {
-            return false;
-        }
+    if (!g_animMgr) {
+        delete anim;
+        return true;
     }
 
+    if (g_animMgr->GetMiscAnim(anim->nameUID)) {
+        delete anim;
+        return true;
+    }
+
+    MiscAnimNode* node = new MiscAnimNode();
+    node->hash = anim->nameUID;
+    node->type = animType;
+    node->anim = anim;
+    g_animMgr->AddAnim(node);
     return true;
 }
 
-// PSX STREAM.CPP parity hook: HandleRCB/HandlePCB load animation entities via
-// AnimLoaderCallback/CompAnimLoaderCallback and append MiscAnimNode objects to
-// AnimationManager. This recreates the missing population pass from perm data.
-static void LoadPermMiscAnimations(const u8* permData, u32 permSize, u8 animType) {
-    if (!permData || permSize < 40 || !g_animMgr) {
+static bool RegisterFrameListAnimChunk(const u8* chunkBody,
+                                       u32 chunkBodySize,
+                                       const u8* permData,
+                                       u32& permCursor,
+                                       u32 permSize,
+                                       u8 animType)
+{
+    if (!chunkBody || chunkBodySize < 8 || !permData) {
+        return true;
+    }
+
+    u32 cursor = 0;
+    (void)p3dReadU32LE(chunkBody + cursor);
+    cursor += 4;
+    const u32 rawSize = p3dReadU32LE(chunkBody + cursor);
+    cursor += 4;
+
+    u32 chunkNameHash = 0;
+    u32 targetHash = 0;
+    ReadChunkPStringHash(chunkBody, chunkBodySize, cursor, &chunkNameHash);
+    ReadChunkPStringHash(chunkBody, chunkBodySize, cursor, &targetHash);
+
+    if (permCursor + rawSize > permSize) {
+        LOG("[World] FrameList perm overflow at %u (size=%u total=%u)", permCursor, rawSize, permSize);
+        return false;
+    }
+
+    FrameListAnim* frameList = ParseFrameListAnimRaw(permData + permCursor, rawSize);
+    permCursor += rawSize;
+
+    if (!frameList) {
+        return true;
+    }
+
+    if (!g_animMgr) {
+        delete frameList;
+        return true;
+    }
+
+    if (chunkNameHash != 0) {
+        frameList->nameUID = chunkNameHash;
+    }
+    if (targetHash != 0) {
+        frameList->targetUID = targetHash;
+    }
+
+    if (g_animMgr->GetMiscAnim(frameList->nameUID)) {
+        delete frameList;
+        return true;
+    }
+
+    MiscAnimNode* node = new MiscAnimNode();
+    node->hash = frameList->nameUID;
+    node->type = animType;
+    node->frameList = frameList;
+    g_animMgr->AddAnim(node);
+    return true;
+}
+
+static bool RegisterSequenceAnimChunk(const u8* chunkBody,
+                                      u32 chunkBodySize,
+                                      const u8* permData,
+                                      u32& permCursor,
+                                      u32 permSize,
+                                      u8 animType)
+{
+    if (!chunkBody || chunkBodySize < 4 || !permData) {
+        return true;
+    }
+
+    const u32 rawSize = p3dReadU32LE(chunkBody + 0);
+    if (permCursor + rawSize > permSize) {
+        LOG("[World] SequenceAnim perm overflow at %u (size=%u total=%u)", permCursor, rawSize, permSize);
+        return false;
+    }
+
+    SequenceAnim* sequence = ParseSequenceAnimRaw(permData + permCursor, rawSize);
+    permCursor += rawSize;
+
+    if (!sequence) {
+        return true;
+    }
+
+    if (!g_animMgr) {
+        delete sequence;
+        return true;
+    }
+
+    for (u32 i = 0; i < sequence->numParts; i++) {
+        SequenceAnimPart& part = sequence->parts[i];
+        if (part.animHash != 0) {
+            part.node = g_animMgr->GetMiscAnim(part.animHash);
+            if (part.node && part.node->anim) {
+                part.anim = part.node->anim;
+            }
+        }
+    }
+
+    if (g_animMgr->GetMiscAnim(sequence->nameUID)) {
+        delete sequence;
+        return true;
+    }
+
+    MiscAnimNode* node = new MiscAnimNode();
+    node->hash = sequence->nameUID;
+    node->type = animType;
+    node->sequenceAnim = sequence;
+    g_animMgr->AddAnim(node);
+    return true;
+}
+
+static void RegisterCompositeAnimChunk(const u8* chunkBody, u32 chunkBodySize, u8 animType) {
+    if (!chunkBody || chunkBodySize < 5 || !g_animMgr) {
         return;
     }
 
-    std::vector<u32> headerOffsets;
-    headerOffsets.reserve(64);
-
-    for (u32 off = 0; off + 40 <= permSize; off += 4) {
-        if (!IsLikelyTransformAnimHeader(permData, permSize, off)) {
-            continue;
-        }
-        headerOffsets.push_back(off);
-    }
-
-    if (headerOffsets.empty()) {
+    CompositeAnimData* composite = ParseCompositeAnimChunkBody(chunkBody, chunkBodySize);
+    if (!composite) {
         return;
     }
 
-    s32 loadedCount = 0;
-    for (u32 i = 0; i < headerOffsets.size(); i++) {
-        const u32 start = headerOffsets[i];
-        const u32 end = (i + 1 < headerOffsets.size()) ? headerOffsets[i + 1] : permSize;
-        if (end <= start || end - start < 40) {
-            continue;
-        }
-
-        const u32 rawSize = end - start;
-        u8* rawCopy = (u8*)std::malloc(rawSize);
-        if (!rawCopy) {
-            continue;
-        }
-        std::memcpy(rawCopy, permData + start, rawSize);
-
-        TransformAnim* anim = TransformAnim::Parse(rawCopy, rawSize);
-        if (!anim) {
-            std::free(rawCopy);
-            continue;
-        }
-        anim->ownedRawData = rawCopy;
-
-        if (!IsLikelyTransformAnim(anim)) {
-            delete anim;
-            continue;
-        }
-
-        if (g_animMgr->GetMiscAnim(anim->nameUID)) {
-            delete anim;
-            continue;
-        }
-
-        MiscAnimNode* node = new MiscAnimNode();
-        node->hash = anim->nameUID;
-        node->anim = anim;
-        node->type = animType;
-        g_animMgr->AddAnim(node);
-        loadedCount++;
+    if (g_animMgr->GetMiscAnim(composite->nameUID)) {
+        delete composite;
+        return;
     }
 
-    if (loadedCount > 0) {
-        LOG("[World] Loaded %d misc anims from perm stream (type=%u)", loadedCount, (u32)animType);
+    for (u32 i = 0; i < composite->numParts; i++) {
+        CompositeAnimPartData& part = composite->parts[i];
+        if (part.animNameUID != 0) {
+            part.animNode = g_animMgr->GetMiscAnim(part.animNameUID);
+        }
     }
+
+    MiscAnimNode* node = new MiscAnimNode();
+    node->hash = composite->nameUID;
+    node->type = animType;
+    node->compositeAnim = composite;
+    g_animMgr->AddAnim(node);
+}
+
+static VizAnim* ParseVizAnimChunkBody(const u8* body, u32 bodySize) {
+    if (!body || bodySize < 10) {
+        return nullptr;
+    }
+
+    u32 cursor = 0;
+    u32 nameHash = 0;
+    u32 targetHash = 0;
+    if (!ReadChunkPStringHash(body, bodySize, cursor, &nameHash)
+        || !ReadChunkPStringHash(body, bodySize, cursor, &targetHash)
+        || cursor + 4 > bodySize) {
+        return nullptr;
+    }
+
+    const s16 numFrames = p3dReadS16LE(body + cursor);
+    cursor += 2;
+    const u16 numNodes = p3dReadU16LE(body + cursor);
+    cursor += 2;
+
+    if (cursor + 6 > bodySize) {
+        return nullptr;
+    }
+
+    const u16 subChunkId = p3dReadU16LE(body + cursor);
+    cursor += 2;
+    const u32 subChunkSize = p3dReadU32LE(body + cursor);
+    cursor += 4;
+
+    if (subChunkId != 0x4021 || subChunkSize < 6) {
+        return nullptr;
+    }
+
+    const u32 subBodySize = subChunkSize - 6;
+    if (cursor + subBodySize > bodySize || numNodes == 0 || subBodySize < static_cast<u32>(numNodes) * 8u) {
+        return nullptr;
+    }
+
+    VizAnim* vizAnim = new VizAnim();
+    vizAnim->nameUID = nameHash;
+    vizAnim->targetUID = targetHash;
+    vizAnim->numFrames = (numFrames > 0) ? numFrames : 0;
+    vizAnim->numNodes = numNodes;
+
+    vizAnim->rawData = static_cast<u8*>(std::malloc(subBodySize));
+    if (!vizAnim->rawData) {
+        delete vizAnim;
+        return nullptr;
+    }
+
+    vizAnim->rawSize = subBodySize;
+    std::memcpy(vizAnim->rawData, body + cursor, subBodySize);
+
+    vizAnim->nodes = new VizAnimNodeEntry[numNodes]();
+    for (u16 nodeIndex = 0; nodeIndex < numNodes; nodeIndex++) {
+        const u32 entryOffset = static_cast<u32>(nodeIndex) * 8u;
+        const u32 geoHash = p3dReadU32LE(vizAnim->rawData + entryOffset + 0);
+        const u32 bitsOffset = p3dReadU32LE(vizAnim->rawData + entryOffset + 4);
+
+        VizAnimNodeEntry& outNode = vizAnim->nodes[nodeIndex];
+        outNode.targetHash = geoHash;
+        if (bitsOffset < vizAnim->rawSize) {
+            outNode.bitWords = reinterpret_cast<const u32*>(vizAnim->rawData + bitsOffset);
+        }
+    }
+
+    return vizAnim;
+}
+
+static void RegisterVizAnimChunk(const u8* chunkBody, u32 chunkBodySize, u8 animType) {
+    if (!chunkBody || chunkBodySize < 10 || !g_animMgr) {
+        return;
+    }
+
+    VizAnim* vizAnim = ParseVizAnimChunkBody(chunkBody, chunkBodySize);
+    if (!vizAnim) {
+        return;
+    }
+
+    if (g_animMgr->GetMiscAnim(vizAnim->nameUID)) {
+        delete vizAnim;
+        return;
+    }
+
+    MiscAnimNode* node = new MiscAnimNode();
+    node->hash = vizAnim->nameUID;
+    node->type = animType;
+    node->vizAnim = vizAnim;
+    g_animMgr->AddAnim(node);
 }
 
 static bool SwitchStringEqualsNoCase(const char* lhs, const char* rhs) {
@@ -900,20 +1602,26 @@ struct GeoMaterialInfo {
     u16 tpage = 0;
 };
 
-struct GeoVertex {
-    f32 x;
-    f32 y;
-    f32 z;
-    f32 r;
-    f32 g;
-    f32 b;
-    f32 u;
-    f32 v;
-    f32 tpage;
-    f32 cba;
-};
+static u32 GetDynGeoPrimPacketSize(u8 primCmd) {
+    switch (primCmd & 0xFCu) {
+        case 0x3C:
+        case 0x2C:
+            return 52;
+        case 0x38:
+        case 0x28:
+            return 36;
+        case 0x34:
+        case 0x24:
+            return 40;
+        case 0x30:
+        case 0x20:
+            return 28;
+        default:
+            return 0;
+    }
+}
 
-static void DecodePackedUV(u16 packed, GeoVertex& vertex, const GeoMaterialInfo& material) {
+static void DecodePackedUV(u16 packed, GeoRenderVertex& vertex, const GeoMaterialInfo& material) {
     vertex.u = static_cast<f32>(packed & 0xFF);
     vertex.v = static_cast<f32>((packed >> 8) & 0xFF);
     vertex.tpage = static_cast<f32>(material.tpage);
@@ -923,16 +1631,32 @@ static void DecodePackedUV(u16 packed, GeoVertex& vertex, const GeoMaterialInfo&
 static pddiPrimBuffer* ParseDynGeoPrims(
     const u8* geoData,
     u32 geoSize,
-    const std::unordered_map<u32, GeoMaterialInfo>& materials)
+    const std::unordered_map<u32, GeoMaterialInfo>& materials,
+    bool* outUsesSemiTrans,
+    u8* outSemiTransMode,
+    std::vector<GeoRenderVertex>* outVerts,
+    std::vector<u32>* outPrimStart,
+    std::vector<u8>* outPrimVertCount,
+    std::vector<u32>* outPrimMaterialUID,
+    std::vector<u8>* outPrimCmd,
+    std::vector<u32>* outPrimPacketOffset)
 {
+    if (outUsesSemiTrans) {
+        *outUsesSemiTrans = false;
+    }
+    if (outSemiTransMode) {
+        *outSemiTransMode = 0;
+    }
+
     if (!geoData || geoSize < 0x58) {
         return nullptr;
     }
 
-    u32 vertListOff = ReadU32(geoData + 0x10) << 2;
-    u16 numVerts = ReadU16(geoData + 0x14);
-    u16 numPolys = ReadU16(geoData + 0x16);
-    u32 polyListOff = ReadU32(geoData + 0x40) << 2;
+    u32 vertListOff = p3dReadU32LE(geoData + 0x10) << 2;
+    u16 numVerts = p3dReadU16LE(geoData + 0x14);
+    u16 numPolys = p3dReadU16LE(geoData + 0x16);
+    u32 polyListOff = p3dReadU32LE(geoData + 0x40) << 2;
+    u32 colourListOff = p3dReadU32LE(geoData + 0x44) << 2;
 
     if (numVerts == 0 || numPolys == 0) {
         return nullptr;
@@ -946,52 +1670,102 @@ static pddiPrimBuffer* ParseDynGeoPrims(
 
     const u8* verts = geoData + vertListOff;
     const u8* polys = geoData + polyListOff;
+    const u8* colours = nullptr;
+    if (colourListOff && colourListOff + numVerts * 4 <= geoSize) {
+        colours = geoData + colourListOff;
+    }
 
-    std::vector<GeoVertex> vertBuf;
+    std::vector<GeoRenderVertex> vertBuf;
     std::vector<u16> idxBuf;
+    std::vector<u32> primStart;
+    std::vector<u8> primVertCount;
+    std::vector<u32> primMaterialUID;
+    std::vector<u8> primCmdList;
+    std::vector<u32> primPacketOffset;
+    bool usesSemiTrans = false;
+    bool hasSemiTransMode = false;
+    u8 semiTransMode = 0;
+    u32 primListPacketOffset = 0;
 
-    auto makeVertex = [&](u16 index) -> GeoVertex {
-        GeoVertex vertex = {};
+    auto makeVertex = [&](u16 index) -> GeoRenderVertex {
+        GeoRenderVertex vertex = {};
         if (index >= numVerts) {
             return vertex;
         }
 
         const u8* src = verts + index * 8;
-        vertex.x = static_cast<f32>(ReadS16(src + 0));
-        vertex.y = static_cast<f32>(ReadS16(src + 2));
-        vertex.z = static_cast<f32>(ReadS16(src + 4));
+        vertex.x = static_cast<f32>(p3dReadS16LE(src + 0));
+        vertex.y = static_cast<f32>(p3dReadS16LE(src + 2));
+        vertex.z = static_cast<f32>(p3dReadS16LE(src + 4));
+
+        // Default neutral colour for flat primitive paths.
         vertex.r = 0.85f;
         vertex.g = 0.85f;
         vertex.b = 0.85f;
+
         vertex.u = 0.0f;
         vertex.v = 0.0f;
-        vertex.tpage = -1.0f; // TEMP: force untextured to test geometry
+        vertex.tpage = -1.0f; // default for untextured prims
         vertex.cba = 0.0f;
         return vertex;
     };
 
+    auto applyVertexColour = [&](u16 index, GeoRenderVertex& vertex) {
+        if (!colours || index >= numVerts) {
+            return;
+        }
+
+        const u32 packedColour = p3dReadU32LE(colours + index * 4);
+        vertex.r = std::min(1.0f, static_cast<f32>(packedColour & 0xFFu) / 128.0f);
+        vertex.g = std::min(1.0f, static_cast<f32>((packedColour >> 8) & 0xFFu) / 128.0f);
+        vertex.b = std::min(1.0f, static_cast<f32>((packedColour >> 16) & 0xFFu) / 128.0f);
+    };
+
     for (u16 polyIndex = 0; polyIndex < numPolys; polyIndex++) {
         const u8* poly = polys + polyIndex * 24;
-        u32 materialHash = ReadU32(poly + 0);
+        u32 materialHash = p3dReadU32LE(poly + 0);
         auto materialIt = materials.find(materialHash);
         if (materialIt == materials.end()) {
             continue;
         }
 
         const GeoMaterialInfo& material = materialIt->second;
-        u8 primCmd = static_cast<u8>(material.primCmd & 0xFD);
+        if ((material.primCmd & 0x02u) != 0u) {
+            usesSemiTrans = true;
+            if (!hasSemiTransMode) {
+                semiTransMode = static_cast<u8>((material.tpage >> 5) & 3u);
+                hasSemiTransMode = true;
+            }
+        }
 
-        GeoVertex v0 = makeVertex(ReadU16(poly + 8));
-        GeoVertex v1 = makeVertex(ReadU16(poly + 10));
-        GeoVertex v2 = makeVertex(ReadU16(poly + 12));
-        GeoVertex v3 = makeVertex(ReadU16(poly + 14));
+        u8 primCmd = static_cast<u8>(material.primCmd & 0xFD);
+        const u32 packetSize = GetDynGeoPrimPacketSize(primCmd);
+        if (packetSize == 0) {
+            continue;
+        }
+        const u32 packetOffset = primListPacketOffset;
+        primListPacketOffset += packetSize;
+
+        GeoRenderVertex v0 = makeVertex(p3dReadU16LE(poly + 8));
+        GeoRenderVertex v1 = makeVertex(p3dReadU16LE(poly + 10));
+        GeoRenderVertex v2 = makeVertex(p3dReadU16LE(poly + 12));
+        GeoRenderVertex v3 = makeVertex(p3dReadU16LE(poly + 14));
+
+        // PSX colour-table modulation is for gouraud primitive commands only.
+        // Flat commands carry colour through a separate packet lane.
+        if ((primCmd & 0x10u) != 0u) {
+            applyVertexColour(p3dReadU16LE(poly + 8), v0);
+            applyVertexColour(p3dReadU16LE(poly + 10), v1);
+            applyVertexColour(p3dReadU16LE(poly + 12), v2);
+            applyVertexColour(p3dReadU16LE(poly + 14), v3);
+        }
 
         if (primCmd == 0x34 || primCmd == 0x24 || primCmd == 0x3C || primCmd == 0x2C) {
-            DecodePackedUV(ReadU16(poly + 16), v0, material);
-            DecodePackedUV(ReadU16(poly + 18), v1, material);
-            DecodePackedUV(ReadU16(poly + 20), v2, material);
+            DecodePackedUV(p3dReadU16LE(poly + 16), v0, material);
+            DecodePackedUV(p3dReadU16LE(poly + 18), v1, material);
+            DecodePackedUV(p3dReadU16LE(poly + 20), v2, material);
             if (primCmd == 0x3C || primCmd == 0x2C) {
-                DecodePackedUV(ReadU16(poly + 22), v3, material);
+                DecodePackedUV(p3dReadU16LE(poly + 22), v3, material);
             }
         }
 
@@ -1001,28 +1775,44 @@ static pddiPrimBuffer* ParseDynGeoPrims(
             case 0x20:
             case 0x34:
             case 0x24:
-                vertBuf.push_back(v0);
-                vertBuf.push_back(v1);
                 vertBuf.push_back(v2);
-                idxBuf.push_back(base + 0);
+                vertBuf.push_back(v1);
+                vertBuf.push_back(v0);
+
+                // Keep rendered winding identical to (v0,v1,v2) while dynamic
+                // vertex lanes follow PSX packet order (v2,v1,v0).
                 idxBuf.push_back(base + 1);
                 idxBuf.push_back(base + 2);
+                idxBuf.push_back(base + 0);
+                primStart.push_back(base);
+                primVertCount.push_back(3);
+                primMaterialUID.push_back(materialHash);
+                primCmdList.push_back(primCmd);
+                primPacketOffset.push_back(packetOffset);
                 break;
 
             case 0x38:
             case 0x28:
             case 0x3C:
             case 0x2C:
-                vertBuf.push_back(v0);
-                vertBuf.push_back(v1);
-                vertBuf.push_back(v2);
                 vertBuf.push_back(v3);
-                idxBuf.push_back(base + 0);
-                idxBuf.push_back(base + 1);
-                idxBuf.push_back(base + 2);
-                idxBuf.push_back(base + 1);
+                vertBuf.push_back(v2);
+                vertBuf.push_back(v1);
+                vertBuf.push_back(v0);
+
+                // Render as original (v0,v1,v2) + (v1,v3,v2) while packing
+                // dynamic lanes in PSX packet order (v3,v2,v1,v0).
                 idxBuf.push_back(base + 3);
                 idxBuf.push_back(base + 2);
+                idxBuf.push_back(base + 1);
+                idxBuf.push_back(base + 2);
+                idxBuf.push_back(base + 0);
+                idxBuf.push_back(base + 1);
+                primStart.push_back(base);
+                primVertCount.push_back(4);
+                primMaterialUID.push_back(materialHash);
+                primCmdList.push_back(primCmd);
+                primPacketOffset.push_back(packetOffset);
                 break;
 
             default:
@@ -1060,6 +1850,32 @@ static pddiPrimBuffer* ParseDynGeoPrims(
     pddiPrimBuffer* buffer = p3d::device->NewPrimBuffer(desc);
     buffer->SetVertexData(vertBuf.data(), static_cast<u32>(vertBuf.size()));
     buffer->SetIndices(idxBuf.data(), static_cast<u32>(idxBuf.size()));
+
+    if (outUsesSemiTrans) {
+        *outUsesSemiTrans = usesSemiTrans;
+    }
+    if (outSemiTransMode) {
+        *outSemiTransMode = semiTransMode;
+    }
+    if (outVerts) {
+        *outVerts = vertBuf;
+    }
+    if (outPrimStart) {
+        *outPrimStart = primStart;
+    }
+    if (outPrimVertCount) {
+        *outPrimVertCount = primVertCount;
+    }
+    if (outPrimMaterialUID) {
+        *outPrimMaterialUID = primMaterialUID;
+    }
+    if (outPrimCmd) {
+        *outPrimCmd = primCmdList;
+    }
+    if (outPrimPacketOffset) {
+        *outPrimPacketOffset = primPacketOffset;
+    }
+
     return buffer;
 }
 
@@ -1075,11 +1891,7 @@ static void LoadGeoPair(
         return;
     }
 
-    // Match PSX Stream.cpp behavior where RCB/PCB loaders push animation
-    // entities into AnimationManager during stream load callbacks.
-    LoadPermMiscAnimations(permData, permSize, (u8)storeId);
-
-    if (ReadU16(p3dData) != 0xFF04) {
+    if (p3dReadU16LE(p3dData) != 0xFF04) {
         return;
     }
 
@@ -1089,23 +1901,24 @@ static void LoadGeoPair(
         struct PrmInfo { u32 permOffset; u32 permSize; };
         std::unordered_map<u32, PrmInfo> prmMap; // nameHash → perm location
 
-        u32 rootSize = ReadU32(p3dData + 2);
+        u32 rootSize = p3dReadU32LE(p3dData + 2);
         u32 chunkEnd = (rootSize < p3dSize) ? rootSize : p3dSize;
         u32 chunkPos = 6;
         u32 permCursor = 0;
 
         while (chunkPos + 6 <= chunkEnd) {
-            u16 chunkId = ReadU16(p3dData + chunkPos);
-            u32 chunkSize = ReadU32(p3dData + chunkPos + 2);
+            u16 chunkId = p3dReadU16LE(p3dData + chunkPos);
+            u32 chunkSize = p3dReadU32LE(p3dData + chunkPos + 2);
             if (chunkSize < 6 || chunkPos + chunkSize > chunkEnd) {
                 break;
             }
 
             const u8* chunkBody = p3dData + chunkPos + 6;
+            const u32 permBefore = permCursor;
 
             if (chunkId == 0x6001 || chunkId == 0x6002) {
-                u32 nameCount = ReadU32(chunkBody + 0);
-                u32 chunkPermSize = ReadU32(chunkBody + 4);
+                u32 nameCount = p3dReadU32LE(chunkBody + 0);
+                u32 chunkPermSize = p3dReadU32LE(chunkBody + 4);
                 u32 namesPos = 8;
                 std::vector<std::string> names;
                 names.reserve(nameCount);
@@ -1138,12 +1951,12 @@ static void LoadGeoPair(
 
                                 GeoMaterialInfo info = {};
                                 // PSX primitive command byte lives in the high byte of this word.
-                                info.primCmd = static_cast<u8>((ReadU32(record + 16) >> 24) & 0xFF);
-                                u32 texInfo = ReadU32(record + 20);
+                                info.primCmd = static_cast<u8>((p3dReadU32LE(record + 16) >> 24) & 0xFF);
+                                u32 texInfo = p3dReadU32LE(record + 20);
                                 info.cba = static_cast<u16>(texInfo & 0xFFFF);
                                 info.tpage = static_cast<u16>(texInfo >> 16);
 
-                                u32 materialHash = ReadU32(record + 0);
+                                u32 materialHash = p3dReadU32LE(record + 0);
                                 if (materialHash == 0 && i < names.size()) {
                                     materialHash = p3dHash(names[i].c_str());
                                 }
@@ -1161,23 +1974,86 @@ static void LoadGeoPair(
                         LOG("[World] Unsupported multi-geo chunk with %u entries", nameCount);
                     }
                     else {
-                        u32 modelHash = ReadU32(permData + permCursor + 0);
+                        u32 modelHash = p3dReadU32LE(permData + permCursor + 0);
                         if (!g_levelManager->FindModel(static_cast<s32>(modelHash))) {
+                            bool usesSemiTrans = false;
+                            u8 semiTransMode = 0;
+                            std::vector<GeoRenderVertex> dynamicVerts;
+                            std::vector<u32> dynamicPrimStart;
+                            std::vector<u8> dynamicPrimVertCount;
+                            std::vector<u32> dynamicPrimMaterialUID;
+                            std::vector<u8> dynamicPrimCmd;
+                            std::vector<u32> dynamicPrimPacketOffset;
                             pddiPrimBuffer* buffer = ParseDynGeoPrims(
                                 permData + permCursor,
                                 chunkPermSize,
-                                materials);
+                                materials,
+                                &usesSemiTrans,
+                                &semiTransMode,
+                                &dynamicVerts,
+                                &dynamicPrimStart,
+                                &dynamicPrimVertCount,
+                                &dynamicPrimMaterialUID,
+                                &dynamicPrimCmd,
+                                &dynamicPrimPacketOffset);
                             if (buffer) {
                                 OriginalGeo* original = new OriginalGeo();
                                 original->nameCRC = modelHash ? modelHash : p3dHash(names[0].c_str());
                                 original->SetStoreID(static_cast<s8>(storeId));
                                 original->meshBuffer = buffer;
-                                original->bboxMin[0] = ReadS32(permData + permCursor + 0x18);
-                                original->bboxMin[1] = ReadS32(permData + permCursor + 0x1C);
-                                original->bboxMin[2] = ReadS32(permData + permCursor + 0x20);
-                                original->bboxMax[0] = ReadS32(permData + permCursor + 0x24);
-                                original->bboxMax[1] = ReadS32(permData + permCursor + 0x28);
-                                original->bboxMax[2] = ReadS32(permData + permCursor + 0x2C);
+                                original->usesSemiTrans = usesSemiTrans;
+                                original->semiTransMode = semiTransMode;
+                                original->bboxMin[0] = p3dReadS32LE(permData + permCursor + 0x18);
+                                original->bboxMin[1] = p3dReadS32LE(permData + permCursor + 0x1C);
+                                original->bboxMin[2] = p3dReadS32LE(permData + permCursor + 0x20);
+                                original->bboxMax[0] = p3dReadS32LE(permData + permCursor + 0x24);
+                                original->bboxMax[1] = p3dReadS32LE(permData + permCursor + 0x28);
+                                original->bboxMax[2] = p3dReadS32LE(permData + permCursor + 0x2C);
+
+                                if (!dynamicVerts.empty()) {
+                                    original->dynamicVertCount = static_cast<u32>(dynamicVerts.size());
+                                    original->dynamicVerts = new GeoRenderVertex[original->dynamicVertCount];
+                                    if (original->dynamicVerts) {
+                                        memcpy(original->dynamicVerts,
+                                               dynamicVerts.data(),
+                                               sizeof(GeoRenderVertex) * original->dynamicVertCount);
+                                    }
+                                }
+
+                                if (!dynamicPrimStart.empty()
+                                    && dynamicPrimStart.size() == dynamicPrimVertCount.size()
+                                     && dynamicPrimStart.size() == dynamicPrimMaterialUID.size()
+                                     && dynamicPrimStart.size() == dynamicPrimCmd.size()
+                                     && dynamicPrimStart.size() == dynamicPrimPacketOffset.size()) {
+                                    original->dynamicPrimCount = static_cast<u32>(dynamicPrimStart.size());
+                                    original->dynamicPrimStart = new u32[original->dynamicPrimCount];
+                                    original->dynamicPrimVertCount = new u8[original->dynamicPrimCount];
+                                    original->dynamicPrimMaterialUID = new u32[original->dynamicPrimCount];
+                                     original->dynamicPrimCmd = new u8[original->dynamicPrimCount];
+                                     original->dynamicPrimPacketOffset = new u32[original->dynamicPrimCount];
+                                    if (original->dynamicPrimStart
+                                        && original->dynamicPrimVertCount
+                                         && original->dynamicPrimMaterialUID
+                                         && original->dynamicPrimCmd
+                                         && original->dynamicPrimPacketOffset) {
+                                        memcpy(original->dynamicPrimStart,
+                                               dynamicPrimStart.data(),
+                                               sizeof(u32) * original->dynamicPrimCount);
+                                        memcpy(original->dynamicPrimVertCount,
+                                               dynamicPrimVertCount.data(),
+                                               sizeof(u8) * original->dynamicPrimCount);
+                                        memcpy(original->dynamicPrimMaterialUID,
+                                               dynamicPrimMaterialUID.data(),
+                                               sizeof(u32) * original->dynamicPrimCount);
+                                         memcpy(original->dynamicPrimCmd,
+                                             dynamicPrimCmd.data(),
+                                             sizeof(u8) * original->dynamicPrimCount);
+                                         memcpy(original->dynamicPrimPacketOffset,
+                                             dynamicPrimPacketOffset.data(),
+                                             sizeof(u32) * original->dynamicPrimCount);
+                                    }
+                                }
+
                                 g_levelManager->AddOriginal(original, 0);
                                 LOG("[World] Loaded Geo model '%s' (hash 0x%08X, store %d)",
                                     names[0].c_str(), original->nameCRC, storeId);
@@ -1187,6 +2063,97 @@ static void LoadGeoPair(
                 }
 
                 permCursor += chunkPermSize;
+            }
+
+            // PSX: tVertAnimLoader::Load (TVRTLOAD.CPP:32)
+            // Chunk 0x6004 consumes perm payload and registers tFrameList in INVANI.
+            else if (chunkId == 0x6004) {
+                if (!RegisterFrameListAnimChunk(chunkBody,
+                                                chunkSize - 6,
+                                                permData,
+                                                permCursor,
+                                                permSize,
+                                                static_cast<u8>(storeId))) {
+                    break;
+                }
+            }
+
+            // PSX: tClutAnimLoader::Load (TCLTLOAD.CPP:29)
+            // Chunk 0x6006 registers tClutList in INVANI.
+            else if (chunkId == 0x6006) {
+                if (!RegisterClutAnimChunk(chunkBody, chunkSize - 6, static_cast<u8>(storeId))) {
+                    break;
+                }
+            }
+
+            // PSX: tTranAnimLoader2::Load (TRANLOAD.CPP:98)
+            // Chunk 0x6400 consumes perm payload and registers tTransformAnim in INVANI.
+            else if (chunkId == 0x6400) {
+                if (!RegisterTransformAnimChunk(chunkBody,
+                                                chunkSize - 6,
+                                                permData,
+                                                permCursor,
+                                                permSize,
+                                                static_cast<u8>(storeId))) {
+                    break;
+                }
+            }
+
+            // PSX: tSequenceAnimLoader::Load (SEQUENCE.CPP:26)
+            // Chunk 0x6040 consumes perm payload and registers a tSequenceAnim in INVANI.
+            else if (chunkId == 0x6040) {
+                if (!RegisterSequenceAnimChunk(chunkBody,
+                                               chunkSize - 6,
+                                               permData,
+                                               permCursor,
+                                               permSize,
+                                               static_cast<u8>(storeId))) {
+                    break;
+                }
+            }
+
+            // PSX: tCompAnimLoader::Load (COMPANIM.CPP:78)
+            // Chunk 0x4007 defines tCompositeAnim parts by animation name.
+            else if (chunkId == 0x4007) {
+                RegisterCompositeAnimChunk(chunkBody, chunkSize - 6, static_cast<u8>(storeId));
+            }
+
+            // PSX: tParamAnimLoader::Load (PARAMLOAD.CPP:279)
+            // Chunk 0x4300 registers tParamAnim in INVANI.
+            else if (chunkId == 0x4300) {
+                if (!RegisterParamAnimChunk(chunkBody, chunkSize - 6, static_cast<u8>(storeId))) {
+                    break;
+                }
+            }
+
+            // PSX: tVizAnimLoader::Load (VIZANIM.CPP:116)
+            // Chunk 0x4020 registers tVizAnim in INVANI (used by composite VIZ_* parts).
+            else if (chunkId == 0x4020) {
+                RegisterVizAnimChunk(chunkBody, chunkSize - 6, static_cast<u8>(storeId));
+            }
+
+            // PSX: tCBVParamAnimLoader::Load (CBVPARAM.CPP:243)
+            // Chunk 0x6021 registers cbv_* misc anim tables in INVANI.
+            else if (chunkId == 0x6021) {
+                if (!RegisterCBVParamAnimChunk(chunkBody, chunkSize - 6, static_cast<u8>(storeId))) {
+                    break;
+                }
+            }
+
+            // PSX PALDATA.CPP: 0x8C00/0x8C01 use shared palette metadata + perm cursor.
+            else if (chunkId == 0x8C00 || chunkId == 0x8C01) {
+                if (!LoadPaletteData(chunkId, chunkBody, chunkSize - 6, permData, permCursor, permSize)) {
+                    LOG("[World] Failed loading palette chunk 0x%04X", chunkId);
+                    break;
+                }
+            }
+
+            // PSX SCALEDAT.CPP: 0x8B01 consumes variable-size perm payload.
+            else if (chunkId == 0x8B01) {
+                if (!LoadScaleData(chunkId, chunkBody, chunkSize - 6, permData, permCursor, permSize)) {
+                    LOG("[World] Failed loading ScaleData chunk 0x%04X", chunkId);
+                    break;
+                }
             }
 
             else if (chunkId == 0x8C20 || chunkId == 0x8C21) {
@@ -1199,12 +2166,20 @@ static void LoadGeoPair(
                                 permData, permCursor, permSize);
             }
 
+            else if (chunkId == 0x8A00) {
+                LoadWEffectChunkStub(chunkBody, chunkSize - 6);
+            }
+
             else if (chunkId == 0x8A10) {
                 GEffect_LoadChunk(chunkBody, chunkSize - 6);
             }
 
             else if (chunkId == 0x8A20) {
                 Obstacle_LoadAnimChunk(chunkBody, chunkSize - 6);
+            }
+
+            else if (chunkId == 0x8A30) {
+                LoadParticleSystemChunk(chunkBody, chunkSize - 6);
             }
 
             // PSX: tETreeLoader::Load / myETreeLoaderCallback (STREAM.CPP:678)
@@ -1221,11 +2196,80 @@ static void LoadGeoPair(
                         nameBuf[copyLen] = '\0';
 
                         u32 nameHash = p3dHash(nameBuf);
+                        struct ETreePartEntry {
+                            u32 jointHash;
+                            u32 modelHash;
+                        };
+                        std::vector<ETreePartEntry> geoPartEntries;
+
+                        u32 subCursor = 1u + static_cast<u32>(nameLen) + 2u;
+                        while (subCursor + 6 <= bodyLen) {
+                            const u16 subChunkId = p3dReadU16LE(chunkBody + subCursor);
+                            const u32 subChunkSize = p3dReadU32LE(chunkBody + subCursor + 2);
+                            if (subChunkSize < 6 || subCursor + subChunkSize > bodyLen) {
+                                break;
+                            }
+
+                            if (subChunkId == 0x6141) {
+                                const u8* subBody = chunkBody + subCursor + 6;
+                                const u32 subBodyLen = subChunkSize - 6;
+                                u32 subBodyCursor = 0;
+                                u32 jointNameHash = 0;
+                                u32 modelNameHash = 0;
+
+                                if (ReadChunkPStringHash(subBody, subBodyLen, subBodyCursor, &jointNameHash)
+                                    && ReadChunkPStringHash(subBody, subBodyLen, subBodyCursor, &modelNameHash)
+                                    && modelNameHash != 0
+                                    && modelNameHash != nameHash) {
+                                    ETreePartEntry entry = {};
+                                    entry.jointHash = jointNameHash;
+                                    entry.modelHash = modelNameHash;
+                                    geoPartEntries.push_back(entry);
+                                }
+                            }
+
+                            subCursor += subChunkSize;
+                        }
+
                         // PSX: always creates ETree (no duplicate check against Geo list).
                         // Both Geo and ETree can coexist with the same nameCRC in different lists.
                         OriginalETree* et = new OriginalETree();
                         et->nameCRC = nameHash;
                         et->SetStoreID(static_cast<s8>(storeId));
+
+                        if (!geoPartEntries.empty()) {
+                            const u16 partCount = static_cast<u16>(geoPartEntries.size());
+                            et->geoPartCount = partCount;
+                            et->geoPartHashes = new u32[partCount]();
+                            et->geoPartJointHashes = new u32[partCount]();
+                            et->geoParts = new OriginalGeo*[partCount]();
+
+                            u16 resolvedParts = 0;
+                            for (u16 partIndex = 0; partIndex < partCount; partIndex++) {
+                                const ETreePartEntry& entry = geoPartEntries[partIndex];
+                                const u32 modelHash = entry.modelHash;
+                                et->geoPartJointHashes[partIndex] = entry.jointHash;
+                                et->geoPartHashes[partIndex] = modelHash;
+
+                                OriginalBasic* geoBasic = g_levelManager->FindGeo(static_cast<s32>(modelHash));
+                                if (geoBasic && geoBasic->GetType() == 0) {
+                                    et->geoParts[partIndex] = static_cast<OriginalGeo*>(geoBasic);
+                                    if (et->geoParts[partIndex] && et->geoParts[partIndex]->meshBuffer) {
+                                        resolvedParts++;
+                                    }
+                                }
+
+                                LOG("[World] ETree '%s' part[%u] jointHash=0x%08X modelHash=0x%08X resolved=%d",
+                                    nameBuf,
+                                    partIndex,
+                                    et->geoPartJointHashes ? et->geoPartJointHashes[partIndex] : 0,
+                                    modelHash,
+                                    (et->geoParts[partIndex] && et->geoParts[partIndex]->meshBuffer) ? 1 : 0);
+                            }
+
+                            LOG("[World] ETree '%s' parts=%u resolved=%u", nameBuf, partCount, resolvedParts);
+                        }
+
                         g_levelManager->AddOriginal(et, 0);
                         LOG("[World] Loaded ETree '%s' (hash 0x%08X, store %d)", nameBuf, nameHash, storeId);
                     }
@@ -1239,10 +2283,10 @@ static void LoadGeoPair(
                 u8 nameLen = chunkBody[p++];
                 p += nameLen;
                 if (p + 12 > bodyLen) { chunkPos += chunkSize; continue; }
-                s16 rx = ReadS16(chunkBody + p); p += 2;
-                s16 ry = ReadS16(chunkBody + p); p += 2;
-                s16 rw = ReadS16(chunkBody + p); p += 2;
-                s16 rh = ReadS16(chunkBody + p); p += 2;
+                s16 rx = p3dReadS16LE(chunkBody + p); p += 2;
+                s16 ry = p3dReadS16LE(chunkBody + p); p += 2;
+                s16 rw = p3dReadS16LE(chunkBody + p); p += 2;
+                s16 rh = p3dReadS16LE(chunkBody + p); p += 2;
                 p += 4; // skip type
                 if (rw > 0 && rh > 0 && rw <= 1024 && rh <= 512 &&
                     p + (u32)(rw * rh * 2) <= bodyLen) {
@@ -1258,7 +2302,7 @@ static void LoadGeoPair(
             else if (chunkId == 0x6009) {
                 u32 bodyLen = chunkSize - 6;
                 if (bodyLen >= 5) {
-                    u32 prmPermSize = ReadU32(chunkBody + 0);
+                    u32 prmPermSize = p3dReadU32LE(chunkBody + 0);
                     u8 prmNameLen = chunkBody[4];
                     if ((u32)(5 + prmNameLen) <= bodyLen) {
                         char prmNameBuf[256];
@@ -1294,7 +2338,7 @@ static void LoadGeoPair(
                         nameBuf[copyLen] = '\0';
                         p += nameLen;
 
-                        u16 jointCount = ReadU16(chunkBody + p); p += 2;
+                        u16 jointCount = p3dReadU16LE(chunkBody + p); p += 2;
 
                         // Read PRM name
                         char prmNameBuf[256] = {};
@@ -1311,7 +2355,7 @@ static void LoadGeoPair(
                         // Read permSize (perm consumed by STree joint data)
                         u32 streePermSize = 0;
                         if (p + 4 <= bodyLen) {
-                            streePermSize = ReadU32(chunkBody + p);
+                            streePermSize = p3dReadU32LE(chunkBody + p);
                             p += 4;
                         }
 
@@ -1320,6 +2364,8 @@ static void LoadGeoPair(
                         OriginalSTree* original = new OriginalSTree();
                         original->nameCRC = nameHash;
                         original->SetStoreID(static_cast<s8>(storeId));
+                        original->xformVertsCallback = RP_XformVertsLitCBF_CL;
+                        original->fixUpPolysCallback = RP_FixUpPolysCBF_CL;
                         original->skeleton = ParseSTreeChunk(chunkBody, bodyLen, false);
 
                         // Look up PRM geometry data from perm
@@ -1343,7 +2389,7 @@ static void LoadGeoPair(
                                         original->skeleton->numJoints);
                                 }
                                 else {
-                                    pddiPrimBuffer* meshBuf = ParseBLKPrims(
+                                    pddiPrimBuffer* meshBuf = BuildPrimBufferFromRawPrimGeom(
                                         permData + prm.permOffset, prm.permSize);
                                     if (meshBuf) {
                                         original->meshBuffer = meshBuf;
@@ -1370,6 +2416,17 @@ static void LoadGeoPair(
                 }
             }
 
+            if (storeId == 2 && ((permBefore >= 32000 && permBefore <= 34000)
+                || chunkId == 0x8C20 || chunkId == 0x8C21)) {
+                LOG("[World] GeoPair chunk: store=%d id=0x%04X chunkPos=%u bodyLen=%u permBefore=%u permAfter=%u",
+                    storeId,
+                    chunkId,
+                    chunkPos,
+                    chunkSize - 6,
+                    permBefore,
+                    permCursor);
+            }
+
             chunkPos += chunkSize;
         }
     }
@@ -1385,32 +2442,27 @@ static void LoadGeoPairsInRange(
     const char* p3dMagic,
     s32 storeId)
 {
+    (void)p3dMagic;
+
     for (u32 i = rangeStart; i < rangeEnd; i++) {
         if (strncmp(entries[i].magic, permMagic, 4) != 0) {
             continue;
         }
 
-            u32 pairIndex = rangeEnd;
-            for (u32 j = i + 1; j < rangeEnd; j++) {
-                if (strncmp(entries[j].magic, p3dMagic, 4) == 0) {
-                    pairIndex = j;
-                    break;
-                }
-                if (strncmp(entries[j].magic, permMagic, 4) == 0) {
-                    break;
-                }
-            }
+        // PSX STREAM.CPP LoadPermChunk__6Stream consumes the current entry as
+        // perm payload and then advances to the immediate next stream entry for
+        // the paired P3D payload.
+        const u32 pairIndex = i + 1;
+        if (pairIndex >= rangeEnd) {
+            continue;
+        }
 
-            if (pairIndex == rangeEnd) {
-                continue;
-            }
-
-            const tStreamEntry& permEntry = entries[i];
-            const tStreamEntry& p3dEntry = entries[pairIndex];
-            if (permEntry.offset + permEntry.size > fileSize ||
-                p3dEntry.offset + p3dEntry.size > fileSize) {
-                continue;
-            }
+        const tStreamEntry& permEntry = entries[i];
+        const tStreamEntry& p3dEntry = entries[pairIndex];
+        if (permEntry.offset + permEntry.size > fileSize ||
+            p3dEntry.offset + p3dEntry.size > fileSize) {
+            continue;
+        }
 
         LoadGeoPair(
             world,
@@ -1507,15 +2559,15 @@ void World::LoadTPGTextures(const u8* lcfData, u32 lcfSize) {
         if (offset + size > lcfSize || size < 6) continue;
 
         const u8* d = lcfData + offset;
-        u16 rootId = ReadU16(d);
-        u32 rootSize = ReadU32(d + 2);
+        u16 rootId = p3dReadU16LE(d);
+        u32 rootSize = p3dReadU32LE(d + 2);
         if (rootId != 0xFF04) continue;
 
         u32 cpos = 6;
         u32 cend = (rootSize < size) ? rootSize : size;
         while (cpos + 6 <= cend) {
-            u16 chunkId = ReadU16(d + cpos);
-            u32 chunkSize = ReadU32(d + cpos + 2);
+            u16 chunkId = p3dReadU16LE(d + cpos);
+            u32 chunkSize = p3dReadU32LE(d + cpos + 2);
             if (chunkSize < 6 || cpos + chunkSize > cend) break;
 
             if (chunkId == 0x6008) {
@@ -1530,10 +2582,10 @@ void World::LoadTPGTextures(const u8* lcfData, u32 lcfSize) {
 
                 // RECT16: s16 x, y, w, h + u32 type
                 if (p + 12 > doff + dlen) { cpos += chunkSize; continue; }
-                s16 rx = ReadS16(d + p); p += 2;
-                s16 ry = ReadS16(d + p); p += 2;
-                s16 rw = ReadS16(d + p); p += 2;
-                s16 rh = ReadS16(d + p); p += 2;
+                s16 rx = p3dReadS16LE(d + p); p += 2;
+                s16 ry = p3dReadS16LE(d + p); p += 2;
+                s16 rw = p3dReadS16LE(d + p); p += 2;
+                s16 rh = p3dReadS16LE(d + p); p += 2;
                 p += 4; // skip type
 
                 // Upload raw pixel data to VRAM
@@ -1678,6 +2730,12 @@ void World::CheckThingSwitches(Thing* thing) {
 
     u32 bucket = (thing->thingType != 0) ? 2u : 1u;
     CheckSwitchList(switchLists[bucket], thing);
+}
+
+WDBSwitch* World::FindPrimarySwitchByCRC(u32 crc) {
+    // PSX Platform path-node attrib 11 uses FindNodeCRC(theWorldMgr + 0x6C, crc, 0).
+    ccNode* node = switchLists[0].FindNodeCRC(crc, nullptr);
+    return node ? static_cast<WDBSwitch*>(node) : nullptr;
 }
 
 // Simple tokenizer matching PSX GetNextToken__4Game
@@ -1928,8 +2986,13 @@ bool World::LoadLevelIndex(u32 levelIndex) {
         }
     }
 
-    // PSX: WorldEffects, PWorldEffects, ParticleSystem
-    // TODO: not yet reversed
+    // PSX: InitWorldEffects__7WEffectP7DBPoint
+    if (g_database) {
+        WEffect_InitWorldEffects(g_database->GetFirstPoint());
+        PWEffect_InitWorldEffects(g_database->GetFirstPoint());
+    }
+
+    ParticleSystem_InitParticleInfoMemory();
 
     // PSX: Populate__2AI(0) - spawn entities from WDB database
     if (g_ai) {
@@ -1950,9 +3013,6 @@ bool World::LoadLevelIndex(u32 levelIndex) {
     // PSX: LoadBG, InitBG - background rendering
     // TODO: BackG not yet reversed
 
-    // PSX: PopulateWEffects
-    // TODO: not yet reversed
-
     // PSX: ScoreManager::SetPar
     if (g_scoreManager) {
         g_scoreManager->SetPar();
@@ -1962,6 +3022,10 @@ bool World::LoadLevelIndex(u32 levelIndex) {
     if (g_director) {
         g_director->Reset();
         g_director->SetScript();
+    }
+
+    if (g_environmentManager && g_levelManager) {
+        g_environmentManager->SetupModelAmbientLighting(&g_levelManager->modelLists[0]);
     }
 
     // PSX: SetupModelAmbientLighting, ProcessSwitches
@@ -1982,6 +3046,8 @@ bool World::LoadLevelIndex(u32 levelIndex) {
     if (g_ai) {
         g_ai->PopulateBlock();
     }
+
+    WEffect_PopulateWEffects();
 
     // PSX: if (IsValidBlockNumber(playerBlockNum) == 4096) -> reposition player
     // PSX returns 0x1000 (4096) when block is NOT valid.
@@ -2079,6 +3145,9 @@ bool World::LoadLevelIndex(u32 levelIndex) {
 
 bool World::Load(const std::string& lcfPath) {
     Unload();
+
+    g_wEffectChunkCount = 0;
+    g_particleSystemChunkCount = 0;
 
     // Read LCF file from disc (PC equivalent of Stream::Open + disc read)
     std::ifstream file(lcfPath, std::ios::binary | std::ios::ate);
@@ -2307,7 +3376,7 @@ void World::DrawEverythingHandler(const LVector* playerPos) {
 
     for (u32 i = 0; i < numBlocks && count < 128; i++) {
         Block* block = blockMgr.GetBlock(i);
-        if (!block || !block->primBuffer) continue;
+        if (!block || !block->primGeom) continue;
 
         s32 distSq, zDepth;
         computeBlockToPointDistances(block, playerPos, &distSq, &zDepth);
@@ -2369,6 +3438,8 @@ void World::DrawEverythingHandler(const LVector* playerPos) {
                 DrawEntityList(g_ai->pickupList, bn);
                 DrawEntityList(g_ai->moveList, bn);
             }
+
+            Effects_DrawEffects(static_cast<s32>(bn));
 
             // PSX: Draw__5BlockRC10tagLVector(block, &localPos)
             entry.block->Draw(&localPos);
@@ -2568,12 +3639,10 @@ void World::OffsetToPreventSeams(LVector& pos, const LVector& playerPos) {
     s32 signY = (dy < 0) ? -1 : (dy > 0) ? 1 : 0;
     s32 signZ = (dz < 0) ? -1 : (dz > 0) ? 1 : 0;
 
-    // PSX: v1 = gp[96] (seamDivisor)
-    // These are set during level initialization - using reasonable PSX defaults
-    s32 seamDivisor = 4096; // gp+0x60
-    s32 seamLimit = 8;      // gp+0x64
-
-    if (seamDivisor == 0) return;
+    // PSX small-data values loaded from gp+0x60 / gp+0x64.
+    // These correspond to BLOCK_DRAW_SEAM_OFFSET_CODE[1] and [2].
+    s32 seamDivisor = BLOCK_DRAW_SEAM_OFFSET_CODE[1];
+    s32 seamLimit = BLOCK_DRAW_SEAM_OFFSET_CODE[2];
 
     // PSX: a3 = (signX * dx) / seamDivisor
     s32 rawX = (signX * dx) / seamDivisor;
@@ -2585,7 +3654,7 @@ void World::OffsetToPreventSeams(LVector& pos, const LVector& playerPos) {
     s32 offY = (-signY) * (rawY + 1);
     s32 offZ = (-signZ) * (rawZ + 1);
 
-    // PSX: clamp each to Â±seamLimit (gp[100])
+    // PSX: clamp each to +/-seamLimit (gp[100])
     if (offX < -seamLimit) offX = -seamLimit;
     else if (offX > seamLimit) offX = seamLimit;
     if (offY < -seamLimit) offY = -seamLimit;
@@ -2611,7 +3680,16 @@ void World::Unload() {
             g_ai->UnPopulate(0);
         }
 
+        WEffect_UnPopulateWEffects(-1);
+
         Obstacle_ClearPetalAnimList();
+        Effects_UnloadAll();
+        WEffect_Unload();
+        PWEffect_Unload();
+        GEffect_Unload();
+        UnloadScaleData();
+        UnloadPaletteData();
+        ParticleSystem_Unload();
         UnloadUVPrimData();
         UnloadCBVPrimData();
         PurgeSwitches();
@@ -2627,10 +3705,21 @@ void World::Unload() {
         }
     }
     else {
+        WEffect_UnPopulateWEffects(-1);
+        Effects_UnloadAll();
+        WEffect_Unload();
+        PWEffect_Unload();
+        GEffect_Unload();
+        UnloadScaleData();
+        UnloadPaletteData();
+        ParticleSystem_Unload();
         UnloadUVPrimData();
         UnloadCBVPrimData();
         PurgeSwitches();
     }
+
+    g_wEffectChunkCount = 0;
+    g_particleSystemChunkCount = 0;
 
     streamData.clear();
     if (vramHandle && p3d::context) {
@@ -2658,8 +3747,12 @@ void World::UnloadPermanent() {
 // PSX: UnloadPetal__5World (WORLD.CPP:1176, 0x80045F34)
 void World::UnloadPetal() {
     MARKFUNCTION(0x80045F34);
-
-    // PSX: Unload__10UVPrimData, Unload__11CBVPrimData (0x80045F90, 0x80045F98)
+    WEffect_UnPopulateWEffects(-1);
+    WEffect_Unload();
+    PWEffect_Unload();
+    ParticleSystem_UnloadLevel();
+    UnloadLevelScaleData();
+    UnloadPaletteData();
     UnloadUVPrimData();
     UnloadCBVPrimData();
     PurgeSwitches();
@@ -2713,6 +3806,8 @@ void World::LoadPetal(u32 petalIndex) {
     currentPetalIndex = petalIndex;
 
     blockMgr.SetDeathVolumeFlag(1);
+    g_wEffectChunkCount = 0;
+    g_particleSystemChunkCount = 0;
 
     // Petal load is a new level segment; clear per-level score/collect state first.
     if (g_scoreManager) {
@@ -2763,6 +3858,10 @@ void World::LoadPetal(u32 petalIndex) {
             g_database->Scan(data + entries[i].offset, entries[i].size);
         }
 
+        WEffect_InitWorldEffects(g_database->GetFirstPoint());
+        PWEffect_InitWorldEffects(g_database->GetFirstPoint());
+        ParticleSystem_InitParticleInfoMemory();
+
         LoadGeoPairsInRange(this, entries, data, dataSize, petalStart, petalEnd, ".PCI", ".PCP", 2);
 
         // Refresh VRAM GL texture after Geo texture uploads
@@ -2794,6 +3893,8 @@ void World::LoadPetal(u32 petalIndex) {
     if (g_ai) {
         g_ai->PopulateBlock();
     }
+
+    WEffect_PopulateWEffects();
 
     if (g_director) {
         g_director->Reset();
@@ -2867,4 +3968,5 @@ s32 World::LevelMenuExecute(hdMenuItem* item) {
 
     return 4;
 }
+
 

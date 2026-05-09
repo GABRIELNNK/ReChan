@@ -1,10 +1,7 @@
 #include "p3d/flip.h"
+#include "p3d/byteread.h"
 #include "p3d/p3dmath.h"
 #include <cstring>
-
-static u16 ReadU16(const u8* p) { return p[0] | (p[1] << 8); }
-static u32 ReadU32(const u8* p) { return p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24); }
-static s16 ReadS16(const u8* p) { return (s16)(p[0] | (p[1] << 8)); }
 
 static s16 LerpAngle16(s16 a0, s16 a1, s32 frac16) {
     // PSX interpolates angle deltas in 16-bit space (wrapped delta).
@@ -15,7 +12,7 @@ static s16 LerpAngle16(s16 a0, s16 a1, s32 frac16) {
 // TransformAnim
 
 TransformAnim::TransformAnim()
-    : nameUID(0), numFrames(0), numRotChannels(0), numTransChannels(0),
+    : nameUID(0), numFrames(0), targetType(0), targetNameUID(0), numRotChannels(0), numTransChannels(0),
       rotChannels(nullptr), transChannels(nullptr), ownedRawData(nullptr) {}
 
 TransformAnim::~TransformAnim() {
@@ -36,17 +33,17 @@ TransformAnim* TransformAnim::Parse(const u8* rawData, u32 rawSize) {
     //   +4:  refCount (s32, ignored)
     //   +8:  vtable offset (u32, ignored)
     //   +12: numFrames (s32)
-    //   +16: targetType (s32, ignored)
-    //   +20: targetNameUID (u32, ignored)
+    //   +16: targetType (s32)
+    //   +20: targetNameUID (u32)
     //   +24: numRotChannels (s32)
     //   +28: numTransChannels (s32)
     //   +32: rotChannelArrayOffset (u32 DWORD offset)
     //   +36: transChannelArrayOffset (u32 DWORD offset)
 
-    s32 numRotCh = (s32)ReadU32(rawData + 24);
-    s32 numTransCh = (s32)ReadU32(rawData + 28);
-    u32 rotArrayByteOff = ReadU32(rawData + 32) * 4;
-    u32 transArrayByteOff = ReadU32(rawData + 36) * 4;
+    s32 numRotCh = (s32)p3dReadU32LE(rawData + 24);
+    s32 numTransCh = (s32)p3dReadU32LE(rawData + 28);
+    u32 rotArrayByteOff = p3dReadU32LE(rawData + 32) * 4;
+    u32 transArrayByteOff = p3dReadU32LE(rawData + 36) * 4;
 
     if (rotArrayByteOff + (u32)numRotCh * 4 > rawSize) {
         return nullptr;
@@ -56,8 +53,10 @@ TransformAnim* TransformAnim::Parse(const u8* rawData, u32 rawSize) {
     }
 
     TransformAnim* ta = new TransformAnim();
-    ta->nameUID = ReadU32(rawData + 0);
-    ta->numFrames = (s32)ReadU32(rawData + 12);
+    ta->nameUID = p3dReadU32LE(rawData + 0);
+    ta->numFrames = (s32)p3dReadU32LE(rawData + 12);
+    ta->targetType = (s32)p3dReadU32LE(rawData + 16);
+    ta->targetNameUID = p3dReadU32LE(rawData + 20);
     ta->numRotChannels = numRotCh;
     ta->numTransChannels = numTransCh;
 
@@ -65,15 +64,15 @@ TransformAnim* TransformAnim::Parse(const u8* rawData, u32 rawSize) {
     if (numRotCh > 0) {
         ta->rotChannels = new Channel[numRotCh];
         for (s32 i = 0; i < numRotCh; i++) {
-            u32 chByteOff = ReadU32(rawData + rotArrayByteOff + i * 4) * 4;
+            u32 chByteOff = p3dReadU32LE(rawData + rotArrayByteOff + i * 4) * 4;
             if (chByteOff + 8 > rawSize) {
                 ta->rotChannels[i] = { 0, 0, nullptr, rawData, rawSize };
                 continue;
             }
             const u8* ch = rawData + chByteOff;
             ta->rotChannels[i] = {
-                ReadU32(ch + 0),    // jointParam
-                ReadU32(ch + 4),    // keyType
+                p3dReadU32LE(ch + 0),    // jointParam
+                p3dReadU32LE(ch + 4),    // keyType
                 ch,                 // chData
                 rawData,            // rawBase
                 rawSize             // rawSize
@@ -85,15 +84,15 @@ TransformAnim* TransformAnim::Parse(const u8* rawData, u32 rawSize) {
     if (numTransCh > 0) {
         ta->transChannels = new Channel[numTransCh];
         for (s32 i = 0; i < numTransCh; i++) {
-            u32 chByteOff = ReadU32(rawData + transArrayByteOff + i * 4) * 4;
+            u32 chByteOff = p3dReadU32LE(rawData + transArrayByteOff + i * 4) * 4;
             if (chByteOff + 8 > rawSize) {
                 ta->transChannels[i] = { 0, 0, nullptr, rawData, rawSize };
                 continue;
             }
             const u8* ch = rawData + chByteOff;
             ta->transChannels[i] = {
-                ReadU32(ch + 0),    // jointParam
-                ReadU32(ch + 4),    // keyType
+                p3dReadU32LE(ch + 0),    // jointParam
+                p3dReadU32LE(ch + 4),    // keyType
                 ch,                 // chData
                 rawData,            // rawBase
                 rawSize             // rawSize
@@ -233,18 +232,18 @@ void TransformFlip::EvalRotChannel(const TransformAnim::Channel& ch, STreeJoint&
 
     if (ch.keyType == KEY_STATIC_3DOF_ANGLE) {
         // tStatic3DOFKeyList: constant values at +8, +12, +16
-        joint.rotationX = (s16)(s32)ReadU32(data + 8);
-        joint.rotationY = (s16)(s32)ReadU32(data + 12);
-        joint.rotationZ = (s16)(s32)ReadU32(data + 16);
+        joint.rotationX = (s16)(s32)p3dReadU32LE(data + 8);
+        joint.rotationY = (s16)(s32)p3dReadU32LE(data + 12);
+        joint.rotationZ = (s16)(s32)p3dReadU32LE(data + 16);
     } else if (ch.keyType == KEY_JOINT_3DOF_ANGLE) {
         // tJoint3DOFangle: packed rotation values
         // +8: numKeys, +12: keyTimesOff, +16: keyValuesOff
-        u32 numKeys = ReadU32(data + 8);
+        u32 numKeys = p3dReadU32LE(data + 8);
         if (numKeys == 0) {
             return;
         }
-        u32 keyTimesOff = ReadU32(data + 12);
-        u32 keyValsOff = ReadU32(data + 16);
+        u32 keyTimesOff = p3dReadU32LE(data + 12);
+        u32 keyValsOff = p3dReadU32LE(data + 16);
         u32 keyValsByteOff = keyValsOff * 4;
 
         auto decodePacked = [](u32 packed, s32& rx, s32& ry, s32& rz) {
@@ -256,7 +255,7 @@ void TransformFlip::EvalRotChannel(const TransformAnim::Channel& ch, STreeJoint&
 
         if (numKeys == 1) {
             s32 bracket = FindBracket(raw, keyTimesOff, (s32)numKeys, frameReal);
-            u32 packed = ReadU32(raw + keyValsByteOff + bracket * 4);
+            u32 packed = p3dReadU32LE(raw + keyValsByteOff + bracket * 4);
             s32 rx, ry, rz;
             decodePacked(packed, rx, ry, rz);
             joint.rotationX = (s16)rx;
@@ -270,7 +269,7 @@ void TransformFlip::EvalRotChannel(const TransformAnim::Channel& ch, STreeJoint&
 
         if (bracket >= (s32)numKeys - 1) {
             // At or past last key
-            u32 packed = ReadU32(raw + keyValsByteOff + (numKeys - 1) * 4);
+            u32 packed = p3dReadU32LE(raw + keyValsByteOff + (numKeys - 1) * 4);
             s32 rx, ry, rz;
             decodePacked(packed, rx, ry, rz);
             joint.rotationX = (s16)rx;
@@ -280,8 +279,8 @@ void TransformFlip::EvalRotChannel(const TransformAnim::Channel& ch, STreeJoint&
         }
 
         // Unpack both bracket keyframes
-        u32 packed0 = ReadU32(raw + keyValsByteOff + bracket * 4);
-        u32 packed1 = ReadU32(raw + keyValsByteOff + (bracket + 1) * 4);
+        u32 packed0 = p3dReadU32LE(raw + keyValsByteOff + bracket * 4);
+        u32 packed1 = p3dReadU32LE(raw + keyValsByteOff + (bracket + 1) * 4);
 
         s32 rx0, ry0, rz0;
         s32 rx1, ry1, rz1;
@@ -311,13 +310,13 @@ void TransformFlip::EvalRotChannel(const TransformAnim::Channel& ch, STreeJoint&
     } else if (ch.keyType == KEY_JOINT_1DOF_ANGLE) {
         // tJoint1DOFangle: single axis rotation
         // +8=numKeys, +12=keyTimesOff(u8 array), +16=dofIndex, +20=keyValuesOff(s16 array)
-        u32 numKeys = ReadU32(data + 8);
+        u32 numKeys = p3dReadU32LE(data + 8);
         if (numKeys == 0) {
             return;
         }
-        u32 keyTimesOff = ReadU32(data + 12);
-        u32 dofIndex = ReadU32(data + 16);
-        u32 keyValsOff = ReadU32(data + 20);
+        u32 keyTimesOff = p3dReadU32LE(data + 12);
+        u32 dofIndex = p3dReadU32LE(data + 16);
+        u32 keyValsOff = p3dReadU32LE(data + 20);
         u32 keyTimesByteOff = keyTimesOff * 4;
         u32 keyValsByteOff = keyValsOff * 4;
 
@@ -327,16 +326,16 @@ void TransformFlip::EvalRotChannel(const TransformAnim::Channel& ch, STreeJoint&
 
         s16 val;
         if (numKeys == 1 || bracket >= (s32)numKeys - 1) {
-            val = ReadS16(raw + keyValsByteOff + bracket * 2);
+            val = p3dReadS16LE(raw + keyValsByteOff + bracket * 2);
         } else {
             s32 t0 = (s32)times[bracket];
             s32 t1 = (s32)times[bracket + 1];
             s32 timeDelta = t1 - t0;
             if (timeDelta <= 0) {
-                val = ReadS16(raw + keyValsByteOff + bracket * 2);
+                val = p3dReadS16LE(raw + keyValsByteOff + bracket * 2);
             } else {
-                s16 v0 = ReadS16(raw + keyValsByteOff + bracket * 2);
-                s16 v1 = ReadS16(raw + keyValsByteOff + (bracket + 1) * 2);
+                s16 v0 = p3dReadS16LE(raw + keyValsByteOff + bracket * 2);
+                s16 v1 = p3dReadS16LE(raw + keyValsByteOff + (bracket + 1) * 2);
                 s32 frameDelta = frameReal - (t0 << 16);
                 s32 frac16 = (s32)(((s64)frameDelta << 16) / ((s64)timeDelta << 16));
                 val = LerpAngle16(v0, v1, frac16);
@@ -367,18 +366,18 @@ void TransformFlip::EvalTransChannel(const TransformAnim::Channel& ch, STreeJoin
     if (ch.keyType == KEY_STATIC_3DOF_POS) {
         // tStatic3DOFKeyList: constant values at +8, +12, +16
         writeTranslation(
-            (s32)ReadU32(data + 8),
-            (s32)ReadU32(data + 12),
-            (s32)ReadU32(data + 16));
+            (s32)p3dReadU32LE(data + 8),
+            (s32)p3dReadU32LE(data + 12),
+            (s32)p3dReadU32LE(data + 16));
     } else if (ch.keyType == KEY_JOINT_3DOF_LP_PSX) {
         // tJoint3DOFlpPSX: 3DOF linear position
         // +8: numKeys, +12: keyTimesOff, +16: keyValuesOff (3 x s16 per key)
-        u32 numKeys = ReadU32(data + 8);
+        u32 numKeys = p3dReadU32LE(data + 8);
         if (numKeys == 0) {
             return;
         }
-        u32 keyTimesOff = ReadU32(data + 12);
-        u32 keyValsOff = ReadU32(data + 16);
+        u32 keyTimesOff = p3dReadU32LE(data + 12);
+        u32 keyValsOff = p3dReadU32LE(data + 16);
         u32 keyValsByteOff = keyValsOff * 4;
 
         if (numKeys == 1) {
@@ -388,9 +387,9 @@ void TransformFlip::EvalTransChannel(const TransformAnim::Channel& ch, STreeJoin
                 return;
             }
             writeTranslation(
-                (s32)ReadS16(raw + vOff + 0),
-                (s32)ReadS16(raw + vOff + 2),
-                (s32)ReadS16(raw + vOff + 4));
+                (s32)p3dReadS16LE(raw + vOff + 0),
+                (s32)p3dReadS16LE(raw + vOff + 2),
+                (s32)p3dReadS16LE(raw + vOff + 4));
             return;
         }
 
@@ -403,9 +402,9 @@ void TransformFlip::EvalTransChannel(const TransformAnim::Channel& ch, STreeJoin
                 return;
             }
             writeTranslation(
-                (s32)ReadS16(raw + vOff + 0),
-                (s32)ReadS16(raw + vOff + 2),
-                (s32)ReadS16(raw + vOff + 4));
+                (s32)p3dReadS16LE(raw + vOff + 0),
+                (s32)p3dReadS16LE(raw + vOff + 2),
+                (s32)p3dReadS16LE(raw + vOff + 4));
             return;
         }
 
@@ -415,12 +414,12 @@ void TransformFlip::EvalTransChannel(const TransformAnim::Channel& ch, STreeJoin
             return;
         }
 
-        s32 x0 = (s32)ReadS16(raw + vOff0 + 0);
-        s32 y0 = (s32)ReadS16(raw + vOff0 + 2);
-        s32 z0 = (s32)ReadS16(raw + vOff0 + 4);
-        s32 x1 = (s32)ReadS16(raw + vOff1 + 0);
-        s32 y1 = (s32)ReadS16(raw + vOff1 + 2);
-        s32 z1 = (s32)ReadS16(raw + vOff1 + 4);
+        s32 x0 = (s32)p3dReadS16LE(raw + vOff0 + 0);
+        s32 y0 = (s32)p3dReadS16LE(raw + vOff0 + 2);
+        s32 z0 = (s32)p3dReadS16LE(raw + vOff0 + 4);
+        s32 x1 = (s32)p3dReadS16LE(raw + vOff1 + 0);
+        s32 y1 = (s32)p3dReadS16LE(raw + vOff1 + 2);
+        s32 z1 = (s32)p3dReadS16LE(raw + vOff1 + 4);
 
         u32 timesByteOff = keyTimesOff * 4;
         s32 t0 = (s32)*(raw + timesByteOff + bracket);
@@ -440,3 +439,4 @@ void TransformFlip::EvalTransChannel(const TransformAnim::Channel& ch, STreeJoin
             (s32)(z0 + (((z1 - z0) * (s64)frac16) >> 16)));
     }
 }
+

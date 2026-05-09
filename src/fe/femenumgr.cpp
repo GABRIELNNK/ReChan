@@ -14,27 +14,10 @@
 #include "snd/fesnd.h"
 #include "snd/rsevent.h"
 #include "snd/sound.h"
+#include "fe/fe_sound_menu_helpers.h"
 
 // Global feMenuMgr pointer
 feMenuMgr* g_feMenuMgr = nullptr;
-
-// Slider maxValue is 65535 (PSX SPU range), but platform flags/settings use 0-100.
-static constexpr u32 SLIDER_MAX = 65535;
-static constexpr u32 FLAG_MAX = 100;
-
-static u32 SliderToFlag(u32 sliderVal) {
-    if (sliderVal > SLIDER_MAX) {
-        sliderVal = SLIDER_MAX;
-    }
-    return (sliderVal * FLAG_MAX + (SLIDER_MAX / 2)) / SLIDER_MAX;
-}
-
-static u32 FlagToSlider(u32 flagVal) {
-    if (flagVal > FLAG_MAX) {
-        flagVal = FLAG_MAX;
-    }
-    return (flagVal * SLIDER_MAX + (FLAG_MAX / 2)) / FLAG_MAX;
-}
 
 // Screen hashes (from decompiled constructor and SelfInit)
 static constexpr u32 HASH_MAIN_SCREEN = 0x062B99E2;      // startScreenHashes[0]
@@ -185,88 +168,36 @@ static constexpr u32 HASH_SOUND_STEREO = 0x3D030EFA;
 
 // PSX: _SetMusicVolume (SOUND.CPP:148, 0x80059594)
 static s32 SetMusicVolumeCallback(hdMenuItem* item) {
-    u32 raw = item->GetValue();
-    u32 val = SliderToFlag(raw);
-    rsEvent(RS_SET_MUSIC_VOL, (s32)val, 0, 0);
-    if (g_sound) {
-        g_sound->flag0 = (s16)val;
-    }
-    return 8;
+    return FeSoundMenuSetMusicVolume(item);
 }
 
 // PSX: _SetEffectsVolume (SOUND.CPP:159, 0x80059600)
 static s32 SetEffectsVolumeCallback(hdMenuItem* item) {
-    u32 raw = item->GetValue();
-    u32 val = SliderToFlag(raw);
-    rsEvent(RS_SET_EFFECTS_VOL, (s32)val, 0, 0);
-    rsEvent(RS_SET_EFFECTS_VOL_AUX, (s32)val, 0, 0);
-    if (g_sound) {
-        g_sound->flag2 = (s16)val;
-    }
-    return 8;
+    return FeSoundMenuSetEffectsVolume(item);
 }
 
 // PSX: _SetDialogVolume (SOUND.CPP:170, 0x80059698)
 static s32 SetDialogVolumeCallback(hdMenuItem* item) {
-    u32 raw = item->GetValue();
-    u32 val = SliderToFlag(raw);
-    rsEvent(RS_SET_DIALOG_VOL, (s32)val, 0, 0);
-    if (g_sound) {
-        g_sound->flag1 = (s16)val;
-    }
-    return 8;
+    return FeSoundMenuSetDialogVolume(item);
 }
 
 // PSX: _StereoOnOff (SOUND.CPP:129, 0x8005950C)
 static s32 StereoOnOffCallback(hdMenuItem* item) {
-    if (item->GetValue()) {
-        rsEvent(RS_SET_STEREO, 0, 0, 0);
-        if (g_sound) {
-            g_sound->activeFlag = 1;
-        }
-    }
-    else {
-        rsEvent(RS_SET_MONO, 0, 0, 0);
-        if (g_sound) {
-            g_sound->activeFlag = 0;
-        }
-    }
-    return 8;
+    return FeSoundMenuSetStereoOnOff(item);
 }
 
 // PSX: InstallMenu__5Sound (SOUND.CPP:272, 0x80059A4C)
 static void InstallSoundMenu(hdMenu* menu) {
-    if (!menu || !g_sound) {
-        return;
-    }
-
-    menu->SetCallback(HASH_SOUND_EFFECT, (hdMenuItemCallback)SetEffectsVolumeCallback);
-    hdMenuItem* effectsItem = menu->FindItem(HASH_SOUND_EFFECT);
-    if (effectsItem) {
-        effectsItem->SetValue(FlagToSlider((u32)(u16)g_sound->flag2));
-    }
-
-    menu->SetCallback(HASH_SOUND_MUSIC, (hdMenuItemCallback)SetMusicVolumeCallback);
-    hdMenuItem* musicItem = menu->FindItem(HASH_SOUND_MUSIC);
-    if (musicItem) {
-        musicItem->SetValue(FlagToSlider((u32)(u16)g_sound->flag0));
-    }
-
-    menu->SetCallback(HASH_SOUND_VOICE, (hdMenuItemCallback)SetDialogVolumeCallback);
-    hdMenuItem* voiceItem = menu->FindItem(HASH_SOUND_VOICE);
-    if (voiceItem) {
-        voiceItem->SetValue(FlagToSlider((u32)(u16)g_sound->flag1));
-    }
-
-    menu->SetCallback(HASH_SOUND_STEREO, (hdMenuItemCallback)StereoOnOffCallback);
-    hdMenuItem* stereoItem = menu->FindItem(HASH_SOUND_STEREO);
-    if (stereoItem) {
-        stereoItem->SetValue(g_sound->activeFlag != 0);
-    }
-
-    if (g_frontEndSound) {
-        g_frontEndSound->ProcessSoundEvent(FE_SND_CURSOR_BACK);
-    }
+    FeInstallSoundMenuCommon(
+        menu,
+        HASH_SOUND_EFFECT,
+        HASH_SOUND_MUSIC,
+        HASH_SOUND_VOICE,
+        HASH_SOUND_STEREO,
+        SetEffectsVolumeCallback,
+        SetMusicVolumeCallback,
+        SetDialogVolumeCallback,
+        StereoOnOffCallback);
 }
 
 // PSX: ResumeGame__9feMenuMgrP10hdMenuItem (Overlay4 0x80010968)

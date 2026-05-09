@@ -7,7 +7,9 @@
 #include "gen/ai.h"
 #include "gen/director.h"
 #include "gen/game.h"
+#include "gen/geffect.h"
 #include "gen/world.h"
+#include "gen/weffect.h"
 #include "snd/snddrct.h"
 #include "gen/model.h"
 #include "gen/database.h"
@@ -199,13 +201,17 @@ void Door::Draw() {
     MARKFUNCTION(0x8001B060);
     // PSX: custom draw - copies pos and drawRot to model, then calls Show
     if (model) {
+        LVector drawPos = pos;
+        LVector renderRot = drawRot;
+        ObstacleBuildRenderTransform(this, pos, drawRot, drawPos, renderRot);
+
         Model* m = static_cast<Model*>(model);
-        m->posX = pos.x;
-        m->posY = pos.y;
-        m->posZ = pos.z;
-        m->rotX = (u16)drawRot.x;
-        m->rotY = (u16)drawRot.y;
-        m->rotZ = (u16)drawRot.z;
+        m->posX = drawPos.x;
+        m->posY = drawPos.y;
+        m->posZ = drawPos.z;
+        m->rotX = (u16)(renderRot.x & 0xFFFF);
+        m->rotY = (u16)(renderRot.y & 0xFFFF);
+        m->rotZ = (u16)(renderRot.z & 0xFFFF);
         m->Show(0);
     }
 }
@@ -237,12 +243,19 @@ void Door::Trigger() {
                 }
             }
         }
-        // PSX: also manages secondary model via FWEffect::Find/Continue
-        // Not yet implemented on PC
+
+        // PSX: if attrib 11 hash is set, continue the matching FWEffect.
+        if (secondaryModelHash != 0) {
+            FWEffect* effect = FWEffect::Find((u32)secondaryModelHash);
+            LOG("[Door::Trigger] hub FW continue hash=0x%08X found=%d", (u32)secondaryModelHash, effect ? 1 : 0);
+            if (effect) {
+                effect->Continue();
+            }
+        }
     }
     else {
         // Non-hub: play door open sound
-        CSoundDirect::PlayTransient(156, nullptr, 0, 0);
+        CSoundDirect::PlayTransient(156, static_cast<void*>(&pos), 0, 0);
     }
 }
 
@@ -434,7 +447,13 @@ void Door::DeathCheck() {
             doorState = 1;
             CSoundDirect::PlayTransient(158, static_cast<void*>(&pos), 0, 0);
         }
-        // PSX: hide secondary and tertiary model GEffects
-        // Not yet implemented on PC
+
+        if (secondaryModelHash != 0) {
+            GEffect_Create(static_cast<u32>(secondaryModelHash), nullptr, nullptr, nullptr, 0, 0, 0);
+        }
+
+        if (tertiaryModelHash != 0) {
+            GEffect_Create(static_cast<u32>(tertiaryModelHash), nullptr, nullptr, nullptr, 0, 0, 0);
+        }
     }
 }

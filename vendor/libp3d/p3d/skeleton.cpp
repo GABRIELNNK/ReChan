@@ -1,6 +1,7 @@
 // skeleton.cpp - Pure3D v11.3 tSTree/tSJoint implementation
 // PSX: TSTREE.CPP (Display, ComputeMatrices), STLOAD.CPP (tSTreeLoader)
 #include "p3d/skeleton.h"
+#include "p3d/byteread.h"
 #include "p3d/hash.h"
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
@@ -12,10 +13,6 @@
 static constexpr u16 CHUNK_STREE_JOINT   = 0x6121;
 static constexpr u16 CHUNK_STREE_MAPPING = 0x4123;
 static constexpr u16 CHUNK_REST_POSE     = 0x6125;
-
-static u16 ReadU16(const u8* p) { return p[0] | (p[1] << 8); }
-static u32 ReadU32(const u8* p) { return p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24); }
-static s16 ReadS16(const u8* p) { return (s16)(p[0] | (p[1] << 8)); }
 
 // Read PString: u8 length prefix + chars. Returns name hash.
 static u32 ReadPString(const u8* data, u32 maxLen, u32& outBytesRead) {
@@ -260,35 +257,35 @@ static bool ParseJointChunk(const u8* data, u32 dataSize, STreeJoint* out) {
     if (p + 4 > dataSize) {
         return false;
     }
-    out->flags = ReadU32(data + p);
+    out->flags = p3dReadU32LE(data + p);
     p += 4;
 
     // Word -> primGeomStartIdx
     if (p + 2 > dataSize) {
         return false;
     }
-    out->primGeomStartIdx = ReadU16(data + p);
+    out->primGeomStartIdx = p3dReadU16LE(data + p);
     p += 2;
 
     // Word -> primGeomCount
     if (p + 2 > dataSize) {
         return false;
     }
-    out->primGeomCount = ReadU16(data + p);
+    out->primGeomCount = p3dReadU16LE(data + p);
     p += 2;
 
     // Word -> polyStartIdx
     if (p + 2 > dataSize) {
         return false;
     }
-    out->polyStartIdx = ReadU16(data + p);
+    out->polyStartIdx = p3dReadU16LE(data + p);
     p += 2;
 
     // Long -> matrix buffer dword offset (STLOAD AddJoint).
     if (p + 4 > dataSize) {
         return false;
     }
-    out->captureBufferIdx = (s32)ReadU32(data + p);
+    out->captureBufferIdx = (s32)p3dReadU32LE(data + p);
     p += 4;
 
     // Initialize runtime fields
@@ -315,14 +312,14 @@ static bool ParseJointChunk(const u8* data, u32 dataSize, STreeJoint* out) {
 
     // Optional 0x6125 rest-pose sub-chunk (single optional child in STLOAD AddJoint).
     if (p + 6 <= dataSize) {
-        u16 subId = ReadU16(data + p);
-        u32 subSize = ReadU32(data + p + 2);
+        u16 subId = p3dReadU16LE(data + p);
+        u32 subSize = p3dReadU32LE(data + p + 2);
         if (subSize >= 6 && p + subSize <= dataSize && subId == CHUNK_REST_POSE) {
             u32 sp = p + 6;
             if (sp + 6 <= p + subSize) {
-                out->restPoseRotX = ReadS16(data + sp);
-                out->restPoseRotY = ReadS16(data + sp + 2);
-                out->restPoseRotZ = ReadS16(data + sp + 4);
+                out->restPoseRotX = p3dReadS16LE(data + sp);
+                out->restPoseRotY = p3dReadS16LE(data + sp + 2);
+                out->restPoseRotZ = p3dReadS16LE(data + sp + 4);
             }
         }
     }
@@ -342,7 +339,7 @@ STreeData* ParseSTreeChunk(const u8* chunkData, u32 chunkDataSize, bool isMapped
     if (p + 2 > chunkDataSize) {
         return nullptr;
     }
-    s16 numJoints = ReadS16(chunkData + p);
+    s16 numJoints = p3dReadS16LE(chunkData + p);
     p += 2;
     if (numJoints <= 0 || numJoints > 256) {
         return nullptr;
@@ -366,8 +363,8 @@ STreeData* ParseSTreeChunk(const u8* chunkData, u32 chunkDataSize, bool isMapped
     // Parse sub-chunks
     u32 jointIdx = 0;
     while (p + 6 <= chunkDataSize) {
-        u16 subId = ReadU16(chunkData + p);
-        u32 subSize = ReadU32(chunkData + p + 2);
+        u16 subId = p3dReadU16LE(chunkData + p);
+        u32 subSize = p3dReadU32LE(chunkData + p + 2);
         if (subSize < 6 || p + subSize > chunkDataSize) {
             break;
         }
@@ -375,12 +372,12 @@ STreeData* ParseSTreeChunk(const u8* chunkData, u32 chunkDataSize, bool isMapped
         if (subId == CHUNK_STREE_MAPPING && isMapped) {
             u32 mp = p + 6;
             if (mp + 4 <= p + subSize) {
-                u32 mapCount = ReadU32(chunkData + mp);
+                u32 mapCount = p3dReadU32LE(chunkData + mp);
                 mp += 4;
                 tree->numMapEntries = mapCount;
                 tree->jointOrderMap = (u32*)std::malloc(mapCount * sizeof(u32));
                 for (u32 m = 0; m < mapCount && mp + 4 <= p + subSize; m++) {
-                    tree->jointOrderMap[m] = ReadU32(chunkData + mp);
+                    tree->jointOrderMap[m] = p3dReadU32LE(chunkData + mp);
                     mp += 4;
                 }
             }
@@ -405,3 +402,4 @@ STreeData* ParseSTreeChunk(const u8* chunkData, u32 chunkDataSize, bool isMapped
 
     return tree;
 }
+

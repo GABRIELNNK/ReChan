@@ -4,6 +4,7 @@
 #include "gen/common.h"
 #include "gen/display.h"
 #include "gen/camera.h"
+#include "gen/psxmath_helpers.h"
 #include "p3d/p3dmath.h"
 #include "pc/audio.h"
 #include <vector>
@@ -13,10 +14,6 @@
 // These are defined inline by p3d math headers; declare here to keep tooling resolution stable.
 s32 rmSin16(s32 angle);
 s32 rmMag3ff(s32 a1, s32 a2, s32 a3);
-
-static inline s32 MulShift16Signed(s32 a, s32 b) {
-    return (s32)(((s64)a * (s64)b) >> 16);
-}
 
 static bool GetListenerState(LVector& outPos, s32& outYaw) {
     if (!g_display) {
@@ -78,8 +75,8 @@ static void GetObjectVolumesPsx(u16 baseVol, const LVector* objPos, u16& outVolL
         return;
     }
 
-    const s32 sepX = MulShift16Signed(rmSin16(yaw - 0x4000), STEREO_SEPARATION);
-    const s32 sepZ = MulShift16Signed(rmSin16(yaw), STEREO_SEPARATION);
+    const s32 sepX = PsxMulShift16Signed(rmSin16(yaw - 0x4000), STEREO_SEPARATION);
+    const s32 sepZ = PsxMulShift16Signed(rmSin16(yaw), STEREO_SEPARATION);
 
     const s32 lx = listener.x - sepX;
     const s32 lz = listener.z - sepZ;

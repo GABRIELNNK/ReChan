@@ -98,8 +98,8 @@ public:
 
     bool  InitDisplay(const pddiDisplayInit& init) override;
     void  SwapBuffers() override;
-    int   GetWidth() override { return fbWidth; }
-    int   GetHeight() override { return fbHeight; }
+    int   GetWidth() override;
+    int   GetHeight() override;
     bool  ShouldClose() override;
     void  PollEvents() override;
 
@@ -119,6 +119,8 @@ public:
     bool IsBorderless() override { return borderless; }
     void SetResolution(int w, int h) override;
     void SetVSync(bool enabled) override;
+    void SetMSAA(int samples) override;
+    int  GetMSAA() override { return msaaSamples; }
     void SetWindowPos(int x, int y) override;
 
     void SetTitle(const char* title) override;
@@ -135,7 +137,7 @@ public:
     void RenderOverlay() override;
 
     // Viewport
-    void GetViewport(int& x, int& y, int& w, int& h) const;
+    void GetViewport(int& x, int& y, int& w, int& h);
 
     GLFWwindow* GetWindow() const { return window; }
 
@@ -152,9 +154,14 @@ private:
     bool cursorVisible = true;
     bool cursorClipped = false;
     bool focused = true;
+    int msaaSamples = 0;
+    int maxMsaaSamples = 0;
     pddiWndProc wndProc;
 
     void UpdateCursorClip();
+    int ClampMSAASamples(int samples) const;
+    void SyncFramebufferSize();
+    void QueryFramebufferSize(int& width, int& height) const;
 
     static void FramebufferSizeCallback(GLFWwindow* window, int width, int height);
     static void WindowFocusCallback(GLFWwindow* window, int focused);
@@ -184,6 +191,7 @@ public:
     void SetProjectionMatrix(const Mat4& m) override;
     void SetViewMatrix(const Mat4& m) override;
     void SetWorldMatrix(const Mat4& m) override;
+    const Mat4& GetWorldMatrix() const override { return worldMatrix; }
     const Mat4& GetViewMatrix() const override { return viewMatrix; }
     const Mat4& GetProjectionMatrix() const override { return projection; }
 
@@ -191,6 +199,8 @@ public:
     void EnableZBuffer(bool enable) override;
     void SetBlendMode(pddiBlendMode mode) override;
     void SetScissor(int x, int y, int w, int h) override;
+    void SetMultisampleEnabled(bool enable) override;
+    void ResolveForOverlayPass() override;
 
     void DrawQuad(pddiBaseShader* shader,
                   float x, float y, float w, float h,
@@ -200,6 +210,7 @@ public:
 
     void SetTexture(pddiTexture* tex) override;
     void SetVRAMHandle(u32 handle) override;
+    void SetTexInfoOverride(bool enabled, u32 texInfoWord) override;
 
     u32  CreateVRAMTexture(int w, int h, const u16* data) override;
     void DestroyVRAMTexture(u32 handle) override;
@@ -220,12 +231,23 @@ private:
     Mat4 worldMatrix;
     pddiTexture* currentTexture = nullptr;
     u32 vramHandle = 0;
+    bool texInfoOverrideEnabled = false;
+    u32 texInfoOverrideWord = 0;
     u32 quadVAO = 0;
     u32 quadVBO = 0;
     u32 program3D = 0;
     u32 gouraudVAO = 0;
     u32 gouraudVBO = 0;
     u32 gouraudProgram = 0;
+    u32 msaaFbo = 0;
+    u32 msaaColorRbo = 0;
+    u32 msaaDepthStencilRbo = 0;
+    s32 msaaWidth = 0;
+    s32 msaaHeight = 0;
+    s32 activeMsaaSamples = 0;
+    bool usingMsaaFramebuffer = false;
+    bool multisampleEnabled = true;
+    bool resolvedForOverlay = false;
 
     // Renderstate cache
     pddiCullMode cachedCullMode = PDDI_CULL_NONE;
@@ -236,6 +258,9 @@ private:
     void InitQuadMesh();
     void InitGouraudMesh();
     void Init3DShader();
+    void UpdateMultisampleState();
+    void EnsureMSAAFramebuffer(s32 samples, s32 width, s32 height);
+    void DestroyMSAAFramebuffer();
 };
 
 // glDevice

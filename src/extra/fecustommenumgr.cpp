@@ -15,33 +15,292 @@
 #include "gen/time.h"
 #include "xclib/xccolour.h"
 #include "gen/scoremgr.h"
+#include "gen/world.h"
 #include "p3d/texture.h"
 #include <cmath>
-#include <vector>
+#include <cstdio>
 
 feCustomMenuMgr* g_feCustomMenuMgr = nullptr;
+
+static constexpr s32 kFrameRateOptionValues[] = { 30, 60, 120, 0 };
+static constexpr s32 kMsaaOptionValues[] = { 0, 2, 4, 8, 16 };
+static constexpr s32 kKeyBindingActionCount = ACTION_OPEN_CLOSE_MENU;
+
+static void BeginNewGameReset() {
+    if (g_scoreManager) {
+        g_scoreManager->HandleGameBegin();
+    }
+
+    if (g_game) {
+        World* world = g_game->GetWorld();
+        if (world) {
+            world->Unload();
+            world->UnloadLevelPart2();
+            world->UnloadPermanent();
+        }
+    }
+
+    if (g_scoreManager) {
+        g_scoreManager->drunkenMasterUnlocked = 0;
+    }
+}
+
+static bool IsKeyBindingAction(Action action) {
+    return action >= ACTION_JUMP && action < ACTION_OPEN_CLOSE_MENU;
+}
+
+static void SetDesktopBindingCodeUnique(Action action, s32 slot, s32 code) {
+    if (!g_actionInput) {
+        return;
+    }
+
+    if (!IsKeyBindingAction(action) || slot < 0 || slot >= DEF_KEYBIND_SLOT_COUNT) {
+        return;
+    }
+
+    if (code != 0) {
+        for (s32 actionIndex = 0; actionIndex < kKeyBindingActionCount; actionIndex++) {
+            const Action currentAction = (Action)actionIndex;
+            for (s32 currentSlot = 0; currentSlot < DEF_KEYBIND_SLOT_COUNT; currentSlot++) {
+                if (currentAction == action && currentSlot == slot) {
+                    continue;
+                }
+
+                if (g_actionInput->GetDesktopBindingCode(currentAction, currentSlot) == code) {
+                    g_actionInput->SetDesktopBindingCode(currentAction, currentSlot, 0);
+                }
+            }
+        }
+    }
+
+    g_actionInput->SetDesktopBindingCode(action, slot, code);
+}
+
+static void BuildActionDisplayName(Action action, char* outText, s32 outTextLen) {
+    if (!outText || outTextLen <= 0) {
+        return;
+    }
+
+    outText[0] = '\0';
+
+    const char* token = ActionToToken(action);
+    if (!token) {
+        return;
+    }
+
+    s32 write = 0;
+    for (s32 i = 0; token[i] != '\0' && write + 1 < outTextLen; i++) {
+        char ch = token[i];
+        if (ch == '_') {
+            ch = ' ';
+        }
+        outText[write++] = ch;
+    }
+    outText[write] = '\0';
+}
+
+static void SetPromptText(char* dst, s32 dstLen, const char* fmt, const char* a = nullptr, const char* b = nullptr, const char* c = nullptr) {
+    if (!dst || dstLen <= 0) {
+        return;
+    }
+
+    if (!fmt) {
+        dst[0] = '\0';
+        return;
+    }
+
+    if (a && b && c) {
+        snprintf(dst, dstLen, fmt, a, b, c);
+    }
+    else if (a && b) {
+        snprintf(dst, dstLen, fmt, a, b);
+    }
+    else if (a) {
+        snprintf(dst, dstLen, fmt, a);
+    }
+    else {
+        snprintf(dst, dstLen, "%s", fmt);
+    }
+}
+
+static s32 ClampFrameRateOptionIndex(s32 index) {
+    if (index < 0) {
+        return 0;
+    }
+
+    const s32 maxIndex = (s32)(sizeof(kFrameRateOptionValues) / sizeof(kFrameRateOptionValues[0])) - 1;
+    if (index > maxIndex) {
+        return maxIndex;
+    }
+    return index;
+}
+
+static s32 FrameRateOptionIndexToValue(s32 index) {
+    return kFrameRateOptionValues[ClampFrameRateOptionIndex(index)];
+}
+
+static s32 FrameRateValueToOptionIndex(s32 fps) {
+    if (fps <= 0) {
+        return (s32)(sizeof(kFrameRateOptionValues) / sizeof(kFrameRateOptionValues[0])) - 1;
+    }
+
+    s32 bestIndex = 0;
+    s32 bestDist = 0x7fffffff;
+
+    for (u32 i = 0; i < (u32)(sizeof(kFrameRateOptionValues) / sizeof(kFrameRateOptionValues[0])); i++) {
+        const s32 candidate = kFrameRateOptionValues[i];
+        if (candidate <= 0) {
+            continue;
+        }
+
+        const s32 dist = (fps > candidate) ? (fps - candidate) : (candidate - fps);
+        if (dist < bestDist) {
+            bestDist = dist;
+            bestIndex = (s32)i;
+        }
+    }
+
+    return bestIndex;
+}
+
+static const char* GetFrameRateDisplayToken(s32 index) {
+    switch (FrameRateOptionIndexToValue(index)) {
+        case 30: return "FE_FR30";
+        case 60: return "FE_FR60";
+        case 120: return "FE_FR120";
+        case 0: return "FE_MAX";
+        default: return nullptr;
+    }
+}
+
+static s32 ClampMsaaOptionIndex(s32 index) {
+    if (index < 0) {
+        return 0;
+    }
+
+    const s32 maxIndex = (s32)(sizeof(kMsaaOptionValues) / sizeof(kMsaaOptionValues[0])) - 1;
+    if (index > maxIndex) {
+        return maxIndex;
+    }
+    return index;
+}
+
+static s32 MsaaOptionIndexToSamples(s32 index) {
+    return kMsaaOptionValues[ClampMsaaOptionIndex(index)];
+}
+
+static s32 MsaaSamplesToOptionIndex(s32 samples) {
+    s32 bestIndex = 0;
+    s32 bestDist = 0x7fffffff;
+
+    for (u32 i = 0; i < (u32)(sizeof(kMsaaOptionValues) / sizeof(kMsaaOptionValues[0])); i++) {
+        const s32 candidate = kMsaaOptionValues[i];
+        const s32 dist = (samples > candidate) ? (samples - candidate) : (candidate - samples);
+        if (dist < bestDist) {
+            bestDist = dist;
+            bestIndex = (s32)i;
+        }
+    }
+
+    return bestIndex;
+}
+
+static s32 WrapStepValue(s32 current, s32 step, s32 lo, s32 hi, s32 dir) {
+    if (lo > hi) {
+        const s32 tmp = lo;
+        lo = hi;
+        hi = tmp;
+    }
+
+    if (step <= 0) {
+        step = 1;
+    }
+
+    s32 v = current + ((dir > 0) ? step : -step);
+    if (v < lo) {
+        return hi;
+    }
+    if (v > hi) {
+        return lo;
+    }
+    return v;
+}
+
+static s32 WrapStepValueSlider(s32 current, s32 step, s32 lo, s32 hi, s32 dir) {
+    if (lo > hi) {
+        const s32 tmp = lo;
+        lo = hi;
+        hi = tmp;
+    }
+
+    if (step <= 0) {
+        step = 1;
+    }
+
+    s32 v = current + ((dir > 0) ? step : -step);
+    return v;
+}
+
+static const char* GetMsaaDisplayToken(s32 index) {
+    switch (MsaaOptionIndexToSamples(index)) {
+        case 2:  return "FE_A2X";
+        case 4:  return "FE_A4X";
+        case 8:  return "FE_A8X";
+        case 16: return "FE_A16X";
+        default: return nullptr;
+    }
+}
+
+static bool IsVolumeSliderBinding(EntryBinding binding) {
+    return binding == EntryBinding_MusicVol
+        || binding == EntryBinding_EffectsVol
+        || binding == EntryBinding_DialogVol;
+}
+
+static s32 GetValueChangeSoundId(const Entry& entry) {
+    if (entry.type == EntryType_Slider && IsVolumeSliderBinding(entry.binding)) {
+        return FE_SND_MENU_8;
+    }
+
+    // Non-volume value adjustments should use the same sound as Enter/confirm.
+    return FE_SND_MENU_5;
+}
+
+static bool IsSaveSlotPage(MenuPage page) {
+    return page == MenuPage_LoadSlots
+        || page == MenuPage_SaveSlots
+        || page == MenuPage_DeleteSlots;
+}
 
 void feCustomMenuMgr::BuildPages() {
     auto& feTitle = AddPage(MenuPage_Title, "FE_TTL", "Menu_Title", MenuPage_None, 0, false, -1, -1);
     SetEntries(feTitle, {
-        Button("FE_NWG", EntryEvent_NewGame),
-        Button("FE_LDG", EntryEvent_Load),
+        Button("FE_STG", EntryEvent_GoPage, MenuPage_StartGame),
         Button("FE_OPT", EntryEvent_GoPage, MenuPage_Options),
-        Button("FE_XTG", EntryEvent_GoPage, MenuPage_QuitConfirm),
+        Button("FE_QTG", EntryEvent_GoPage, MenuPage_QuitConfirm),
                });
 
     auto& feMain = AddPage(MenuPage_Frontend, "FE_MNM", "Menu_Title", MenuPage_None, 0, false, -1, -1);
     SetEntries(feMain, {
         Button("FE_RSM", EntryEvent_Resume),
-        Button("FE_QTG", EntryEvent_GoPage, MenuPage_QuitConfirm),
-        Button("FE_LDG", EntryEvent_Load),
-        Button("FE_SVG", EntryEvent_Save),
+        Button("FE_STG", EntryEvent_GoPage, MenuPage_StartGame),
         Button("FE_OPT", EntryEvent_GoPage, MenuPage_Options),
+        Button("FE_QTG", EntryEvent_GoPage, MenuPage_QuitConfirm),
                });
 
-    auto& feOpts = AddPage(MenuPage_Options, "FE_OPT", "Menu_GameOption", MenuPage_Frontend, 4, false, -1, -1);
+    auto& feStart = AddPage(MenuPage_StartGame, "FE_STG", "Menu_GameOption", MenuPage_Frontend, 1, false, -1, -1);
+    SetEntries(feStart, {
+        Button("FE_NWG", EntryEvent_NewGame),
+        Button("FE_LDG", EntryEvent_Load),
+        Button("FE_SVG", EntryEvent_Save),
+        Button("FE_DLG", EntryEvent_Delete),
+        Button("FE_BCK", EntryEvent_Back),
+               });
+
+    auto& feOpts = AddPage(MenuPage_Options, "FE_OPT", "Menu_GameOption", MenuPage_Frontend, 2, false, -1, -1);
     SetEntries(feOpts, {
         Button("FE_CTL", EntryEvent_GoPage, MenuPage_Controller),
+        Button("FE_KBD", EntryEvent_GoPage, MenuPage_KeyBindings),
         Button("FE_DIS", EntryEvent_GoPage, MenuPage_Display),
         Button("FE_SND", EntryEvent_GoPage, MenuPage_Sound),
         Button("FE_BCK", EntryEvent_Back),
@@ -53,11 +312,16 @@ void feCustomMenuMgr::BuildPages() {
         Button("FE_BCK", EntryEvent_Back),
                });
 
+    AddPage(MenuPage_KeyBindings, "FE_KBD", "Menu_Controller", MenuPage_Controller, 1, false,
+            DEF_KEYBIND_WINDOW_W, DEF_KEYBIND_WINDOW_H);
+
     auto& feDisplay = AddPage(MenuPage_Display, "FE_DIS", "Menu_GameOption", MenuPage_Options, 1, false, -1, -1);
     SetEntries(feDisplay, {
-        Slider("FE_RES", EntryBinding_DisplayResolution, 1, 0, 64),
-        Slider("FE_FSC", EntryBinding_DisplayScreenMode, 1, 0, 2),
+        List("FE_RES", EntryBinding_DisplayResolution, 1, 0, 64),
+        List("FE_FSC", EntryBinding_DisplayScreenMode, 1, 0, 2),
         Toggle("FE_VYS", EntryBinding_DisplayVsync),
+        List("FE_FPS", EntryBinding_DisplayFrameRate, 1, 0, 3),
+        List("FE_MSA", EntryBinding_DisplayMsaa, 1, 0, 4),
         Button("FE_BCK", EntryEvent_Back),
                });
 
@@ -70,10 +334,71 @@ void feCustomMenuMgr::BuildPages() {
         Button("FE_BCK", EntryEvent_Back),
                });
 
-    auto& feNewGame = AddPage(MenuPage_NewGameConfirm, "FE_NGQ", "Menu_Confirmation", MenuPage_Frontend, 0, false, -1, -1);
-    SetEntries(feNewGame, {
-        Button("FE_YS", EntryEvent_NewGame),
+    auto& feLoadSlots = AddPage(MenuPage_LoadSlots, "FE_LDG", "Menu_GameOption", MenuPage_StartGame, 1, false, -1, -1);
+    SetEntries(feLoadSlots, {
+        Button("FE_NTD", EntryEvent_Load),
+        Button("FE_NTD", EntryEvent_Load),
+        Button("FE_NTD", EntryEvent_Load),
+        Button("FE_NTD", EntryEvent_Load),
+        Button("FE_NTD", EntryEvent_Load),
+        Button("FE_NTD", EntryEvent_Load),
+        Button("FE_NTD", EntryEvent_Load),
+        Button("FE_NTD", EntryEvent_Load),
+        Button("FE_BCK", EntryEvent_Back),
+               });
+
+    auto& feSaveSlots = AddPage(MenuPage_SaveSlots, "FE_SVG", "Menu_GameOption", MenuPage_StartGame, 2, false, -1, -1);
+    SetEntries(feSaveSlots, {
+        Button("FE_NTD", EntryEvent_Save),
+        Button("FE_NTD", EntryEvent_Save),
+        Button("FE_NTD", EntryEvent_Save),
+        Button("FE_NTD", EntryEvent_Save),
+        Button("FE_NTD", EntryEvent_Save),
+        Button("FE_NTD", EntryEvent_Save),
+        Button("FE_NTD", EntryEvent_Save),
+        Button("FE_NTD", EntryEvent_Save),
+        Button("FE_BCK", EntryEvent_Back),
+               });
+
+    auto& feDeleteSlots = AddPage(MenuPage_DeleteSlots, "FE_DLG", "Menu_GameOption", MenuPage_StartGame, 3, false, -1, -1);
+    SetEntries(feDeleteSlots, {
+        Button("FE_NTD", EntryEvent_Delete),
+        Button("FE_NTD", EntryEvent_Delete),
+        Button("FE_NTD", EntryEvent_Delete),
+        Button("FE_NTD", EntryEvent_Delete),
+        Button("FE_NTD", EntryEvent_Delete),
+        Button("FE_NTD", EntryEvent_Delete),
+        Button("FE_NTD", EntryEvent_Delete),
+        Button("FE_NTD", EntryEvent_Delete),
+        Button("FE_BCK", EntryEvent_Back),
+               });
+
+    auto& feLoadConfirm = AddPage(MenuPage_LoadConfirm, "FE_LDG", "Menu_Confirmation", MenuPage_LoadSlots, 0, false, -1, -1);
+    SetEntries(feLoadConfirm, {
+        Info("FE_LDQ"),
         Button("FE_NO", EntryEvent_Back),
+        Button("FE_YS", EntryEvent_LoadConfirmYes),
+               });
+
+    auto& feSaveConfirm = AddPage(MenuPage_SaveConfirm, "FE_SVG", "Menu_Confirmation", MenuPage_SaveSlots, 0, false, -1, -1);
+    SetEntries(feSaveConfirm, {
+        Info("FE_SVQ"),
+        Button("FE_NO", EntryEvent_Back),
+        Button("FE_YS", EntryEvent_SaveConfirmYes),
+               });
+
+    auto& feDeleteConfirm = AddPage(MenuPage_DeleteConfirm, "FE_DLG", "Menu_Confirmation", MenuPage_DeleteSlots, 0, false, -1, -1);
+    SetEntries(feDeleteConfirm, {
+        Info("FE_DLQ"),
+        Button("FE_NO", EntryEvent_Back),
+        Button("FE_YS", EntryEvent_DeleteConfirmYes),
+               });
+
+    auto& feNewGame = AddPage(MenuPage_NewGameConfirm, "FE_NWG", "Menu_Confirmation", MenuPage_Frontend, 0, false, -1, -1);
+    SetEntries(feNewGame, {
+        Info("FE_NGQ"),
+        Button("FE_NO", EntryEvent_Back),
+        Button("FE_YS", EntryEvent_NewGame),
                });
 
     auto& feExitLevel = AddPage(MenuPage_ExitLevelConfirm, "FE_EXL", "Menu_Confirmation", MenuPage_Pause, 2, true, -1, -1);
@@ -83,14 +408,14 @@ void feCustomMenuMgr::BuildPages() {
         Button("FE_YS", EntryEvent_ExitToHub),
                });
 
-    auto& feQuit = AddPage(MenuPage_QuitConfirm, "FE_XGQ", "Menu_Confirmation", MenuPage_None, 0, false, -1, -1);
+    auto& feQuit = AddPage(MenuPage_QuitConfirm, "FE_QTG", "Menu_Confirmation", MenuPage_None, 0, false, -1, -1);
     SetEntries(feQuit, {
         Info("FE_XGM"),
         Button("FE_NO", EntryEvent_Back),
         Button("FE_YS", EntryEvent_QuitGame),
                });
 
-    auto& feQuitting = AddPage(MenuPage_Quitting, "FE_XGQ", "Menu_Confirmation", MenuPage_None, 0, false, -1, -1);
+    auto& feQuitting = AddPage(MenuPage_Quitting, "FE_QTG", "Menu_Confirmation", MenuPage_None, 0, false, -1, -1);
     SetEntries(feQuitting, {
         Info("FE_QUI"),
                });
@@ -100,6 +425,7 @@ void feCustomMenuMgr::BuildPages() {
         Button("FE_RSG", EntryEvent_Resume),
         Button("FE_OPT", EntryEvent_GoPage, MenuPage_Options),
         Button("FE_EXL", EntryEvent_GoPage, MenuPage_ExitLevelConfirm),
+        Button("FE_QTG", EntryEvent_GoPage, MenuPage_QuitConfirm),
                });
 }
 
@@ -152,6 +478,319 @@ s32 feCustomMenuMgr::Invoke() {
     if (!g_actionInput)
         return m_result;
 
+    if (m_currPage == MenuPage_KeyBindings) {
+        if (m_keyBindActionCursor < 0 || m_keyBindActionCursor >= kKeyBindingActionCount) {
+            m_keyBindActionCursor = 0;
+        }
+
+        if (m_keyBindSlotCursor < 0 || m_keyBindSlotCursor >= DEF_KEYBIND_SLOT_COUNT) {
+            m_keyBindSlotCursor = 0;
+        }
+
+        auto clampKeyBindScroll = [this]() {
+            if (m_keyBindActionCursor < m_keyBindScrollTop) {
+                m_keyBindScrollTop = m_keyBindActionCursor;
+            }
+            if (m_keyBindActionCursor >= m_keyBindScrollTop + DEF_KEYBIND_VISIBLE_ROWS) {
+                m_keyBindScrollTop = m_keyBindActionCursor - (DEF_KEYBIND_VISIBLE_ROWS - 1);
+            }
+
+            const s32 maxScrollTop = (kKeyBindingActionCount > DEF_KEYBIND_VISIBLE_ROWS)
+                ? (kKeyBindingActionCount - DEF_KEYBIND_VISIBLE_ROWS)
+                : 0;
+            if (m_keyBindScrollTop < 0) {
+                m_keyBindScrollTop = 0;
+            }
+            if (m_keyBindScrollTop > maxScrollTop) {
+                m_keyBindScrollTop = maxScrollTop;
+            }
+        };
+
+        double sx = 0.0;
+        double sy = 0.0;
+        g_actionInput->GetMousePosition(sx, sy);
+
+        bool mouseMoved = false;
+        if (!m_mousePosInitialized) {
+            m_lastMouseX = sx;
+            m_lastMouseY = sy;
+            m_mousePosInitialized = true;
+        }
+        else if (m_mouseInputActive) {
+            mouseMoved = (std::fabs(sx - m_lastMouseX) > 0.5) || (std::fabs(sy - m_lastMouseY) > 0.5);
+            m_lastMouseX = sx;
+            m_lastMouseY = sy;
+        }
+        else {
+            mouseMoved = (std::fabs(sx - m_lastMouseX) > 4.0) || (std::fabs(sy - m_lastMouseY) > 4.0);
+            if (mouseMoved) {
+                m_lastMouseX = sx;
+                m_lastMouseY = sy;
+            }
+        }
+
+        const bool leftClick = g_actionInput->IsMouseButtonTriggered(MouseBtn::Left);
+        const bool rightClick = g_actionInput->IsMouseButtonTriggered(MouseBtn::Right);
+        const s32 scroll = g_actionInput->ConsumeScrollDelta();
+        // Key bindings page should respond only to keyboard + mouse.
+        const bool nonMouseInput = g_actionInput->HadKeyboardInputThisFrame();
+
+        if ((mouseMoved || leftClick || rightClick || scroll != 0) && !nonMouseInput) {
+            if (!m_mouseInputActive && g_display) {
+                g_display->SetCursorVisible(true);
+            }
+            m_mouseInputActive = true;
+        }
+
+        if (m_keyBindCaptureActive) {
+            if (m_keyBindCaptureBlockFrames > 0) {
+                m_keyBindCaptureBlockFrames--;
+                return m_result;
+            }
+
+            const s32 capturedKey = g_actionInput->GetTriggeredKeyThisFrame();
+            const s32 capturedMouse = g_actionInput->GetTriggeredMouseButtonThisFrame();
+            const Action action = (Action)m_keyBindActionCursor;
+
+            if (capturedKey == KEY_ESCAPE ||
+                (nonMouseInput && g_actionInput->JustPressed(ACTION_MENU_BACK)) ||
+                (nonMouseInput && g_actionInput->JustPressed(ACTION_OPEN_CLOSE_MENU))) {
+                m_keyBindCaptureActive = false;
+                PlaySound(FE_SND_MENU_5);
+                return m_result;
+            }
+
+            if ((nonMouseInput && g_actionInput->JustPressed(ACTION_MENU_CLEAR)) ||
+                capturedKey == KEY_DELETE || capturedKey == KEY_BACKSPACE) {
+                SetDesktopBindingCodeUnique(action, m_keyBindSlotCursor, 0);
+                g_settings.Save(SETTINGS_PATH);
+                m_keyBindCaptureActive = false;
+                PlaySound(FE_SND_MENU_5);
+                return m_result;
+            }
+
+            if (capturedKey != 0) {
+                SetDesktopBindingCodeUnique(action, m_keyBindSlotCursor, ActionInput::EncodeKeyboardBindingCode(capturedKey));
+                g_settings.Save(SETTINGS_PATH);
+                m_keyBindCaptureActive = false;
+                PlaySound(FE_SND_MENU_5);
+                return m_result;
+            }
+
+            if (capturedMouse != MouseBtn::NONE) {
+                SetDesktopBindingCodeUnique(action, m_keyBindSlotCursor, ActionInput::EncodeMouseBindingCode(capturedMouse));
+                g_settings.Save(SETTINGS_PATH);
+                m_keyBindCaptureActive = false;
+                PlaySound(FE_SND_MENU_5);
+                return m_result;
+            }
+
+            if (nonMouseInput && m_mouseInputActive) {
+                m_mouseInputActive = false;
+                if (g_display) {
+                    g_display->SetCursorVisible(false);
+                }
+            }
+
+            return m_result;
+        }
+
+        s32 hoverActionIndex = -1;
+        s32 hoverRowIndex = -1;
+        s32 hoverSlotIndex = m_keyBindSlotCursor;
+
+        if (m_mouseInputActive) {
+            const f32 screenW = g_display ? (f32)g_display->GetScreenWidth() : DEFAULT_SCREEN_WIDTH;
+            const f32 screenH = g_display ? (f32)g_display->GetScreenHeight() : DEFAULT_SCREEN_HEIGHT;
+            const f32 aspect = g_display ? g_display->GetAspectRatio() : (4.0f / 3.0f);
+#if FIX_ASPECT_RATIO
+            const f32 effectiveW = screenW * DEFAULT_ASPECT_RATIO / aspect;
+            const f32 offsetX = (screenW - effectiveW) * 0.5f;
+            const f32 psxX = ((f32)sx - offsetX) * DEFAULT_SCREEN_WIDTH / effectiveW;
+#else
+            const f32 psxX = (f32)sx * DEFAULT_SCREEN_WIDTH / screenW;
+#endif
+            const f32 psxY = (f32)sy * DEFAULT_SCREEN_HEIGHT / screenH;
+
+            const PageDef* page = &m_pages[m_currPage];
+            const s32 panelX = DEF_WINDOW_CENTER_X - page->frameW / 2;
+            const s32 panelY = DEF_WINDOW_CENTER_Y - page->frameH / 2;
+            const s32 contentTop = panelY + DEF_TITLE_BAR_H + DEF_CONTENT_TOP_PAD;
+            const s32 labelX = panelX + DEF_LABEL_X_PAD;
+            const s32 headerY = contentTop + DEF_CONTENT_PAD + DEF_TEXT_Y_OFF;
+            const s32 firstRowY = headerY + DEF_KEYBIND_ROW_STEP;
+            const s32 slotW = DEF_KEYBIND_SLOT_W;
+            const s32 slotGap = DEF_KEYBIND_SLOT_GAP;
+            const s32 slot2Right = panelX + page->frameW - DEF_VALUE_X_PAD;
+            const s32 slot2Left = slot2Right - slotW;
+            const s32 slot1Right = slot2Left - slotGap;
+            const s32 slot1Left = slot1Right - slotW;
+            const s32 actionLabelRight = slot1Left - DEF_KEYBIND_ACTION_COL_GAP;
+            const s32 visibleRows = (kKeyBindingActionCount - m_keyBindScrollTop < DEF_KEYBIND_VISIBLE_ROWS)
+                ? (kKeyBindingActionCount - m_keyBindScrollTop)
+                : DEF_KEYBIND_VISIBLE_ROWS;
+
+            if (psxX >= (f32)panelX && psxX < (f32)(panelX + page->frameW)) {
+                for (s32 row = 0; row < visibleRows; row++) {
+                    const s32 rowTop = firstRowY + row * DEF_KEYBIND_ROW_STEP - DEF_KEYBIND_ROW_TOP_PAD;
+                    const s32 rowBottom = rowTop + DEF_KEYBIND_ROW_STEP;
+                    if (psxY < (f32)rowTop || psxY >= (f32)rowBottom) {
+                        continue;
+                    }
+
+                    const s32 actionIndex = m_keyBindScrollTop + row;
+                    if (actionIndex < 0 || actionIndex >= kKeyBindingActionCount) {
+                        continue;
+                    }
+
+                    if (psxX >= (f32)(slot2Left - DEF_KEYBIND_HIT_PAD) && psxX < (f32)(slot2Left + slotW + DEF_KEYBIND_HIT_PAD)) {
+                        hoverSlotIndex = 1;
+                    }
+                    else if (psxX >= (f32)(slot1Left - DEF_KEYBIND_HIT_PAD) && psxX < (f32)(slot1Left + slotW + DEF_KEYBIND_HIT_PAD)) {
+                        hoverSlotIndex = 0;
+                    }
+                    else if (psxX >= (f32)(labelX - DEF_KEYBIND_CELL_PAD - DEF_KEYBIND_HIT_PAD) && psxX < (f32)actionLabelRight) {
+                        hoverSlotIndex = m_keyBindSlotCursor;
+                    }
+                    else {
+                        continue;
+                    }
+
+                    hoverActionIndex = actionIndex;
+                    hoverRowIndex = row;
+                    break;
+                }
+            }
+
+            if (hoverActionIndex >= 0 && hoverActionIndex != m_keyBindActionCursor) {
+                m_keyBindActionCursor = hoverActionIndex;
+                clampKeyBindScroll();
+                PlaySound(FE_SND_MENU_7);
+            }
+
+            if (hoverActionIndex >= 0 && hoverSlotIndex != m_keyBindSlotCursor) {
+                m_keyBindSlotCursor = hoverSlotIndex;
+                PlaySound(FE_SND_MENU_7);
+            }
+
+            if (scroll != 0) {
+                const s32 oldScrollTop = m_keyBindScrollTop;
+                const s32 maxScrollTop = (kKeyBindingActionCount > DEF_KEYBIND_VISIBLE_ROWS)
+                    ? (kKeyBindingActionCount - DEF_KEYBIND_VISIBLE_ROWS)
+                    : 0;
+                const s32 dir = (scroll > 0) ? -1 : 1;
+                const s32 scrollSteps = (scroll > 0) ? scroll : -scroll;
+
+                for (s32 step = 0; step < scrollSteps; step++) {
+                    m_keyBindScrollTop += dir;
+                    if (m_keyBindScrollTop < 0) {
+                        m_keyBindScrollTop = 0;
+                        break;
+                    }
+                    if (m_keyBindScrollTop > maxScrollTop) {
+                        m_keyBindScrollTop = maxScrollTop;
+                        break;
+                    }
+                }
+
+                if (m_keyBindScrollTop != oldScrollTop) {
+                    if (hoverRowIndex >= 0) {
+                        m_keyBindActionCursor = m_keyBindScrollTop + hoverRowIndex;
+                    }
+
+                    if (m_keyBindActionCursor < m_keyBindScrollTop) {
+                        m_keyBindActionCursor = m_keyBindScrollTop;
+                    }
+                    if (m_keyBindActionCursor >= m_keyBindScrollTop + DEF_KEYBIND_VISIBLE_ROWS) {
+                        m_keyBindActionCursor = m_keyBindScrollTop + (DEF_KEYBIND_VISIBLE_ROWS - 1);
+                    }
+                    if (m_keyBindActionCursor >= kKeyBindingActionCount) {
+                        m_keyBindActionCursor = kKeyBindingActionCount - 1;
+                    }
+
+                    PlaySound(FE_SND_MENU_7);
+                }
+            }
+
+            if (leftClick && hoverActionIndex >= 0) {
+                m_keyBindCaptureActive = true;
+                m_keyBindCaptureBlockFrames = 1;
+                PlaySound(FE_SND_MENU_5);
+                return m_result;
+            }
+
+            if (rightClick) {
+                PlaySound(FE_SND_MENU_5);
+                GoBack();
+                return m_result;
+            }
+        }
+
+        if (nonMouseInput && g_actionInput->JustPressed(ACTION_MENU_UP)) {
+            m_keyBindActionCursor--;
+            if (m_keyBindActionCursor < 0) {
+                m_keyBindActionCursor = kKeyBindingActionCount - 1;
+            }
+            clampKeyBindScroll();
+            PlaySound(FE_SND_MENU_7);
+        }
+
+        if (nonMouseInput && g_actionInput->JustPressed(ACTION_MENU_DOWN)) {
+            m_keyBindActionCursor++;
+            if (m_keyBindActionCursor >= kKeyBindingActionCount) {
+                m_keyBindActionCursor = 0;
+            }
+            clampKeyBindScroll();
+            PlaySound(FE_SND_MENU_7);
+        }
+
+        if (nonMouseInput && g_actionInput->JustPressed(ACTION_MENU_LEFT)) {
+            m_keyBindSlotCursor--;
+            if (m_keyBindSlotCursor < 0) {
+                m_keyBindSlotCursor = DEF_KEYBIND_SLOT_COUNT - 1;
+            }
+            PlaySound(FE_SND_MENU_7);
+        }
+
+        if (nonMouseInput && g_actionInput->JustPressed(ACTION_MENU_RIGHT)) {
+            m_keyBindSlotCursor++;
+            if (m_keyBindSlotCursor >= DEF_KEYBIND_SLOT_COUNT) {
+                m_keyBindSlotCursor = 0;
+            }
+            PlaySound(FE_SND_MENU_7);
+        }
+
+        if (nonMouseInput && g_actionInput->JustPressed(ACTION_MENU_CONFIRM)) {
+            m_keyBindCaptureActive = true;
+            m_keyBindCaptureBlockFrames = 1;
+            PlaySound(FE_SND_MENU_5);
+        }
+
+        const s32 clearKey = g_actionInput->GetTriggeredKeyThisFrame();
+        if ((nonMouseInput && g_actionInput->JustPressed(ACTION_MENU_CLEAR)) ||
+            clearKey == KEY_DELETE || clearKey == KEY_BACKSPACE) {
+            const Action action = (Action)m_keyBindActionCursor;
+            SetDesktopBindingCodeUnique(action, m_keyBindSlotCursor, 0);
+            g_settings.Save(SETTINGS_PATH);
+            PlaySound(FE_SND_MENU_5);
+        }
+
+        if ((nonMouseInput && g_actionInput->JustPressed(ACTION_MENU_BACK)) ||
+            (nonMouseInput && g_actionInput->JustPressed(ACTION_OPEN_CLOSE_MENU))) {
+            PlaySound(FE_SND_MENU_5);
+            GoBack();
+        }
+
+        if (nonMouseInput && m_mouseInputActive) {
+            m_mouseInputActive = false;
+            if (g_display) {
+                g_display->SetCursorVisible(false);
+            }
+        }
+
+        return m_result;
+    }
+
     double sx = 0.0;
     double sy = 0.0;
     g_actionInput->GetMousePosition(sx, sy);
@@ -181,6 +820,8 @@ s32 feCustomMenuMgr::Invoke() {
     const bool leftClick = g_actionInput->IsMouseButtonTriggered(MouseBtn::Left);
     const bool rightClick = g_actionInput->IsMouseButtonTriggered(MouseBtn::Right);
     const s32 scroll = g_actionInput->ConsumeScrollDelta();
+    const Entry* e = &m_pages[m_currPage].entries[m_cursor];
+    auto prevVal = GetBoundValue(*e);
 
     // Determine non-mouse input first so it can suppress mouse re-activation below.
     const bool nonMouseInput = g_actionInput->HadKeyboardInputThisFrame() || g_actionInput->HadGamepadInputThisFrame();
@@ -230,10 +871,16 @@ s32 feCustomMenuMgr::Invoke() {
                 const s32 rowH = DEF_ROW_STEP + GetEntryExtraHeight(*page, page->entries[i], hoverFont);
                 if (psxY >= (f32)rowTop && psxY < (f32)(rowTop + rowH)) {
                     if (i != m_cursor && page->entries[i].type != EntryType_Info) {
-                        // Discard staged resolution when leaving that row via mouse.
+                        // Discard staged display values when leaving that row via mouse.
                         const Entry& prev = page->entries[m_cursor];
                         if (prev.binding == EntryBinding_DisplayResolution) {
                             m_pendingResolutionActive = false;
+                        }
+                        if (prev.binding == EntryBinding_DisplayScreenMode) {
+                            m_pendingScreenModeActive = false;
+                        }
+                        if (prev.binding == EntryBinding_DisplayMsaa) {
+                            m_pendingMsaaActive = false;
                         }
                         m_cursor = i;
                         PlaySound(FE_SND_MENU_7);
@@ -255,6 +902,10 @@ s32 feCustomMenuMgr::Invoke() {
         }
         if (scroll != 0) {
             Adjust(scroll > 0 ? 1 : -1);
+
+            if (prevVal != GetBoundValue(*e)) {
+                PlaySound(GetValueChangeSoundId(*e));
+            }
         }
     }
 
@@ -269,10 +920,18 @@ s32 feCustomMenuMgr::Invoke() {
     }
 
     if (g_actionInput->JustPressed(ACTION_MENU_LEFT)) {
-        Adjust(-1);  // PSX: no sound for LEFT
+        Adjust(-1);
+
+        if (prevVal != GetBoundValue(*e)) {
+            PlaySound(GetValueChangeSoundId(*e));
+        }
     }
     if (g_actionInput->JustPressed(ACTION_MENU_RIGHT)) {
-        Adjust(1);   // PSX: no sound for RIGHT
+        Adjust(1);
+
+        if (prevVal != GetBoundValue(*e)) {
+            PlaySound(GetValueChangeSoundId(*e));
+        }
     }
 
     if (g_actionInput->JustPressed(ACTION_MENU_CONFIRM)) {
@@ -307,6 +966,48 @@ void feCustomMenuMgr::SetPage(MenuPage page) {
     m_cursor = 0;
     m_result = 1;
     m_pendingResolutionActive = false;
+    m_pendingScreenModeActive = false;
+    m_pendingMsaaActive = false;
+    m_keyBindCaptureActive = false;
+    m_keyBindCaptureBlockFrames = 0;
+
+    if (m_currPage == MenuPage_None) {
+        m_pendingLoadSlot = -1;
+        m_pendingSaveSlot = -1;
+        m_pendingDeleteSlot = -1;
+    }
+
+    if (m_currPage == MenuPage_KeyBindings) {
+        m_keyBindActionCursor = 0;
+        m_keyBindSlotCursor = 0;
+        m_keyBindScrollTop = 0;
+    }
+
+    if (m_currPage == MenuPage_StartGame) {
+        const bool showSave = (m_pages[MenuPage_StartGame].parentPage == MenuPage_Frontend);
+        if (showSave) {
+            SetEntries(m_pages[MenuPage_StartGame], {
+                Button("FE_NWG", EntryEvent_NewGame),
+                Button("FE_LDG", EntryEvent_Load),
+                Button("FE_SVG", EntryEvent_Save),
+                Button("FE_DLG", EntryEvent_Delete),
+                Button("FE_BCK", EntryEvent_Back),
+                       });
+        }
+        else {
+            SetEntries(m_pages[MenuPage_StartGame], {
+                Button("FE_NWG", EntryEvent_NewGame),
+                Button("FE_LDG", EntryEvent_Load),
+                Button("FE_DLG", EntryEvent_Delete),
+                Button("FE_BCK", EntryEvent_Back),
+                       });
+        }
+    }
+
+    if (IsSaveSlotPage(m_currPage)) {
+        RefreshSaveSlots();
+    }
+
     // Advance cursor past any leading Info entries.
     if (m_currPage != MenuPage_None) {
         const PageDef& pg = m_pages[m_currPage];
@@ -366,11 +1067,17 @@ void feCustomMenuMgr::MoveCursor(s32 dir) {
     }
     m_cursor = next;
 
-    // Leaving the resolution row without confirming discards staged value.
+    // Leaving a staged display row without confirming discards staged value.
     if (prevCursor != m_cursor) {
         const Entry& prev = m_pages[m_currPage].entries[prevCursor];
         if (prev.binding == EntryBinding_DisplayResolution) {
             m_pendingResolutionActive = false;
+        }
+        if (prev.binding == EntryBinding_DisplayScreenMode) {
+            m_pendingScreenModeActive = false;
+        }
+        if (prev.binding == EntryBinding_DisplayMsaa) {
+            m_pendingMsaaActive = false;
         }
     }
 }
@@ -384,10 +1091,18 @@ void feCustomMenuMgr::Confirm() {
         return;
     }
 
-    if (e->type == EntryType_Slider) {
+    if (e->type == EntryType_List) {
         if (e->binding == EntryBinding_DisplayResolution && m_pendingResolutionActive) {
             ApplyValue(*e, m_pendingResolutionIndex);
             m_pendingResolutionActive = false;
+        }
+        else if (e->binding == EntryBinding_DisplayScreenMode && m_pendingScreenModeActive) {
+            ApplyValue(*e, m_pendingScreenMode);
+            m_pendingScreenModeActive = false;
+        }
+        else if (e->binding == EntryBinding_DisplayMsaa && m_pendingMsaaActive) {
+            ApplyValue(*e, m_pendingMsaaIndex);
+            m_pendingMsaaActive = false;
         }
         return;
     }
@@ -406,11 +1121,24 @@ void feCustomMenuMgr::Confirm() {
             GoBack();
             break;
         case EntryEvent_NewGame:
-            // Title-page New Game should use title loop's fade->OpenFE flow.
-            if (m_currPage != MenuPage_Title && g_game)
+        {
+            const bool fromTitle = g_game && g_game->GetState() == GameState::TitleLoop;
+            if (!fromTitle && m_currPage != MenuPage_NewGameConfirm) {
+                m_pages[MenuPage_NewGameConfirm].parentPage = m_currPage;
+                m_pages[MenuPage_NewGameConfirm].parentEntry = m_cursor;
+                SetPage(MenuPage_NewGameConfirm);
+                break;
+            }
+
+            BeginNewGameReset();
+
+            if (!fromTitle && g_game) {
+                g_game->QueueTitleNewGameStart();
                 g_game->SetState(GameState::Init);
+            }
             m_result = 4;
             break;
+        }
         case EntryEvent_ExitToHub:
             if (g_game)
                 g_game->SetState(GameState::OpenLocationMenu);
@@ -426,13 +1154,133 @@ void feCustomMenuMgr::Confirm() {
             m_result = 4;
             break;
         case EntryEvent_Load:
+            if (m_currPage != MenuPage_LoadSlots) {
+                m_pages[MenuPage_LoadSlots].parentPage = m_currPage;
+                m_pages[MenuPage_LoadSlots].parentEntry = m_cursor;
+                SetPage(MenuPage_LoadSlots);
+                break;
+            }
+
+            if (m_cursor >= 0 && m_cursor < SAVEGAME_SLOT_COUNT) {
+                const bool fromTitle = g_game && g_game->GetState() == GameState::TitleLoop;
+                if (fromTitle) {
+                    if (!SaveGameLoadSlot(m_cursor)) {
+                        PlaySound(16);
+                        break;
+                    }
+                    m_result = 4;
+                    break;
+                }
+
+                if (!m_saveSlots[m_cursor].occupied) {
+                    PlaySound(FE_SND_MENU_7);
+                    break;
+                }
+
+                m_pendingLoadSlot = m_cursor;
+                m_pages[MenuPage_LoadConfirm].parentPage = MenuPage_LoadSlots;
+                m_pages[MenuPage_LoadConfirm].parentEntry = m_cursor;
+                SetPage(MenuPage_LoadConfirm);
+            }
             break;
         case EntryEvent_Save:
+            if (m_currPage != MenuPage_SaveSlots) {
+                m_pages[MenuPage_SaveSlots].parentPage = m_currPage;
+                m_pages[MenuPage_SaveSlots].parentEntry = m_cursor;
+                SetPage(MenuPage_SaveSlots);
+                break;
+            }
+
+            if (m_cursor >= 0 && m_cursor < SAVEGAME_SLOT_COUNT) {
+                m_pendingSaveSlot = m_cursor;
+                m_pages[MenuPage_SaveConfirm].parentPage = MenuPage_SaveSlots;
+                m_pages[MenuPage_SaveConfirm].parentEntry = m_cursor;
+                SetPage(MenuPage_SaveConfirm);
+            }
+            break;
+        case EntryEvent_Delete:
+            if (m_currPage != MenuPage_DeleteSlots) {
+                m_pages[MenuPage_DeleteSlots].parentPage = m_currPage;
+                m_pages[MenuPage_DeleteSlots].parentEntry = m_cursor;
+                SetPage(MenuPage_DeleteSlots);
+                break;
+            }
+
+            if (m_cursor >= 0 && m_cursor < SAVEGAME_SLOT_COUNT) {
+                if (!m_saveSlots[m_cursor].occupied) {
+                    PlaySound(16);
+                    break;
+                }
+
+                m_pendingDeleteSlot = m_cursor;
+                m_pages[MenuPage_DeleteConfirm].parentPage = MenuPage_DeleteSlots;
+                m_pages[MenuPage_DeleteConfirm].parentEntry = m_cursor;
+                SetPage(MenuPage_DeleteConfirm);
+            }
+            break;
+        case EntryEvent_LoadConfirmYes:
+            if (m_pendingLoadSlot >= 0 && m_pendingLoadSlot < SAVEGAME_SLOT_COUNT) {
+                if (SaveGameLoadSlot(m_pendingLoadSlot) && SaveGameApplyPendingLoad(g_game) && g_game) {
+                    m_pendingLoadSlot = -1;
+                    g_game->SetState(GameState::QueueLevelLoad);
+                    m_result = 4;
+                }
+                else {
+                    PlaySound(FE_SND_MENU_7);
+                }
+            }
+            else {
+                PlaySound(FE_SND_MENU_7);
+            }
+            break;
+        case EntryEvent_SaveConfirmYes:
+            if (m_pendingSaveSlot >= 0 && m_pendingSaveSlot < SAVEGAME_SLOT_COUNT) {
+                if (SaveGameWriteSlot(m_pendingSaveSlot)) {
+                    RefreshSaveSlots();
+                    const s32 savedSlot = m_pendingSaveSlot;
+                    m_pendingSaveSlot = -1;
+                    SetPage(MenuPage_SaveSlots);
+                    m_cursor = savedSlot;
+                }
+                else {
+                    PlaySound(FE_SND_MENU_7);
+                }
+            }
+            else {
+                PlaySound(FE_SND_MENU_7);
+            }
+            break;
+        case EntryEvent_DeleteConfirmYes:
+            if (m_pendingDeleteSlot >= 0 && m_pendingDeleteSlot < SAVEGAME_SLOT_COUNT) {
+                if (SaveGameDeleteSlot(m_pendingDeleteSlot)) {
+                    RefreshSaveSlots();
+                    const s32 deletedSlot = m_pendingDeleteSlot;
+                    m_pendingDeleteSlot = -1;
+                    SetPage(MenuPage_DeleteSlots);
+                    m_cursor = deletedSlot;
+                }
+                else {
+                    PlaySound(FE_SND_MENU_7);
+                }
+            }
+            else {
+                PlaySound(FE_SND_MENU_7);
+            }
             break;
     }
 }
 
 void feCustomMenuMgr::GoBack() {
+    if (m_currPage == MenuPage_LoadConfirm) {
+        m_pendingLoadSlot = -1;
+    }
+    if (m_currPage == MenuPage_SaveConfirm) {
+        m_pendingSaveSlot = -1;
+    }
+    if (m_currPage == MenuPage_DeleteConfirm) {
+        m_pendingDeleteSlot = -1;
+    }
+
     if (m_currPage == MenuPage::MenuPage_Frontend || m_currPage == MenuPage::MenuPage_Pause || m_currPage == MenuPage::MenuPage_Title) {
         Deactivate();
         return;
@@ -450,28 +1298,51 @@ void feCustomMenuMgr::GoBack() {
 
 void feCustomMenuMgr::Adjust(s32 dir) {
     const Entry* e = &m_pages[m_currPage].entries[m_cursor];
-    if (e->binding == EntryBinding_None || dir == 0) return;
+    if (e->binding == EntryBinding_None || dir == 0)
+        return;
 
     if (e->type == EntryType_Toggle) {
         const s32 v = GetBoundValue(*e) ? 0 : 1;
         ApplyValue(*e, v);
     }
-    else if (e->type == EntryType_Slider) {
+    else if (e->type == EntryType_List) {
         if (e->binding == EntryBinding_DisplayResolution) {
             const s32 current = m_pendingResolutionActive ? m_pendingResolutionIndex : GetBoundValue(*e);
-            s32 v = current + dir * e->step;
             s32 maxIndex = 0;
             if (g_display) {
                 const s32 count = g_display->GetResolutionCount();
                 maxIndex = (count > 0) ? (count - 1) : 0;
             }
-            if (v < 0) v = 0;
-            if (v > maxIndex) v = maxIndex;
+            const s32 v = WrapStepValue(current, e->step, 0, maxIndex, dir);
             m_pendingResolutionIndex = v;
             m_pendingResolutionActive = true;
             return;
         }
 
+        if (e->binding == EntryBinding_DisplayScreenMode) {
+            const s32 current = m_pendingScreenModeActive ? m_pendingScreenMode : GetBoundValue(*e);
+            const s32 v = WrapStepValue(current, e->step, e->lo, e->hi, dir);
+            m_pendingScreenMode = v;
+            m_pendingScreenModeActive = true;
+            return;
+        }
+
+        if (e->binding == EntryBinding_DisplayMsaa) {
+            const s32 current = m_pendingMsaaActive ? m_pendingMsaaIndex : GetBoundValue(*e);
+            const s32 v = WrapStepValue(current, e->step, e->lo, e->hi, dir);
+            m_pendingMsaaIndex = v;
+            m_pendingMsaaActive = true;
+            return;
+        }
+
+        if (e->binding == EntryBinding_DisplayFrameRate) {
+            const s32 current = GetBoundValue(*e);
+            const s32 v = WrapStepValue(current, e->step, e->lo, e->hi, dir);
+            ApplyValue(*e, v);
+            return;
+        }
+    }
+    else if (e->type == EntryType_Slider) {
         if (e->binding == EntryBinding_MusicVol ||
             e->binding == EntryBinding_EffectsVol ||
             e->binding == EntryBinding_DialogVol) {
@@ -481,9 +1352,7 @@ void feCustomMenuMgr::Adjust(s32 dir) {
             if (current > 100) current = 100;
 
             s32 seg = (current * kSegments) / 100;
-            seg += (dir > 0) ? 1 : -1;
-            if (seg < 0) seg = 0;
-            if (seg > kSegments) seg = kSegments;
+            seg = WrapStepValueSlider(seg, 1, 0, kSegments, dir);
 
             s32 v = 0;
             if (seg <= 0) {
@@ -502,9 +1371,7 @@ void feCustomMenuMgr::Adjust(s32 dir) {
             return;
         }
 
-        s32 v = GetBoundValue(*e) + dir * e->step;
-        if (v < e->lo) v = e->lo;
-        if (v > e->hi) v = e->hi;
+        const s32 v = WrapStepValue(GetBoundValue(*e), e->step, e->lo, e->hi, dir);
         ApplyValue(*e, v);
     }
 }
@@ -519,6 +1386,16 @@ s32 feCustomMenuMgr::GetBoundValue(const Entry& e) const {
         case EntryBinding_DisplayResolution: return g_display ? g_display->GetResolutionIndex() : 0;
         case EntryBinding_DisplayScreenMode: return g_display ? g_display->GetScreenMode() : Display::GetDefaultScreenMode();
         case EntryBinding_DisplayVsync: return g_display ? g_display->GetVsync() : Display::GetDefaultVsync();
+        case EntryBinding_DisplayFrameRate:
+        {
+            const s32 fps = g_time ? g_time->targetFPS : 30;
+            return FrameRateValueToOptionIndex(fps);
+        }
+        case EntryBinding_DisplayMsaa:
+        {
+            const s32 samples = g_display ? g_display->GetMSAA() : Display::GetDefaultMSAA();
+            return MsaaSamplesToOptionIndex(samples);
+        }
         default: return 0;
     }
 }
@@ -556,6 +1433,21 @@ void feCustomMenuMgr::ApplyValue(const Entry& e, s32 v) {
         if (g_display) g_display->SetVsync(v);
         Display::SetDefaultVsync(v);
     }
+    else if (e.binding == EntryBinding_DisplayFrameRate) {
+        const s32 fps = FrameRateOptionIndexToValue(v);
+        if (g_time) {
+            g_time->targetFPS = fps;
+        }
+    }
+    else if (e.binding == EntryBinding_DisplayMsaa) {
+        const s32 samples = MsaaOptionIndexToSamples(v);
+        if (g_display) {
+            g_display->SetMSAA(samples);
+        }
+        else {
+            Display::SetDefaultMSAA(samples);
+        }
+    }
     else if (e.binding == EntryBinding_DisplayResolution) {
         if (g_display) g_display->SetResolutionIndex(v);
     }
@@ -566,6 +1458,44 @@ void feCustomMenuMgr::ApplyValue(const Entry& e, s32 v) {
 void feCustomMenuMgr::PlaySound(s32 id) const {
     if (g_frontEndSound)
         g_frontEndSound->ProcessSoundEvent(id);
+}
+
+void feCustomMenuMgr::RefreshSaveSlots() {
+    for (s32 i = 0; i < SAVEGAME_SLOT_COUNT; i++) {
+        SaveGameSlotInfo info = {};
+        SaveGameQuerySlotInfo(i, &info);
+        m_saveSlots[i] = info;
+    }
+}
+
+void feCustomMenuMgr::BuildSaveSlotLabel(s32 slotIndex, char* outText, s32 outTextLen) const {
+    if (!outText || outTextLen <= 0) {
+        return;
+    }
+
+    outText[0] = '\0';
+
+    if (slotIndex < 0 || slotIndex >= SAVEGAME_SLOT_COUNT) {
+        return;
+    }
+
+    const SaveGameSlotInfo& slot = m_saveSlots[slotIndex];
+    if (slot.occupied) {
+        const char* fmt = Localize("FE_SLD");
+        if (!fmt) {
+            fmt = "Save Slot %d - %s";
+        }
+
+        const char* dateText = slot.dateText[0] ? slot.dateText : "Unknown";
+        snprintf(outText, outTextLen, fmt, slotIndex + 1, dateText);
+    }
+    else {
+        const char* fmt = Localize("FE_SLE");
+        if (!fmt) {
+            fmt = "Save Slot %d Empty";
+        }
+        snprintf(outText, outTextLen, fmt, slotIndex + 1);
+    }
 }
 
 PageDef& feCustomMenuMgr::AddPage(
@@ -620,6 +1550,18 @@ Entry feCustomMenuMgr::Slider(const char* tok, EntryBinding binding, s32 step, s
     memset(e.token, 0, sizeof(e.token));
     strcpy_s(e.token, tok);
     e.type = EntryType_Slider;
+    e.event = EntryEvent_None;
+    e.goPage = MenuPage_None;
+    e.binding = binding;
+    e.step = step; e.lo = lo; e.hi = hi;
+    return e;
+}
+
+Entry feCustomMenuMgr::List(const char* tok, EntryBinding binding, s32 step, s32 lo, s32 hi) {
+    Entry e;
+    memset(e.token, 0, sizeof(e.token));
+    strcpy_s(e.token, tok);
+    e.type = EntryType_List;
     e.event = EntryEvent_None;
     e.goPage = MenuPage_None;
     e.binding = binding;
@@ -773,259 +1715,96 @@ static void DrawRectPSX(s32 x, s32 y, s32 w, s32 h, u8 r, u8 g, u8 b, u8 a) {
         r, g, b, a);
 }
 
-static void DrawCircleDotPSX(s32 cx, s32 cy, s32 radius,
-                             u8 outlineR, u8 outlineG, u8 outlineB, u8 outlineA,
-                             u8 fillR, u8 fillG, u8 fillB, u8 fillA) {
-    if (radius <= 0)
-        return;
-
-    static tTexture* s_dotFilled = nullptr;
-    static tTexture* s_dotEmpty = nullptr;
-    static s32 s_cachedRadiusPx = -1;
-    static s32 s_cachedOuterPx = -1;
-    static s32 s_cachedRingPx = -1;
-    static s32 s_cachedInnerPx = -1;
-    static s32 s_cachedCrossPx = -1;
-    static u32 s_cachedColorKey = 0;
-
-    const auto packRgba = [](u8 r, u8 g, u8 b, u8 a) -> u32 {
-        return ((u32)a << 24) | ((u32)b << 16) | ((u32)g << 8) | (u32)r;
-    };
-    const auto psxToTexChan = [](u8 v) -> u8 {
-        u32 scaled = ((u32)v * 255u + 64u) / 128u;
-        return (scaled > 255u) ? 255u : (u8)scaled;
-    };
-
-    const u8 ringTexR = psxToTexChan(DEF_SLIDER_CIRCLE_RING_R);
-    const u8 ringTexG = psxToTexChan(DEF_SLIDER_CIRCLE_RING_G);
-    const u8 ringTexB = psxToTexChan(DEF_SLIDER_CIRCLE_RING_B);
-    const u8 fillTexR = psxToTexChan(fillR);
-    const u8 fillTexG = psxToTexChan(fillG);
-    const u8 fillTexB = psxToTexChan(fillB);
-
-    const f32 scaleY = SCREEN_SCALE_Y(1.0f);
-    s32 rasterDiv = DEF_SLIDER_CIRCLE_RASTER_DIV;
-    if (rasterDiv < 1) rasterDiv = 1;
-    if (rasterDiv > 4) rasterDiv = 4;
-    const f32 rasterScaleY = scaleY / (f32)rasterDiv;
-
-    s32 radiusPx = (s32)std::round((f32)radius * rasterScaleY);
-    if (radiusPx < 1)
-        radiusPx = 1;
-
-    s32 outerPx = (s32)std::round((f32)DEF_SLIDER_CIRCLE_OUTER_OUTLINE_THICKNESS * rasterScaleY);
-    s32 ringPx = (s32)std::round((f32)DEF_SLIDER_CIRCLE_RING_THICKNESS * rasterScaleY);
-    s32 innerPx = (s32)std::round((f32)DEF_SLIDER_CIRCLE_INNER_OUTLINE_THICKNESS * rasterScaleY);
-    s32 crossPx = (s32)std::round((f32)DEF_SLIDER_CIRCLE_CROSS_HALF * rasterScaleY);
-
-    if (outerPx < 0) outerPx = 0;
-    if (ringPx < 1) ringPx = 1;
-    if (innerPx < 0) innerPx = 0;
-    if (crossPx < 0) crossPx = 0;
-
-    if (outerPx > radiusPx) outerPx = radiusPx;
-    if (outerPx + ringPx > radiusPx) {
-        ringPx = radiusPx - outerPx;
-        if (ringPx < 1) {
-            ringPx = 1;
-            if (outerPx > radiusPx - 1) outerPx = radiusPx - 1;
-        }
-    }
-    if (outerPx + ringPx + innerPx > radiusPx - 1) {
-        innerPx = (radiusPx - 1) - (outerPx + ringPx);
-        if (innerPx < 0) innerPx = 0;
-    }
-
-    const u32 colorKey =
-        packRgba(outlineR, outlineG, outlineB, outlineA) ^
-        (packRgba(ringTexR, ringTexG, ringTexB, DEF_SLIDER_CIRCLE_RING_A) * 33u) ^
-        (packRgba(DEF_SLIDER_CIRCLE_INNER_OUTLINE_R, DEF_SLIDER_CIRCLE_INNER_OUTLINE_G, DEF_SLIDER_CIRCLE_INNER_OUTLINE_B, DEF_SLIDER_CIRCLE_INNER_OUTLINE_A) * 97u) ^
-        (packRgba(fillTexR, fillTexG, fillTexB, fillA) * 131u) ^
-        (packRgba(DEF_SLIDER_CIRCLE_CROSS_R, DEF_SLIDER_CIRCLE_CROSS_G, DEF_SLIDER_CIRCLE_CROSS_B, DEF_SLIDER_CIRCLE_CROSS_A) * 193u);
-
-    const bool needRebuild =
-        !s_dotFilled || !s_dotEmpty ||
-        s_cachedRadiusPx != radiusPx ||
-        s_cachedOuterPx != outerPx ||
-        s_cachedRingPx != ringPx ||
-        s_cachedInnerPx != innerPx ||
-        s_cachedCrossPx != crossPx ||
-        s_cachedColorKey != colorKey;
-
-    if (needRebuild) {
-        if (s_dotFilled) { s_dotFilled->Release(); s_dotFilled = nullptr; }
-        if (s_dotEmpty) { s_dotEmpty->Release(); s_dotEmpty = nullptr; }
-
-        s32 pad = DEF_SLIDER_CIRCLE_TEXTURE_PAD;
-        if (pad < 0) pad = 0;
-        const s32 size = radiusPx * 2 + pad * 2 + 1;
-        const f32 cxp = (f32)(size - 1) * 0.5f;
-        const f32 cyp = (f32)(size - 1) * 0.5f;
-
-        const f32 outerR = (f32)radiusPx;
-        const f32 ringOuterR = outerR - (f32)outerPx;
-        const f32 innerOutlineOuterR = ringOuterR - (f32)ringPx;
-        const f32 holeR = innerOutlineOuterR - (f32)innerPx;
-
-        const f32 outerR2 = outerR * outerR;
-        const f32 ringOuterR2 = ringOuterR * ringOuterR;
-        const f32 innerOutlineOuterR2 = innerOutlineOuterR * innerOutlineOuterR;
-        const f32 holeR2 = holeR * holeR;
-
-        auto buildDotPixels = [&](bool filledCenter) {
-            s32 ss = DEF_SLIDER_CIRCLE_SUPERSAMPLE;
-            if (ss < 1) ss = 1;
-            if (ss > 2) ss = 2;
-
-            std::vector<u32> pixels((size_t)size * (size_t)size, 0u);
-            for (s32 y = 0; y < size; y++) {
-                for (s32 x = 0; x < size; x++) {
-                    u32 accR = 0, accG = 0, accB = 0, accA = 0;
-                    for (s32 sy = 0; sy < ss; sy++) {
-                        for (s32 sx = 0; sx < ss; sx++) {
-                            const f32 invSs = 1.0f / (f32)ss;
-                            const f32 sampleOffX = ((f32)sx + 0.5f) * invSs;
-                            const f32 sampleOffY = ((f32)sy + 0.5f) * invSs;
-                            const f32 px = (f32)x + sampleOffX;
-                            const f32 py = (f32)y + sampleOffY;
-                            const f32 dx = px - cxp;
-                            const f32 dy = py - cyp;
-                            const f32 d2 = dx * dx + dy * dy;
-
-                            u8 sr = 0, sg = 0, sb = 0, sa = 0;
-                            if (d2 <= outerR2) {
-                                if (d2 > ringOuterR2) {
-                                    sr = outlineR; sg = outlineG; sb = outlineB; sa = outlineA;
-                                }
-                                else if (d2 > innerOutlineOuterR2) {
-                                    sr = ringTexR; sg = ringTexG; sb = ringTexB; sa = DEF_SLIDER_CIRCLE_RING_A;
-                                }
-                                else if (d2 > holeR2) {
-                                    sr = DEF_SLIDER_CIRCLE_INNER_OUTLINE_R; sg = DEF_SLIDER_CIRCLE_INNER_OUTLINE_G; sb = DEF_SLIDER_CIRCLE_INNER_OUTLINE_B; sa = DEF_SLIDER_CIRCLE_INNER_OUTLINE_A;
-                                }
-                                else if (filledCenter) {
-                                    sr = fillTexR; sg = fillTexG; sb = fillTexB; sa = fillA;
-                                }
-                            }
-
-                            // Optional center cross over hole/fill.
-                            if (crossPx > 0) {
-                                const s32 ix = (s32)std::floor(px + 0.5f);
-                                const s32 iy = (s32)std::floor(py + 0.5f);
-                                const s32 cxi = (s32)std::floor(cxp + 0.5f);
-                                const s32 cyi = (s32)std::floor(cyp + 0.5f);
-                                if ((iy == cyi && std::abs(ix - cxi) <= crossPx) ||
-                                    (ix == cxi && std::abs(iy - cyi) <= crossPx)) {
-                                    sr = DEF_SLIDER_CIRCLE_CROSS_R;
-                                    sg = DEF_SLIDER_CIRCLE_CROSS_G;
-                                    sb = DEF_SLIDER_CIRCLE_CROSS_B;
-                                    sa = DEF_SLIDER_CIRCLE_CROSS_A;
-                                }
-                            }
-
-                            accR += sr;
-                            accG += sg;
-                            accB += sb;
-                            accA += sa;
-                        }
-                    }
-
-                    const u32 sampleCount = (u32)(ss * ss);
-                    const u8 r = (u8)(accR / sampleCount);
-                    const u8 g = (u8)(accG / sampleCount);
-                    const u8 b = (u8)(accB / sampleCount);
-                    const u8 a = (u8)(accA / sampleCount);
-                    pixels[(size_t)y * (size_t)size + (size_t)x] = packRgba(r, g, b, a);
-                }
-            }
-            return pixels;
-        };
-
-        std::vector<u32> filledPixels = buildDotPixels(true);
-        std::vector<u32> emptyPixels = buildDotPixels(false);
-
-        s_dotFilled = new tTexture();
-        s_dotFilled->Create(size, size, 32, 8, filledPixels.data());
-        s_dotEmpty = new tTexture();
-        s_dotEmpty->Create(size, size, 32, 8, emptyPixels.data());
-
-        s_cachedRadiusPx = radiusPx;
-        s_cachedOuterPx = outerPx;
-        s_cachedRingPx = ringPx;
-        s_cachedInnerPx = innerPx;
-        s_cachedCrossPx = crossPx;
-        s_cachedColorKey = colorKey;
-    }
-
-    tTexture* dotTex = (fillA > 0) ? s_dotFilled : s_dotEmpty;
-    if (!dotTex)
-        return;
-
-    const f32 cxScreen = SCALE_AND_CENTER_X((f32)cx);
-    const f32 cyScreen = SCREEN_SCALE_Y((f32)cy);
-    const s32 texW = dotTex->GetWidth();
-    const s32 texH = dotTex->GetHeight();
-    const f32 drawW = (f32)texW * (f32)rasterDiv;
-    const f32 drawH = (f32)texH * (f32)rasterDiv;
-    const f32 drawX = std::floor(cxScreen - drawW * 0.5f + 0.5f);
-    const f32 drawY = std::floor(cyScreen - drawH * 0.5f + 0.5f);
-    ScreenDraw::DrawQuad(dotTex, drawX, drawY, drawW, drawH,
-                         0.0f, 0.0f, 1.0f, 1.0f,
-                         128, 128, 128, 255);
-}
-
-static void DrawSliderCircleMeterPSX(s32 rightX, s32 centerY, s32 value,
-                                     u8 fillR, u8 fillG, u8 fillB, u8 fillA) {
+static void BuildPsxSliderMeterString(s32 value, char* buf, s32 bufLen) {
     static constexpr s32 kSegments = DEF_SLIDER_CIRCLE_SEGMENTS;
-    static constexpr s32 kRadius = DEF_SLIDER_CIRCLE_RADIUS;
-    static constexpr s32 kStep = DEF_SLIDER_CIRCLE_STEP;
-    static constexpr u8 kOutlineR = DEF_SLIDER_CIRCLE_OUTER_OUTLINE_R;
-    static constexpr u8 kOutlineG = DEF_SLIDER_CIRCLE_OUTER_OUTLINE_G;
-    static constexpr u8 kOutlineB = DEF_SLIDER_CIRCLE_OUTER_OUTLINE_B;
-    static constexpr u8 kOutlineA = DEF_SLIDER_CIRCLE_OUTER_OUTLINE_A;
+
+    if (!buf || bufLen <= 0)
+        return;
+
     if (value < 0) value = 0;
     if (value > 100) value = 100;
-    // Strict 0..100 to 0..6 mapping: each step spans 100/6.
+
     s32 filled = (value * kSegments) / 100;
     if (filled < 0) filled = 0;
     if (filled > kSegments) filled = kSegments;
 
-    const s32 diam = kRadius * 2 + 1;
-    const s32 totalW = (kSegments - 1) * kStep + diam;
-    const s32 startX = rightX - totalW + 1;
-
-    for (s32 i = 0; i < kSegments; i++) {
-        const s32 cx = startX + i * kStep + kRadius;
-        const bool isFilled = (i < filled);
-        // Empty segments keep a hollow center; filled segments fill the center.
-        const u8 dotA = isFilled ? fillA : 0;
-        DrawCircleDotPSX(cx, centerY, kRadius,
-                         kOutlineR, kOutlineG, kOutlineB, kOutlineA,
-                         fillR, fillG, fillB, dotA);
+    s32 i = 0;
+    for (; i < kSegments && i < (bufLen - 1); i++) {
+        buf[i] = (i < filled) ? 'o' : 'f';
     }
+    buf[i] = '\0';
 }
 
-static xcFont* ResolvePsxSliderMeterFontFromSectionMan(xcSectionMan* sectionMan) {
+struct PsxSliderMeterStyle {
+    xcFont* font = nullptr;
+    u32 color = 0xFF808080u;
+};
+
+static void DrawSliderCircleMeterPSX(const PsxSliderMeterStyle& style, s32 rightX, s32 textY, s32 value) {
+    xcFont* meterFont = style.font;
+    if (!meterFont)
+        return;
+
+    char meterText[DEF_SLIDER_CIRCLE_SEGMENTS + 1];
+    BuildPsxSliderMeterString(value, meterText, (s32)sizeof(meterText));
+
+    meterFont->SetScale(SCREEN_SCALE_X(1.0f), SCREEN_SCALE_Y(1.0f));
+    const f32 screenX = SCALE_AND_CENTER_X((f32)rightX);
+    const f32 screenY = SCREEN_SCALE_Y((f32)textY);
+    meterFont->DrawText(meterText, screenX + 1.0f, screenY + 1.0f, (u32)(DEF_TEXT_SHADOW_A << 24), XC_JUST_RIGHT);
+    meterFont->DrawText(meterText, screenX, screenY, style.color, XC_JUST_RIGHT);
+}
+
+static xcFont* ResolvePsxSliderMeterFontByHash(xcSectionMan* sectionMan, u32 fontHash) {
+    if (sectionMan) {
+        if (xcFont* font = sectionMan->FindFont(fontHash)) {
+            return font;
+        }
+    }
+
+    if (g_oxFontFile && g_oxFontFile->sectionMan && g_oxFontFile->sectionMan != sectionMan) {
+        if (xcFont* font = g_oxFontFile->sectionMan->FindFont(fontHash)) {
+            return font;
+        }
+    }
+
+    return nullptr;
+}
+
+static PsxSliderMeterStyle ResolvePsxSliderMeterStyleFromSectionMan(xcSectionMan* sectionMan) {
+    PsxSliderMeterStyle style;
+
     if (!sectionMan || !sectionMan->section)
-        return nullptr;
+        return style;
 
     xcSection* sec = sectionMan->section;
     if (!sec || !sec->overlays || !sec->rawData)
-        return nullptr;
+        return style;
 
-    // FE/GAME sound menu hash and hdItemSelection value text hash from PSX path.
-    static constexpr u32 HASH_SOUND_MENU = 0x061CD029u;
-    // PSX hdItemSelection value text object hash used by hdSndItemSelection.
-    static constexpr u32 HASH_VALUE_TEXT = (u32)(-922957088);
+    // PSX SNDSELECT item overlays used by FE/GAME sound menus.
+    static constexpr u32 HASH_SOUND_ITEM_OVERLAYS[] = {
+        0x1B5DD3F5u, // Sound_Effect
+        0xB3DA1CE9u, // Sound_Music
+        0xB47983DEu, // Sound_Voice
+    };
+    // PSX hdItemSelection value text object hash used by selection items.
+    static constexpr u32 HASH_VALUE_TEXT = 0xC8FCCAE0u;
 
-    // Prefer the exact sound menu overlay first.
-    if (xcOverlayData* soundOverlay = sec->FindOverlay(HASH_SOUND_MENU)) {
+    for (u32 overlayHash : HASH_SOUND_ITEM_OVERLAYS) {
+        xcOverlayData* soundOverlay = sec->FindOverlay(overlayHash);
+        if (!soundOverlay)
+            continue;
+
         u8* valueObj = soundOverlay->GetTextObj(HASH_VALUE_TEXT, sec->rawData);
-        if (valueObj) {
-            xcTextPrim* valueText = reinterpret_cast<xcTextPrim*>(valueObj);
-            xcFont* font = sectionMan->FindFont(valueText->fontHash);
-            if (font)
-                return font;
+        if (!valueObj)
+            continue;
+
+        xcTextPrim* valueText = reinterpret_cast<xcTextPrim*>(valueObj);
+        xcFont* font = ResolvePsxSliderMeterFontByHash(sectionMan, valueText->fontHash);
+        if (font) {
+            style.font = font;
+            style.color = valueText->GetColor();
+            return style;
         }
     }
 
@@ -1040,12 +1819,19 @@ static xcFont* ResolvePsxSliderMeterFontFromSectionMan(xcSectionMan* sectionMan)
             continue;
 
         xcTextPrim* valueText = reinterpret_cast<xcTextPrim*>(valueObj);
-        xcFont* font = sectionMan->FindFont(valueText->fontHash);
-        if (font)
-            return font;
+        xcFont* font = ResolvePsxSliderMeterFontByHash(sectionMan, valueText->fontHash);
+        if (font) {
+            style.font = font;
+            style.color = valueText->GetColor();
+            return style;
+        }
     }
 
-    return nullptr;
+    return style;
+}
+
+static PsxSliderMeterStyle ResolvePsxSliderMeterStyle(xcSectionMan* sectionMan) {
+    return ResolvePsxSliderMeterStyleFromSectionMan(sectionMan);
 }
 
 static void DrawUniformBorderRectPSX(s32 x, s32 y, s32 w, s32 h, f32 borderPx,
@@ -1082,6 +1868,21 @@ static void DrawUniformHLinePSX(s32 x, s32 y, s32 w, f32 linePx,
         return;
 
     ScreenDraw::DrawColoredRect(x0, y0, drawW, linePx, r, g, b, a);
+}
+
+static void DrawUniformVLinePSX(s32 x, s32 y, s32 h, f32 linePx,
+                                u8 r, u8 g, u8 b, u8 a) {
+    if (h <= 0 || linePx <= 0.0f)
+        return;
+
+    const f32 x0 = SCALE_AND_CENTER_X((f32)x);
+    const f32 y0 = SCREEN_SCALE_Y((f32)y);
+    const f32 y1 = SCREEN_SCALE_Y((f32)(y + h));
+    const f32 drawH = y1 - y0;
+    if (drawH <= 0.0f)
+        return;
+
+    ScreenDraw::DrawColoredRect(x0, y0, linePx, drawH, r, g, b, a);
 }
 
 static void DrawUniformBorderFillRectPSX(s32 x, s32 y, s32 w, s32 h, f32 borderPx,
@@ -1199,11 +2000,11 @@ void feCustomMenuMgr::DrawMenuWindow(s32 x, s32 y, s32 w, s32 h, const char* tit
     DrawMenuOrnament(ornamentTex, x + 18, y + 10);
     DrawMenuOrnament(ornamentTex, x + w - 32, y + 10);
     for (s32 i = 0; i < DEF_BOTTOM_ORN_COUNT; i++) {
-        const s32 leftX = x + DEF_BOTTOM_ORN_LEFT_X + i * DEF_BOTTOM_ORN_STEP;
+        const s32 leftX = x + 18 + i * DEF_BOTTOM_ORN_STEP;
         DrawMenuOrnament(ornamentTex, leftX, bottomY0 + DEF_BOTTOM_ORN_Y_OFF);
     }
     for (s32 i = 0; i < DEF_BOTTOM_ORN_COUNT; i++) {
-        const s32 rightX = x + w - DEF_BOTTOM_ORN_RIGHT_X + i * DEF_BOTTOM_ORN_STEP;
+        const s32 rightX = x + w - (i * DEF_BOTTOM_ORN_STEP) - 32;
         DrawMenuOrnament(ornamentTex, rightX, bottomY0 + DEF_BOTTOM_ORN_Y_OFF);
     }
 
@@ -1236,7 +2037,6 @@ void feCustomMenuMgr::Render() {
     const s32 panelH = page->frameH;
 
     EnsureTextures();
-
     const char* title = Localize(page->titleToken);
     if (!title)
         title = page->titleToken;
@@ -1249,6 +2049,17 @@ void feCustomMenuMgr::Render() {
     xcFont* bodyFont = FindFont("Beats_lo", "Beats_mid");
     if (!bodyFont) return;
     bodyFont->SetScale(SCREEN_SCALE_X(1.0f), SCREEN_SCALE_Y(1.0f));
+
+    PsxSliderMeterStyle sliderMeterStyle;
+    if (g_feMenuMgr && g_feMenuMgr->sectionMan) {
+        sliderMeterStyle = ResolvePsxSliderMeterStyle(g_feMenuMgr->sectionMan);
+    }
+    if (!sliderMeterStyle.font && g_gameMenu && g_gameMenu->sectionMan) {
+        sliderMeterStyle = ResolvePsxSliderMeterStyle(g_gameMenu->sectionMan);
+    }
+    if (!sliderMeterStyle.font && m_menuArt) {
+        sliderMeterStyle = ResolvePsxSliderMeterStyle(m_menuArt);
+    }
 
     // Dragon panel: present on pause page only
     static constexpr s32 DRAGON_PANEL_W = 88;
@@ -1271,84 +2082,233 @@ void feCustomMenuMgr::Render() {
         ? (panelX + DEF_BORDER_W + (dragonBoxX - DEF_BORDER_W - panelX) / 2)
         : DEF_WINDOW_CENTER_X;
 
-    for (s32 i = 0; i < page->numEntries; i++) {
-        const Entry& item = page->entries[i];
-        const bool selected = (i == m_cursor);
-        const u32 color = selected ? selectedColor : normalColor;
-        const s32 rowY = firstY + i * DEF_ROW_STEP + CalcEntryYExtra(*page, i, bodyFont) + DEF_TEXT_Y_OFF;
+    if (m_currPage == MenuPage_KeyBindings) {
+        const s32 headerY = contentTop + DEF_CONTENT_PAD + DEF_TEXT_Y_OFF;
+        const s32 firstRowY = headerY + DEF_KEYBIND_ROW_STEP;
+        const s32 slotW = DEF_KEYBIND_SLOT_W;
+        const s32 slotGap = DEF_KEYBIND_SLOT_GAP;
+        const s32 slot2Right = panelX + panelW - DEF_VALUE_X_PAD;
+        const s32 slot2Left = slot2Right - slotW;
+        const s32 slot1Right = slot2Left - slotGap;
+        const s32 slot1Left = slot1Right - slotW;
+        const s32 visibleRows = (kKeyBindingActionCount - m_keyBindScrollTop < DEF_KEYBIND_VISIBLE_ROWS)
+            ? (kKeyBindingActionCount - m_keyBindScrollTop)
+            : DEF_KEYBIND_VISIBLE_ROWS;
 
-        const char* label = Localize(item.token);
-        if (!label) label = item.token;
+        const s32 tableLeft = labelX - DEF_KEYBIND_TABLE_SIDE_PAD;
+        const s32 tableRight = slot2Left + slotW + DEF_KEYBIND_TABLE_SIDE_PAD;
+        const s32 tableW = tableRight - tableLeft;
 
-        const f32 rowScreenY = SCREEN_SCALE_Y((f32)rowY);
-        const f32 labelScreenX = SCALE_AND_CENTER_X((f32)labelX);
-        const f32 valueScreenX = SCALE_AND_CENTER_X((f32)valueX);
-        const f32 centerScreenX = SCALE_AND_CENTER_X((f32)contentCenterX);
+        const f32 headerYScreen = SCREEN_SCALE_Y((f32)headerY);
+        bodyFont->DrawText("Action", SCALE_AND_CENTER_X((f32)labelX), headerYScreen, normalColor, 0);
+        bodyFont->DrawText("Bind 1", SCALE_AND_CENTER_X((f32)(slot1Left + slotW / 2)), headerYScreen, normalColor, XC_JUST_CENTER);
+        bodyFont->DrawText("Bind 2", SCALE_AND_CENTER_X((f32)(slot2Left + slotW / 2)), headerYScreen, normalColor, XC_JUST_CENTER);
 
-        if (item.type == EntryType_Info) {
-            const u32 infoColor = (u32)((DEF_INFO_TEXT_A << 24) | (DEF_INFO_TEXT_B << 16) | (DEF_INFO_TEXT_G << 8) | DEF_INFO_TEXT_R);
-            const f32 wrapWidth = SCREEN_SCALE_X((f32)(page->frameW - DEF_LABEL_X_PAD * 2));
-            bodyFont->SetWrapX(wrapWidth);
-            bodyFont->DrawText(label, centerScreenX + 1.0f, rowScreenY + 1.0f, (u32)(DEF_INFO_SHADOW_A << 24), XC_JUST_CENTER);
-            bodyFont->DrawText(label, centerScreenX, rowScreenY, infoColor, XC_JUST_CENTER);
-            bodyFont->SetWrapX(0.0f);
-        }
-        else if (item.type == EntryType_Slider && item.binding != EntryBinding_None) {
-            bodyFont->DrawText(label, labelScreenX + 1.0f, rowScreenY + 1.0f, (u32)(DEF_TEXT_SHADOW_A << 24), 0);
-            bodyFont->DrawText(label, labelScreenX, rowScreenY, color, 0);
+        for (s32 row = 0; row < visibleRows; row++) {
+            const s32 actionIndex = m_keyBindScrollTop + row;
+            const Action action = (Action)actionIndex;
+            const bool selectedRow = (actionIndex == m_keyBindActionCursor);
+            const s32 rowY = firstRowY + row * DEF_KEYBIND_ROW_STEP;
+            const s32 rowTextY = rowY + DEF_TEXT_Y_OFF;
 
-            if (item.binding == EntryBinding_DisplayResolution) {
-                s32 idx = GetBoundValue(item);
-                if (selected && m_pendingResolutionActive) {
-                    idx = m_pendingResolutionIndex;
-                }
-
-                char resText[32];
-                strcpy_s(resText, "AUTO");
-                if (g_display) {
-                    pddiVideoMode mode;
-                    if (g_display->GetResolutionMode(idx, mode)) {
-                        sprintf_s(resText, "%dx%d", mode.width, mode.height);
-                    }
-                }
-
-                bodyFont->DrawText(resText, valueScreenX + 1.0f, rowScreenY + 1.0f, (u32)(DEF_TEXT_SHADOW_A << 24), XC_JUST_RIGHT);
-                bodyFont->DrawText(resText, valueScreenX, rowScreenY, color, XC_JUST_RIGHT);
-            }
-            else if (item.binding == EntryBinding_DisplayScreenMode) {
-                const s32 mode = GetBoundValue(item);
-                const char* modeText = Localize("FE_SCF");
-                if (mode == ScreenMode_Borderless) {
-                    modeText = Localize("FE_SCB");
-                }
-                else if (mode == ScreenMode_Windowed) {
-                    modeText = Localize("FE_SCW");
-                }
-
-                bodyFont->DrawText(modeText, valueScreenX + 1.0f, rowScreenY + 1.0f, (u32)(DEF_TEXT_SHADOW_A << 24), XC_JUST_RIGHT);
-                bodyFont->DrawText(modeText, valueScreenX, rowScreenY, color, XC_JUST_RIGHT);
+            if ((row & 1) == 0) {
+                DrawRect(tableLeft, rowY - DEF_KEYBIND_ROW_TOP_PAD, tableW, DEF_KEYBIND_ROW_STEP,
+                         DEF_KEYBIND_STRIPE_DARK_R, DEF_KEYBIND_STRIPE_DARK_G, DEF_KEYBIND_STRIPE_DARK_B, DEF_KEYBIND_STRIPE_DARK_A);
             }
             else {
-                DrawSliderCircleMeterPSX(
-                    valueX + DEF_SLIDER_CIRCLE_X_OFF,
-                    rowY + DEF_SLIDER_CIRCLE_Y_OFF,
-                    GetBoundValue(item),
-                    DEF_SLIDER_CIRCLE_FILL_R,
-                    DEF_SLIDER_CIRCLE_FILL_G,
-                    DEF_SLIDER_CIRCLE_FILL_B,
-                    DEF_SLIDER_CIRCLE_FILL_A);
+                DrawRect(tableLeft, rowY - DEF_KEYBIND_ROW_TOP_PAD, tableW, DEF_KEYBIND_ROW_STEP,
+                         DEF_KEYBIND_STRIPE_WARM_R, DEF_KEYBIND_STRIPE_WARM_G, DEF_KEYBIND_STRIPE_WARM_B, DEF_KEYBIND_STRIPE_WARM_A);
             }
+
+            if (selectedRow) {
+                const s32 cellLeft = (m_keyBindSlotCursor == 0) ? slot1Left : slot2Left;
+                DrawRect(cellLeft - DEF_KEYBIND_CELL_PAD, rowY - DEF_KEYBIND_ROW_TOP_PAD,
+                         slotW + DEF_KEYBIND_CELL_PAD * 2, DEF_KEYBIND_ROW_STEP,
+                         DEF_KEYBIND_ACTIVE_FILL_R, DEF_KEYBIND_ACTIVE_FILL_G, DEF_KEYBIND_ACTIVE_FILL_B, DEF_KEYBIND_ACTIVE_FILL_A);
+                DrawUniformBorderRectPSX(cellLeft - DEF_KEYBIND_CELL_PAD, rowY - DEF_KEYBIND_ROW_TOP_PAD,
+                                         slotW + DEF_KEYBIND_CELL_PAD * 2, DEF_KEYBIND_ROW_STEP,
+                                         GetMenuBorderPx(), m_pulse.GetRed8(), m_pulse.GetGreen8(), m_pulse.GetBlue8(), 255);
+            }
+
+            char actionName[64] = {};
+            char slot0Label[32] = {};
+            char slot1Label[32] = {};
+            BuildActionDisplayName(action, actionName, (s32)sizeof(actionName));
+            if (g_actionInput) {
+                g_actionInput->GetDesktopBindingLabel(action, 0, slot0Label, (s32)sizeof(slot0Label));
+                g_actionInput->GetDesktopBindingLabel(action, 1, slot1Label, (s32)sizeof(slot1Label));
+            }
+
+            if (selectedRow && m_keyBindCaptureActive) {
+                if (m_keyBindSlotCursor == 0) {
+                    snprintf(slot0Label, (s32)sizeof(slot0Label), "?");
+                }
+                else {
+                    snprintf(slot1Label, (s32)sizeof(slot1Label), "?");
+                }
+            }
+
+            const bool selectedSlot0 = selectedRow && m_keyBindSlotCursor == 0;
+            const bool selectedSlot1 = selectedRow && m_keyBindSlotCursor == 1;
+            const u32 actionColor = normalColor;
+            const u32 slot0Color = selectedSlot0 ? selectedColor : normalColor;
+            const u32 slot1Color = selectedSlot1 ? selectedColor : normalColor;
+            const f32 rowScreenY = SCREEN_SCALE_Y((f32)rowTextY);
+            bodyFont->DrawText(actionName, SCALE_AND_CENTER_X((f32)labelX), rowScreenY, actionColor, 0);
+            bodyFont->DrawText(slot0Label, SCALE_AND_CENTER_X((f32)(slot1Left + slotW / 2)), rowScreenY, slot0Color, XC_JUST_CENTER);
+            bodyFont->DrawText(slot1Label, SCALE_AND_CENTER_X((f32)(slot2Left + slotW / 2)), rowScreenY, slot1Color, XC_JUST_CENTER);
         }
-        else if (item.type == EntryType_Toggle && item.binding != EntryBinding_None) {
-            const s32 toggle = GetBoundValue(item);
-            bodyFont->DrawText(label, labelScreenX + 1.0f, rowScreenY + 1.0f, (u32)(DEF_TEXT_SHADOW_A << 24), 0);
-            bodyFont->DrawText(label, labelScreenX, rowScreenY, color, 0);
-            bodyFont->DrawText(toggle ? "ON" : "OFF", valueScreenX + 1.0f, rowScreenY + 1.0f, (u32)(DEF_TEXT_SHADOW_A << 24), XC_JUST_RIGHT);
-            bodyFont->DrawText(toggle ? "ON" : "OFF", valueScreenX, rowScreenY, color, XC_JUST_RIGHT);
-        }
-        else {
-            bodyFont->DrawText(label, centerScreenX + 1.0f, rowScreenY + 1.0f, (u32)(DEF_TEXT_SHADOW_A << 24), XC_JUST_CENTER);
-            bodyFont->DrawText(label, centerScreenX, rowScreenY, color, XC_JUST_CENTER);
+
+        char scrollText[32] = {};
+        snprintf(scrollText, (s32)sizeof(scrollText), "%d-%d/%d",
+                 m_keyBindScrollTop + 1,
+                 m_keyBindScrollTop + visibleRows,
+                 kKeyBindingActionCount);
+        bodyFont->DrawText(scrollText,
+                           SCALE_AND_CENTER_X((f32)(panelX + panelW - DEF_VALUE_X_PAD)),
+                           SCREEN_SCALE_Y((f32)(panelY + panelH - DEF_BOTTOM_BAR_H - DEF_CONTENT_BOTTOM_PAD - DEF_ROW_TEXT_H + DEF_TEXT_Y_OFF)),
+                           normalColor,
+                           XC_JUST_RIGHT);
+    }
+    else {
+        for (s32 i = 0; i < page->numEntries; i++) {
+            const Entry& item = page->entries[i];
+            const bool selected = (i == m_cursor);
+            const u32 color = selected ? selectedColor : normalColor;
+            const s32 rowY = firstY + i * DEF_ROW_STEP + CalcEntryYExtra(*page, i, bodyFont) + DEF_TEXT_Y_OFF;
+
+            const char* label = Localize(item.token);
+            if (!label) label = item.token;
+
+            const f32 rowScreenY = SCREEN_SCALE_Y((f32)rowY);
+            const f32 labelScreenX = SCALE_AND_CENTER_X((f32)labelX);
+            const f32 valueScreenX = SCALE_AND_CENTER_X((f32)valueX);
+            const f32 centerScreenX = SCALE_AND_CENTER_X((f32)contentCenterX);
+
+            if (item.type == EntryType_Info) {
+                const u32 infoColor = (u32)((DEF_INFO_TEXT_A << 24) | (DEF_INFO_TEXT_B << 16) | (DEF_INFO_TEXT_G << 8) | DEF_INFO_TEXT_R);
+                const f32 wrapWidth = SCREEN_SCALE_X((f32)(page->frameW - DEF_LABEL_X_PAD * 2));
+                bodyFont->SetWrapX(wrapWidth);
+                bodyFont->DrawText(label, centerScreenX + 1.0f, rowScreenY + 1.0f, (u32)(DEF_INFO_SHADOW_A << 24), XC_JUST_CENTER);
+                bodyFont->DrawText(label, centerScreenX, rowScreenY, infoColor, XC_JUST_CENTER);
+                bodyFont->SetWrapX(0.0f);
+            }
+            else if (item.type == EntryType_List && item.binding != EntryBinding_None) {
+                const u32 sliderColor = color;
+
+                bodyFont->DrawText(label, labelScreenX + 1.0f, rowScreenY + 1.0f, (u32)(DEF_TEXT_SHADOW_A << 24), 0);
+                bodyFont->DrawText(label, labelScreenX, rowScreenY, sliderColor, 0);
+
+                if (item.binding == EntryBinding_DisplayResolution) {
+                    s32 idx = GetBoundValue(item);
+                    if (selected && m_pendingResolutionActive) {
+                        idx = m_pendingResolutionIndex;
+                    }
+
+                    const char* resText = nullptr;
+
+                    char resTextBuf[32];
+                    if (g_display) {
+                        pddiVideoMode mode;
+                        if (g_display->GetResolutionMode(idx, mode)) {
+                            sprintf_s(resTextBuf, "%dx%d", mode.width, mode.height);
+                            resText = resTextBuf;
+                        }
+                    }
+
+                    if (!resText) {
+                        resText = Localize("FE_AUT");
+                    }
+
+                    if (!resText) {
+                        continue;
+                    }
+
+                    bodyFont->DrawText(resText, valueScreenX + 1.0f, rowScreenY + 1.0f, (u32)(DEF_TEXT_SHADOW_A << 24), XC_JUST_RIGHT);
+                    bodyFont->DrawText(resText, valueScreenX, rowScreenY, sliderColor, XC_JUST_RIGHT);
+                }
+                else if (item.binding == EntryBinding_DisplayScreenMode) {
+                    s32 mode = GetBoundValue(item);
+                    if (selected && m_pendingScreenModeActive) {
+                        mode = m_pendingScreenMode;
+                    }
+                    const char* modeText = Localize("FE_SCF");
+                    if (mode == ScreenMode_Borderless) {
+                        modeText = Localize("FE_SCB");
+                    }
+                    else if (mode == ScreenMode_Windowed) {
+                        modeText = Localize("FE_SCW");
+                    }
+
+                    bodyFont->DrawText(modeText, valueScreenX + 1.0f, rowScreenY + 1.0f, (u32)(DEF_TEXT_SHADOW_A << 24), XC_JUST_RIGHT);
+                    bodyFont->DrawText(modeText, valueScreenX, rowScreenY, color, XC_JUST_RIGHT);
+                }
+                else if (item.binding == EntryBinding_DisplayMsaa) {
+                    s32 msaaIndex = GetBoundValue(item);
+                    if (selected && m_pendingMsaaActive) {
+                        msaaIndex = m_pendingMsaaIndex;
+                    }
+                    const s32 msaaSamples = MsaaOptionIndexToSamples(msaaIndex);
+                    const char* msaaToken = (msaaSamples == 0)
+                        ? "FE_OFF"
+                        : GetMsaaDisplayToken(msaaIndex);
+                    const char* msaaText = msaaToken ? Localize(msaaToken) : nullptr;
+
+                    if (!msaaText) {
+                        continue;
+                    }
+
+                    bodyFont->DrawText(msaaText, valueScreenX + 1.0f, rowScreenY + 1.0f, (u32)(DEF_TEXT_SHADOW_A << 24), XC_JUST_RIGHT);
+                    bodyFont->DrawText(msaaText, valueScreenX, rowScreenY, color, XC_JUST_RIGHT);
+                }
+                else if (item.binding == EntryBinding_DisplayFrameRate) {
+                    const char* frameRateToken = GetFrameRateDisplayToken(GetBoundValue(item));
+                    const char* frameRateText = frameRateToken ? Localize(frameRateToken) : nullptr;
+
+                    if (!frameRateText) {
+                        continue;
+                    }
+
+                    bodyFont->DrawText(frameRateText, valueScreenX + 1.0f, rowScreenY + 1.0f, (u32)(DEF_TEXT_SHADOW_A << 24), XC_JUST_RIGHT);
+                    bodyFont->DrawText(frameRateText, valueScreenX, rowScreenY, color, XC_JUST_RIGHT);
+                }
+            }
+            else if (item.type == EntryType_Slider && item.binding != EntryBinding_None) {
+                bodyFont->DrawText(label, labelScreenX + 1.0f, rowScreenY + 1.0f, (u32)(DEF_TEXT_SHADOW_A << 24), 0);
+                bodyFont->DrawText(label, labelScreenX, rowScreenY, color, 0);
+
+                DrawSliderCircleMeterPSX(
+                    sliderMeterStyle,
+                    valueX + DEF_SLIDER_CIRCLE_X_OFF,
+                    rowY,
+                    GetBoundValue(item));
+            }
+            else if (item.type == EntryType_Toggle && item.binding != EntryBinding_None) {
+                const s32 toggle = GetBoundValue(item);
+                const char* toggleToken = toggle ? "FE_ON" : "FE_OFF";
+                const char* toggleText = Localize(toggleToken);
+
+                if (!toggleText) {
+                    continue;
+                }
+
+                bodyFont->DrawText(label, labelScreenX + 1.0f, rowScreenY + 1.0f, (u32)(DEF_TEXT_SHADOW_A << 24), 0);
+                bodyFont->DrawText(label, labelScreenX, rowScreenY, color, 0);
+                bodyFont->DrawText(toggleText, valueScreenX + 1.0f, rowScreenY + 1.0f, (u32)(DEF_TEXT_SHADOW_A << 24), XC_JUST_RIGHT);
+                bodyFont->DrawText(toggleText, valueScreenX, rowScreenY, color, XC_JUST_RIGHT);
+            }
+            else {
+                if (IsSaveSlotPage(m_currPage) && i < SAVEGAME_SLOT_COUNT) {
+                    char slotLabel[96] = {};
+                    BuildSaveSlotLabel(i, slotLabel, (s32)sizeof(slotLabel));
+                    bodyFont->DrawText(slotLabel, labelScreenX + 1.0f, rowScreenY + 1.0f, (u32)(DEF_TEXT_SHADOW_A << 24), 0);
+                    bodyFont->DrawText(slotLabel, labelScreenX, rowScreenY, color, 0);
+                }
+                else {
+                    bodyFont->DrawText(label, centerScreenX + 1.0f, rowScreenY + 1.0f, (u32)(DEF_TEXT_SHADOW_A << 24), XC_JUST_CENTER);
+                    bodyFont->DrawText(label, centerScreenX, rowScreenY, color, XC_JUST_CENTER);
+                }
+            }
         }
     }
 
@@ -1407,14 +2367,92 @@ void feCustomMenuMgr::Render() {
         bodyFont->DrawText(dragonCountStr, SCALE_AND_CENTER_X((f32)dragonCenterX), SCREEN_SCALE_Y((f32)(dragonCountY + DEF_TEXT_Y_OFF)), dragonColor, XC_JUST_CENTER);
     }
 
-    // Help text in the bottom bar
+    // Help prompts in the bottom bar
     xcFont* helpFont = FindFont("Beats_lo", "Beats_mid");
-    if (helpFont) {
-        helpFont->SetScale(SCREEN_SCALE_X(1.0f), SCREEN_SCALE_Y(1.0f));
+    if (helpFont && m_currPage != MenuPage_Quitting) {
+        f32 helpScale = 0.8f;
+        f32 promptGap = DEF_HELP_GROUP_GAP_PX;
+        if (m_currPage == MenuPage_KeyBindings) {
+            helpScale = DEF_KEYBIND_HELP_SCALE;
+            promptGap = DEF_KEYBIND_HELP_GAP_PX;
+        }
+        helpFont->SetScale(SCREEN_SCALE_X(helpScale), SCREEN_SCALE_Y(helpScale));
+        const Entry* selectedEntry = nullptr;
+        if (m_currPage >= 0 && m_currPage < MenuPage_Count) {
+            const PageDef& currentPage = m_pages[m_currPage];
+            if (m_cursor >= 0 && m_cursor < currentPage.numEntries) {
+                selectedEntry = &currentPage.entries[m_cursor];
+            }
+        }
+
+        char prompts[6][96] = {};
+        s32 promptCount = 0;
+        auto pushPrompt = [&](const char* token, const char* fallback) {
+            if (promptCount >= (s32)(sizeof(prompts) / sizeof(prompts[0]))) {
+                return;
+            }
+
+            const char* localized = Localize(token);
+            SetPromptText(prompts[promptCount], (s32)sizeof(prompts[promptCount]), "%s", localized ? localized : fallback);
+            promptCount++;
+        };
+
+        if (m_currPage == MenuPage_KeyBindings) {
+            if (m_keyBindCaptureActive) {
+                pushPrompt("FE_KBPR", "Press key or mouse");
+                pushPrompt("FE_KBCLR", "<ACT:MENU_CLEAR> Unbind");
+                pushPrompt("FE_KBCAN", "<ACT:MENU_BACK> Cancel");
+            }
+            else {
+                pushPrompt("FE_KBSLT", "<ACT:MENU_LEFT>/<ACT:MENU_RIGHT> Slot");
+                pushPrompt("FE_KBBND", "<ACT:MENU_CONFIRM> Bind");
+                pushPrompt("FE_KBCLR", "<ACT:MENU_CLEAR> Unbind");
+                pushPrompt("FE_KBBCK", "<ACT:MENU_BACK> Back");
+            }
+        }
+        else {
+            if (selectedEntry) {
+                if (selectedEntry->type == EntryType_Slider) {
+                    pushPrompt("FE_HPADJ", "<ACT:MENU_LEFT> / <ACT:MENU_RIGHT> Adjust");
+                }
+                else if (selectedEntry->type == EntryType_List) {
+                    pushPrompt("FE_HPADJ", "<ACT:MENU_LEFT> / <ACT:MENU_RIGHT> Adjust");
+                    pushPrompt("FE_HPSET", "<ACT:MENU_CONFIRM> Set");
+                }
+                else if (selectedEntry->type == EntryType_Toggle) {
+                    pushPrompt("FE_HPADJ", "<ACT:MENU_LEFT> / <ACT:MENU_RIGHT> Adjust");
+                    pushPrompt("FE_HPTGL", "<ACT:MENU_CONFIRM> Toggle");
+                }
+                else {
+                    pushPrompt("FE_HPSEL", "<ACT:MENU_CONFIRM> Select");
+                }
+            }
+
+            pushPrompt("FE_HPBCK", "<ACT:MENU_BACK> Back");
+        }
+
+        const u32 helpColor = (u32)((DEF_HELP_TEXT_A << 24) | (DEF_HELP_TEXT_R << 16) | (DEF_HELP_TEXT_G << 8) | DEF_HELP_TEXT_B);
         const s32 bottomBarY = panelY + panelH - DEF_BOTTOM_BAR_H;
-        const s32 helpY = bottomBarY + DEF_HELP_Y_PAD;
-        helpFont->DrawText("X Select", SCALE_AND_CENTER_X((f32)(DEF_WINDOW_CENTER_X + DEF_HELP_LEFT_X_OFF)), SCREEN_SCALE_Y((f32)helpY), (u32)((DEF_HELP_TEXT_A << 24) | (DEF_HELP_TEXT_R << 16) | (DEF_HELP_TEXT_G << 8) | DEF_HELP_TEXT_B), XC_JUST_CENTER);
-        helpFont->DrawText("T Back", SCALE_AND_CENTER_X((f32)(DEF_WINDOW_CENTER_X + DEF_HELP_RIGHT_X_OFF)), SCREEN_SCALE_Y((f32)helpY), (u32)((DEF_HELP_TEXT_A << 24) | (DEF_HELP_TEXT_R << 16) | (DEF_HELP_TEXT_G << 8) | DEF_HELP_TEXT_B), XC_JUST_CENTER);
+        const f32 helpY = SCREEN_SCALE_Y((f32)(bottomBarY + DEF_HELP_Y_PAD));
+        const f32 centerScreenX = SCALE_AND_CENTER_X((f32)DEF_WINDOW_CENTER_X);
+
+        f32 totalWidth = 0.0f;
+        for (s32 i = 0; i < promptCount; i++) {
+            totalWidth += helpFont->MeasureText(prompts[i]);
+            if (i + 1 < promptCount) {
+                totalWidth += promptGap;
+            }
+        }
+
+        f32 cursorX = centerScreenX - totalWidth * 0.5f;
+        for (s32 i = 0; i < promptCount; i++) {
+            helpFont->DrawText(prompts[i], cursorX, helpY, helpColor, 0);
+            cursorX += helpFont->MeasureText(prompts[i]);
+
+            if (i + 1 < promptCount) {
+                cursorX += promptGap;
+            }
+        }
     }
 }
 

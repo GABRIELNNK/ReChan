@@ -185,7 +185,7 @@ s32 DBCameraPath::FindClosestNodes(LVector pos,
 
         // PSX: skip block-distance check on level 7
         bool levelException = (g_game && g_game->GetWorld() &&
-                               g_game->GetWorld()->GetCurrentLevelIndex() == 7);
+                       g_game->GetWorld()->GetCurLevelID() == 7);
         bool farBlocks = !levelException &&
             ((blockA - blockB) >= 3u) && ((blockB - blockA) >= 3u);
         if (!g_blockManager->IsValidBlockNumber(blockA) || farBlocks) {
@@ -219,18 +219,14 @@ s32 DBCameraPath::FindClosestNodes(LVector pos,
             s32 toPos_z = (pos.z - closest->targetPos.z) << 16;
 
             s32 magA = (s32)rmMag3((f32)segA_x, (f32)segA_y, (f32)segA_z);
-            if (magA > 0) {
-                segA_x = rmDiv16i(segA_x, magA);
-                segA_y = rmDiv16i(segA_y, magA);
-                segA_z = rmDiv16i(segA_z, magA);
-            }
+            segA_x = rmDiv16i(segA_x, magA);
+            segA_y = rmDiv16i(segA_y, magA);
+            segA_z = rmDiv16i(segA_z, magA);
 
             s32 magB = (s32)rmMag3((f32)segB_x, (f32)segB_y, (f32)segB_z);
-            if (magB > 0) {
-                segB_x = rmDiv16i(segB_x, magB);
-                segB_y = rmDiv16i(segB_y, magB);
-                segB_z = rmDiv16i(segB_z, magB);
-            }
+            segB_x = rmDiv16i(segB_x, magB);
+            segB_y = rmDiv16i(segB_y, magB);
+            segB_z = rmDiv16i(segB_z, magB);
 
             s64 dot =
                 (((s64)(segA_x - segB_x) * (s64)toPos_x) >> 16) +

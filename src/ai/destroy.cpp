@@ -160,9 +160,7 @@ void DestructibleThing::Destroy() {
     if (effectHash) {
         LVector center;
         FillBoxCentre(center, pos, orientation, collBox);
-        // Create__7GEffect(effectHash, center, 0,0,0,0, effectParam)
-        // GEffect::Create
-        (void)center;
+        GEffect_Create(effectHash, &center, nullptr, nullptr, 0, 0, effectParam);
     }
 
     // Smash__18CDestructibleSound(sound)

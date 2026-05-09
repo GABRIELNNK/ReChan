@@ -1,12 +1,67 @@
 #pragma once
 #include "core.h"
 
-// Reads PSX tPrimGeom data from BLK stream entries and produces
-// pddiPrimBuffer objects for rendering through the pddi abstraction.
-
 class pddiPrimBuffer;
+struct STreeJoint;
 
-// Parse tPrimGeom data into a pddiPrimBuffer for PC rendering.
-// pg points to the tPrimGeom base (BLK entry + 24), pgSize is bytes remaining.
-// PC equivalent of LoadPrim__5BlockPv pointer fixups + RP render pipeline.
-pddiPrimBuffer* ParseBLKPrims(const u8* pg, u32 pgSize);
+// PSX tGeometry base used by RP_ZCullGClip / RP_ZCullGMFog.
+// On PC we keep the owning raw tPrimGeom bytes and resolve the live pointers
+// against that storage before drawing.
+struct tGeometry {
+	const u8* vertexList = nullptr;
+	u16 numVerts = 0;
+	u16 numPolys = 0;
+
+	s32 bboxMinX = 0;
+	s32 bboxMinY = 0;
+	s32 bboxMinZ = 0;
+	s32 bboxMaxX = 0;
+	s32 bboxMaxY = 0;
+	s32 bboxMaxZ = 0;
+	s32 sphereX = 0;
+	s32 sphereY = 0;
+	s32 sphereZ = 0;
+	s32 sphereRadius = 0;
+
+	const u8* GetVertexList() const;
+	void SetVertexList(const u8* verts);
+};
+
+// PSX tPrimGeom : tGeometry [108 bytes on PSX].
+// PC stores the fixed-up raw prim bytes and resolves all render tables from
+// that owned byte buffer on demand.
+struct tPrimGeom : public tGeometry {
+	const u8* primList = nullptr;
+	const u8* primListAlt = nullptr;
+	const u8* primData48 = nullptr;
+	const u8* primData4C = nullptr;
+	const u8* gmFogWriteList = nullptr;
+	const u8* polyData = nullptr;
+	const u8* gmFogColourList = nullptr;
+	const u8* primData5C = nullptr;
+	const u8* loopVertData = nullptr;
+	u16 geoType = 0;
+	u16 numLoops = 0;
+	const u8* loopPrimData = nullptr;
+
+	u8* ownedRawData = nullptr;
+	u32 ownedRawSize = 0;
+
+	~tPrimGeom();
+	tPrimGeom* Clone() const;
+	int Display(const LVector* drawPos = nullptr);
+	int GetGeoType() const;
+	static int GetEntityType();
+};
+
+// PSX STree callback hooks installed by CharDataLoadCallback / stream STree load.
+u32 RP_XformVertsLitCBF_CL(tPrimGeom* geometry, STreeJoint* joint, u32* fastCache, u16* scratch);
+s32 RP_FixUpPolysCBF_CL(tPrimGeom* geometry, void* view, u32 loopIndex, u32 polyIndex);
+
+int RP_ZCullGClip(tGeometry* geometry, const LVector* drawPos = nullptr);
+int RP_ZCullGMFog(tGeometry* geometry, const LVector* drawPos, u16 fogNear, u16 fogFar, u32 fogColour);
+
+// Legacy host bridge for non-block call sites that still consume a raw
+// pddiPrimBuffer instead of owning a reversed tPrimGeom object.
+tPrimGeom* CloneRawPrimGeom(const u8* primData, u32 primSize);
+pddiPrimBuffer* BuildPrimBufferFromRawPrimGeom(const u8* primData, u32 primSize);

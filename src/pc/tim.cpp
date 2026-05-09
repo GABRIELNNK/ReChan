@@ -1,4 +1,5 @@
 #include "gen/common.h"
+#include "gen/psxcolor_helpers.h"
 #include "pc/tim.h"
 #include "gen/config.h"
 #include "p3d/texture.h"
@@ -22,15 +23,6 @@ struct TimSection {
     u16 x, y;   // VRAM destination
     u16 w, h;   // dimensions (in 16-bit units for image data)
 };
-
-static inline u32 psx16ToRGBA32(u16 c) {
-    // PSX 15-bit color: 0bbbbbgggggrrrrr (bit 15 = STP)
-    u32 r = (c & 0x1F) << 3;
-    u32 g = ((c >> 5) & 0x1F) << 3;
-    u32 b = ((c >> 10) & 0x1F) << 3;
-    u32 a = (c == 0) ? 0 : 255; // transparent black convention
-    return (a << 24) | (b << 16) | (g << 8) | r;
-}
 
 TimImage* Tim::LoadFromFile(const char* path) {
     u8* data = nullptr;
@@ -116,7 +108,7 @@ TimImage* Tim::LoadFromMemory(const u8* data, u32 fileSize) {
                     u8 byte = row[x / 2];
                     u8 idx = (x & 1) ? (byte >> 4) : (byte & 0x0F);
                     if (idx < clutColors)
-                        img->rgba[y * pixW + x] = psx16ToRGBA32(clut[idx]);
+                        img->rgba[y * pixW + x] = PsxAbgr1555ToRgba8888(clut[idx]);
                 }
             }
             break;
@@ -129,7 +121,7 @@ TimImage* Tim::LoadFromMemory(const u8* data, u32 fileSize) {
                 for (s32 x = 0; x < pixW; x++) {
                     u8 idx = row[x];
                     if (idx < clutColors)
-                        img->rgba[y * pixW + x] = psx16ToRGBA32(clut[idx]);
+                        img->rgba[y * pixW + x] = PsxAbgr1555ToRgba8888(clut[idx]);
                 }
             }
             break;
@@ -139,7 +131,7 @@ TimImage* Tim::LoadFromMemory(const u8* data, u32 fileSize) {
             for (s32 y = 0; y < pixH; y++) {
                 const u16* row = reinterpret_cast<const u16*>(imgData + y * iw * 2);
                 for (s32 x = 0; x < pixW; x++) {
-                    img->rgba[y * pixW + x] = psx16ToRGBA32(row[x]);
+                    img->rgba[y * pixW + x] = PsxAbgr1555ToRgba8888(row[x]);
                 }
             }
             break;
@@ -185,9 +177,11 @@ static Mat4 BeginOverlay() {
     EnsureShader();
     Mat4 prev = p3d::context->GetProjectionMatrix();
 
+    p3d::context->ResolveForOverlayPass();
     p3d::context->SetProjectionMatrix(Ortho(0.0f, SCREEN_WIDTH, SCREEN_HEIGHT, 0.0f, -1.0f, 1.0f));
     p3d::context->EnableZBuffer(false);
     p3d::context->SetCullMode(PDDI_CULL_NONE);
+    p3d::context->SetMultisampleEnabled(false);
 
     return prev;
 }
@@ -197,6 +191,7 @@ static void EndOverlay(const Mat4& prev) {
     p3d::context->SetProjectionMatrix(prev);
     p3d::context->EnableZBuffer(true);
     p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+    p3d::context->SetMultisampleEnabled(true);
 }
 
 void ScreenDraw::DrawFullscreen(tTexture* tex) {

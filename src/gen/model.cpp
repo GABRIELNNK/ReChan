@@ -2,6 +2,8 @@
 #include "gen/animmat.h"
 #include "gen/animstruct.h"
 #include "gen/charmgr.h"
+#include "gen/envmgr.h"
+#include "gen/lights.h"
 #include "gen/paramanim.h"
 #include "ai/player.h"
 #include "gen/skeleton.h"
@@ -12,6 +14,7 @@
 #include "snd/hmndsnd.h"
 #include "pc/log.h"
 #include <cstdlib>
+#include <algorithm>
 #include <vector>
 
 static const u8 kStreeMirrorSwapPairs[] = {
@@ -21,6 +24,35 @@ static const u8 kStreeMirrorSwapPairs[] = {
     5, 9,
     0, 0,
 };
+
+static std::vector<const OriginalSTree*> s_liveOriginalSTrees;
+
+static void RegisterLiveOriginalSTree(const OriginalSTree* tree) {
+    if (!tree) {
+        return;
+    }
+
+    s_liveOriginalSTrees.push_back(tree);
+}
+
+static void UnregisterLiveOriginalSTree(const OriginalSTree* tree) {
+    if (!tree) {
+        return;
+    }
+
+    const auto it = std::find(s_liveOriginalSTrees.begin(), s_liveOriginalSTrees.end(), tree);
+    if (it != s_liveOriginalSTrees.end()) {
+        s_liveOriginalSTrees.erase(it);
+    }
+}
+
+static bool IsLiveOriginalSTree(const OriginalSTree* tree) {
+    if (!tree) {
+        return false;
+    }
+
+    return std::find(s_liveOriginalSTrees.begin(), s_liveOriginalSTrees.end(), tree) != s_liveOriginalSTrees.end();
+}
 
 static DrawableSTree* GetDrawableSTree(Model* model) {
     if (!model || model->drawableType != 2 || !model->drawable) {
@@ -87,9 +119,12 @@ static OriginalSTree* CloneActiveSTree(const OriginalSTree* source) {
 // OriginalSTree
 OriginalSTree::OriginalSTree() {
     SetType(1); // STree type
+    RegisterLiveOriginalSTree(this);
 }
 
 OriginalSTree::~OriginalSTree() {
+    UnregisterLiveOriginalSTree(this);
+
     if (meshBuffer) {
         meshBuffer->Release();
         meshBuffer = nullptr;
@@ -117,6 +152,27 @@ OriginalGeo::~OriginalGeo() {
         meshBuffer->Release();
         meshBuffer = nullptr;
     }
+
+    delete[] dynamicVerts;
+    dynamicVerts = nullptr;
+    dynamicVertCount = 0;
+
+    delete[] dynamicPrimStart;
+    dynamicPrimStart = nullptr;
+
+    delete[] dynamicPrimVertCount;
+    dynamicPrimVertCount = nullptr;
+
+    delete[] dynamicPrimMaterialUID;
+    dynamicPrimMaterialUID = nullptr;
+
+    delete[] dynamicPrimCmd;
+    dynamicPrimCmd = nullptr;
+
+    delete[] dynamicPrimPacketOffset;
+    dynamicPrimPacketOffset = nullptr;
+
+    dynamicPrimCount = 0;
 }
 
 OriginalETree::OriginalETree() {
@@ -128,6 +184,17 @@ OriginalETree::~OriginalETree() {
         meshBuffer->Release();
         meshBuffer = nullptr;
     }
+
+    delete[] geoParts;
+    geoParts = nullptr;
+
+    delete[] geoPartJointHashes;
+    geoPartJointHashes = nullptr;
+
+    delete[] geoPartHashes;
+    geoPartHashes = nullptr;
+
+    geoPartCount = 0;
 }
 
 DrawableBasic::~DrawableBasic() = default;
@@ -154,7 +221,7 @@ DrawableSTree::~DrawableSTree() {
     if (alternate && alternate != original) {
         delete alternate;
     }
-    else if (original) {
+    else if (original && IsLiveOriginalSTree(original)) {
         original->activeTreeInUse = false;
     }
 
@@ -275,15 +342,139 @@ void DrawableGeo::Display(u32 /*flags*/) {
 
 DrawableETree::DrawableETree(OriginalETree* orig) {
     original = orig;
+    ownerModel = nullptr;
+    if (original && original->geoPartCount > 0) {
+        geoPartVisible = new u8[original->geoPartCount];
+        if (geoPartVisible) {
+            for (u16 i = 0; i < original->geoPartCount; i++) {
+                geoPartVisible[i] = 1;
+            }
+        }
+    }
 }
 
 DrawableETree::~DrawableETree() {
+    delete[] geoPartVisible;
+    geoPartVisible = nullptr;
+    ownerModel = nullptr;
     original = nullptr;
 }
 
+static const Mat4* FindJointWorldMatrixByHash(const STreeData* skeleton,
+                                              const Mat4* jointMatrices,
+                                              u32 jointHash) {
+    if (!skeleton || !jointMatrices || !skeleton->joints || jointHash == 0) {
+        return nullptr;
+    }
+
+    for (u32 jointIndex = 0; jointIndex < skeleton->numJoints; jointIndex++) {
+        if (skeleton->joints[jointIndex].nameUID == jointHash) {
+            return &jointMatrices[jointIndex];
+        }
+    }
+
+    return nullptr;
+}
+
+static void DrawGeoPartMesh(OriginalGeo* geo) {
+    if (!geo || !geo->meshBuffer) {
+        return;
+    }
+
+    if (geo->usesSemiTrans) {
+        pddiBlendMode blendMode = PDDI_BLEND_ALPHA;
+        switch (geo->semiTransMode & 3u) {
+            case 1: blendMode = PDDI_BLEND_ADD; break;
+            case 2: blendMode = PDDI_BLEND_SUBTRACT; break;
+            case 3: blendMode = PDDI_BLEND_PSX_QUARTER; break;
+            default: break;
+        }
+        p3d::context->SetBlendMode(blendMode);
+    }
+
+    p3d::context->DrawPrimBuffer(geo->meshBuffer);
+
+    if (geo->usesSemiTrans) {
+        p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+    }
+}
+
 void DrawableETree::Display(u32 /*flags*/) {
-    if (original && original->meshBuffer) {
+    if (!original) {
+        return;
+    }
+
+    if (original->geoParts && original->geoPartHashes && original->geoPartCount > 0) {
+        const Mat4 baseWorld = p3d::context->GetWorldMatrix();
+
+        STreeData* skeleton = nullptr;
+        std::vector<Mat4> partJointMatrices;
+        if (ownerModel && ownerModel->animStructure && original->geoPartJointHashes) {
+            AnimStructure* anim = static_cast<AnimStructure*>(ownerModel->animStructure);
+            TransformFlip* flip = anim ? anim->GetFlip() : nullptr;
+            if (flip && flip->tree && flip->tree->joints && flip->tree->numJoints > 0) {
+                skeleton = flip->tree;
+                partJointMatrices.resize(skeleton->numJoints);
+                skeleton->ComputeWorldMatricesWithCallbacks(partJointMatrices.data());
+            }
+        }
+
+        for (u16 i = 0; i < original->geoPartCount; i++) {
+            if (geoPartVisible && geoPartVisible[i] == 0) {
+                continue;
+            }
+
+            OriginalGeo* geo = original->geoParts[i];
+            if (!geo || !geo->meshBuffer) {
+                continue;
+            }
+
+            const Mat4* partMatrix = nullptr;
+            if (skeleton && partJointMatrices.data() && original->geoPartJointHashes) {
+                partMatrix = FindJointWorldMatrixByHash(skeleton,
+                                                        partJointMatrices.data(),
+                                                        original->geoPartJointHashes[i]);
+            }
+
+            if (partMatrix) {
+                Mat4 partWorld = baseWorld * (*partMatrix);
+                p3d::context->SetWorldMatrix(partWorld);
+            }
+            else {
+                p3d::context->SetWorldMatrix(baseWorld);
+            }
+
+            DrawGeoPartMesh(geo);
+        }
+
+        p3d::context->SetWorldMatrix(baseWorld);
+        return;
+    }
+
+    if (original->meshBuffer) {
         p3d::context->DrawPrimBuffer(original->meshBuffer);
+    }
+}
+
+void DrawableETree::SetGeoPartVisibleByHash(u32 hash, bool visible) {
+    if (!original || !original->geoPartHashes || original->geoPartCount == 0 || !geoPartVisible) {
+        return;
+    }
+
+    for (u16 i = 0; i < original->geoPartCount; i++) {
+        if (original->geoPartHashes[i] == hash) {
+            geoPartVisible[i] = visible ? 1 : 0;
+        }
+    }
+}
+
+void DrawableETree::ResetGeoPartVisibility() {
+    if (!original || !geoPartVisible) {
+        return;
+    }
+
+    for (u16 i = 0; i < original->geoPartCount; i++) {
+        geoPartVisible[i] = 1;
     }
 }
 
@@ -312,10 +503,16 @@ Model::Model() {
 // PSX: __5Model (MODEL.CPP:697, 0x8006E6CC)
 Model::~Model() {
     MARKFUNCTION(0x8006E6CC);
+
+    DeleteAmbientLight();
+    DeleteHardwareLights();
+
     if (field36) {
         delete static_cast<ModelFloorHeightState*>(field36);
         field36 = nullptr;
     }
+
+    DeleteAnimStructures();
     DeleteDrawable();
 }
 
@@ -365,6 +562,69 @@ void Model::HandleDecFrame(AnimStructure* anim) { anim->DecFrame(); }
 void Model::HandleLoopDesired(AnimStructure* /*anim*/) { /* PSX: empty stub */ }
 void Model::HandleRunToLastBlend(AnimStructure* anim) { anim->RunToLastBlend(); }
 
+// PSX: DeleteAnimStructures__5Model (MODEL.CPP:768, 0x8006E83C)
+void Model::DeleteAnimStructures() {
+    MARKFUNCTION(0x8006E83C);
+
+    if (!animStructure) {
+        return;
+    }
+
+    delete static_cast<AnimStructure*>(animStructure);
+    animStructure = nullptr;
+}
+
+// PSX: AllocateAmbientLight__5Model (MODEL.CPP:2024, 0x8007013C)
+AmbientLight* Model::AllocateAmbientLight() {
+    MARKFUNCTION(0x8007013C);
+
+    DeleteAmbientLight();
+    ambientLight = new AmbientLight();
+    return static_cast<AmbientLight*>(ambientLight);
+}
+
+// PSX: DeleteAmbientLight__5Model (MODEL.CPP:2030, 0x80070170)
+void Model::DeleteAmbientLight() {
+    MARKFUNCTION(0x80070170);
+
+    if (!ambientLight) {
+        return;
+    }
+
+    delete static_cast<AmbientLight*>(ambientLight);
+    ambientLight = nullptr;
+}
+
+// PSX: AllocateHardwareLights__5ModelUl (MODEL.CPP:2039, 0x800701BC)
+HardwareLight* Model::AllocateHardwareLights(u32 count) {
+    MARKFUNCTION(0x800701BC);
+
+    DeleteHardwareLights();
+
+    if (count == 0) {
+        return nullptr;
+    }
+
+    HardwareLight* lights = new HardwareLight[count]();
+    hwLights = lights;
+    hwLightCount = static_cast<s32>(count);
+    return lights;
+}
+
+// PSX: DeleteHardwareLights__5Model (MODEL.CPP:2046, 0x80070254)
+void Model::DeleteHardwareLights() {
+    MARKFUNCTION(0x80070254);
+
+    if (!hwLights) {
+        hwLightCount = 0;
+        return;
+    }
+
+    delete[] static_cast<HardwareLight*>(hwLights);
+    hwLights = nullptr;
+    hwLightCount = 0;
+}
+
 // SModel
 // PSX: _6SModel (MODEL.CPP:1013, 0x8006ED68)
 SModel::SModel() {
@@ -387,6 +647,34 @@ void SModel::Show(u32 flags) {
 
     if (!drawable || !backPtr)
         return;
+
+    if (g_environmentManager) {
+        g_environmentManager->lighting.DoModelLighting(backPtr);
+    }
+
+    bool addedHwLights[3] = { false, false, false };
+    if (g_environmentManager && hwLights && hwLightCount > 0) {
+        HardwareLight* modelLights = static_cast<HardwareLight*>(hwLights);
+        const s32 lightCount = (hwLightCount < 3) ? hwLightCount : 3;
+
+        for (s32 slot = 0; slot < lightCount; slot++) {
+            if (!modelLights[slot].active) {
+                continue;
+            }
+
+            const LVector lightDir = {
+                modelLights[slot].directionX,
+                modelLights[slot].directionY,
+                modelLights[slot].directionZ,
+            };
+            g_environmentManager->lighting.AddLightToPort(slot, &lightDir, modelLights[slot].colour);
+            addedHwLights[slot] = true;
+        }
+    }
+
+    if (ambientLight) {
+        static_cast<AmbientLight*>(ambientLight)->SetPortToLight();
+    }
 
     const u32 ownerFlags = backPtr->flags;
     const bool ownerDeadWindow = (ownerFlags & 0x80u) != 0;
@@ -424,6 +712,18 @@ void SModel::Show(u32 flags) {
 
     if (useSemiTrans) {
         p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+    }
+
+    if (ambientLight) {
+        RestoreWorldAmbientLightToPort();
+    }
+
+    if (g_environmentManager) {
+        for (s32 slot = 0; slot < 3; slot++) {
+            if (addedHwLights[slot]) {
+                g_environmentManager->lighting.RemoveLightFromPort(slot);
+            }
+        }
     }
 }
 
@@ -681,6 +981,39 @@ void GModel::Show(u32 flags) {
         return;
     }
 
+    if (g_environmentManager) {
+        const u16 thingType = backPtr->thingType;
+        const bool inGatedTypeRange = (thingType >= 400u && thingType < 474u);
+        const bool forceLighting = (*(reinterpret_cast<const u8*>(backPtr) + 113u) != 0u);
+        if (!inGatedTypeRange || forceLighting) {
+            g_environmentManager->lighting.DoModelLighting(backPtr);
+        }
+    }
+
+    bool addedHwLights[3] = { false, false, false };
+    if (g_environmentManager && hwLights && hwLightCount > 0) {
+        HardwareLight* modelLights = static_cast<HardwareLight*>(hwLights);
+        const s32 lightCount = (hwLightCount < 3) ? hwLightCount : 3;
+
+        for (s32 slot = 0; slot < lightCount; slot++) {
+            if (!modelLights[slot].active) {
+                continue;
+            }
+
+            const LVector lightDir = {
+                modelLights[slot].directionX,
+                modelLights[slot].directionY,
+                modelLights[slot].directionZ,
+            };
+            g_environmentManager->lighting.AddLightToPort(slot, &lightDir, modelLights[slot].colour);
+            addedHwLights[slot] = true;
+        }
+    }
+
+    if (ambientLight) {
+        static_cast<AmbientLight*>(ambientLight)->SetPortToLight();
+    }
+
     modelFlags |= 0x50;
 
     Mat4 world;
@@ -689,6 +1022,18 @@ void GModel::Show(u32 flags) {
 
     p3d::context->SetWorldMatrix(world);
     drawable->Display(flags);
+
+    if (ambientLight) {
+        RestoreWorldAmbientLightToPort();
+    }
+
+    if (g_environmentManager) {
+        for (s32 slot = 0; slot < 3; slot++) {
+            if (addedHwLights[slot]) {
+                g_environmentManager->lighting.RemoveLightFromPort(slot);
+            }
+        }
+    }
 }
 
 void GModel::SetOriginalGeo(OriginalGeo* original) {
@@ -708,7 +1053,9 @@ EModel::~EModel() {
 void EModel::SetOriginalETree(OriginalETree* original, TransformAnim* animation) {
     MARKFUNCTION(0x8006FBAC);
     DeleteDrawable();
-    drawable = new DrawableETree(original);
+    DrawableETree* drawableETree = new DrawableETree(original);
+    drawableETree->SetOwnerModel(this);
+    drawable = drawableETree;
     drawableType = 3;
 
     if (animation) {
@@ -760,6 +1107,34 @@ void EModel::Show(u32 flags) {
         return;
     }
 
+    if (g_environmentManager) {
+        g_environmentManager->lighting.DoModelLighting(backPtr);
+    }
+
+    bool addedHwLights[3] = { false, false, false };
+    if (g_environmentManager && hwLights && hwLightCount > 0) {
+        HardwareLight* modelLights = static_cast<HardwareLight*>(hwLights);
+        const s32 lightCount = (hwLightCount < 3) ? hwLightCount : 3;
+
+        for (s32 slot = 0; slot < lightCount; slot++) {
+            if (!modelLights[slot].active) {
+                continue;
+            }
+
+            const LVector lightDir = {
+                modelLights[slot].directionX,
+                modelLights[slot].directionY,
+                modelLights[slot].directionZ,
+            };
+            g_environmentManager->lighting.AddLightToPort(slot, &lightDir, modelLights[slot].colour);
+            addedHwLights[slot] = true;
+        }
+    }
+
+    if (ambientLight) {
+        static_cast<AmbientLight*>(ambientLight)->SetPortToLight();
+    }
+
     modelFlags |= 0x50;
 
     Mat4 world;
@@ -768,6 +1143,18 @@ void EModel::Show(u32 flags) {
 
     p3d::context->SetWorldMatrix(world);
     drawable->Display(flags);
+
+    if (ambientLight) {
+        RestoreWorldAmbientLightToPort();
+    }
+
+    if (g_environmentManager) {
+        for (s32 slot = 0; slot < 3; slot++) {
+            if (addedHwLights[slot]) {
+                g_environmentManager->lighting.RemoveLightFromPort(slot);
+            }
+        }
+    }
 }
 
 // HumanoidModel

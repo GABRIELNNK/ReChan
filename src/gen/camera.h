@@ -36,6 +36,11 @@ public:
     void Update();
     void LookAtTarget(const LVector* target);
 
+#if HIGH_FPS_PLAY_PRESENTATION
+    void BeginLogicStepHighFPS();
+    void UpdateHighFPS();
+#endif
+
     void SetMode(CameraMode mode);
 
     void SetFOV(s32 fov);
@@ -72,6 +77,12 @@ public:
     void SetPosition(s32 x, s32 y, s32 z) {
         position = { x, y, z };
         curPos = { x, y, z };
+        prevPosition = { x, y, z };
+    }
+
+    // PSX Director camera opcode '7' writes only position + prevPosition.
+    void SetPositionAndPrev(s32 x, s32 y, s32 z) {
+        position = { x, y, z };
         prevPosition = { x, y, z };
     }
 
@@ -203,5 +214,19 @@ private:
 
     // +480,+484,+488: shake strength per axis (init 100 in Reset)
     LVector shakeStrength = {};
+
+#if HIGH_FPS_PLAY_PRESENTATION
+    LVector highFpsPrevPosition = {};
+    LVector highFpsPrevTargetPos = {};
+    s32 highFpsPrevCamAngleX = 0;
+    s32 highFpsPrevCamAngleY = 0;
+    s32 highFpsPrevCamAngleZ = 0;
+    LVector highFpsPrevAnimPos = {};
+    LVector highFpsPrevAnimTarget = {};
+    u16 highFpsPrevAnimTwist = 0;
+    s32 highFpsPrevAnimFovA = 0;
+    s32 highFpsPrevAnimFovB = 0;
+    bool highFpsSampleValid = false;
+#endif
 
 };

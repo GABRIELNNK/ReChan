@@ -55,8 +55,13 @@ enum Action : s32 {
     ACTION_MENU_RIGHT,
     ACTION_MENU_CONFIRM,
     ACTION_MENU_BACK,
+    ACTION_MENU_CLEAR,
     ACTION_COUNT,
 };
+
+// Convert between action enum and inline prompt token text used by <ACT:...>.
+const char* ActionToToken(Action action);
+Action ActionFromToken(const char* token);
 
 // Gamepad button IDs for bindings (matches GLFW gamepad layout)
 namespace GpBtn {
@@ -97,8 +102,8 @@ namespace GpAxis {
 };
 
 struct ActionBinding {
-    int keyboardKey;       // keyboard key, or 0 for none
-    s32 mouseButton;       // MouseBtn value, or MouseBtn::NONE
+    int keyboardKeys[2];   // per-slot keyboard key, or 0 for none
+    s32 mouseButtons[2];   // per-slot MouseBtn value, or MouseBtn::NONE
     s32 gamepadButton;     // GpBtn value, or GpBtn::NONE
     s32 gamepadButton2;    // alternate GpBtn (e.g. D-pad for movement), or GpBtn::NONE
     s32 gamepadAxis;       // GpAxis value, or GpAxis::NONE
@@ -156,10 +161,26 @@ public:
     // Rebinding
     void SetKeyBinding(Action action, int key);
     void SetMouseButtonBinding(Action action, s32 mouseButton);
+    void SetKeyBindingSlot(Action action, s32 slot, int key);
+    void SetMouseButtonBindingSlot(Action action, s32 slot, s32 mouseButton);
     void SetGamepadButtonBinding(Action action, s32 gpButton);
     int GetKeyBinding(Action action) const;
     s32 GetMouseButtonBinding(Action action) const;
+    int GetKeyBindingSlot(Action action, s32 slot) const;
+    s32 GetMouseButtonBindingSlot(Action action, s32 slot) const;
     s32 GetGamepadButtonBinding(Action action) const;
+
+    // Persisted desktop binding code format:
+    //  0 = unbound, >0 = keyboard key code, <0 = mouse button code (-1-left, -2-right, -3-middle)
+    static s32 EncodeKeyboardBindingCode(s32 key);
+    static s32 EncodeMouseBindingCode(s32 mouseButton);
+    void SetDesktopBindingCode(Action action, s32 slot, s32 code);
+    s32 GetDesktopBindingCode(Action action, s32 slot) const;
+    void GetDesktopBindingLabel(Action action, s32 slot, char* outLabel, s32 outLabelLen) const;
+
+    // Last desktop input edge seen during Update(), for bind capture UIs.
+    s32 GetTriggeredKeyThisFrame() const { return triggeredKeyThisFrame; }
+    s32 GetTriggeredMouseButtonThisFrame() const { return triggeredMouseButtonThisFrame; }
 
     u32 GetPadButtons(bool menuActionsEnabled) const;
     bool UsesAnalogPad() const { return gamepadActive; }
@@ -181,6 +202,8 @@ private:
     double mouseY = 0.0;
     bool mouseDown[3] = {};
     bool mousePrev[3] = {};
+    s32 triggeredKeyThisFrame = 0;
+    s32 triggeredMouseButtonThisFrame = MouseBtn::NONE;
     s32 scrollDelta = 0;
 
     bool PollAction(Action action, PlatformInput* platform) const;

@@ -251,7 +251,7 @@ static bool PopulateCharacterOriginal(OriginalSTree* original, CharFile* cf, u32
             type, original->nameCRC, original->skeleton->numJoints);
     }
     else {
-        original->meshBuffer = primGeomData ? ParseBLKPrims(primGeomData, primGeomSize) : nullptr;
+        original->meshBuffer = primGeomData ? BuildPrimBufferFromRawPrimGeom(primGeomData, primGeomSize) : nullptr;
 
         LOG("[CharMgr] Populated OriginalSTree (flat) for type %u (hash 0x%08X)",
             type, original->nameCRC);
@@ -936,6 +936,8 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
             OriginalSTree* original = new OriginalSTree();
             original->nameCRC = nameHash;
             original->SetStoreID(type == 0 ? 0 : 2);
+                original->xformVertsCallback = RP_XformVertsLitCBF_CL;
+                original->fixUpPolysCallback = RP_FixUpPolysCBF_CL;
 
             s32 bufSize = rrSize(cf->rrHeader, rrIdx - 1);
             u32 primGeomSize = 0;
@@ -973,7 +975,7 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
                 // Fallback: flat mesh without skeleton
                 pddiPrimBuffer* meshBuf = nullptr;
                 if (primGeomData) {
-                    meshBuf = ParseBLKPrims(primGeomData, primGeomSize);
+                    meshBuf = BuildPrimBufferFromRawPrimGeom(primGeomData, primGeomSize);
                 }
                 original->meshBuffer = meshBuf;
 

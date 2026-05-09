@@ -117,15 +117,19 @@ void Launcher::Draw() {
     Model* mdl = static_cast<Model*>(model);
     if (!mdl) return;
 
+    LVector drawPos = pos;
+    LVector drawOrient = orientation;
+    ObstacleBuildRenderTransform(this, pos, orientation, drawPos, drawOrient);
+
     // Copy position and orientation to model
-    mdl->posX = pos.x;
-    mdl->posY = pos.y;
-    mdl->posZ = pos.z;
+    mdl->posX = drawPos.x;
+    mdl->posY = drawPos.y;
+    mdl->posZ = drawPos.z;
     // PSX copies 12 bytes from orientation to model rotation area (+0x34)
     // Model rotation is u16 x3 starting at +52, but PSX writes full s32 words
-    mdl->rotX = (u16)orientation.x;
-    mdl->rotY = (u16)orientation.y;
-    mdl->rotZ = (u16)orientation.z;
+    mdl->rotX = (u16)(drawOrient.x & 0xFFFF);
+    mdl->rotY = (u16)(drawOrient.y & 0xFFFF);
+    mdl->rotZ = (u16)(drawOrient.z & 0xFFFF);
 
     mdl->Show(0);
 }

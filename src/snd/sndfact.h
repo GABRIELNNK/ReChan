@@ -5,6 +5,8 @@ class CSound;
 
 // PSX: CSoundFactory (SNDFACT.CPP)
 // Type IDs:
+//   10000 = CParticleEffectSound (24 bytes)
+//   10010 = CWorldEffectSound (32 bytes)
 //   10040 = CPlatformSound (56 bytes)
 //   10060 = CHumanoidSound (132 bytes)
 //   10070 = CGenericTransientSound (28 bytes)

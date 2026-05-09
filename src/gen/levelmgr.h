@@ -51,6 +51,7 @@ public:
 
     OriginalBasic* FindModel(ModelListEnum listType, s32 id);
     OriginalBasic* FindModel(u32 id);
+    OriginalBasic* FindETree(s32 id);
     OriginalBasic* FindSTree(s32 id);
     OriginalBasic* FindGeo(s32 id);
 

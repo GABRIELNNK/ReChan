@@ -1,5 +1,6 @@
 #include "ai/colfight.h"
 #include "ai/humanoid.h"
+#include "gen/psxmath_helpers.h"
 #include "p3d/p3dmath.h"
 
 // PSX: global array of 12 Humanoid pointers (gArray in decompile)
@@ -10,10 +11,6 @@ static constexpr s32 QUICK_CHECK_MAX_X = 0x800;
 static constexpr s32 QUICK_CHECK_MAX_Y = 0x800;
 static constexpr s32 QUICK_CHECK_MAX_Z = 0x800;
 static constexpr s32 COLFIGHT_MAX_WEAPON_SPACING = 0x80;
-
-static s32 AbsS32(s32 value) {
-    return value < 0 ? -value : value;
-}
 
 // PSX: FindHumanoid__17FightingCollisionPC8Humanoid (COLFIGHT.CPP:116, 0x80072514)
 static s32 FindHumanoid(const Humanoid* h) {
@@ -285,9 +282,9 @@ s32 CheckAttack(
             continue;
         }
 
-        const s32 dx = AbsS32(target->pos.x - source->pos.x);
-        const s32 dy = AbsS32(target->pos.y - source->pos.y);
-        const s32 dz = AbsS32(target->pos.z - source->pos.z);
+        const s32 dx = PsxAbsS32(target->pos.x - source->pos.x);
+        const s32 dy = PsxAbsS32(target->pos.y - source->pos.y);
+        const s32 dz = PsxAbsS32(target->pos.z - source->pos.z);
         if (dx < QUICK_CHECK_MAX_X && dy < QUICK_CHECK_MAX_Y && dz < QUICK_CHECK_MAX_Z
             && CheckAttackPair(target, source, attackType)) {
             if (hitCount < maxCount && outHumanoids) {

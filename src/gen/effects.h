@@ -1,0 +1,43 @@
+#pragma once
+
+#include "gen/cclist.h"
+
+class Effects : public ccNode {
+public:
+    Effects();
+    ~Effects() override;
+
+    virtual s32 Update();
+    virtual void Display(s32 blockNum);
+    virtual s32 Create();
+    virtual s32 PutBackEffect();
+    virtual bool IsDirectorOverlay() const;
+
+    s32 effectType = 0;
+    s32 blockNum = -1;
+    s32 inEffectsList = 0;
+};
+
+// PSX: Die__7Effectsii (EFFECTS.CPP:60, 0x8004C6C8)
+s32 Effects_Die(s32 blockNum, s32 effectType);
+
+// PSX: Find__7EffectslUl (EFFECTS.CPP:106, 0x8004C778)
+Effects* Effects_Find(s32 effectType, u32 effectHash);
+
+// PSX: UnloadAll__7Effects (EFFECTS.CPP:137, 0x8004C7D8)
+s32 Effects_UnloadAll();
+
+// PSX: UpdateAll__7Effects (EFFECTS.CPP:174, 0x8004C854)
+s32 Effects_UpdateAll();
+
+// PSX: DrawEffects__7Effectsi (EFFECTS.CPP:207, 0x8004C8BC)
+s32 Effects_DrawEffects(s32 blockNum);
+
+// PSX: AddEffect__7Effectsi (EFFECTS.CPP:279, 0x8004C9D8)
+s32 Effects_AddEffect(Effects* effect, s32 addToHead);
+
+// PSX: RemoveEffect__7Effects (EFFECTS.CPP:299, 0x8004CA28)
+Effects* Effects_RemoveEffect(Effects* effect);
+
+// PSX global frame counter used by WEffect vertex animation paths.
+extern u32 g_wEffectGlobalFrame;

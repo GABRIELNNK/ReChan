@@ -8,6 +8,7 @@
 
 class hdMenuItem;
 class Thing;
+class WDBSwitch;
 
 // PSX globals used by front-end destination selection return flow.
 extern LVector g_destSelectReturnPos;
@@ -62,6 +63,7 @@ public:
     void UnloadPetal();
     void ResetLevel();
     void CheckThingSwitches(Thing* thing);
+    WDBSwitch* FindPrimarySwitchByCRC(u32 crc);
     void ProcessPendingSwitchActions();
     void RequestPlayerResetOnLoad() { pendingPlayerReset = true; }
     bool ConsumePlayerResetOnLoad() {

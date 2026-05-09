@@ -4,7 +4,7 @@
 
 // Text object field hashes used by selection items
 static constexpr u32 HASH_LABEL_TEXT = 3132773;       // "label" textObj in overlay
-static constexpr u32 HASH_VALUE_TEXT = (u32)(-922957088); // "value" multi-frame textObj
+static constexpr u32 HASH_VALUE_TEXT = 0xC8FCCAE0u;   // PSX value textObj used by selection items
 
 // ---- hdItemGoto ----
 

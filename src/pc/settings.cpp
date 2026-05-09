@@ -3,12 +3,16 @@
 #include "gen/ccfile.h"
 #include "gen/control.h"
 #include "gen/display.h"
+#include "gen/time.h"
+#include "pc/inputaction.h"
+#include "p3d/context.h"
 #include "snd/sound.h"
 #include "snd/rsevent.h"
 
 #include <filesystem>
 #include <string>
 #include <system_error>
+#include <cstdio>
 #include <cstring>
 #include <cstdlib>
 
@@ -16,6 +20,27 @@ GameSettings g_settings;
 
 static constexpr s32 kFallbackScreenWidth = 1280;
 static constexpr s32 kFallbackScreenHeight = 720;
+
+static s32 NormalizeFrameRateSetting(s32 fps) {
+    if (fps <= 0) {
+        return 0;
+    }
+
+    static const s32 kAllowed[] = { 30, 60, 120 };
+    s32 closest = kAllowed[0];
+    s32 closestDist = (fps > closest) ? (fps - closest) : (closest - fps);
+
+    for (u32 i = 1; i < (u32)(sizeof(kAllowed) / sizeof(kAllowed[0])); i++) {
+        const s32 candidate = kAllowed[i];
+        const s32 dist = (fps > candidate) ? (fps - candidate) : (candidate - fps);
+        if (dist < closestDist) {
+            closest = candidate;
+            closestDist = dist;
+        }
+    }
+
+    return closest;
+}
 
 struct SettingDef {
     const char* section;
@@ -68,7 +93,29 @@ static void ApplyResolutionDimensions(s32 width, s32 height) {
         }
     }
 
+    pddiVideoMode bestMode = {};
+    if (!g_display->GetResolutionMode(bestIndex, bestMode)) {
+        return;
+    }
+
     g_display->SetResolutionIndex(bestIndex);
+
+    LOG("[Settings] Resolution apply: requested=%dx%d matched=%dx%d index=%d mode=%d",
+        width,
+        height,
+        bestMode.width,
+        bestMode.height,
+        bestIndex,
+        g_display->GetScreenMode());
+
+    // In windowed/borderless modes, allow exact requested window size even when
+    // monitor mode enumeration has no exact match (common on ultrawide setups).
+    if ((bestMode.width != width || bestMode.height != height)
+        && g_display->GetScreenMode() != ScreenMode_Fullscreen
+        && p3d::display) {
+        p3d::display->SetResolution(width, height);
+        LOG("[Settings] Resolution apply: forced exact window size %dx%d", width, height);
+    }
 }
 
 static char* TrimInPlace(char* text) {
@@ -247,6 +294,35 @@ static void SetVsyncSetting(s32 v) {
     }
 }
 
+static s32 GetMsaaSetting() {
+    if (g_display) {
+        return g_display->GetMSAA();
+    }
+    return Display::GetDefaultMSAA();
+}
+
+static void SetMsaaSetting(s32 v) {
+    if (g_display) {
+        g_display->SetMSAA(v);
+    }
+    else {
+        Display::SetDefaultMSAA(v);
+    }
+}
+
+static s32 GetFrameRateSetting() {
+    if (g_time) {
+        return NormalizeFrameRateSetting(g_time->targetFPS);
+    }
+    return 30;
+}
+
+static void SetFrameRateSetting(s32 v) {
+    if (g_time) {
+        g_time->targetFPS = NormalizeFrameRateSetting(v);
+    }
+}
+
 static const SettingDef kSettingDefs[] = {
     { "audio", "music_volume",   100, 0, 100, GetMusicVolume,   SetMusicVolume },
     { "audio", "effects_volume", 100, 0, 100, GetEffectsVolume, SetEffectsVolume },
@@ -256,6 +332,8 @@ static const SettingDef kSettingDefs[] = {
     { "controls", "shock",         0, 0,   1, GetShockEnabledSetting, SetShockEnabledSetting },
     { "display", "screen_mode",     2, 0,   2, GetScreenModeSetting,  SetScreenModeSetting },
     { "display", "vsync",          1, 0,   1, GetVsyncSetting,       SetVsyncSetting },
+    { "display", "frame_rate",    30, 0, 120, GetFrameRateSetting,   SetFrameRateSetting },
+    { "display", "msaa",           0, 0,  16, GetMsaaSetting,        SetMsaaSetting },
 };
 
 static constexpr u32 kSettingDefCount = (u32)(sizeof(kSettingDefs) / sizeof(kSettingDefs[0]));
@@ -268,6 +346,91 @@ static s32 FindSettingDefIndex(const char* section, const char* key) {
         }
     }
     return -1;
+}
+
+static bool IsPersistedKeybindAction(Action action) {
+    return action >= ACTION_JUMP && action < ACTION_OPEN_CLOSE_MENU;
+}
+
+static void BuildKeybindSettingKey(Action action, s32 slot, char* outKey, s32 outKeyLen) {
+    if (!outKey || outKeyLen <= 0) {
+        return;
+    }
+
+    outKey[0] = '\0';
+
+    if (slot < 0 || slot >= 2) {
+        return;
+    }
+
+    if (!IsPersistedKeybindAction(action)) {
+        return;
+    }
+
+    const char* token = ActionToToken(action);
+    if (!token) {
+        return;
+    }
+
+    char lowerToken[48] = {};
+    s32 write = 0;
+    for (s32 i = 0; token[i] != '\0' && write + 1 < (s32)sizeof(lowerToken); i++) {
+        char c = token[i];
+        if (c >= 'A' && c <= 'Z') {
+            c = (char)(c - 'A' + 'a');
+        }
+        lowerToken[write++] = c;
+    }
+    lowerToken[write] = '\0';
+
+    snprintf(outKey, outKeyLen, "%s_%d", lowerToken, slot + 1);
+}
+
+static bool ParseKeybindSettingKey(const char* key, Action& outAction, s32& outSlot) {
+    outAction = ACTION_COUNT;
+    outSlot = -1;
+
+    if (!key || key[0] == '\0') {
+        return false;
+    }
+
+    const char* slotSep = strrchr(key, '_');
+    if (!slotSep || slotSep == key) {
+        return false;
+    }
+
+    s32 slot = -1;
+    if (!ParseSettingValue(slotSep + 1, slot)) {
+        return false;
+    }
+    slot -= 1;
+    if (slot < 0 || slot >= 2) {
+        return false;
+    }
+
+    char tokenUpper[48] = {};
+    const s32 tokenLen = (s32)(slotSep - key);
+    if (tokenLen <= 0 || tokenLen >= (s32)sizeof(tokenUpper)) {
+        return false;
+    }
+
+    for (s32 i = 0; i < tokenLen; i++) {
+        char c = key[i];
+        if (c >= 'a' && c <= 'z') {
+            c = (char)(c - 'a' + 'A');
+        }
+        tokenUpper[i] = c;
+    }
+    tokenUpper[tokenLen] = '\0';
+
+    Action action = ActionFromToken(tokenUpper);
+    if (action < 0 || action >= ACTION_COUNT) {
+        return false;
+    }
+
+    outAction = action;
+    outSlot = slot;
+    return true;
 }
 
 static std::string BuildIniText() {
@@ -305,6 +468,29 @@ static std::string BuildIniText() {
     text += displayLine;
     snprintf(displayLine, sizeof(displayLine), "screen_height = %d\n", screenHeight);
     text += displayLine;
+
+    if (g_actionInput) {
+        text += "\n[keybinds]\n";
+        for (s32 i = 0; i < ACTION_COUNT; i++) {
+            const Action action = (Action)i;
+            if (!IsPersistedKeybindAction(action)) {
+                continue;
+            }
+
+            for (s32 slot = 0; slot < 2; slot++) {
+                char keyName[64] = {};
+                BuildKeybindSettingKey(action, slot, keyName, (s32)sizeof(keyName));
+                if (keyName[0] == '\0') {
+                    continue;
+                }
+
+                const s32 code = g_actionInput->GetDesktopBindingCode(action, slot);
+                char line[128] = {};
+                snprintf(line, sizeof(line), "%s = %d\n", keyName, code);
+                text += line;
+            }
+        }
+    }
 
     return text;
 }
@@ -429,6 +615,30 @@ bool GameSettings::Load(const char* path) {
                     }
                     continue;
                 }
+            }
+
+            if (strcmp(currentSection, "keybinds") == 0) {
+                Action action = ACTION_COUNT;
+                s32 slot = -1;
+                if (!ParseKeybindSettingKey(key, action, slot)) {
+                    LOG("[Settings] Load: unknown key [%s] %s", currentSection, key);
+                    continue;
+                }
+
+                if (!IsPersistedKeybindAction(action)) {
+                    continue;
+                }
+
+                s32 parsedValue = 0;
+                if (!ParseSettingValue(valueText, parsedValue)) {
+                    LOG("[Settings] Load: bad value for [%s] %s = '%s'", currentSection, key, valueText);
+                    continue;
+                }
+
+                if (g_actionInput) {
+                    g_actionInput->SetDesktopBindingCode(action, slot, parsedValue);
+                }
+                continue;
             }
 
             s32 defIndex = FindSettingDefIndex(currentSection, key);

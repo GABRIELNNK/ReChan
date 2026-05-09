@@ -2,7 +2,7 @@
 #include "gen/levelmgr.h"
 #include "gen/charmgr.h"
 #include "gen/animmgr.h"
-#include "gen/geffect.h"
+#include "gen/envmgr.h"
 #include "gen/model.h"
 #include "ai/obstacle.h"
 
@@ -66,7 +66,9 @@ void LevelManager::PurgeLevel() {
         delete n;
     }
 
-    // PSX: EnvironmentManager::Reset()
+    if (g_environmentManager) {
+        g_environmentManager->Reset();
+    }
     DeletePermMemID(1);
     DeletePermMemID(2);
 
@@ -74,7 +76,6 @@ void LevelManager::PurgeLevel() {
     if (g_animMgr) {
         g_animMgr->PurgeLevel();
     }
-    GEffect_Unload();
 
     LOG("[LevelManager] PurgeLevel");
 }
@@ -96,12 +97,14 @@ void LevelManager::PurgePetal() {
         delete n;
     }
 
-    // PSX: EnvironmentManager::Reset()
+    if (g_environmentManager) {
+        g_environmentManager->Reset();
+    }
+
     // PSX: AnimationManager::PurgePetal()
     if (g_animMgr) {
         g_animMgr->PurgePetal();
     }
-    GEffect_Unload();
     // PSX: Obstacle::ClearPetalAnimList()
     Obstacle_ClearPetalAnimList();
 
@@ -252,6 +255,25 @@ OriginalBasic* LevelManager::FindSTree(s32 id) {
         OriginalBasic* ob = static_cast<OriginalBasic*>(static_cast<ccNode*>(n));
         if (ob->nameCRC == crc) return ob;
     }
+    return nullptr;
+}
+
+// PSX: FindETree__12LevelManagerl (0x80059358)
+OriginalBasic* LevelManager::FindETree(s32 id) {
+    MARKFUNCTION(0x80059358);
+    u32 crc = static_cast<u32>(id);
+
+    // Host keeps ETree originals in modelLists[3] on the current path.
+    for (ccMinNode* n = modelLists[3].head; n; n = n->next) {
+        OriginalBasic* ob = static_cast<OriginalBasic*>(static_cast<ccNode*>(n));
+        if (ob->nameCRC == crc) return ob;
+    }
+
+    for (ccMinNode* n = etreeList.head; n; n = n->next) {
+        OriginalBasic* ob = static_cast<OriginalBasic*>(static_cast<ccNode*>(n));
+        if (ob->nameCRC == crc) return ob;
+    }
+
     return nullptr;
 }
 

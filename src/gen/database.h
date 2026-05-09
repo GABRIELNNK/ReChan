@@ -154,7 +154,10 @@ public:
     DBPath* FindPath(const char* name);
     DBPoint* FindPoint(const char* name);
 
-    // Find path by CRC
+    // Find path by CRC (PSX: FindPath__8DatabaseUl)
+    DBPath* FindPath(u32 crc);
+
+    // Host compatibility wrapper
     DBPath* FindPathByCRC(u32 crc);
 
     // Get the points list directly

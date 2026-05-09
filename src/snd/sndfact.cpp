@@ -1,10 +1,12 @@
 #include "snd/sndfact.h"
 #include "snd/basesnd.h"
+#include "snd/esound.h"
 #include "snd/trnssnd.h"
 #include "snd/prstsnd.h"
 #include "snd/hmndsnd.h"
 #include "snd/platsnd.h"
 #include "snd/wpnsnd.h"
+#include "snd/rsevent.h"
 
 struct PlatformSoundLoadData {
     u8 pad[2];
@@ -21,6 +23,43 @@ struct PlatformSoundLoadData {
     s8 hitPathNodeCooldownReset;
     s8 pad23;
 };
+
+struct WorldEffectSoundLoadData {
+    u8 pad0;
+    s8 persistentId;
+    u16 startFrame;
+    u16 endFrame;
+    u16 soundFlags;
+    u8 updateFlags;
+    u8 pad9;
+};
+
+struct ParticleEffectSoundLoadData {
+    u8 pad0;
+    s8 persistentId;
+};
+
+// PSX: IsBasicSoundLoaded__21CSoundFactoryDatabaseUl (SNDFDB.CPP:1011, 0x800AC240)
+// LocInfo[loc][0] values at 0x800D6588 (GAME_REL.psx.lst):
+//   loc 0..20 -> 1..21
+//   loc 21..24 -> 22
+static const u8 s_locInfoLoadIndex[25] = {
+    1, 2, 3, 4, 5,
+    6, 7, 8, 9, 10,
+    11, 12, 13, 14, 15,
+    16, 17, 18, 19, 20,
+    21, 22, 22, 22, 22
+};
+
+static s32 IsBasicSoundLoaded(u32 packedSoundWord) {
+    if (g_currentSoundLocation < 0 || g_currentSoundLocation >= 25) {
+        return -5000;
+    }
+
+    const u32 locationIndex = s_locInfoLoadIndex[g_currentSoundLocation];
+    const u32 requiredMask = (1u << (locationIndex + 8));
+    return (packedSoundWord & requiredMask) ? 0 : -5000;
+}
 
 // PSX: CreatePlatformSound__21CSoundFactoryDatabaseP6CSoundUl (SNDFDB.CPP:372)
 static void FillPlatformSoundLoadData(u32 soundId, PlatformSoundLoadData& data) {
@@ -287,6 +326,85 @@ LABEL_85:
     }
 }
 
+// PSX: CreateWorldEffectSound__21CSoundFactoryDatabaseP6CSoundUl (SNDFDB.CPP:216)
+static s32 FillWorldEffectSoundLoadData(u32 soundId, WorldEffectSoundLoadData& data) {
+    data = {};
+    data.persistentId = -1;
+
+    switch (soundId) {
+        case 0x06270125:
+            data.persistentId = 30;
+            data.startFrame = 19;
+            data.endFrame = 63;
+            return 0;
+        case 0x0AC36654:
+            data.persistentId = 43;
+            return 0;
+        case 0x0D5083CC:
+            data.persistentId = 38;
+            return 0;
+        case 0x0CA0D800:
+        case 0x0E402AA0:
+        case 0x02E7CA59:
+            data.persistentId = 31;
+            data.soundFlags = 5300;
+            return 0;
+        case 0x0655C107:
+        case 0x0465C147:
+            data.persistentId = 28;
+            data.startFrame = 1;
+            data.endFrame = 15;
+            return 0;
+        case 0x08A88A45:
+            data.persistentId = 32;
+            return 0;
+        case 0x04A6117F:
+            data.persistentId = 33;
+            data.soundFlags = 2000;
+            return 0;
+        case 0x04B061A3:
+            data.persistentId = 44;
+            return 0;
+        case 0x05850678:
+            data.persistentId = 40;
+            return 0;
+        case 0x004C4252:
+            data.persistentId = 41;
+            return 0;
+        default:
+            return -100;
+    }
+}
+
+// PSX: CreateParticleEffectSound__21CSoundFactoryDatabaseP6CSoundUl (SNDFDB.CPP:165)
+static s32 FillParticleEffectSoundLoadData(u32 soundId, ParticleEffectSoundLoadData& data) {
+    data = {};
+    data.persistentId = -1;
+
+    switch (soundId) {
+        case 88635922:
+        case 8889404:
+            data.persistentId = 35;
+            return 0;
+        case 60675069:
+        case 208540507:
+            data.persistentId = 29;
+            return 0;
+        case 102753076:
+            data.persistentId = 39;
+            return 0;
+        case 223416785:
+            data.persistentId = 37;
+            return 0;
+        case 75930324:
+        case 185475524:
+            data.persistentId = 36;
+            return 0;
+        default:
+            return -100;
+    }
+}
+
 // PSX: CreateObject__13CSoundFactoryUlPP6CSoundUl (SNDFACT.CPP:178, 0x8005759C)
 // Creates a CSound-derived object by type ID and loads the soundId into it.
 // PSX flow: switch(typeId) -> allocate -> construct -> LoadObject -> Load(soundId data)
@@ -296,6 +414,34 @@ s32 CSoundFactory::CreateObject(u32 typeId, CSound** outObj, u32 soundId) {
     *outObj = nullptr;
 
     switch (typeId) {
+        case 10000:
+        {
+            CParticleEffectSound* obj = new CParticleEffectSound();
+            ParticleEffectSoundLoadData data = {};
+            s32 loadResult = FillParticleEffectSoundLoadData(soundId, data);
+            if (loadResult < 0) {
+                delete obj;
+                return loadResult;
+            }
+
+            obj->Load(&data);
+            *outObj = obj;
+            break;
+        }
+        case 10010:
+        {
+            CWorldEffectSound* obj = new CWorldEffectSound();
+            WorldEffectSoundLoadData data = {};
+            s32 loadResult = FillWorldEffectSoundLoadData(soundId, data);
+            if (loadResult < 0) {
+                delete obj;
+                return loadResult;
+            }
+
+            obj->Load(&data);
+            *outObj = obj;
+            break;
+        }
         case 10050:
         {
             CWeaponSound* obj = new CWeaponSound();
@@ -438,6 +584,9 @@ s32 CSoundFactory::CreateObject(u32 typeId, CSound** outObj, u32 soundId) {
             if (soundId >= 259) {
                 return -1000;
             }
+            if (IsBasicSoundLoaded(g_transData[2 * soundId]) < 0) {
+                return -5000;
+            }
             CGenericTransientSound* obj = new CGenericTransientSound();
             // PSX: writes u16 soundId at sp+18, calls Load(sp+16)
             // Load copies 4 bytes from data to obj+16, soundId at obj+18
@@ -455,6 +604,9 @@ s32 CSoundFactory::CreateObject(u32 typeId, CSound** outObj, u32 soundId) {
             }
             if (soundId == 0xFF) {
                 return -5010;
+            }
+            if (IsBasicSoundLoaded(g_persistData[2 * soundId]) < 0) {
+                return -5000;
             }
             CGenericPersistentSound* obj = new CGenericPersistentSound();
             // PSX: writes u8 persistId at sp+17, calls Load(sp+16)

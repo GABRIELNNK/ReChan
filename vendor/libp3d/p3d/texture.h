@@ -24,6 +24,8 @@ public:
     tTexture();
     ~tTexture() override;
 
+    static tTexture* LoadFromImagePath(const char* path, s32* outWidth = nullptr, s32* outHeight = nullptr);
+
     bool Create(int width, int height, int bpp, int alphaDepth, const void* rgba);
 
     pddiTexture* GetTexture() const { return texture; }

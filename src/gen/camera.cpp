@@ -15,6 +15,7 @@
 #include "gen/world.h"
 #include "gen/time.h"
 #include "gen/paramanim.h"
+#include "gen/psxmath_helpers.h"
 
 // PSX math helpers
 
@@ -32,14 +33,6 @@ static constexpr s32 MAX_VIEW_POS_DELTA_Z = 32;
 static constexpr s32 RESTING_DIST = 3200;
 static constexpr s32 HEIGHT_OFFSET = 2000;
 static constexpr s32 SPIN_RATE = 6500;
-
-static s32 rmRandom0() {
-    return std::rand();
-}
-
-static s32 rmSin16Local(s32 angle) {
-    return rmSin16(angle);
-}
 
 bool EvalCubic(s32* curValue, s32* accel, s32 target, s32 velocity, s32 time) {
     s32 v7 = *accel;
@@ -151,6 +144,19 @@ void Camera::Reset() {
     lookAtMode = 0;
     targetThing = nullptr;
 
+#if HIGH_FPS_PLAY_PRESENTATION
+    highFpsPrevPosition = position;
+    highFpsPrevTargetPos = targetPos;
+    highFpsPrevCamAngleX = camAngleX;
+    highFpsPrevCamAngleY = camAngleY;
+    highFpsPrevCamAngleZ = camAngleZ;
+    G_2ptcam.GetPosition(&highFpsPrevAnimPos);
+    G_2ptcam.GetTarget(&highFpsPrevAnimTarget);
+    highFpsPrevAnimTwist = G_2ptcam.GetTwist();
+    G_2ptcam.GetFOV(&highFpsPrevAnimFovA, &highFpsPrevAnimFovB);
+    highFpsSampleValid = false;
+#endif
+
     // Anim - PSX: inline PurgeAnims/DeleteAsyncAnim logic at end of Reset
     if (cameraAnim) {
         delete cameraAnim;
@@ -165,6 +171,144 @@ void Camera::Reset() {
     }
     cameraAnchor = nullptr;
 }
+
+#if HIGH_FPS_PLAY_PRESENTATION
+void Camera::BeginLogicStepHighFPS() {
+    highFpsPrevPosition = position;
+    highFpsPrevTargetPos = targetPos;
+    highFpsPrevCamAngleX = camAngleX;
+    highFpsPrevCamAngleY = camAngleY;
+    highFpsPrevCamAngleZ = camAngleZ;
+    G_2ptcam.GetPosition(&highFpsPrevAnimPos);
+    G_2ptcam.GetTarget(&highFpsPrevAnimTarget);
+    highFpsPrevAnimTwist = G_2ptcam.GetTwist();
+    G_2ptcam.GetFOV(&highFpsPrevAnimFovA, &highFpsPrevAnimFovB);
+    highFpsSampleValid = true;
+}
+
+void Camera::UpdateHighFPS() {
+    if (!highFpsSampleValid || !g_time) {
+        Update();
+        return;
+    }
+
+    // Keep director/cutscene camera updates on pure logic positions.
+    // Interpolating render-only frames can place the camera through world
+    // geometry even when PSX logic camera stays in front of it.
+    if (g_directorActive != 0) {
+        Update();
+        return;
+    }
+
+    f32 alpha = g_time->GetPlayPresentationAlpha();
+    if (alpha <= 0.0f) {
+        Update();
+        return;
+    }
+    if (alpha > 1.0f) {
+        alpha = 1.0f;
+    }
+
+    LVector savedPosition = position;
+    LVector savedTargetPos = targetPos;
+    s32 savedCamAngleX = camAngleX;
+    s32 savedCamAngleY = camAngleY;
+    s32 savedCamAngleZ = camAngleZ;
+    s16 savedQuadrantYZ = quadrantYZ;
+    s16 savedQuadrantXZ = quadrantXZ;
+
+    if (cameraAnim != nullptr) {
+        LVector currentAnimPos = {};
+        LVector currentAnimTarget = {};
+        G_2ptcam.GetPosition(&currentAnimPos);
+        G_2ptcam.GetTarget(&currentAnimTarget);
+        const u16 currentAnimTwist = G_2ptcam.GetTwist();
+        s32 currentAnimFovA = 0;
+        s32 currentAnimFovB = 0;
+        G_2ptcam.GetFOV(&currentAnimFovA, &currentAnimFovB);
+
+        LVector interpAnimPos = {
+            highFpsPrevAnimPos.x + (s32)((f32)(currentAnimPos.x - highFpsPrevAnimPos.x) * alpha),
+            highFpsPrevAnimPos.y + (s32)((f32)(currentAnimPos.y - highFpsPrevAnimPos.y) * alpha),
+            highFpsPrevAnimPos.z + (s32)((f32)(currentAnimPos.z - highFpsPrevAnimPos.z) * alpha),
+        };
+
+        LVector interpAnimTarget = {
+            highFpsPrevAnimTarget.x + (s32)((f32)(currentAnimTarget.x - highFpsPrevAnimTarget.x) * alpha),
+            highFpsPrevAnimTarget.y + (s32)((f32)(currentAnimTarget.y - highFpsPrevAnimTarget.y) * alpha),
+            highFpsPrevAnimTarget.z + (s32)((f32)(currentAnimTarget.z - highFpsPrevAnimTarget.z) * alpha),
+        };
+
+        const s32 twistStep = PsxAngleDelta16((s32)currentAnimTwist, (s32)highFpsPrevAnimTwist);
+        const u16 interpAnimTwist = (u16)(highFpsPrevAnimTwist + (s32)((f32)twistStep * alpha));
+
+        const s32 interpAnimFovA = highFpsPrevAnimFovA
+            + (s32)((f32)(currentAnimFovA - highFpsPrevAnimFovA) * alpha);
+        const s32 interpAnimFovB = highFpsPrevAnimFovB
+            + (s32)((f32)(currentAnimFovB - highFpsPrevAnimFovB) * alpha);
+
+        G_2ptcam.SetPosition(&interpAnimPos);
+        G_2ptcam.SetTarget(&interpAnimTarget);
+        G_2ptcam.SetTwist(interpAnimTwist);
+        G_2ptcam.SetFOV(interpAnimFovA, interpAnimFovB);
+
+        Update();
+
+        G_2ptcam.SetPosition(&currentAnimPos);
+        G_2ptcam.SetTarget(&currentAnimTarget);
+        G_2ptcam.SetTwist(currentAnimTwist);
+        G_2ptcam.SetFOV(currentAnimFovA, currentAnimFovB);
+
+        position = savedPosition;
+        targetPos = savedTargetPos;
+        camAngleX = savedCamAngleX;
+        camAngleY = savedCamAngleY;
+        camAngleZ = savedCamAngleZ;
+        quadrantYZ = savedQuadrantYZ;
+        quadrantXZ = savedQuadrantXZ;
+        return;
+    }
+
+    LVector deltaPos = {
+        position.x - highFpsPrevPosition.x,
+        position.y - highFpsPrevPosition.y,
+        position.z - highFpsPrevPosition.z,
+    };
+
+    LVector deltaTarget = {
+        targetPos.x - highFpsPrevTargetPos.x,
+        targetPos.y - highFpsPrevTargetPos.y,
+        targetPos.z - highFpsPrevTargetPos.z,
+    };
+
+    position.x = highFpsPrevPosition.x + (s32)((f32)deltaPos.x * alpha);
+    position.y = highFpsPrevPosition.y + (s32)((f32)deltaPos.y * alpha);
+    position.z = highFpsPrevPosition.z + (s32)((f32)deltaPos.z * alpha);
+
+    targetPos.x = highFpsPrevTargetPos.x + (s32)((f32)deltaTarget.x * alpha);
+    targetPos.y = highFpsPrevTargetPos.y + (s32)((f32)deltaTarget.y * alpha);
+    targetPos.z = highFpsPrevTargetPos.z + (s32)((f32)deltaTarget.z * alpha);
+
+    if (flags & 0x02) {
+        LookAtTarget(&targetPos);
+    }
+    else {
+        camAngleX = PsxLerpAngle16(highFpsPrevCamAngleX, savedCamAngleX, alpha);
+        camAngleY = PsxLerpAngle16(highFpsPrevCamAngleY, savedCamAngleY, alpha);
+        camAngleZ = PsxLerpAngle16(highFpsPrevCamAngleZ, savedCamAngleZ, alpha);
+    }
+
+    Update();
+
+    position = savedPosition;
+    targetPos = savedTargetPos;
+    camAngleX = savedCamAngleX;
+    camAngleY = savedCamAngleY;
+    camAngleZ = savedCamAngleZ;
+    quadrantYZ = savedQuadrantYZ;
+    quadrantXZ = savedQuadrantXZ;
+}
+#endif
 
 
 // Camera::Think (0x80047F28)
@@ -694,16 +838,14 @@ void Camera::FollowPath() {
     s32 toBy = targetWorldPos.y - nodeB_tgt.y;
     s32 toBz = targetWorldPos.z - nodeB_tgt.z;
 
-    s64 dotA64 = (s64)segX * (s64)toAx + (s64)segY * (s64)toAy + (s64)segZ * (s64)toAz;
-    s64 dotB64 = (s64)segX * (s64)toBx + (s64)segY * (s64)toBy + (s64)segZ * (s64)toBz;
-    s64 denom64 = dotA64 - dotB64;
+    // PSX computes this in 32-bit registers, so preserve wraparound behavior
+    // before passing values to rmDiv16i.
+    const u32 dotAU = (u32)((s64)segX * (s64)toAx + (s64)segY * (s64)toAy + (s64)segZ * (s64)toAz);
+    const u32 dotBU = (u32)((s64)segX * (s64)toBx + (s64)segY * (s64)toBy + (s64)segZ * (s64)toBz);
+    const s32 dotA = (s32)dotAU;
+    const s32 denom = (s32)(dotAU - dotBU);
 
-    s32 dotA = (dotA64 > 0x7FFFFFFFLL) ? 0x7FFFFFFF : (dotA64 < -0x80000000LL ? (s32)0x80000000 : (s32)dotA64);
-    s32 denom = (denom64 > 0x7FFFFFFFLL) ? 0x7FFFFFFF : (denom64 < -0x80000000LL ? (s32)0x80000000 : (s32)denom64);
-
-    s32 t = 0;
-    if (denom != 0)
-        t = rmDiv16i(dotA, denom);
+    s32 t = rmDiv16i(dotA, denom);
     if (t < 0) t = 0;
     if (t > FIX16_ONE) t = FIX16_ONE;
 
@@ -869,11 +1011,11 @@ void Camera::RigidCam() {
         }
     }
 
-    s32 sinYaw = rmSin16Local(followAngle);
+    s32 sinYaw = rmSin16(followAngle);
     curPos.x = viewPos.x - fixmul16(sinYaw, RESTING_DIST);
     curPos.y = viewPos.y + HEIGHT_OFFSET;
 
-    s32 sinYaw90 = rmSin16Local(followAngle + 0x4000);
+    s32 sinYaw90 = rmSin16(followAngle + 0x4000);
     curPos.z = viewPos.z - fixmul16(sinYaw90, RESTING_DIST);
 }
 
@@ -890,13 +1032,13 @@ void Camera::CameraShake() {
     s32 shakeZ = 0;
 
     if (shakeStrength.x != 0) {
-        shakeX = rmRandom0() % shakeStrength.x;
+        shakeX = PsxRandom0() % shakeStrength.x;
     }
     if (shakeStrength.y != 0) {
-        shakeY = rmRandom0() % shakeStrength.y;
+        shakeY = PsxRandom0() % shakeStrength.y;
     }
     if (shakeStrength.z != 0) {
-        shakeZ = rmRandom0() % shakeStrength.z;
+        shakeZ = PsxRandom0() % shakeStrength.z;
     }
 
     prevPosition = position;

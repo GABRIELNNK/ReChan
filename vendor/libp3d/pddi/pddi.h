@@ -38,7 +38,8 @@ enum pddiBlendMode {
     PDDI_BLEND_NONE,
     PDDI_BLEND_ALPHA,
     PDDI_BLEND_ADD,
-    PDDI_BLEND_SUBTRACT
+    PDDI_BLEND_SUBTRACT,
+    PDDI_BLEND_PSX_QUARTER
 };
 
 enum pddiCompareMode {

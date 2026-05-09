@@ -1,4 +1,4 @@
-﻿#include "gen/common.h"
+#include "gen/common.h"
 #include "ai/obstacle.h"
 #include "ai/obstacle_shared.h"
 #include "ai/activezn.h"
@@ -21,8 +21,10 @@
 #include "gen/model.h"
 #include "gen/path.h"
 #include "gen/world.h"
+#include "p3d/byteread.h"
 #include "p3d/p3dmath.h"
 #include "snd/snddrct.h"
+#include "gen/time.h"
 
 const LVector ZERO_DELTA_VELOCITY = { 0, 0, 0 };
 
@@ -31,6 +33,140 @@ const tagCollisionBox INVALID_COLLISION_BOX = {
     -0x7FFF, -0x7FFF, -0x7FFF,
     -0x7FFF, 0
 };
+
+#if HIGH_FPS_PLAY_PRESENTATION
+static constexpr s32 MAX_OBSTACLE_RENDER_SMOOTH_STATES = 512;
+
+struct ObstacleRenderSmoothState {
+    const Thing* owner = nullptr;
+    bool initialized = false;
+    LVector prevPos = {};
+    LVector curPos = {};
+    LVector prevOrient = {};
+    LVector curOrient = {};
+};
+
+static ObstacleRenderSmoothState s_obstacleRenderSmoothStates[MAX_OBSTACLE_RENDER_SMOOTH_STATES] = {};
+
+static ObstacleRenderSmoothState* FindObstacleRenderSmoothState(const Thing* owner) {
+    if (!owner) {
+        return nullptr;
+    }
+
+    ObstacleRenderSmoothState* freeState = nullptr;
+    for (s32 i = 0; i < MAX_OBSTACLE_RENDER_SMOOTH_STATES; i++) {
+        ObstacleRenderSmoothState* state = &s_obstacleRenderSmoothStates[i];
+        if (state->owner == owner) {
+            return state;
+        }
+        if (!freeState && state->owner == nullptr) {
+            freeState = state;
+        }
+    }
+
+    if (!freeState) {
+        return nullptr;
+    }
+
+    freeState->owner = owner;
+    freeState->initialized = false;
+    freeState->prevPos = {};
+    freeState->curPos = {};
+    freeState->prevOrient = {};
+    freeState->curOrient = {};
+    return freeState;
+}
+
+static void ClearObstacleRenderSmoothState(const Thing* owner) {
+    if (!owner) {
+        return;
+    }
+
+    for (s32 i = 0; i < MAX_OBSTACLE_RENDER_SMOOTH_STATES; i++) {
+        ObstacleRenderSmoothState* state = &s_obstacleRenderSmoothStates[i];
+        if (state->owner == owner) {
+            state->owner = nullptr;
+            state->initialized = false;
+            state->prevPos = {};
+            state->curPos = {};
+            state->prevOrient = {};
+            state->curOrient = {};
+            return;
+        }
+    }
+}
+#endif
+
+void ObstacleBuildRenderTransform(
+    const Thing* owner,
+    const LVector& logicPos,
+    const LVector& logicOrientation,
+    LVector& outPos,
+    LVector& outOrientation) {
+    outPos = logicPos;
+    outOrientation = logicOrientation;
+
+#if HIGH_FPS_PLAY_PRESENTATION
+    const bool obstacleInPlay = (g_time && g_game && g_game->GetState() == GameState::Play);
+    if (!obstacleInPlay) {
+        ClearObstacleRenderSmoothState(owner);
+        return;
+    }
+
+    ObstacleRenderSmoothState* smoothState = FindObstacleRenderSmoothState(owner);
+    if (!smoothState) {
+        return;
+    }
+
+    if (!smoothState->initialized) {
+        smoothState->prevPos = logicPos;
+        smoothState->curPos = logicPos;
+        smoothState->prevOrient = logicOrientation;
+        smoothState->curOrient = logicOrientation;
+        smoothState->initialized = true;
+    }
+
+    const bool didLogicStep = g_time->DidPlayLogicStepThisFrame();
+    if (didLogicStep) {
+        smoothState->prevPos = smoothState->curPos;
+        smoothState->curPos = logicPos;
+        smoothState->prevOrient = smoothState->curOrient;
+        smoothState->curOrient = logicOrientation;
+    }
+
+    f32 alpha = g_time->GetPlayPresentationAlpha();
+    if (alpha < 0.0f) {
+        alpha = 0.0f;
+    }
+    else if (alpha > 1.0f) {
+        alpha = 1.0f;
+    }
+
+    const s32 stepDx = smoothState->curPos.x - smoothState->prevPos.x;
+    const s32 stepDy = smoothState->curPos.y - smoothState->prevPos.y;
+    const s32 stepDz = smoothState->curPos.z - smoothState->prevPos.z;
+
+    outPos.x = smoothState->prevPos.x + (s32)((f32)stepDx * alpha);
+    outPos.y = smoothState->prevPos.y + (s32)((f32)stepDy * alpha);
+    outPos.z = smoothState->prevPos.z + (s32)((f32)stepDz * alpha);
+
+    const s32 stepRX = (s16)((u16)smoothState->curOrient.x - (u16)smoothState->prevOrient.x);
+    const s32 stepRY = (s16)((u16)smoothState->curOrient.y - (u16)smoothState->prevOrient.y);
+    const s32 stepRZ = (s16)((u16)smoothState->curOrient.z - (u16)smoothState->prevOrient.z);
+
+    outOrientation.x = (u16)(smoothState->prevOrient.x + (s32)((f32)stepRX * alpha));
+    outOrientation.y = (u16)(smoothState->prevOrient.y + (s32)((f32)stepRY * alpha));
+    outOrientation.z = (u16)(smoothState->prevOrient.z + (s32)((f32)stepRZ * alpha));
+#endif
+}
+
+void ObstacleForgetRenderTransform(const Thing* owner) {
+#if HIGH_FPS_PLAY_PRESENTATION
+    ClearObstacleRenderSmoothState(owner);
+#else
+    (void)owner;
+#endif
+}
 
 // PSX: FillVectorArray__8ObstacleP10tagLVectorRC6DBLine (OBSTACLE.CPP:447, 0x8007AEF0)
 bool FillVectorArray(LVector* out, const DBLine& line) {
@@ -119,6 +255,9 @@ Obstacle::Obstacle(const LVector* pos, u16 type) : Thing(pos, type) {
 
 Obstacle::~Obstacle() {
     MARKFUNCTION(0x8007CA7C);
+#if HIGH_FPS_PLAY_PRESENTATION
+    ObstacleForgetRenderTransform(this);
+#endif
 }
 
 void Obstacle::Think() {
@@ -129,17 +268,21 @@ void Obstacle::Think() {
 void Obstacle::Draw() {
     MARKFUNCTION(0x8007AE04);
     if (model) {
+        LVector drawPos = pos;
+        LVector drawOrient = orientation;
+        ObstacleBuildRenderTransform(this, pos, orientation, drawPos, drawOrient);
+
         // PSX: selects render table based on shadowFlag and lightingFlag
         // (litTable, ZSortTable, litFarTable, ZFarTable) - not needed on PC
 
         // PSX: copies pos and orientation to model fields
         Model* m = static_cast<Model*>(model);
-        m->posX = pos.x;
-        m->posY = pos.y;
-        m->posZ = pos.z;
-        m->rotX = (u16)orientation.x;
-        m->rotY = (u16)orientation.y;
-        m->rotZ = (u16)orientation.z;
+        m->posX = drawPos.x;
+        m->posY = drawPos.y;
+        m->posZ = drawPos.z;
+        m->rotX = (u16)(drawOrient.x & 0xFFFF);
+        m->rotY = (u16)(drawOrient.y & 0xFFFF);
+        m->rotZ = (u16)(drawOrient.z & 0xFFFF);
         m->Show(0);
     }
 }
@@ -287,9 +430,27 @@ void Obstacle::UpdateShadowFloorHeight() {
 
 void Obstacle::CreateModel(const char* name) {
     MARKFUNCTION(0x8007CC64);
-    // PSX: empty stub - real work in AllocateAndCreateModel
-    // PC: call Thing::CreateModel which creates SModel
+    if (!model) {
+        GModel* gm = new GModel();
+        gm->backPtr = this;
+        model = gm;
+    }
+
     Thing::CreateModel(name);
+
+    Model* modelPtr = static_cast<Model*>(model);
+    if (!modelPtr) {
+        return;
+    }
+
+    if (lightingFlag) {
+        if (!modelPtr->hwLights) {
+            modelPtr->AllocateHardwareLights(3);
+        }
+        if (!modelPtr->ambientLight) {
+            modelPtr->AllocateAmbientLight();
+        }
+    }
 }
 
 void Obstacle::DeleteModel() {
@@ -1061,11 +1222,7 @@ static constexpr s32 MAX_OBSTACLE_ANIMS = 32;
 static MiscAnimNode* g_obstacleAnimTable[MAX_OBSTACLE_ANIMS] = {};
 static s32 g_obstacleAnimCount = 0;
 
-static u32 ObstacleReadU32LE(const u8* p) {
-    return p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24);
-}
-
-// PSX: GetAnimation__8Obstaclelllll → 0x8007CB88 (OBSTACLE.CPP:1803)
+// PSX: GetAnimation__8Obstaclelllll ? 0x8007CB88 (OBSTACLE.CPP:1803)
 MiscAnimNode* Obstacle_GetAnimation(s32 animIndex) {
     MARKFUNCTION(0x8007CB88);
     if (animIndex < 0 || g_obstacleAnimCount <= animIndex) {
@@ -1074,7 +1231,7 @@ MiscAnimNode* Obstacle_GetAnimation(s32 animIndex) {
     return g_obstacleAnimTable[animIndex];
 }
 
-// PSX: ClearPetalAnimList__8Obstacle → 0x8007CB5C (OBSTACLE.CPP:1797)
+// PSX: ClearPetalAnimList__8Obstacle ? 0x8007CB5C (OBSTACLE.CPP:1797)
 void Obstacle_ClearPetalAnimList() {
     MARKFUNCTION(0x8007CB5C);
     for (s32 i = MAX_OBSTACLE_ANIMS - 1; i >= 0; i--) {
@@ -1101,8 +1258,8 @@ void Obstacle_LoadAnimChunk(const u8* body, u32 bodySize) {
         return;
     }
 
-    u32 animHash = ObstacleReadU32LE(body + 0);
-    (void)ObstacleReadU32LE(body + 4); // PSX reads and ignores second long here.
+    u32 animHash = p3dReadU32LE(body + 0);
+    (void)p3dReadU32LE(body + 4); // PSX reads and ignores second long here.
 
     MiscAnimNode* misc = nullptr;
     if (g_animMgr) {

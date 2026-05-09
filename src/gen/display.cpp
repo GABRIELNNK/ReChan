@@ -10,6 +10,28 @@
 Display* g_display = nullptr;
 s32 Display::s_defaultScreenMode = ScreenMode_Windowed;
 s32 Display::s_defaultVsync = 1;
+s32 Display::s_defaultMsaa = 0;
+
+static s32 NormalizeMSAASamples(s32 samples) {
+    if (samples <= 0) {
+        return 0;
+    }
+
+    static const s32 kAllowed[] = { 2, 4, 8, 16 };
+    s32 closest = kAllowed[0];
+    s32 closestDist = (samples > closest) ? (samples - closest) : (closest - samples);
+
+    for (u32 i = 1; i < (u32)(sizeof(kAllowed) / sizeof(kAllowed[0])); i++) {
+        const s32 candidate = kAllowed[i];
+        const s32 dist = (samples > candidate) ? (samples - candidate) : (candidate - samples);
+        if (dist < closestDist) {
+            closest = candidate;
+            closestDist = dist;
+        }
+    }
+
+    return closest;
+}
 
 // PSX: __7Display (0x800C9A30) / _7Display (overlay, 0x8012BAD0)
 Display::Display() {
@@ -18,6 +40,7 @@ Display::Display() {
     pri = 60; // PSX: byte at offset 18 = 60
     screenMode = s_defaultScreenMode;
     vsync = s_defaultVsync;
+    msaa = NormalizeMSAASamples(s_defaultMsaa);
     resolutionIndex = 0;
 }
 
@@ -103,6 +126,7 @@ void Display::InternalOpen() {
     // PC: tView doesn't have layer system, viewport is full-screen by default.
 
     frameCounter = 0;
+    SetMSAA(msaa);
     SetCursorCaptured(true);
 }
 
@@ -150,6 +174,13 @@ void Display::SetScreenMode(s32 mode) {
             p3d::display->SetBorderless(false);
             p3d::display->SetFullscreen(false);
         }
+
+        // Re-apply the currently selected display mode dimensions after changing
+        // window mode so startup/menu ordering cannot force a stale size.
+        pddiVideoMode selectedMode;
+        if (GetResolutionMode(resolutionIndex, selectedMode)) {
+            p3d::display->SetResolution(selectedMode.width, selectedMode.height);
+        }
     }
 }
 
@@ -159,6 +190,21 @@ void Display::SetVsync(s32 enabled) {
     if (p3d::display) {
         p3d::display->SetVSync(vsync != 0);
     }
+}
+
+void Display::SetMSAA(s32 samples) {
+    msaa = NormalizeMSAASamples(samples);
+    s_defaultMsaa = msaa;
+
+    if (p3d::display) {
+        p3d::display->SetMSAA(msaa);
+        msaa = p3d::display->GetMSAA();
+        s_defaultMsaa = msaa;
+    }
+}
+
+void Display::SetDefaultMSAA(s32 samples) {
+    s_defaultMsaa = NormalizeMSAASamples(samples);
 }
 
 s32 Display::GetResolutionCount() const {

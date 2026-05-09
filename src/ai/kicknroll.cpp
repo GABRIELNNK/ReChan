@@ -2,6 +2,7 @@
 #include "ai/humanoid.h"
 #include "gen/common.h"
 #include "gen/database.h"
+#include "gen/geffect.h"
 #include "ai/obstacle_shared.h"
 
 KickNRoll::KickNRoll(const LVector* pos, u16 type)
@@ -57,7 +58,13 @@ void KickNRoll::HandleEnvironmentCollision(const LVector& normal) {
 void KickNRoll::Destroy() {
     MARKFUNCTION(0x8001CEEC);
     aliveFlag = 0;
-    // TODO: if effectHash: Create__7GEffect
+
+    if (effectHash) {
+        LVector center = {};
+        FillBoxCentre(center, pos, orientation, collBox);
+        GEffect_Create(effectHash, &center, nullptr, nullptr, 0, 0, effectParam);
+    }
+
     extern const tagCollisionBox INVALID_COLLISION_BOX;
     SetCollisionBox(INVALID_COLLISION_BOX);
 }

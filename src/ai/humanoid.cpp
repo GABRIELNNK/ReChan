@@ -17,7 +17,9 @@
 #include "gen/colsect.h"
 #include "gen/fxp.h"
 #include "gen/scoremgr.h"
+#include "gen/time.h"
 #include "gen/world.h"
+#include "gen/psxmath_helpers.h"
 #include "fe/hud.h"
 #include "snd/rsevent.h"
 #include "snd/hmndsnd.h"
@@ -79,6 +81,181 @@ static constexpr u32 PLAYER_DIVE_ROLL_KICK_ROOT_ADDRESS = 0x800CEE44u;
 static constexpr u32 PLAYER_BACK_GRAB_KICK_ROOT_ADDRESS = 0x800CEE6Cu;
 // PSX gp+1948, data block default at 0x800DD0E8.
 static s32 freeFormFightingMode = 0;
+
+#if HIGH_FPS_PLAY_PRESENTATION
+static constexpr s32 MAX_HUMANOID_RENDER_SMOOTH_STATES = 256;
+
+struct HumanoidRenderSmoothState {
+    Humanoid* owner = nullptr;
+    bool initialized = false;
+    LVector prevPos = {};
+    LVector curPos = {};
+    LVector prevOrient = {};
+    LVector curOrient = {};
+    bool animInitialized = false;
+    s32 animEnum = -1;
+    s32 prevAnimFrame = 0;
+    s32 curAnimFrame = 0;
+};
+
+static HumanoidRenderSmoothState s_humanoidRenderSmoothStates[MAX_HUMANOID_RENDER_SMOOTH_STATES] = {};
+
+static HumanoidRenderSmoothState* FindHumanoidRenderSmoothState(Humanoid* humanoid) {
+    if (!humanoid) {
+        return nullptr;
+    }
+
+    HumanoidRenderSmoothState* freeState = nullptr;
+    for (s32 i = 0; i < MAX_HUMANOID_RENDER_SMOOTH_STATES; i++) {
+        HumanoidRenderSmoothState* state = &s_humanoidRenderSmoothStates[i];
+        if (state->owner == humanoid) {
+            return state;
+        }
+        if (!freeState && state->owner == nullptr) {
+            freeState = state;
+        }
+    }
+
+    if (!freeState) {
+        return nullptr;
+    }
+
+    freeState->owner = humanoid;
+    freeState->initialized = false;
+    freeState->prevPos = {};
+    freeState->curPos = {};
+    freeState->prevOrient = {};
+    freeState->curOrient = {};
+    freeState->animInitialized = false;
+    freeState->animEnum = -1;
+    freeState->prevAnimFrame = 0;
+    freeState->curAnimFrame = 0;
+    return freeState;
+}
+
+static void ClearHumanoidRenderSmoothState(Humanoid* humanoid) {
+    if (!humanoid) {
+        return;
+    }
+
+    for (s32 i = 0; i < MAX_HUMANOID_RENDER_SMOOTH_STATES; i++) {
+        HumanoidRenderSmoothState* state = &s_humanoidRenderSmoothStates[i];
+        if (state->owner == humanoid) {
+            state->owner = nullptr;
+            state->initialized = false;
+            state->prevPos = {};
+            state->curPos = {};
+            state->prevOrient = {};
+            state->curOrient = {};
+            state->animInitialized = false;
+            state->animEnum = -1;
+            state->prevAnimFrame = 0;
+            state->curAnimFrame = 0;
+            return;
+        }
+    }
+}
+
+static s32 WrapLoopFrameReal(s32 frameReal, s32 endFrame) {
+    const s32 range = endFrame + FIX16_ONE;
+    if (range <= 0) {
+        return frameReal;
+    }
+
+    while (frameReal < 0) {
+        frameReal += range;
+    }
+    while (frameReal > endFrame) {
+        frameReal -= range;
+    }
+
+    return frameReal;
+}
+
+static s32 BuildInterpolatedAnimFrameReal(const AnimStructure* anim, s32 prevFrame, s32 curFrame,
+    f32 alpha) {
+    if (!anim) {
+        return curFrame;
+    }
+
+    s32 frameStep = curFrame - prevFrame;
+
+    if (anim->loopTypeField == ANIM_LOOP || anim->loopTypeField == ANIM_LOOP_REVERSE) {
+        const s32 range = anim->endFrame + FIX16_ONE;
+        if (range > 0) {
+            const s32 halfRange = range >> 1;
+            if (frameStep > halfRange) {
+                frameStep -= range;
+            }
+            else if (frameStep < -halfRange) {
+                frameStep += range;
+            }
+        }
+    }
+
+    s32 frameReal = prevFrame + (s32)((f32)frameStep * alpha);
+
+    if (anim->loopTypeField == ANIM_LOOP || anim->loopTypeField == ANIM_LOOP_REVERSE) {
+        frameReal = WrapLoopFrameReal(frameReal, anim->endFrame);
+    }
+    else {
+        if (frameReal < 0) {
+            frameReal = 0;
+        }
+        if (frameReal > anim->endFrame) {
+            frameReal = anim->endFrame;
+        }
+    }
+
+    return frameReal;
+}
+
+static void UpdateHumanoidRenderAnimPose(HumanoidModel* model, HumanoidRenderSmoothState* smoothState,
+    bool didLogicStep, f32 alpha) {
+    if (!model || !smoothState) {
+        return;
+    }
+
+    AnimStructure* anim = static_cast<AnimStructure*>(model->animStructure);
+    if (!anim || !anim->flip || !anim->animation) {
+        smoothState->animInitialized = false;
+        return;
+    }
+
+    const s32 animEnum = anim->animEnum;
+    const s32 currentFrame = anim->currentFrame;
+
+    if (!smoothState->animInitialized || smoothState->animEnum != animEnum) {
+        smoothState->animInitialized = true;
+        smoothState->animEnum = animEnum;
+        smoothState->prevAnimFrame = currentFrame;
+        smoothState->curAnimFrame = currentFrame;
+    }
+
+    if (didLogicStep) {
+        smoothState->animEnum = animEnum;
+        smoothState->prevAnimFrame = smoothState->curAnimFrame;
+        smoothState->curAnimFrame = currentFrame;
+    }
+
+    if (alpha < 0.0f) {
+        alpha = 0.0f;
+    }
+
+    if (alpha > 1.0f) {
+        alpha = 1.0f;
+    }
+
+    const s32 frameReal = BuildInterpolatedAnimFrameReal(
+        anim,
+        smoothState->prevAnimFrame,
+        smoothState->curAnimFrame,
+        alpha);
+
+    anim->flip->SetFrameReal(frameReal);
+    anim->flip->UpdateJoints();
+}
+#endif
 
 // PSX gp+1764 (0x800DD030): gravityReduction
 static s32 s_gravityReduction = 3;
@@ -830,6 +1007,9 @@ Humanoid::Humanoid(const LVector* initialPos, u16 type)
 // PSX: _._8Humanoid (HUMANOID.CPP:490)
 Humanoid::~Humanoid() {
     MARKFUNCTION(0x80062C58);
+#if HIGH_FPS_PLAY_PRESENTATION
+    ClearHumanoidRenderSmoothState(this);
+#endif
     // PSX: KillDialog, DeleteModel, DeleteRightHandObj, DeleteLeftHandObj, etc.
     KillDialog(0, 0, 512);
     DeleteModel();
@@ -899,11 +1079,76 @@ void Humanoid::Draw() {
     LVector drawPos = pos;
     LVector drawOrient = orientation;
 
+#if HIGH_FPS_PLAY_PRESENTATION
+    const bool humanoidInPlay =
+        (g_time && g_game && g_game->GetState() == GameState::Play);
+    const bool didLogicStep = humanoidInPlay && g_time->DidPlayLogicStepThisFrame();
+    f32 presentationAlpha = humanoidInPlay ? g_time->GetPlayPresentationAlpha() : 0.0f;
+    HumanoidRenderSmoothState* smoothState = nullptr;
+
+    if (humanoidInPlay) {
+        smoothState = FindHumanoidRenderSmoothState(this);
+        if (smoothState && !smoothState->initialized) {
+            smoothState->prevPos = pos;
+            smoothState->curPos = pos;
+            smoothState->prevOrient = orientation;
+            smoothState->curOrient = orientation;
+            smoothState->initialized = true;
+        }
+
+        if (smoothState && didLogicStep) {
+            smoothState->prevPos = smoothState->curPos;
+            smoothState->curPos = pos;
+            smoothState->prevOrient = smoothState->curOrient;
+            smoothState->curOrient = orientation;
+        }
+
+        if (smoothState) {
+            if (presentationAlpha < 0.0f) {
+                presentationAlpha = 0.0f;
+            }
+            else if (presentationAlpha > 1.0f) {
+                presentationAlpha = 1.0f;
+            }
+
+            s32 stepDx = smoothState->curPos.x - smoothState->prevPos.x;
+            s32 stepDy = smoothState->curPos.y - smoothState->prevPos.y;
+            s32 stepDz = smoothState->curPos.z - smoothState->prevPos.z;
+
+            drawPos.x = smoothState->prevPos.x + (s32)((f32)stepDx * presentationAlpha);
+            drawPos.y = smoothState->prevPos.y + (s32)((f32)stepDy * presentationAlpha);
+            drawPos.z = smoothState->prevPos.z + (s32)((f32)stepDz * presentationAlpha);
+
+            const s32 stepRX = PsxAngleDelta16(smoothState->curOrient.x, smoothState->prevOrient.x);
+            const s32 stepRY = PsxAngleDelta16(smoothState->curOrient.y, smoothState->prevOrient.y);
+            const s32 stepRZ = PsxAngleDelta16(smoothState->curOrient.z, smoothState->prevOrient.z);
+
+            drawOrient.x = (u16)(smoothState->prevOrient.x + (s32)((f32)stepRX * presentationAlpha));
+            drawOrient.y = (u16)(smoothState->prevOrient.y + (s32)((f32)stepRY * presentationAlpha));
+            drawOrient.z = (u16)(smoothState->prevOrient.z + (s32)((f32)stepRZ * presentationAlpha));
+        }
+    }
+    else {
+        ClearHumanoidRenderSmoothState(this);
+    }
+#endif
+
     if (model) {
         HumanoidModel* hm = static_cast<HumanoidModel*>(model);
-        // PSX: Swap__17AnimationMatrices(v2[24]) - swap double-buffered joint matrices
+        // PSX: draw path swaps matrices; high-FPS mode moves authoritative
+        // swap/capture to HumanoidModel::Animate (logic phase).
         if (hm->animMatrices) {
+#if HIGH_FPS_PLAY_PRESENTATION
+            if (humanoidInPlay) {
+                // Visual high-FPS pose updates should not mutate gameplay matrix buffers.
+                hm->animMatrices->SetCaptureEnabled(0);
+            }
+            else {
+                hm->animMatrices->SetCaptureEnabled(1);
+            }
+#else
             hm->animMatrices->Swap();
+#endif
         }
         // PSX: copy pos/orientation to model, then Show(0)
         Model* m = static_cast<Model*>(model);
@@ -913,7 +1158,19 @@ void Humanoid::Draw() {
         m->rotX = (u16)(drawOrient.x & 0xFFFF);
         m->rotY = (u16)(drawOrient.y & 0xFFFF);
         m->rotZ = (u16)(drawOrient.z & 0xFFFF);
+
+    #if HIGH_FPS_PLAY_PRESENTATION
+        if (humanoidInPlay) {
+            UpdateHumanoidRenderAnimPose(hm, smoothState, didLogicStep, presentationAlpha);
+        }
+    #endif
         m->Show(0);
+
+#if HIGH_FPS_PLAY_PRESENTATION
+        if (hm->animMatrices) {
+            hm->animMatrices->SetCaptureEnabled(1);
+        }
+#endif
 
         return;
     }

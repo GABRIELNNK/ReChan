@@ -29,3 +29,6 @@
 
 // Treat GameState::End as an application-exit request in main loop so game actually closes instead of returning to title screen.
 #define QUIT_GAME_CLOSES_GAME 1
+
+// Experimental: Keep simulation fixed at 30 fps while rendering at higher frame rates, with interpolation for smoothness.
+#define HIGH_FPS_PLAY_PRESENTATION 0

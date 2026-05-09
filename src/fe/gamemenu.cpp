@@ -10,6 +10,7 @@
 #include "snd/sound.h"
 #include "pc/settings.h"
 #include "xclib/xclib.h"
+#include "fe/fe_sound_menu_helpers.h"
 
 // Global gameMenu pointer
 gameMenu* g_gameMenu = nullptr;
@@ -27,24 +28,6 @@ static constexpr u32 HASH_SOUND_STEREO = 1023610618;  // xcHash("Sound_Stereo")
 static constexpr u32 HASH_EXIT_MENU = 2613914;        // xcHash("Exit")
 static constexpr u32 HASH_EXIT_NO = 2685;             // xcHash("No")
 static constexpr u32 HASH_EXIT_YES = 100369;          // xcHash("Yes")
-
-// Slider maxValue is 65535 (PSX SPU range), but platform flags/settings use 0-100.
-static constexpr u32 SLIDER_MAX = 65535;
-static constexpr u32 FLAG_MAX = 100;
-
-static u32 SliderToFlag(u32 sliderVal) {
-    if (sliderVal > SLIDER_MAX) {
-        sliderVal = SLIDER_MAX;
-    }
-    return (sliderVal * FLAG_MAX + (SLIDER_MAX / 2)) / SLIDER_MAX;
-}
-
-static u32 FlagToSlider(u32 flagVal) {
-    if (flagVal > FLAG_MAX) {
-        flagVal = FLAG_MAX;
-    }
-    return (flagVal * SLIDER_MAX + (FLAG_MAX / 2)) / FLAG_MAX;
-}
 
 struct SoundMenuState {
     u16 musicVol = 0;
@@ -124,50 +107,19 @@ static s32 SetControllerShockCallback(hdMenuItem* item) {
 }
 
 static s32 SetMusicVolumeCallback(hdMenuItem* item) {
-    u32 raw = item->GetValue();
-    u32 val = SliderToFlag(raw);
-    rsEvent(RS_SET_MUSIC_VOL, (s32)val, 0, 0);
-    if (g_sound) {
-        g_sound->flag0 = (s16)val;
-    }
-    return 8;
+    return FeSoundMenuSetMusicVolume(item);
 }
 
 static s32 SetEffectsVolumeCallback(hdMenuItem* item) {
-    u32 raw = item->GetValue();
-    u32 val = SliderToFlag(raw);
-    rsEvent(RS_SET_EFFECTS_VOL, (s32)val, 0, 0);
-    rsEvent(RS_SET_EFFECTS_VOL_AUX, (s32)val, 0, 0);
-    if (g_sound) {
-        g_sound->flag2 = (s16)val;
-    }
-    return 8;
+    return FeSoundMenuSetEffectsVolume(item);
 }
 
 static s32 SetDialogVolumeCallback(hdMenuItem* item) {
-    u32 raw = item->GetValue();
-    u32 val = SliderToFlag(raw);
-    rsEvent(RS_SET_DIALOG_VOL, (s32)val, 0, 0);
-    if (g_sound) {
-        g_sound->flag1 = (s16)val;
-    }
-    return 8;
+    return FeSoundMenuSetDialogVolume(item);
 }
 
 static s32 StereoOnOffCallback(hdMenuItem* item) {
-    if (item->GetValue()) {
-        rsEvent(RS_SET_STEREO, 0, 0, 0);
-        if (g_sound) {
-            g_sound->activeFlag = 1;
-        }
-    }
-    else {
-        rsEvent(RS_SET_MONO, 0, 0, 0);
-        if (g_sound) {
-            g_sound->activeFlag = 0;
-        }
-    }
-    return 8;
+    return FeSoundMenuSetStereoOnOff(item);
 }
 
 static void SaveSoundMenuState(SoundMenuState& state) {
@@ -199,37 +151,16 @@ static void RestoreSoundMenuState(const SoundMenuState& state) {
 }
 
 static void InstallSoundMenu(hdMenu* menu) {
-    if (!menu || !g_sound) {
-        return;
-    }
-
-    menu->SetCallback(HASH_SOUND_EFFECT, (hdMenuItemCallback)SetEffectsVolumeCallback);
-    hdMenuItem* effectsItem = menu->FindItem(HASH_SOUND_EFFECT);
-    if (effectsItem) {
-        effectsItem->SetValue(FlagToSlider((u32)(u16)g_sound->flag2));
-    }
-
-    menu->SetCallback(HASH_SOUND_MUSIC, (hdMenuItemCallback)SetMusicVolumeCallback);
-    hdMenuItem* musicItem = menu->FindItem(HASH_SOUND_MUSIC);
-    if (musicItem) {
-        musicItem->SetValue(FlagToSlider((u32)(u16)g_sound->flag0));
-    }
-
-    menu->SetCallback(HASH_SOUND_VOICE, (hdMenuItemCallback)SetDialogVolumeCallback);
-    hdMenuItem* voiceItem = menu->FindItem(HASH_SOUND_VOICE);
-    if (voiceItem) {
-        voiceItem->SetValue(FlagToSlider((u32)(u16)g_sound->flag1));
-    }
-
-    menu->SetCallback(HASH_SOUND_STEREO, (hdMenuItemCallback)StereoOnOffCallback);
-    hdMenuItem* stereoItem = menu->FindItem(HASH_SOUND_STEREO);
-    if (stereoItem) {
-        stereoItem->SetValue(g_sound->activeFlag != 0);
-    }
-
-    if (g_frontEndSound) {
-        g_frontEndSound->ProcessSoundEvent(FE_SND_CURSOR_BACK);
-    }
+    FeInstallSoundMenuCommon(
+        menu,
+        HASH_SOUND_EFFECT,
+        HASH_SOUND_MUSIC,
+        HASH_SOUND_VOICE,
+        HASH_SOUND_STEREO,
+        SetEffectsVolumeCallback,
+        SetMusicVolumeCallback,
+        SetDialogVolumeCallback,
+        StereoOnOffCallback);
 }
 
 // PSX: ExitGame__8gameMenuP10hdMenuItem (0x80037924)

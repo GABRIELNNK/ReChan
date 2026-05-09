@@ -2,6 +2,7 @@
 #include "gen/game.h"
 #include "gen/world.h"
 #include "gen/database.h"
+#include "gen/envmgr.h"
 #include "gen/charmgr.h"
 #include "gen/model.h"
 #include "gen/animstruct.h"
@@ -14,6 +15,7 @@
 #include "gen/camera.h"
 #include "gen/path.h"
 #include "gen/ccfile.h"
+#include "gen/psxmath_helpers.h"
 #include "p3d/p3dmath.h"
 #include "p3d/hash.h"
 #include "ai/obstacle.h"
@@ -110,13 +112,6 @@ BehaviourAttrib::~BehaviourAttrib() {
         delete[] comboStrings;
         comboStrings = nullptr;
     }
-}
-
-static s32 AbsS32(s32 v) {
-    if (v < 0) {
-        return -v;
-    }
-    return v;
 }
 
 static bool IsHumanoidCollisionSkipStateA(s32 state) {
@@ -285,6 +280,20 @@ void AI::AddThingNoTagList(const char* name, u16 type,
                            const LVector* pos, const SVector* orient,
                            const char* modelName, const DBRoot* root) {
     MARKFUNCTION(0x80054404);
+
+    if (type == AITypes::TT_LIGHTSPHERE || type == AITypes::TT_LIGHTSPHERE2) {
+        if (g_environmentManager) {
+            g_environmentManager->lighting.AnalyzeSphere(static_cast<DBPoint*>(const_cast<DBRoot*>(root)));
+        }
+        return;
+    }
+
+    if (type == AITypes::TT_MESHANALYSIS) {
+        if (g_database) {
+            g_database->AnalyzeMesh(const_cast<DBRoot*>(root));
+        }
+        return;
+    }
 
     Thing* thing = nullptr;
     ccList* targetList = &humanoidList; // default: humanoidList (offset +52)
@@ -497,12 +506,12 @@ static void HandleHumanoidHumanoidCollision(Humanoid* a, Humanoid* b) {
     }
 
     bool aMoved = false;
-    if (AbsS32(a->pos.x - a->homePos.x) >= 11 || AbsS32(a->pos.z - a->homePos.z) >= 11) {
+    if (PsxAbsS32(a->pos.x - a->homePos.x) >= 11 || PsxAbsS32(a->pos.z - a->homePos.z) >= 11) {
         aMoved = true;
     }
 
     bool bMoved = false;
-    if (AbsS32(b->pos.x - b->homePos.x) >= 11 || AbsS32(b->pos.z - b->homePos.z) >= 11) {
+    if (PsxAbsS32(b->pos.x - b->homePos.x) >= 11 || PsxAbsS32(b->pos.z - b->homePos.z) >= 11) {
         bMoved = true;
     }
 
@@ -524,7 +533,7 @@ static void HandleHumanoidHumanoidCollision(Humanoid* a, Humanoid* b) {
 
     s32 half = rmDiv16i(xzRadius, twiceRadius);
 
-    if (AbsS32(diffZ) >= AbsS32(diffX)) {
+    if (PsxAbsS32(diffZ) >= PsxAbsS32(diffX)) {
         if (lockA) {
             if (!lockB) {
                 if (posA.z >= posB.z) {
@@ -775,8 +784,12 @@ void AI::MoveThingsPickupCollisions() {
 void AI::MoveCamera() {
     MARKFUNCTION(0x80055F6C);
     if (g_game) {
-        g_game->GetCamera().Think();
-        g_game->GetCamera().Update();
+        Camera& camera = g_game->GetCamera();
+#if HIGH_FPS_PLAY_PRESENTATION
+        camera.BeginLogicStepHighFPS();
+#endif
+        camera.Think();
+        camera.Update();
     }
 }
 
@@ -1107,8 +1120,8 @@ s32 AI::CheckObstacleAttack(
             continue;
         }
 
-        const s32 xzDistance = AbsS32(obstacle->pos.x - humanoid->pos.x)
-            + AbsS32(obstacle->pos.z - humanoid->pos.z);
+        const s32 xzDistance = PsxAbsS32(obstacle->pos.x - humanoid->pos.x)
+            + PsxAbsS32(obstacle->pos.z - humanoid->pos.z);
         if (xzDistance >= 2001) {
             continue;
         }

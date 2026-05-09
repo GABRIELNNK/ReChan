@@ -1,0 +1,147 @@
+#pragma once
+
+#include "core.h"
+#include "p3d/lvector.h"
+#include "p3d/p3dmath.h"
+#include <cmath>
+#include <cstdlib>
+
+inline s32 PsxRandom0() {
+    return std::rand();
+}
+
+inline s32 PsxMulShift16Signed(s32 a, s32 b) {
+    return (s32)(((s64)a * (s64)b) >> 16);
+}
+
+inline s32 PsxAbsS32(s32 value) {
+    return value < 0 ? -value : value;
+}
+
+inline s32 PsxAbsDiffS32(s32 a, s32 b) {
+    const s32 d = a - b;
+    return (d < 0) ? -d : d;
+}
+
+inline s32 PsxClipAngle360(s32 angle) {
+    return angle & 0xFFFF;
+}
+
+inline s32 PsxAngleDelta16(s32 current, s32 previous) {
+    return (s16)((u16)current - (u16)previous);
+}
+
+inline s32 PsxLerpAngle16(s32 previous, s32 current, f32 alpha) {
+    const s32 step = PsxAngleDelta16(current, previous);
+    return (u16)(previous + (s32)((f32)step * alpha));
+}
+
+inline s32 PsxTruncToS32(f32 value) {
+    return static_cast<s32>(std::trunc(value));
+}
+
+inline s32 PsxAsin16FromFix16Clamped(s32 value) {
+    f32 clamped = FIX16_TO_FLOAT(value);
+    if (clamped < -1.0f) {
+        clamped = -1.0f;
+    }
+    else if (clamped > 1.0f) {
+        clamped = 1.0f;
+    }
+
+    return RAD2ANGLE(std::asin(clamped));
+}
+
+inline s32 PsxAcos16FromFix16Clamped(s32 value) {
+    f32 clamped = FIX16_TO_FLOAT(value);
+    if (clamped < -1.0f) {
+        clamped = -1.0f;
+    }
+    else if (clamped > 1.0f) {
+        clamped = 1.0f;
+    }
+
+    return RAD2ANGLE(std::acos(clamped));
+}
+
+inline void PsxV3Cross16(LVector* out, const LVector* lhs, const LVector* rhs) {
+    out->x = (s32)((((s64)lhs->y * rhs->z) >> 16) - (((s64)lhs->z * rhs->y) >> 16));
+    out->y = (s32)((((s64)lhs->z * rhs->x) >> 16) - (((s64)lhs->x * rhs->z) >> 16));
+    out->z = (s32)((((s64)lhs->x * rhs->y) >> 16) - (((s64)lhs->y * rhs->x) >> 16));
+}
+
+inline void PsxInverseOrthMatrix(const Mat4& matrix, Mat4& inverse) {
+    inverse = Mat4();
+
+    inverse.m[0] = matrix.m[0];
+    inverse.m[1] = matrix.m[4];
+    inverse.m[2] = matrix.m[8];
+    inverse.m[4] = matrix.m[1];
+    inverse.m[5] = matrix.m[5];
+    inverse.m[6] = matrix.m[9];
+    inverse.m[8] = matrix.m[2];
+    inverse.m[9] = matrix.m[6];
+    inverse.m[10] = matrix.m[10];
+
+    const f32 tx = matrix.GetTransX();
+    const f32 ty = matrix.GetTransY();
+    const f32 tz = matrix.GetTransZ();
+    inverse.m[12] = -(tx * inverse.m[0] + ty * inverse.m[4] + tz * inverse.m[8]);
+    inverse.m[13] = -(tx * inverse.m[1] + ty * inverse.m[5] + tz * inverse.m[9]);
+    inverse.m[14] = -(tx * inverse.m[2] + ty * inverse.m[6] + tz * inverse.m[10]);
+}
+
+inline void PsxVecTimesMatrixTrunc(const LVector& in, const Mat4& matrix, LVector& out) {
+    out.x = PsxTruncToS32((f32)in.x * matrix.m[0] + (f32)in.y * matrix.m[4] + (f32)in.z * matrix.m[8] + matrix.m[12]);
+    out.y = PsxTruncToS32((f32)in.x * matrix.m[1] + (f32)in.y * matrix.m[5] + (f32)in.z * matrix.m[9] + matrix.m[13]);
+    out.z = PsxTruncToS32((f32)in.x * matrix.m[2] + (f32)in.y * matrix.m[6] + (f32)in.z * matrix.m[10] + matrix.m[14]);
+}
+
+inline void PsxCartesianToSpherical(const LVector& cartesian, LVector& spherical) {
+    const s32 mag = (s32)rmMag3((f32)cartesian.x, (f32)cartesian.y, (f32)cartesian.z);
+    if (mag == 0) {
+        spherical = { 0, 0, 0 };
+        return;
+    }
+
+    s32 xDiv = rmDiv16i(cartesian.x, mag);
+    if (xDiv > FIX16_ONE) {
+        xDiv = FIX16_ONE;
+    }
+    else if (xDiv < -FIX16_ONE) {
+        xDiv = -FIX16_ONE;
+    }
+
+    const s32 polar = PsxAcos16FromFix16Clamped(xDiv);
+    const s32 polarSin = rmSin16(polar);
+
+    s32 yDiv = 0;
+    const s32 denom = (s32)(((s64)mag * polarSin) >> 16);
+    if (denom != 0) {
+        yDiv = rmDiv16i(cartesian.y, denom);
+    }
+    if ((u32)(yDiv + FIX16_ONE) > 0x20000u) {
+        yDiv = (yDiv >= 0) ? 0xFFFF : -0xFFFF;
+    }
+
+    s32 azimuth = PsxAsin16FromFix16Clamped(yDiv);
+    if (cartesian.z < 0) {
+        azimuth = 0x8000 - azimuth;
+    }
+
+    spherical.x = mag;
+    spherical.y = azimuth;
+    spherical.z = polar;
+}
+
+inline void PsxSphericalToCartesian(const LVector& spherical, LVector& cartesian) {
+    const s32 radiusSin = (s32)(((s64)spherical.x * rmSin16(spherical.z)) >> 16);
+    LVector converted = {};
+    converted.x = (s32)(((s64)radiusSin * rmSin16(spherical.y + 0x4000)) >> 16);
+    converted.y = (s32)(((s64)radiusSin * rmSin16(spherical.y)) >> 16);
+    converted.z = (s32)(((s64)spherical.x * rmSin16(spherical.z + 0x4000)) >> 16);
+
+    cartesian.x = converted.z;
+    cartesian.y = converted.y;
+    cartesian.z = converted.x;
+}

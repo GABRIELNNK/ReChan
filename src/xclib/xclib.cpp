@@ -1,7 +1,11 @@
 #include "gen/common.h"
+#include "gen/psxcolor_helpers.h"
 #include "xclib/xclib.h"
 #include "xclib/xcfile.h"
 #include "fe/xcfont.h"
+#if CUSTOM_MENU
+#include "extra/customtext.h"
+#endif
 #include "p3d/texture.h"
 #include "pc/tim.h"
 #include <cstdio>
@@ -142,16 +146,6 @@ void xcInventory::Sort() {
     }
 }
 
-// PSX ABGR1555 to RGBA8888
-
-static inline u32 psxColorToRGBA(u16 c) {
-    if (c == 0) return 0; // transparent black
-    u32 r = (c & 0x1F) << 3;
-    u32 g = ((c >> 5) & 0x1F) << 3;
-    u32 b = ((c >> 10) & 0x1F) << 3;
-    return (255u << 24) | (b << 16) | (g << 8) | r;
-}
-
 // xcCellImage
 
 xcCellImage::~xcCellImage() {
@@ -248,7 +242,7 @@ bool xcCellImage::Decode(const u8* cellData) {
     u32 palette[256] = {};
     for (u32 i = 0; i < hdr->clutEntries && i < 256; i++) {
         u16 c = *(const u16*)(clutRaw + i * 2);
-        palette[i] = psxColorToRGBA(c);
+        palette[i] = PsxAbgr1555ToRgba8888(c);
     }
 
     // Compute per-cell dimensions
@@ -931,6 +925,12 @@ xcScreenData* xcSection::FindScreen(u32 hash) const {
 // PSX: FindString__9xcSectionUl (XCSOS.CPP, 0x8005EB30)
 const char* xcSection::FindString(u32 hash) const {
     MARKFUNCTION(0x8005EB30);
+#if CUSTOM_MENU
+    const char* overrideText = g_customText.GetStringByHash(hash);
+    if (overrideText) {
+        return overrideText;
+    }
+#endif
     if (!strings) return nullptr;
     const xcInventoryItem* item = strings->FindItem(hash);
     if (!item) return nullptr;

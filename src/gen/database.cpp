@@ -674,7 +674,7 @@ DBPoint* Database::FindPoint(const char* name) {
 
 // PSX: FindPath__8DatabaseUl (DATABASE.CPP:978)
 // Finds a path by CRC hash.
-DBPath* Database::FindPathByCRC(u32 crc) {
+DBPath* Database::FindPath(u32 crc) {
     MARKFUNCTION(0x80039258);
     if (crc == 0) {
         return nullptr;
@@ -686,6 +686,10 @@ DBPath* Database::FindPathByCRC(u32 crc) {
     }
 
     return static_cast<DBPath*>(node);
+}
+
+DBPath* Database::FindPathByCRC(u32 crc) {
+    return FindPath(crc);
 }
 
 // PSX: GetPointsList__8Database (DATABASE.CPP:992)

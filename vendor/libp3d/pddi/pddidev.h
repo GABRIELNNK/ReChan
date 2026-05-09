@@ -124,6 +124,8 @@ public:
     virtual bool IsBorderless() = 0;
     virtual void SetResolution(int w, int h) = 0;
     virtual void SetVSync(bool enabled) = 0;
+    virtual void SetMSAA(int samples) = 0;
+    virtual int  GetMSAA() = 0;
     virtual void SetWindowPos(int x, int y) = 0;
 
     // Window title
@@ -162,6 +164,7 @@ public:
     virtual void SetProjectionMatrix(const Mat4& m) = 0;
     virtual void SetViewMatrix(const Mat4& m) = 0;
     virtual void SetWorldMatrix(const Mat4& m) = 0;
+    virtual const Mat4& GetWorldMatrix() const = 0;
     virtual const Mat4& GetViewMatrix() const = 0;
     virtual const Mat4& GetProjectionMatrix() const = 0;
 
@@ -170,6 +173,10 @@ public:
     virtual void EnableZBuffer(bool enable) = 0;
     virtual void SetBlendMode(pddiBlendMode mode) = 0;
     virtual void SetScissor(int x, int y, int w, int h) = 0;
+    // Controls whether immediate-mode 2D draws should use multisample rasterization.
+    virtual void SetMultisampleEnabled(bool enable) = 0;
+    // Resolves the MSAA scene and switches subsequent draws in this frame to the single-sample backbuffer.
+    virtual void ResolveForOverlayPass() = 0;
 
     // Immediate-mode textured quad (for UI / debug rendering)
     virtual void DrawQuad(pddiBaseShader* shader,
@@ -191,6 +198,9 @@ public:
 
     // Set raw VRAM texture handle for PSX VRAM-in-shader lookup (0 to disable)
     virtual void SetVRAMHandle(u32 handle) = 0;
+
+    // Override per-vertex PSX texinfo (tpage/cba) for legacy swap-word effects.
+    virtual void SetTexInfoOverride(bool enabled, u32 texInfoWord) = 0;
 
     // Create/destroy a raw R16UI texture for PSX VRAM upload
     virtual u32  CreateVRAMTexture(int w, int h, const u16* data) = 0;

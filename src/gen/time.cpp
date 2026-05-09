@@ -15,6 +15,9 @@ void Time::InternalClose() { MARKFUNCTION(0x80044A18); }
 void Time::InternalReset() {
     MARKFUNCTION(0x80044A38);
     frameCounter = 0;
+#if HIGH_FPS_PLAY_PRESENTATION
+    ResetPlayPresentationState();
+#endif
 }
 
 void Time::Step() {
@@ -28,6 +31,41 @@ void Time::Tick(f32 realDt) {
     deltaTime = realDt;
     fps = 1.0f / realDt;
 }
+
+#if HIGH_FPS_PLAY_PRESENTATION
+void Time::ResetPlayPresentationState() {
+    playLogicAccumulator = 0.0f;
+    playPresentationAlpha = 0.0f;
+    playLogicStepCount = 1;
+}
+
+s32 Time::BeginPlayFixedStep() {
+    static constexpr f32 kPlayLogicDt = 1.0f / 30.0f;
+    static constexpr s32 kMaxLogicStepsPerFrame = 4;
+    static constexpr f32 kMaxAccumulatedTime = kPlayLogicDt * (f32)kMaxLogicStepsPerFrame;
+
+    playLogicAccumulator += deltaTime;
+    if (playLogicAccumulator > kMaxAccumulatedTime) {
+        playLogicAccumulator = kMaxAccumulatedTime;
+    }
+
+    playLogicStepCount = 0;
+    while (playLogicAccumulator >= kPlayLogicDt && playLogicStepCount < kMaxLogicStepsPerFrame) {
+        playLogicAccumulator -= kPlayLogicDt;
+        ++playLogicStepCount;
+    }
+
+    playPresentationAlpha = playLogicAccumulator / kPlayLogicDt;
+    if (playPresentationAlpha < 0.0f) {
+        playPresentationAlpha = 0.0f;
+    }
+    if (playPresentationAlpha > 1.0f) {
+        playPresentationAlpha = 1.0f;
+    }
+
+    return playLogicStepCount;
+}
+#endif
 
 f64 Time::GetTimeInSeconds() {
     static auto sStart = std::chrono::steady_clock::now();

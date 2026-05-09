@@ -193,43 +193,71 @@ void InputManager::ServiceInput(u32 buttons, u16 padIndex) {
     ctrl.Input(buttons);
 }
 
-void InputManager::ServiceHostPads(const ActionInput* actionInput) {
-    Control& pad0 = controls[0];
-    Control& pad1 = controls[1];
-
+void InputManager::ServiceHostPads(const ActionInput* actionInput, bool commitNow) {
     const bool analogPad = actionInput && actionInput->UsesAnalogPad();
     u32 buttons = 0;
+    u16 padType = analogPad ? 's' : 'A';
+    u8 analogLX = 128;
+    u8 analogLY = 128;
+    u8 analogRX = 128;
+    u8 analogRY = 128;
 
-    pad0.padType = analogPad ? 's' : 'A';
     if (actionInput) {
-        const bool menuActionsEnabled = (pad0.modeMap == sMenuControlMode);
+        const bool menuActionsEnabled = (controls[0].modeMap == sMenuControlMode);
         buttons = actionInput->GetPadButtons(menuActionsEnabled);
 
-        if (pad0.modeMap == sTitleControlMode && actionInput->IsHeld(ACTION_MENU_CONFIRM)) {
+        if (controls[0].modeMap == sTitleControlMode && actionInput->IsHeld(ACTION_MENU_CONFIRM)) {
             buttons |= PsxPad::Start;
         }
     }
 
     if (analogPad && actionInput) {
-        actionInput->GetPadAnalog(pad0.analogLX, pad0.analogLY, pad0.analogRX, pad0.analogRY);
-    }
-    else {
-        pad0.analogLX = 128;
-        pad0.analogLY = 128;
-        pad0.analogRX = 128;
-        pad0.analogRY = 128;
+        actionInput->GetPadAnalog(analogLX, analogLY, analogRX, analogRY);
     }
 
-    ServiceInput(buttons, 0);
+    sampledPressLatch[0] |= (buttons & ~sampledButtons[0]);
+    sampledButtons[0] = buttons;
+    sampledPadType[0] = padType;
+    sampledAnalogLX[0] = analogLX;
+    sampledAnalogLY[0] = analogLY;
+    sampledAnalogRX[0] = analogRX;
+    sampledAnalogRY[0] = analogRY;
 
-    pad1.padType = 0;
+    sampledButtons[1] = 0;
+    sampledPressLatch[1] = 0;
+    sampledPadType[1] = 0;
+    sampledAnalogLX[1] = 128;
+    sampledAnalogLY[1] = 128;
+    sampledAnalogRX[1] = 128;
+    sampledAnalogRY[1] = 128;
+
+    if (commitNow) {
+        CommitHostPads();
+    }
+}
+
+void InputManager::CommitHostPads() {
+    Control& pad0 = controls[0];
+    Control& pad1 = controls[1];
+
+    pad0.padType = sampledPadType[0];
+    pad0.analogLX = sampledAnalogLX[0];
+    pad0.analogLY = sampledAnalogLY[0];
+    pad0.analogRX = sampledAnalogRX[0];
+    pad0.analogRY = sampledAnalogRY[0];
+
+    const u32 effectiveButtons0 = sampledButtons[0] | sampledPressLatch[0];
+    ServiceInput(effectiveButtons0, 0);
+    sampledPressLatch[0] = 0;
+
+    pad1.padType = sampledPadType[1];
     pad1.rawButtons = 0;
     pad1.flags = 0;
     pad1.hasConnectedPad = 0;
-    pad1.analogLX = 128;
-    pad1.analogLY = 128;
-    pad1.analogRX = 128;
-    pad1.analogRY = 128;
+    pad1.analogLX = sampledAnalogLX[1];
+    pad1.analogLY = sampledAnalogLY[1];
+    pad1.analogRX = sampledAnalogRX[1];
+    pad1.analogRY = sampledAnalogRY[1];
     pad1.Input(0);
 }
 
@@ -347,6 +375,14 @@ void InputManager::InternalReset() {
         controls[p].analogRX = controls[p].analogRY = 128;
     }
     controlValFlags[0] = controlValFlags[1] = 0;
+
+    sampledButtons[0] = sampledButtons[1] = 0;
+    sampledPressLatch[0] = sampledPressLatch[1] = 0;
+    sampledPadType[0] = sampledPadType[1] = 0;
+    sampledAnalogLX[0] = sampledAnalogLX[1] = 128;
+    sampledAnalogLY[0] = sampledAnalogLY[1] = 128;
+    sampledAnalogRX[0] = sampledAnalogRX[1] = 128;
+    sampledAnalogRY[0] = sampledAnalogRY[1] = 128;
 }
 
 // PSX: gp+144 - shock enabled flag (0 on PC, no DualShock)

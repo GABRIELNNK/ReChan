@@ -1,6 +1,7 @@
 #include "gen/common.h"
 #include "gen/animmat.h"
 #include "gen/model.h"
+#include "gen/psxmath_helpers.h"
 #include "ai/humanoid.h"
 #include "p3d/skeleton.h"
 #include "p3d/matrix.h"
@@ -67,6 +68,7 @@ AnimationMatrices::AnimationMatrices() {
         boneJointIndex[i] = -1;
     }
     bonesCached = false;
+    captureEnabled = true;
 }
 
 // PSX: SetHumanoid__17AnimationMatricesP8Humanoid (ANIMMAT.CPP:577, 0x80078908)
@@ -185,6 +187,14 @@ s32 AnimationMatrices::GetWeaponAttack(u32 joint, const LVector& localOffset, LV
     return 1;
 }
 
+void AnimationMatrices::SetCaptureEnabled(s32 enable) {
+    captureEnabled = (enable != 0);
+}
+
+s32 AnimationMatrices::CaptureEnabled() const {
+    return captureEnabled ? 1 : 0;
+}
+
 // PSX bone name table: 10 tracked joints matching SetupModelCallbacks order.
 // Slot 0: Head, 1: L Hand, 2: R Hand, 3: L Foot, 4: R Foot,
 // 5: Pelvis, 6: L UpperArm, 7: R UpperArm, 8: L Thigh, 9: R Thigh
@@ -201,65 +211,6 @@ static const char* const AM_JointNames[AM_NUM_SLOTS] = {
     "Bip01 R Thigh",
 };
 
-static s32 TruncToS32(f32 value) {
-    return static_cast<s32>(std::trunc(value));
-}
-
-static s32 rmASin16Local(s32 value) {
-    f32 clamped = FIX16_TO_FLOAT(value);
-    if (clamped < -1.0f) {
-        clamped = -1.0f;
-    }
-    else if (clamped > 1.0f) {
-        clamped = 1.0f;
-    }
-    return RAD2ANGLE(std::asin(clamped));
-}
-
-static s32 rmACos16Local(s32 value) {
-    f32 clamped = FIX16_TO_FLOAT(value);
-    if (clamped < -1.0f) {
-        clamped = -1.0f;
-    }
-    else if (clamped > 1.0f) {
-        clamped = 1.0f;
-    }
-    return RAD2ANGLE(std::acos(clamped));
-}
-
-static void rmV3CrossLocal(LVector* out, const LVector* lhs, const LVector* rhs) {
-    out->x = (s32)((((s64)lhs->y * rhs->z) >> 16) - (((s64)lhs->z * rhs->y) >> 16));
-    out->y = (s32)((((s64)lhs->z * rhs->x) >> 16) - (((s64)lhs->x * rhs->z) >> 16));
-    out->z = (s32)((((s64)lhs->x * rhs->y) >> 16) - (((s64)lhs->y * rhs->x) >> 16));
-}
-
-static void p3dInverseOrthMatrixLocal(const Mat4& matrix, Mat4& inverse) {
-    inverse = Mat4();
-
-    inverse.m[0] = matrix.m[0];
-    inverse.m[1] = matrix.m[4];
-    inverse.m[2] = matrix.m[8];
-    inverse.m[4] = matrix.m[1];
-    inverse.m[5] = matrix.m[5];
-    inverse.m[6] = matrix.m[9];
-    inverse.m[8] = matrix.m[2];
-    inverse.m[9] = matrix.m[6];
-    inverse.m[10] = matrix.m[10];
-
-    const f32 tx = matrix.GetTransX();
-    const f32 ty = matrix.GetTransY();
-    const f32 tz = matrix.GetTransZ();
-    inverse.m[12] = -(tx * inverse.m[0] + ty * inverse.m[4] + tz * inverse.m[8]);
-    inverse.m[13] = -(tx * inverse.m[1] + ty * inverse.m[5] + tz * inverse.m[9]);
-    inverse.m[14] = -(tx * inverse.m[2] + ty * inverse.m[6] + tz * inverse.m[10]);
-}
-
-static void p3dVecTimesMatrixLocal(const LVector& in, const Mat4& matrix, LVector& out) {
-    out.x = TruncToS32((f32)in.x * matrix.m[0] + (f32)in.y * matrix.m[4] + (f32)in.z * matrix.m[8] + matrix.m[12]);
-    out.y = TruncToS32((f32)in.x * matrix.m[1] + (f32)in.y * matrix.m[5] + (f32)in.z * matrix.m[9] + matrix.m[13]);
-    out.z = TruncToS32((f32)in.x * matrix.m[2] + (f32)in.y * matrix.m[6] + (f32)in.z * matrix.m[10] + matrix.m[14]);
-}
-
 static void BuildModelWorldMatrix(const Model* model, Mat4& worldMatrix) {
     worldMatrix = Mat4();
     if (!model) {
@@ -273,54 +224,6 @@ static void BuildModelWorldMatrix(const Model* model, Mat4& worldMatrix) {
     worldMatrix.SetTranslation((f32)model->posX, (f32)model->posY, (f32)model->posZ);
 }
 
-static void MYrmCartesianToSphericalLocal(const LVector& cartesian, LVector& spherical) {
-    const s32 mag = (s32)rmMag3((f32)cartesian.x, (f32)cartesian.y, (f32)cartesian.z);
-    if (mag == 0) {
-        spherical = { 0, 0, 0 };
-        return;
-    }
-
-    s32 xDiv = rmDiv16i(cartesian.x, mag);
-    if (xDiv > FIX16_ONE) {
-        xDiv = FIX16_ONE;
-    }
-    else if (xDiv < -FIX16_ONE) {
-        xDiv = -FIX16_ONE;
-    }
-
-    const s32 polar = rmACos16Local(xDiv);
-    const s32 polarSin = rmSin16(polar);
-
-    s32 yDiv = 0;
-    const s32 denom = (s32)(((s64)mag * polarSin) >> 16);
-    if (denom != 0) {
-        yDiv = rmDiv16i(cartesian.y, denom);
-    }
-    if ((u32)(yDiv + FIX16_ONE) > 0x20000u) {
-        yDiv = (yDiv >= 0) ? 0xFFFF : -0xFFFF;
-    }
-
-    s32 azimuth = rmASin16Local(yDiv);
-    if (cartesian.z < 0) {
-        azimuth = 0x8000 - azimuth;
-    }
-
-    spherical.x = mag;
-    spherical.y = azimuth;
-    spherical.z = polar;
-}
-
-static void MYrmSphericalToCartesianLocal(const LVector& spherical, LVector& cartesian) {
-    const s32 radiusSin = (s32)(((s64)spherical.x * rmSin16(spherical.z)) >> 16);
-    LVector converted = {};
-    converted.x = (s32)(((s64)radiusSin * rmSin16(spherical.y + 0x4000)) >> 16);
-    converted.y = (s32)(((s64)radiusSin * rmSin16(spherical.y)) >> 16);
-    converted.z = (s32)(((s64)spherical.x * rmSin16(spherical.z + 0x4000)) >> 16);
-
-    cartesian.x = converted.z;
-    cartesian.y = converted.y;
-    cartesian.z = converted.x;
-}
 
 static void BuildHeadTrackOverrideMatrix(const LVector& col0, const LVector& col1, const LVector& col2,
     const STreeJoint* joint, Mat4& overrideMatrix) {
@@ -376,19 +279,19 @@ static void HeadTrack(Humanoid* owner, STreeJoint* joint, const Mat4& currentMat
     Mat4 worldCurrent = modelWorld * currentMatrix;
 
     Mat4 inverseCurrent;
-    p3dInverseOrthMatrixLocal(worldCurrent, inverseCurrent);
+    PsxInverseOrthMatrix(worldCurrent, inverseCurrent);
 
     LVector localTarget = {};
-    p3dVecTimesMatrixLocal(targetPos, inverseCurrent, localTarget);
+    PsxVecTimesMatrixTrunc(targetPos, inverseCurrent, localTarget);
     localTarget.x -= joint->translationX;
     localTarget.y -= joint->translationY;
     localTarget.z -= joint->translationZ;
 
     LVector sphericalTarget = {};
-    MYrmCartesianToSphericalLocal(localTarget, sphericalTarget);
+    PsxCartesianToSpherical(localTarget, sphericalTarget);
 
     LVector sphericalCurrent = {};
-    MYrmCartesianToSphericalLocal(model->headTrackDir, sphericalCurrent);
+    PsxCartesianToSpherical(model->headTrackDir, sphericalCurrent);
     (void)sphericalCurrent;
 
     sphericalTarget.x = FIX16_ONE;
@@ -399,20 +302,20 @@ static void HeadTrack(Humanoid* owner, STreeJoint* joint, const Mat4& currentMat
         sphericalTarget.y = (sphericalTarget.y < -32767) ? -49152 : -16384;
     }
 
-    MYrmSphericalToCartesianLocal(sphericalTarget, model->headTrackDir);
+    PsxSphericalToCartesian(sphericalTarget, model->headTrackDir);
 
     LVector heading = {};
     rmV3Normalize(&heading, &model->headTrackDir);
 
     LVector worldUpPoint = { 0, FIX16_ONE, 0 };
     LVector localUp = {};
-    p3dVecTimesMatrixLocal(worldUpPoint, inverseCurrent, localUp);
+    PsxVecTimesMatrixTrunc(worldUpPoint, inverseCurrent, localUp);
 
     LVector col1 = {};
-    rmV3CrossLocal(&col1, &heading, &localUp);
+    PsxV3Cross16(&col1, &heading, &localUp);
 
     LVector col0 = {};
-    rmV3CrossLocal(&col0, &col1, &heading);
+    PsxV3Cross16(&col0, &col1, &heading);
 
     rmV3Normalize(&col1, &col1);
     rmV3Normalize(&col0, &col0);
@@ -685,6 +588,10 @@ s32 AnimationMatrices::CopyMatrix(u32 joint, const Mat4& jointMatrix) {
     s32* matrixData = GetMatrix(joint);
     if (!matrixData) {
         return 0;
+    }
+
+    if (!captureEnabled) {
+        return 1;
     }
 
     // PSX CopyMatrix captures the current port/world matrix for the joint.

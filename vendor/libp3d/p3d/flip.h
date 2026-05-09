@@ -21,6 +21,8 @@ enum TransformDofAxis : u32 {
 struct TransformAnim {
     u32 nameUID;
     s32 numFrames;
+    s32 targetType;
+    u32 targetNameUID;
     s32 numRotChannels;
     s32 numTransChannels;
 

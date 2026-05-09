@@ -42,6 +42,20 @@ public:
     f32 GetDeltaTime() const { return deltaTime; }
     f32 GetFPS() const { return fps; }
     f32 GetTargetDt() const { return (targetFPS > 0) ? (1.0f / (f32)targetFPS) : 0.0f; }
+
+#if HIGH_FPS_PLAY_PRESENTATION
+    void ResetPlayPresentationState();
+    s32 BeginPlayFixedStep();
+    bool DidPlayLogicStepThisFrame() const { return playLogicStepCount > 0; }
+    f32 GetPlayPresentationAlpha() const { return playPresentationAlpha; }
+#endif
+
+private:
+#if HIGH_FPS_PLAY_PRESENTATION
+    f32 playLogicAccumulator = 0.0f;
+    f32 playPresentationAlpha = 0.0f;
+    s32 playLogicStepCount = 1;
+#endif
 };
 
 // PSX: gp-relative global, defined in time.cpp

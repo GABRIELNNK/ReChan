@@ -1,5 +1,6 @@
 #pragma once
 #include "core.h"
+#include "gen/savegame.h"
 #include "extra/customtext.h"
 #include "xclib/xccolour.h"
 #include <initializer_list>
@@ -14,10 +15,19 @@ enum MenuPage : s32 {
     MenuPage_Frontend, 
     MenuPage_Pause,
     MenuPage_Title,
+    MenuPage_StartGame,
     MenuPage_Options,
+    MenuPage_Controls,
     MenuPage_Controller,
+    MenuPage_KeyBindings,
     MenuPage_Display,
     MenuPage_Sound,
+    MenuPage_LoadSlots,
+    MenuPage_SaveSlots,
+    MenuPage_DeleteSlots,
+    MenuPage_LoadConfirm,
+    MenuPage_SaveConfirm,
+    MenuPage_DeleteConfirm,
     MenuPage_NewGameConfirm,
     MenuPage_ExitLevelConfirm,
     MenuPage_QuitConfirm,
@@ -28,6 +38,7 @@ enum MenuPage : s32 {
 enum EntryType : u8 {
     EntryType_Button,
     EntryType_Slider,
+    EntryType_List,
     EntryType_Toggle,
     EntryType_Info,
 }; 
@@ -42,6 +53,8 @@ enum EntryBinding : u8 {
     EntryBinding_DisplayResolution,
     EntryBinding_DisplayScreenMode,
     EntryBinding_DisplayVsync,
+    EntryBinding_DisplayFrameRate,
+    EntryBinding_DisplayMsaa,
 };
 
 enum EntryEvent : u8 {
@@ -54,7 +67,11 @@ enum EntryEvent : u8 {
     EntryEvent_QuitGame,
     EntryEvent_Credits, 
     EntryEvent_Load, 
-    EntryEvent_Save
+    EntryEvent_Save,
+    EntryEvent_Delete,
+    EntryEvent_LoadConfirmYes,
+    EntryEvent_SaveConfirmYes,
+    EntryEvent_DeleteConfirmYes,
 };
 
 #define MAX_ENTRIES_PER_MENU (12)
@@ -89,7 +106,42 @@ enum EntryEvent : u8 {
 #define DEF_HELP_LEFT_X_OFF (-28)
 #define DEF_HELP_RIGHT_X_OFF 42
 
-#define DEF_BOTTOM_ORN_COUNT 4
+// Prompt/help spacing tuning
+#define DEF_HELP_GROUP_GAP_PX 14.0f
+
+// Key Bindings page tuning
+#define DEF_KEYBIND_WINDOW_W 420
+#define DEF_KEYBIND_WINDOW_H 200
+#define DEF_KEYBIND_SLOT_COUNT 2
+#define DEF_KEYBIND_VISIBLE_ROWS 8
+#define DEF_KEYBIND_ROW_STEP 14
+#define DEF_KEYBIND_SLOT_W 76
+#define DEF_KEYBIND_SLOT_GAP 8
+#define DEF_KEYBIND_TABLE_SIDE_PAD 8
+#define DEF_KEYBIND_ACTION_COL_GAP 8
+#define DEF_KEYBIND_HIT_PAD 2
+#define DEF_KEYBIND_ROW_TOP_PAD 2
+#define DEF_KEYBIND_CELL_PAD 2
+#define DEF_KEYBIND_HELP_SCALE 0.62f
+#define DEF_KEYBIND_HELP_GAP_PX 8.0f
+
+// Key Bindings row stripe colors (transparent black / warm yellow)
+#define DEF_KEYBIND_STRIPE_DARK_R 0
+#define DEF_KEYBIND_STRIPE_DARK_G 0
+#define DEF_KEYBIND_STRIPE_DARK_B 0
+#define DEF_KEYBIND_STRIPE_DARK_A 100
+#define DEF_KEYBIND_STRIPE_WARM_R 50
+#define DEF_KEYBIND_STRIPE_WARM_G 30
+#define DEF_KEYBIND_STRIPE_WARM_B 0
+#define DEF_KEYBIND_STRIPE_WARM_A 100
+
+// Selected binding cell background (pure black, opaque)
+#define DEF_KEYBIND_ACTIVE_FILL_R 0
+#define DEF_KEYBIND_ACTIVE_FILL_G 0
+#define DEF_KEYBIND_ACTIVE_FILL_B 0
+#define DEF_KEYBIND_ACTIVE_FILL_A 255
+
+#define DEF_BOTTOM_ORN_COUNT 1
 #define DEF_BOTTOM_ORN_STEP 24
 #define DEF_BOTTOM_ORN_LEFT_X 16
 #define DEF_BOTTOM_ORN_RIGHT_X 104
@@ -143,6 +195,9 @@ enum EntryEvent : u8 {
 #define DEF_TEXT_NORM_R 108
 #define DEF_TEXT_NORM_G 68
 #define DEF_TEXT_NORM_B 0
+#define DEF_TEXT_LOCK_R 82
+#define DEF_TEXT_LOCK_G 58
+#define DEF_TEXT_LOCK_B 20
 #define DEF_TEXT_Y_OFF (-2)
 #define DEF_TEXT_SHADOW_A 0x90
 #define DEF_TITLE_SHADOW_A 0xC0
@@ -289,6 +344,7 @@ private:
     void SetEntries(PageDef& page, std::initializer_list<Entry> list);
     static Entry Button(const char* tok, EntryEvent ev, MenuPage go = MenuPage::MenuPage_None);
     static Entry Slider(const char* tok, EntryBinding binding, s32 step, s32 lo, s32 hi);
+    Entry List(const char* tok, EntryBinding binding, s32 step, s32 lo, s32 hi);
     static Entry Toggle(const char* tok, EntryBinding binding);
     static Entry Info(const char* tok);
 
@@ -300,6 +356,8 @@ private:
     s32 GetBoundValue(const Entry& e) const;
     void ApplyValue(const Entry& e, s32 v);
     void PlaySound(s32 id) const;
+    void RefreshSaveSlots();
+    void BuildSaveSlotLabel(s32 slotIndex, char* outText, s32 outTextLen) const;
 
     struct CellTex { tTexture* tex; s16 w, h; u32 nameHash; };
 
@@ -330,11 +388,31 @@ private:
     bool m_pendingResolutionActive = false;
     s32 m_pendingResolutionIndex = 0;
 
+    // Screen mode selection is staged while focused and committed on confirm.
+    bool m_pendingScreenModeActive = false;
+    s32 m_pendingScreenMode = 0;
+
+    // MSAA selection is staged while focused and committed on confirm.
+    bool m_pendingMsaaActive = false;
+    s32 m_pendingMsaaIndex = 0;
+
     // Input mode tracking: when false, mouse hover is ignored until mouse moves/clicks.
     bool m_mouseInputActive = true;
     bool m_mousePosInitialized = false;
     double m_lastMouseX = 0.0;
     double m_lastMouseY = 0.0;
+
+    // Key bindings page selection/capture state.
+    s32 m_keyBindActionCursor = 0;
+    s32 m_keyBindSlotCursor = 0;
+    s32 m_keyBindScrollTop = 0;
+    bool m_keyBindCaptureActive = false;
+    s32 m_keyBindCaptureBlockFrames = 0;
+
+    SaveGameSlotInfo m_saveSlots[SAVEGAME_SLOT_COUNT] = {};
+    s32 m_pendingLoadSlot = -1;
+    s32 m_pendingSaveSlot = -1;
+    s32 m_pendingDeleteSlot = -1;
 
     bool m_active = 0;
     f32 m_quitTimerSec = 0.0f; // seconds remaining before game actually closes

@@ -11,6 +11,9 @@
 #include "pddi/pddidev.h"
 #include "pddi/pdditex.h"
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "vendor/stb/stb_image.h"
+
 #include <string>
 #include <cstring>
 
@@ -21,6 +24,49 @@ namespace p3d {
 // tTexture
 
 tTexture::tTexture() = default;
+
+tTexture* tTexture::LoadFromImagePath(const char* path, s32* outWidth, s32* outHeight) {
+    if (!path || !path[0]) {
+        return nullptr;
+    }
+
+    int width = 0;
+    int height = 0;
+    int channels = 0;
+    unsigned char* rgbaBytes = stbi_load(path, &width, &height, &channels, 4);
+    if (!rgbaBytes || width <= 0 || height <= 0) {
+        return nullptr;
+    }
+
+    u32* packedPixels = new u32[(size_t)width * (size_t)height];
+    for (s32 i = 0; i < width * height; i++) {
+        const u8 r = rgbaBytes[i * 4 + 0];
+        const u8 g = rgbaBytes[i * 4 + 1];
+        const u8 b = rgbaBytes[i * 4 + 2];
+        const u8 a = rgbaBytes[i * 4 + 3];
+        packedPixels[i] = ((u32)a << 24) | ((u32)b << 16) | ((u32)g << 8) | (u32)r;
+    }
+
+    stbi_image_free(rgbaBytes);
+
+    tTexture* tex = new tTexture();
+    if (!tex->Create(width, height, 32, 8, packedPixels)) {
+        delete[] packedPixels;
+        tex->Release();
+        return nullptr;
+    }
+
+    delete[] packedPixels;
+
+    if (outWidth) {
+        *outWidth = width;
+    }
+    if (outHeight) {
+        *outHeight = height;
+    }
+
+    return tex;
+}
 
 tTexture::~tTexture() {
     if (texture) {
