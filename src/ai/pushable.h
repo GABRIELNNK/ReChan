@@ -17,7 +17,7 @@ public:
     s32 field156 = 0;
     s32 field160 = 0;
     s32 field164 = 0;
-    s32 field168 = 0;
+    s32* field168 = nullptr;
 
     Pushable(const LVector* pos, u16 type);
     ~Pushable() override;

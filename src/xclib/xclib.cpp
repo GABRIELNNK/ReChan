@@ -279,7 +279,7 @@ bool xcCellImage::Decode(const u8* cellData) {
     std::memset(rgba, 0, width * height * sizeof(u32));
 
     // Decompress and decode blocks
-    u8 expandBuf[16384];
+    u8* expandBuf = new u8[16384];
     const u8* blockPtr = clutSrc + clutAdvance;
 
     for (s32 blockIndex = 0; blockIndex < blockCount; blockIndex++) {
@@ -305,6 +305,8 @@ bool xcCellImage::Decode(const u8* cellData) {
 
         blockPtr += 4 + compSize;
     }
+
+    delete expandBuf;
 
     return true;
 }
@@ -748,8 +750,8 @@ void xcSection::DrawPrimObjScaled(u8* primData, f32 scaleX, f32 scaleY, s32 pivo
             if (sectionMan) font = sectionMan->FindFont(prim->fontHash);
             if (!font) break;
 
-            s32 posX = SCALE_AND_CENTER_X((f32)mapX(prim->mtx.GetX()));
-            s32 posY = SCREEN_SCALE_Y((f32)mapY(prim->mtx.GetY()));
+            f32 posX = SCALE_AND_CENTER_X((f32)mapX(prim->mtx.GetX()));
+            f32 posY = SCREEN_SCALE_Y((f32)mapY(prim->mtx.GetY()));
 
             font->SetScale(SCREEN_SCALE_X(scaleX), SCREEN_SCALE_Y(scaleY));
             font->DrawText(str, posX, posY, prim->GetColor(),
@@ -846,8 +848,8 @@ void xcSection::DrawPrimObj(u8* primData) {
             if (sectionMan) font = sectionMan->FindFont(prim->fontHash);
             if (!font) break;
 
-            s32 posX = SCALE_AND_CENTER_X(prim->mtx.GetX());
-            s32 posY = SCREEN_SCALE_Y(prim->mtx.GetY());
+            f32 posX = SCALE_AND_CENTER_X(prim->mtx.GetX());
+            f32 posY = SCREEN_SCALE_Y(prim->mtx.GetY());
 
             font->SetScale(SCREEN_SCALE_X(1.0f), SCREEN_SCALE_Y(1.0f));
             font->DrawText(str, posX, posY, prim->GetColor(),

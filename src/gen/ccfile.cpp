@@ -74,10 +74,10 @@ s32 ccFile::Open(const char* path, u16 mode) {
     SetName(path, 1);
 
     const char* openMode = "rb";
-    if (mode == OPEN_WRITE) {
+    if (mode & OPEN_WRITE) {
         openMode = "wb";
     }
-    else if (mode == OPEN_APPEND) {
+    else if (mode & OPEN_APPEND) {
         openMode = "ab";
     }
 
@@ -96,7 +96,7 @@ s32 ccFile::Open(const char* path, u16 mode) {
     if (length != 0) {
         result = 1;
     }
-    else if (mode == OPEN_WRITE || mode == OPEN_APPEND) {
+    else if (mode & OPEN_WRITE || mode & OPEN_APPEND) {
         result = 1;
         if (!outHandle) {
             outHandle = reinterpret_cast<void*>(kWriteHandleSentinel);

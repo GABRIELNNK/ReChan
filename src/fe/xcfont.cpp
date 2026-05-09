@@ -168,7 +168,12 @@ xcFont::xcFont(const u8* rawData) {
                 u8 gWidth = gd[4];
                 u16 charCode = *(const u16*)(gd + 6);
 
-                xcSpriteLetter& spr = sprites[sprIdx + g];
+                s32 index = sprIdx + g;
+                if (index >= numSprites) {
+                    LOG("[xcFont] Warning: glyph index out of bounds (%d), skipping", index);
+                    continue;
+                }
+                xcSpriteLetter& spr = sprites[index];
                 spr.u0 = xOff;
                 spr.v0 = yOff;
                 spr.u1 = xOff + gWidth;
@@ -463,7 +468,7 @@ void xcFont::DrawText(const char* text, f32 screenX, f32 screenY,
                 numLines++;
             }
         }
-        f32 totalH = (s32)lineHeight * numLines + (lineSpacing) * (numLines - 1);
+        f32 totalH = (f32)lineHeight * numLines + (lineSpacing) * (numLines - 1);
         totalH *= scaleY;
         if ((justify & XC_JUST_VMASK) == XC_JUST_VCENTER)
             screenY -= totalH / 2;
@@ -476,7 +481,7 @@ void xcFont::DrawText(const char* text, f32 screenX, f32 screenY,
     f32 curY = screenY;
 
     if (justify & XC_JUST_RIGHT) {
-        s32 lineW = MeasureText(text);
+        f32 lineW = MeasureText(text);
         if ((justify & XC_JUST_HMASK) == XC_JUST_CENTER)
             curX -= (f32)(lineW / 2);
         else
@@ -511,7 +516,7 @@ void xcFont::DrawText(const char* text, f32 screenX, f32 screenY,
             curY += (f32)((s32)lineHeight + lineSpacing) * scaleY;
             curX = (f32)screenX;
             if (justify & XC_JUST_RIGHT) {
-                s32 lineW = MeasureText(text + pos);
+                f32 lineW = MeasureText(text + pos);
                 if ((justify & XC_JUST_HMASK) == XC_JUST_CENTER)
                     curX -= (f32)(lineW / 2);
                 else

@@ -654,7 +654,7 @@ bool Obstacle::DetectObstacle(const LVector& startPos, const LVector& endPos, s3
     const s32 midX = (startPos.x + endPos.x) / 2;
     const s32 midY = (startPos.y + endPos.y) / 2;
     const s32 midZ = (startPos.z + endPos.z) / 2;
-    const u32 searchExtent = rmMag2(endPos.x - startPos.x, endPos.z - startPos.z);
+    const f32 searchExtent = rmMag2((f32)(endPos.x - startPos.x), (f32)(endPos.z - startPos.z));
 
     for (ccMinNode* node = g_ai->moveList.head; node; node = node->next) {
         Obstacle* obs = static_cast<Obstacle*>(static_cast<Thing*>(node));

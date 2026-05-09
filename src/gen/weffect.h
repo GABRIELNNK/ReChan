@@ -21,8 +21,8 @@ struct CBVPrimData;
 class PaletteData;
 class CWorldEffectSound;
 class Thing;
-class CBVParamAnimData;
-class ClutAnimData;
+struct CBVParamAnimData;
+struct ClutAnimData;
 
 class Model;
 class EModel;

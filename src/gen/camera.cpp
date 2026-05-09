@@ -691,22 +691,22 @@ void Camera::DebugCam() {
     s32 ddz = 0;
 
     if (p3d::input->IsKeyDown(KEY_W)) {
-        ddz += speed * g_time->GetDeltaTime();
+        ddz += speed;
     }
     if (p3d::input->IsKeyDown(KEY_S)) {
-        ddz -= speed * g_time->GetDeltaTime();
+        ddz -= speed;
     }
     if (p3d::input->IsKeyDown(KEY_A)) {
-        ddx -= speed * g_time->GetDeltaTime();
+        ddx -= speed;
     }
     if (p3d::input->IsKeyDown(KEY_D)) {
-        ddx += speed * g_time->GetDeltaTime();
+        ddx += speed;
     }
     if (p3d::input->IsKeyDown(KEY_E)) {
-        ddy += speed * g_time->GetDeltaTime();
+        ddy += speed;
     }
     if (p3d::input->IsKeyDown(KEY_Q)) {
-        ddy -= speed * g_time->GetDeltaTime();
+        ddy -= speed;
     }
 
     if (ddx != 0 || ddy != 0 || ddz != 0) {

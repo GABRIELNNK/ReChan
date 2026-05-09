@@ -4,7 +4,7 @@
 #include "fe/hditem.h"
 
 #if FIX_ASPECT_RATIO
-#include "fe/extra/hudwsfix.h"
+#include "extra/hudwsfix.h"
 #endif
 
 class Humanoid;

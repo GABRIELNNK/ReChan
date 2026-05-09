@@ -46,8 +46,8 @@ public:
 
 private:
     struct StringEntry {
-        u32 hash;
-        std::string text;
+        u32 hash = 0;
+        std::string text = {};
     };
 
     bool LoadTextFile(const char* path);

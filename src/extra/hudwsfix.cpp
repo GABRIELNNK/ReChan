@@ -1,4 +1,4 @@
-#include "fe/extra/hudwsfix.h"
+#include "hudwsfix.h"
 
 #if FIX_ASPECT_RATIO
 

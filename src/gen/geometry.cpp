@@ -419,7 +419,6 @@ tPrimGeom* tPrimGeom::Clone() const {
     MARKFUNCTION(0x800A1548);
 
     tPrimGeom* clone = new tPrimGeom();
-    *static_cast<tGeometry*>(clone) = *static_cast<const tGeometry*>(this);
     clone->geoType = geoType;
     clone->numLoops = numLoops;
 
@@ -1171,12 +1170,6 @@ static pddiPrimBuffer* BuildPrimBufferFromPrimGeom(const tPrimGeom* geom,
         return nullptr;
 
     if (idxBuf.empty()) {
-        LOG("[Geom] all primitives rejected: geom=%p numPolys=%u gmFog=%u backface=%u clip=%u",
-            geom,
-            geom->numPolys,
-            (gmFogState && gmFogState->enabled) ? 1u : 0u,
-            culledBackfaceCount,
-            culledClipCount);
         return nullptr;
     }
 

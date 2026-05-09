@@ -20,7 +20,7 @@ Pushable::~Pushable() {
     if (field168) {
         CPushableSound* snd = reinterpret_cast<CPushableSound*>(field168);
         snd->Release();
-        field168 = 0;
+        field168 = nullptr;
     }
 }
 

@@ -115,6 +115,8 @@ struct ccNode : public ccMinNode {
         if (alloc) {
             s32 len = (s32)strlen(str);
             name = (char*)std::malloc(len + 1);
+            if (!name)
+                return;
             memcpy(name, str, len + 1);
             flags |= 1; // mark as allocated
         }

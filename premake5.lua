@@ -38,6 +38,7 @@ project "rechan"
     links {
         "libp3d",
     }
+	defines { "_CRT_SECURE_NO_WARNINGS" }
 
     filter "system:windows"
         systemversion "latest"

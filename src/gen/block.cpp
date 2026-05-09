@@ -379,10 +379,7 @@ bool Block::Draw(const LVector* drawPos) {
         fogFar = globalFogFar;
     }
     else {
-        const int drew = RP_ZCullGClip(primGeom, drawPos);
-        if (!drew) {
-            LOG("[Block] GClip draw dropped: block=%u primGeom=%p", blockNum, primGeom);
-        }
+        RP_ZCullGClip(primGeom, drawPos);
         return true;
     }
 
