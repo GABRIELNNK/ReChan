@@ -1103,24 +1103,37 @@ void glContext::SetBlendMode(pddiBlendMode mode) {
             glDisable(GL_BLEND);
             glBlendEquation(GL_FUNC_ADD);
             glDepthMask(GL_TRUE);
+            // Restore depth-test precision for opaque geometry.
+            glDisable(GL_POLYGON_OFFSET_FILL);
+            glPolygonOffset(0.0f, 0.0f);
             break;
         case PDDI_BLEND_ALPHA:
             glEnable(GL_BLEND);
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
             glBlendEquation(GL_FUNC_ADD);
             glDepthMask(GL_FALSE);
+            // PSX OT equivalent: blended effects inserted after geometry at the same
+            // OT slot render on top.  With reversed-Z (near=1 far=0, GL_GEQUAL), a
+            // positive depth offset pushes fragments toward camera so same-depth
+            // effects pass the depth test against already-drawn opaque surfaces.
+            glEnable(GL_POLYGON_OFFSET_FILL);
+            glPolygonOffset(1.0f, 1.0f);
             break;
         case PDDI_BLEND_ADD:
             glEnable(GL_BLEND);
             glBlendFunc(GL_ONE, GL_ONE);
             glBlendEquation(GL_FUNC_ADD);
             glDepthMask(GL_FALSE);
+            glEnable(GL_POLYGON_OFFSET_FILL);
+            glPolygonOffset(1.0f, 1.0f);
             break;
         case PDDI_BLEND_SUBTRACT:
             glEnable(GL_BLEND);
             glBlendFunc(GL_ONE, GL_ONE);
             glBlendEquation(GL_FUNC_REVERSE_SUBTRACT);
             glDepthMask(GL_FALSE);
+            glEnable(GL_POLYGON_OFFSET_FILL);
+            glPolygonOffset(1.0f, 1.0f);
             break;
         case PDDI_BLEND_PSX_QUARTER:
             glEnable(GL_BLEND);
@@ -1128,6 +1141,8 @@ void glContext::SetBlendMode(pddiBlendMode mode) {
             glBlendFunc(GL_CONSTANT_ALPHA, GL_ONE);
             glBlendEquation(GL_FUNC_ADD);
             glDepthMask(GL_FALSE);
+            glEnable(GL_POLYGON_OFFSET_FILL);
+            glPolygonOffset(1.0f, 1.0f);
             break;
     }
     stateDirty = false;

@@ -209,11 +209,17 @@ s32 PaletteData::InitPalette() {
 s32 PaletteData::NextFrame() {
     MARKFUNCTION(0x8009D1B8);
 
-    if (frameIndex >= frameCount) {
+    if (frameCount == 0) {
         return 1;
     }
 
     if (!frameStream) {
+        return 1;
+    }
+
+    // Frame stream is consumed by Update() first, then advanced here.
+    // Wrap immediately after the last valid frame to avoid one invalid read tick.
+    if ((frameIndex + 1) >= frameCount) {
         return 1;
     }
 
@@ -231,6 +237,9 @@ s32 PaletteData::Update() {
     if (!writeCursor || !frameStream || !paletteLut) {
         return 0;
     }
+
+    // RLE runs are indexed from palette start every frame.
+    writeCursor = writeCursorEnd - 256;
 
     const u8* frame = frameStream + frameOffset;
     const u16 runCount = ReadU16Pal(frame + 0);

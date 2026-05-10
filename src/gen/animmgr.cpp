@@ -116,7 +116,16 @@ bool VizAnim::IsNodeVisible(u32 nodeIndex, s32 frame) const {
         return false;
     }
 
+    if (numFrames <= 0 || frame >= numFrames) {
+        return false;
+    }
+
     const u32 frameWord = static_cast<u32>(frame) >> 5;
+    const u32 wordCount = (static_cast<u32>(numFrames) + 31u) >> 5;
+    if (frameWord >= wordCount) {
+        return false;
+    }
+
     const u32 frameBit = static_cast<u32>(frame) & 31u;
     const u32 mask = 1u << frameBit;
     return (node.bitWords[frameWord] & mask) != 0u;

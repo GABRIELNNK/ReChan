@@ -49,6 +49,7 @@ public:
     bool LoadSTree(s32 resourceHash, s32 miscAnimHash);
 
     void SetFrame(s32 frame);
+    void SetFrameReal(s32 frameReal16);
     bool EndOfFrame(s32 frame) const;
     bool PointInView(const LVector& pos, s32 radius) const;
 
@@ -105,6 +106,7 @@ private:
     u16 scaleBindingCapacity = 0;
     s16 frameCount = 0;
     s16 currentFrame = 0;
+    s32 currentFrameReal16 = 0;
 
     u16* uvBaseWords = nullptr;
     u32 uvPrimCount = 0;
@@ -247,6 +249,7 @@ public:
     s16 startDelay = 0;
     s16 startDelayCounter = 0;
     s16 pingPongReverse = 0;
+    s16 activatedOnce = 0;
     u16 overrideFlags = 0;
 
     Thing* mentorLink = nullptr;

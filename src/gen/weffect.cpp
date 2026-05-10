@@ -267,6 +267,24 @@ static const s32 kLensFlareClampValues[7] = {
     0x3FCA, 0x56D7, 0x8486, 0xEC3F, 0xA365, 0x6122, 0x3333,
 };
 
+static s32 BuildEffectFrameReal16(s16 frame, s16 frameCounter, s16 frameDelay) {
+    s32 frameReal16 = static_cast<s32>(frame) << 16;
+    if (frameDelay <= 0) {
+        return frameReal16;
+    }
+
+    const s32 stepFrames = static_cast<s32>(frameDelay) + 1;
+    s32 frac16 = static_cast<s32>((static_cast<s64>(frameCounter) << 16) / stepFrames);
+    if (frac16 < 0) {
+        frac16 = 0;
+    }
+    else if (frac16 > 0xFFFF) {
+        frac16 = 0xFFFF;
+    }
+
+    return frameReal16 + frac16;
+}
+
 class PathInfo {
 public:
     PathInfo();
@@ -1157,17 +1175,19 @@ bool ComEffect::ApplyCBVParamAnimFrame(CBVParamAnimData* cbvParamAnimData, s32 f
         return false;
     }
 
-    s32 clampedFrame = frame;
+    s32 frameReal16 = currentFrameReal16;
+    if (frameReal16 < 0) {
+        frameReal16 = 0;
+    }
+
     if (blendNode->paramAnim->numFrames > 0) {
-        if (clampedFrame < 0) {
-            clampedFrame = 0;
-        }
-        else if (clampedFrame >= blendNode->paramAnim->numFrames) {
-            clampedFrame = blendNode->paramAnim->numFrames - 1;
+        const s32 maxFrameReal16 = (blendNode->paramAnim->numFrames - 1) << 16;
+        if (frameReal16 > maxFrameReal16) {
+            frameReal16 = maxFrameReal16;
         }
     }
 
-    s32 blend16 = blendNode->paramAnim->EvaluateFrameReal(clampedFrame << 16);
+    s32 blend16 = blendNode->paramAnim->EvaluateFrameReal(frameReal16);
     if (blend16 < 0) {
         blend16 = 0;
     }
@@ -1179,7 +1199,6 @@ bool ComEffect::ApplyCBVParamAnimFrame(CBVParamAnimData* cbvParamAnimData, s32 f
     const u32 valueCount = cbvParamAnimData->valueRows * cbvParamAnimData->valueCols;
     const u32 entryCount = cbvParamAnimData->numEntries;
     const u32 row1 = (cbvParamAnimData->valueRows > 1) ? 1u : 0u;
-    static bool s_loggedCBVC1Coverage = false;
     static bool s_loggedCBVTableBounds = false;
     static bool s_loggedCBVMode2MissingPacketData = false;
 
@@ -1354,20 +1373,6 @@ bool ComEffect::ApplyCBVParamAnimFrame(CBVParamAnimData* cbvParamAnimData, s32 f
             }
         }
 
-        if (!s_loggedCBVC1Coverage && geo->nameCRC == 0x074A76B4u) {
-            LOG("[WEffect] CBV C1A coverage: mode=%d target=0x%08X geo=0x%08X entries=%u wrote=%u dynVerts=%u zeroRGB=%u rows=%u cols=%u",
-                cbvMode,
-                cbvParamAnimData->targetUID,
-                geo->nameCRC,
-                entryCount,
-                wroteCount,
-                geo->dynamicVertCount,
-                zeroColourCount,
-                cbvParamAnimData->valueRows,
-                cbvParamAnimData->valueCols);
-            s_loggedCBVC1Coverage = true;
-        }
-
         if (wrote) {
             geo->meshBuffer->SetVertexData(geo->dynamicVerts, geo->dynamicVertCount);
         }
@@ -1415,12 +1420,6 @@ bool ComEffect::ApplyClutAnimFrame(ClutAnimData* clutAnimData, s32 frame) {
         return false;
     }
 
-    // PSX mode==0 writes to material cba; mode!=0 patches prim packets at
-    // explicit offsets, which requires source packet storage not yet mirrored.
-    if (clutAnimData->mode != 0) {
-        return false;
-    }
-
     const u16 clut = clutAnimData->GetFrameValue(frame);
 
     auto applyMaterialToGeo = [&](OriginalGeo* geo) -> bool {
@@ -1463,6 +1462,133 @@ bool ComEffect::ApplyClutAnimFrame(ClutAnimData* clutAnimData, s32 frame) {
 
         return wrote;
     };
+
+    auto getDynGeoPrimPacketSize = [](u8 primCmd) -> u32 {
+        switch (primCmd & 0xFCu) {
+            case 0x3C:
+            case 0x2C:
+                return 52;
+            case 0x38:
+            case 0x28:
+                return 36;
+            case 0x34:
+            case 0x24:
+                return 40;
+            case 0x30:
+            case 0x20:
+                return 28;
+            default:
+                return 0;
+        }
+    };
+
+    auto applyPacketOffsetsToGeo = [&](OriginalGeo* geo) -> bool {
+        if (!GeoSupportsDynamicUV(geo)
+            || !geo->dynamicPrimStart
+            || !geo->dynamicPrimVertCount
+            || !geo->dynamicPrimCmd
+            || !geo->dynamicPrimPacketOffset
+            || geo->dynamicPrimCount == 0
+            || !clutAnimData->offsets
+            || clutAnimData->numOffsets <= 0) {
+            return false;
+        }
+
+        bool wrote = false;
+        const f32 cbaWord = static_cast<f32>(clut);
+
+        for (s32 offsetIndex = 0; offsetIndex < clutAnimData->numOffsets; offsetIndex++) {
+            const u32 packetOffset = static_cast<u32>(clutAnimData->offsets[offsetIndex]);
+
+            for (u32 primIndex = 0; primIndex < geo->dynamicPrimCount; primIndex++) {
+                if (clutAnimData->materialUID != 0
+                    && geo->dynamicPrimMaterialUID
+                    && geo->dynamicPrimMaterialUID[primIndex] != clutAnimData->materialUID) {
+                    continue;
+                }
+
+                const u32 packetBase = geo->dynamicPrimPacketOffset[primIndex];
+                const u32 packetSize = getDynGeoPrimPacketSize(geo->dynamicPrimCmd[primIndex]);
+                if (packetSize == 0) {
+                    continue;
+                }
+
+                if (packetOffset < packetBase || packetOffset >= (packetBase + packetSize)) {
+                    continue;
+                }
+
+                const u32 start = geo->dynamicPrimStart[primIndex];
+                const u32 count = static_cast<u32>(geo->dynamicPrimVertCount[primIndex]);
+                if (count == 0 || start >= geo->dynamicVertCount) {
+                    continue;
+                }
+
+                for (u32 corner = 0; corner < count; corner++) {
+                    const u32 vertexIndex = start + corner;
+                    if (vertexIndex >= geo->dynamicVertCount) {
+                        break;
+                    }
+
+                    geo->dynamicVerts[vertexIndex].cba = cbaWord;
+                }
+
+                wrote = true;
+                break;
+            }
+        }
+
+        if (wrote) {
+            geo->meshBuffer->SetVertexData(geo->dynamicVerts, geo->dynamicVertCount);
+        }
+
+        return wrote;
+    };
+
+    auto applyPacketOffsetsByDrawable = [&]() -> bool {
+        if (!model || !model->drawable) {
+            return false;
+        }
+
+        bool applied = false;
+        if (model->drawableType == 1) {
+            DrawableGeo* drawableGeo = static_cast<DrawableGeo*>(model->drawable);
+            OriginalGeo* geo = drawableGeo ? drawableGeo->original : nullptr;
+            if (!geo) {
+                return false;
+            }
+
+            if (clutAnimData->primUID != 0 && geo->nameCRC != clutAnimData->primUID) {
+                return false;
+            }
+
+            return applyPacketOffsetsToGeo(geo);
+        }
+
+        if (model->drawableType == 3) {
+            DrawableETree* drawableETree = static_cast<DrawableETree*>(model->drawable);
+            OriginalETree* original = drawableETree ? drawableETree->original : nullptr;
+            if (!original || !original->geoParts || original->geoPartCount == 0) {
+                return false;
+            }
+
+            for (u16 i = 0; i < original->geoPartCount; i++) {
+                if (clutAnimData->primUID != 0 && original->geoPartHashes
+                    && original->geoPartHashes[i] != clutAnimData->primUID) {
+                    continue;
+                }
+
+                if (applyPacketOffsetsToGeo(original->geoParts[i])) {
+                    applied = true;
+                }
+            }
+        }
+
+        return applied;
+    };
+
+    if (clutAnimData->mode != 0) {
+        return applyPacketOffsetsByDrawable();
+    }
 
     // Mirror PSX mode==0 material write when primitive material ownership is
     // available in the retained dynamic geo data.
@@ -1838,7 +1964,14 @@ bool ComEffect::LoadSTree(s32 inResourceHash, s32 inMiscAnimHash) {
 void ComEffect::SetFrame(s32 frame) {
     MARKFUNCTION(0x8004E7F8);
 
-    currentFrame = static_cast<s16>(frame < 0 ? -frame : frame);
+    SetFrameReal(frame << 16);
+}
+
+void ComEffect::SetFrameReal(s32 frameReal16) {
+    MARKFUNCTION(0x8004E7F8);
+
+    currentFrameReal16 = (frameReal16 < 0) ? -frameReal16 : frameReal16;
+    currentFrame = static_cast<s16>(currentFrameReal16 >> 16);
 
     if (scaleData) {
         ScaleData_SetFrame(scaleData, currentFrame);
@@ -1920,11 +2053,12 @@ bool ComEffect::PointInView(const LVector& pos, s32 radius) const {
                                       / static_cast<f32>(vz));
         }
 
-        if (sx < -margin || sx >= (port.width + margin)) {
+        // Loosen bounds: allow effect if any part of sphere is on screen (PSX-style)
+        if (sx < (0 - margin) || sx >= (port.width + margin)) {
             return 1;
         }
 
-        if (sy < -margin || sy >= (port.height + margin)) {
+        if (sy < (0 - margin) || sy >= (port.height + margin)) {
             return 1;
         }
 
@@ -3226,11 +3360,13 @@ void WEffect::Display(s32 inBlockNum) {
         return;
     }
 
-    if (blockNum != inBlockNum) {
+    if (inBlockNum != 4096 && blockNum != inBlockNum) {
         return;
     }
 
-    if (clipDistance >= 0 && !comEffect->PointInView(pos, clipDistance)) {
+    const bool clipPass = (clipDistance < 0) || comEffect->PointInView(pos, clipDistance);
+
+    if (!clipPass) {
         return;
     }
 
@@ -3242,7 +3378,7 @@ void WEffect::Display(s32 inBlockNum) {
         comEffect->SetVertexInfo(vertexFrame, vertexSpeed);
     }
 
-    comEffect->SetFrame(frame);
+    comEffect->SetFrameReal(BuildEffectFrameReal16(frame, frameCounter, frameDelay));
 
     const LVector* scalePtr = hasScale ? &scale : nullptr;
     comEffect->Render(pos, scalePtr, rotation, renderFlags);
@@ -3254,6 +3390,7 @@ void WEffect::Display(s32 inBlockNum) {
 
 s32 WEffect::PutBackEffect() {
     MARKFUNCTION(0x8008B988);
+
     g_wEffectPool.AddNode(g_wEffectPool.tail, this);
     return ReleaseSound();
 }
@@ -3323,6 +3460,7 @@ s32 SpotLight::Update() {
         }
 
         uvData->accumV = static_cast<u16>(vOffset);
+
     }
 
     return blockNum;
@@ -3331,7 +3469,11 @@ s32 SpotLight::Update() {
 void SpotLight::Display(s32 inBlockNum) {
     MARKFUNCTION(0x800BE450);
 
-    if (!visible || blockNum != inBlockNum || !comEffect) {
+    if (!visible || !comEffect) {
+        return;
+    }
+
+    if (inBlockNum != 4096 && blockNum != inBlockNum) {
         return;
     }
 
@@ -3339,7 +3481,7 @@ void SpotLight::Display(s32 inBlockNum) {
         comEffect->AddUV(uvData, uvData->accumU, uvData->accumV);
     }
 
-    comEffect->SetFrame(frame);
+    comEffect->SetFrameReal(BuildEffectFrameReal16(frame, frameCounter, frameDelay));
 
     LVector renderPos = pos;
     renderPos.z += zOffset;
@@ -3649,7 +3791,14 @@ s32 FWEffect::Create() {
     MARKFUNCTION(0x8008C024);
 
     frameCounter = 0;
-    if (!SetMentor()) {
+    const s32 mentorResult = SetMentor();
+    if (followHash != 0) {
+        if (!mentorResult) {
+            return 0;
+        }
+    }
+    else if (!activatedOnce) {
+        // Mentor-less FW effects are trigger-driven; keep pooled until first Create2 activation.
         return 0;
     }
 
@@ -3704,6 +3853,7 @@ s32 FWEffect::Create2(const LVector* posOverride,
 
     overrideFlags = 0;
     pingPongReverse = 0;
+    activatedOnce = 1;
     createFlags = static_cast<u16>(flags);
     startDelayCounter = 0;
 
@@ -3975,7 +4125,11 @@ s32 FWEffect::Update() {
 void FWEffect::Display(s32 inBlockNum) {
     MARKFUNCTION(0x8008C9D0);
 
-    if (!canDisplay || blockNum != inBlockNum || startDelayCounter > 0 || !comEffect) {
+    if (!canDisplay || startDelayCounter > 0 || !comEffect) {
+        return;
+    }
+
+    if (inBlockNum != 4096 && blockNum != inBlockNum) {
         return;
     }
 
@@ -3987,7 +4141,7 @@ void FWEffect::Display(s32 inBlockNum) {
         return;
     }
 
-    comEffect->SetFrame(frame);
+    comEffect->SetFrameReal(BuildEffectFrameReal16(frame, frameCounter, frameDelay));
 
     LVector renderPos = pos;
     if (mentorPosRef) {
@@ -4043,15 +4197,23 @@ void FWEffect::Display(s32 inBlockNum) {
     }
     else if (scaleRoll) {
         LVector rollScale = { scaleRoll[2], scaleRoll[3], scaleRoll[4] };
-        if (clipDistance < 0 || comEffect->PointInView(renderPos, clipDistance)) {
+        const bool clipPass = (clipDistance < 0) || comEffect->PointInView(renderPos, clipDistance);
+        if (!clipPass) {
+            return;
+        }
+
+        if (clipPass) {
             comEffect->Render(renderPos, &rollScale, rotationPtr, flags | 4u);
         }
         return;
     }
 
-    if (clipDistance < 0 || comEffect->PointInView(renderPos, clipDistance)) {
-        comEffect->Render(renderPos, scalePtr, rotationPtr, flags);
+    const bool clipPass = (clipDistance < 0) || comEffect->PointInView(renderPos, clipDistance);
+    if (!clipPass) {
+        return;
     }
+
+    comEffect->Render(renderPos, scalePtr, rotationPtr, flags);
 }
 
 s32 LensFlare::Create() {
@@ -4212,7 +4374,7 @@ void LensFlare::Display(s32 inBlockNum) {
         return;
     }
 
-    if (inBlockNum != static_cast<s32>(g_blockManager->GetBlockNumber(flarePos))) {
+    if (inBlockNum != 4096 && inBlockNum != static_cast<s32>(g_blockManager->GetBlockNumber(flarePos))) {
         return;
     }
 

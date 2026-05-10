@@ -970,12 +970,14 @@ static VizAnim* ParseVizAnimChunkBody(const u8* body, u32 bodySize) {
     for (u16 nodeIndex = 0; nodeIndex < numNodes; nodeIndex++) {
         const u32 entryOffset = static_cast<u32>(nodeIndex) * 8u;
         const u32 geoHash = p3dReadU32LE(vizAnim->rawData + entryOffset + 0);
-        const u32 bitsOffset = p3dReadU32LE(vizAnim->rawData + entryOffset + 4);
+        const u32 bitsOffsetWords = p3dReadU32LE(vizAnim->rawData + entryOffset + 4);
 
         VizAnimNodeEntry& outNode = vizAnim->nodes[nodeIndex];
         outNode.targetHash = geoHash;
-        if (bitsOffset < vizAnim->rawSize) {
-            outNode.bitWords = reinterpret_cast<const u32*>(vizAnim->rawData + bitsOffset);
+        // tVizNode stores bit offsets in 32-bit words in packed data streams.
+        const u32 bitsOffsetBytes = bitsOffsetWords * 4u;
+        if (bitsOffsetBytes < vizAnim->rawSize) {
+            outNode.bitWords = reinterpret_cast<const u32*>(vizAnim->rawData + bitsOffsetBytes);
         }
     }
 
@@ -3439,10 +3441,10 @@ void World::DrawEverythingHandler(const LVector* playerPos) {
                 DrawEntityList(g_ai->moveList, bn);
             }
 
-            Effects_DrawEffects(static_cast<s32>(bn));
-
             // PSX: Draw__5BlockRC10tagLVector(block, &localPos)
             entry.block->Draw(&localPos);
+
+            Effects_DrawEffects(static_cast<s32>(bn));
         }
     }
 
