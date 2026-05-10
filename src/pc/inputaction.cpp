@@ -371,21 +371,25 @@ void ActionInput::Update(PlatformInput* platform) {
     }
 
     // Switch active device based on last input used.
+    const bool hasKeyboard = platform->HasAnyKeyboardInput();
+    const bool hasMouse = platform->HasAnyMouseInput();
+    const bool hasDesktop = hasKeyboard || hasMouse;
     bool gpConnected = platform->IsGamepadConnected();
     if (!gpConnected) {
-        hadKeyboardInputThisFrame = platform->HasAnyKeyboardInput();
+        hadKeyboardInputThisFrame = hasKeyboard;
+        hadMouseInputThisFrame = hasMouse;
         hadGamepadInputThisFrame = false;
         gamepadActive = false;
     }
     else {
-        bool hasKb = platform->HasAnyKeyboardInput();
         bool hasGp = platform->HasAnyGamepadInput();
-        hadKeyboardInputThisFrame = hasKb;
+        hadKeyboardInputThisFrame = hasKeyboard;
+        hadMouseInputThisFrame = hasMouse;
         hadGamepadInputThisFrame = hasGp;
         if (hasGp) {
             gamepadActive = true;
         }
-        if (hasKb) {
+        if (hasDesktop) {
             gamepadActive = false;
         }
     }

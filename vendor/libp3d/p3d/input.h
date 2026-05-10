@@ -37,6 +37,7 @@ public:
 
     // Device activity detection - true if any input on that device this frame
     bool HasAnyKeyboardInput() const;
+    bool HasAnyMouseInput() const;
     bool HasAnyGamepadInput() const;
 
     // Left stick with deadzone applied (-1..+1)

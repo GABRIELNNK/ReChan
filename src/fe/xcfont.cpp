@@ -31,7 +31,15 @@ static u16 NextPsxChar(const char* text, s32& offset) {
 static bool TryReadInlinePrompt(const char* text, s32 offset, s32* outConsumed, PromptIcons::ResolvedPrompt* outPrompt) {
     Action action = ACTION_COUNT;
     if (!PromptIcons::ParseInlineActionToken(text, offset, outConsumed, &action)) {
-        return false;
+        s32 bindingCode = 0;
+        if (!PromptIcons::ParseInlineDesktopBindingToken(text, offset, outConsumed, &bindingCode)) {
+            return false;
+        }
+
+        if (outPrompt) {
+            PromptIcons::ResolveDesktopBindingCodePrompt(bindingCode, *outPrompt);
+        }
+        return true;
     }
 
     if (outPrompt) {
@@ -577,11 +585,10 @@ f32 xcFont::MeasureText(const char* text) const {
         if (TryReadInlinePrompt(text, pos, &promptConsumed, &prompt)) {
             if (prompt.HasIcon()) {
                 const f32 promptWidth = PromptIcons::GetDrawWidth(prompt, (f32)lineHeight * scaleY);
-                width += (scaleX != 0.0f) ? (promptWidth / scaleX) : 0.0f;
+                width += promptWidth;
             }
             else if (prompt.HasFallback()) {
-                const f32 fallbackWidth = MeasureText(prompt.fallback);
-                width += (scaleX != 0.0f) ? (fallbackWidth / scaleX) : 0.0f;
+                width += MeasureText(prompt.fallback);
             }
             pos += promptConsumed;
             continue;
@@ -592,14 +599,14 @@ f32 xcFont::MeasureText(const char* text) const {
             break;
         }
         if (ch == ' ') {
-            width += spaceWidth;
+            width += (f32)spaceWidth * scaleX;
             continue;
         }
         const xcSpriteLetter* spr = FindLetter(ch);
-        if (!spr) { width += spaceWidth; continue; }
-        width += spr->w;
+        if (!spr) { width += (f32)spaceWidth * scaleX; continue; }
+        width += (f32)spr->w * scaleX;
     }
-    return width * scaleX;
+    return width;
 }
 
 // PC: Decode PSX 4bpp image data with CLUT palette to RGBA texture

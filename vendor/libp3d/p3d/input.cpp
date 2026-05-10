@@ -81,6 +81,18 @@ bool PlatformInput::HasAnyKeyboardInput() const {
     return false;
 }
 
+bool PlatformInput::HasAnyMouseInput() const {
+    for (int i = 0; i < 3; i++) {
+        if (currMouse[i]) {
+            return true;
+        }
+    }
+
+    const double dx = std::fabs(mouseX - prevMouseX);
+    const double dy = std::fabs(mouseY - prevMouseY);
+    return dx > 0.5 || dy > 0.5;
+}
+
 bool PlatformInput::HasAnyGamepadInput() const {
     if (!gamepadConnected) {
         return false;

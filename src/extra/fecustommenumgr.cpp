@@ -99,6 +99,27 @@ static void BuildActionDisplayName(Action action, char* outText, s32 outTextLen)
     outText[write] = '\0';
 }
 
+static void BuildDesktopBindingPromptText(Action action, s32 slot, char* outText, s32 outTextLen) {
+    if (!outText || outTextLen <= 0) {
+        return;
+    }
+
+    outText[0] = '\0';
+
+    if (!g_actionInput || slot < 0 || slot >= DEF_KEYBIND_SLOT_COUNT) {
+        snprintf(outText, outTextLen, "-");
+        return;
+    }
+
+    const s32 code = g_actionInput->GetDesktopBindingCode(action, slot);
+    if (code == 0) {
+        snprintf(outText, outTextLen, "-");
+        return;
+    }
+
+    snprintf(outText, outTextLen, "<BND:%d>", code);
+}
+
 static void SetPromptText(char* dst, s32 dstLen, const char* fmt, const char* a = nullptr, const char* b = nullptr, const char* c = nullptr) {
     if (!dst || dstLen <= 0) {
         return;
@@ -532,8 +553,8 @@ s32 feCustomMenuMgr::Invoke() {
         const bool leftClick = g_actionInput->IsMouseButtonTriggered(MouseBtn::Left);
         const bool rightClick = g_actionInput->IsMouseButtonTriggered(MouseBtn::Right);
         const s32 scroll = g_actionInput->ConsumeScrollDelta();
-        // Key bindings page should respond only to keyboard + mouse.
-        const bool nonMouseInput = g_actionInput->HadKeyboardInputThisFrame();
+        // Key bindings page should respond only to keyboard/gamepad for non-mouse gating.
+        const bool nonMouseInput = g_actionInput->HadKeyboardInputThisFrame() || g_actionInput->HadGamepadInputThisFrame();
 
         if ((mouseMoved || leftClick || rightClick || scroll != 0) && !nonMouseInput) {
             if (!m_mouseInputActive && g_display) {
@@ -2134,10 +2155,8 @@ void feCustomMenuMgr::Render() {
             char slot0Label[32] = {};
             char slot1Label[32] = {};
             BuildActionDisplayName(action, actionName, (s32)sizeof(actionName));
-            if (g_actionInput) {
-                g_actionInput->GetDesktopBindingLabel(action, 0, slot0Label, (s32)sizeof(slot0Label));
-                g_actionInput->GetDesktopBindingLabel(action, 1, slot1Label, (s32)sizeof(slot1Label));
-            }
+            BuildDesktopBindingPromptText(action, 0, slot0Label, (s32)sizeof(slot0Label));
+            BuildDesktopBindingPromptText(action, 1, slot1Label, (s32)sizeof(slot1Label));
 
             if (selectedRow && m_keyBindCaptureActive) {
                 if (m_keyBindSlotCursor == 0) {

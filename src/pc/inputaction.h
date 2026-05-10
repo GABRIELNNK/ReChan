@@ -144,6 +144,7 @@ public:
     // True if gamepad is the active input device (for UI glyph display, etc.)
     bool IsGamepadActive() const { return gamepadActive; }
     bool HadKeyboardInputThisFrame() const { return hadKeyboardInputThisFrame; }
+    bool HadMouseInputThisFrame() const { return hadMouseInputThisFrame; }
     bool HadGamepadInputThisFrame() const { return hadGamepadInputThisFrame; }
 
     // True if any action was just pressed this frame (for "press any button" screens)
@@ -193,6 +194,7 @@ private:
     bool gamepadActive = false;
     bool keysRegistered = false;
     bool hadKeyboardInputThisFrame = false;
+    bool hadMouseInputThisFrame = false;
     bool hadGamepadInputThisFrame = false;
     s32 moveX = 0;
     s32 moveY = 0;

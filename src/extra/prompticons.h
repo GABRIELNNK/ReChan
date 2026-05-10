@@ -8,6 +8,7 @@
 #include "pc/inputaction.h"
 #include "pc/tim.h"
 #include "p3d/texture.h"
+#include <cstdlib>
 #include <cstring>
 
 class PromptIcons {
@@ -28,6 +29,7 @@ public:
         s32 texW = 0;
         s32 texH = 0;
         PromptRect rect;
+        bool isGamepad = false;
         char fallback[24] = {};
 
         bool HasIcon() const {
@@ -103,6 +105,46 @@ public:
         return true;
     }
 
+    static bool ParseInlineDesktopBindingToken(const char* text, s32 start, s32* outConsumed, s32* outCode) {
+        if (!text || start < 0 || text[start] != '<') {
+            return false;
+        }
+
+        static const char kPrefix[] = "<BND:";
+        const s32 prefixLen = (s32)(sizeof(kPrefix) - 1);
+        if (strncmp(text + start, kPrefix, prefixLen) != 0) {
+            return false;
+        }
+
+        const char* tokenStart = text + start + prefixLen;
+        const char* tokenEnd = strchr(tokenStart, '>');
+        if (!tokenEnd || tokenEnd == tokenStart) {
+            return false;
+        }
+
+        const s32 tokenLen = (s32)(tokenEnd - tokenStart);
+        char token[32] = {};
+        if (tokenLen >= (s32)sizeof(token)) {
+            return false;
+        }
+        memcpy(token, tokenStart, tokenLen);
+        token[tokenLen] = '\0';
+
+        char* parseEnd = nullptr;
+        const long parsedCode = strtol(token, &parseEnd, 10);
+        if (!parseEnd || *parseEnd != '\0') {
+            return false;
+        }
+
+        if (outConsumed) {
+            *outConsumed = prefixLen + tokenLen + 1;
+        }
+        if (outCode) {
+            *outCode = (s32)parsedCode;
+        }
+        return true;
+    }
+
     static bool ResolveActionPrompt(Action action, ResolvedPrompt& out) {
         out = {};
 
@@ -125,6 +167,7 @@ public:
             out.texW = sheet.width;
             out.texH = sheet.height;
             out.rect = rect;
+            out.isGamepad = true;
             return true;
         }
 
@@ -145,14 +188,74 @@ public:
         out.texW = sheet.width;
         out.texH = sheet.height;
         out.rect = rect;
+        out.isGamepad = false;
         return true;
+    }
+
+    static bool ResolveDesktopBindingCodePrompt(s32 code, ResolvedPrompt& out) {
+        out = {};
+
+        if (code == 0) {
+            CopyText(out.fallback, (s32)sizeof(out.fallback), "-");
+            return true;
+        }
+
+        if (code > 0) {
+            CopyText(out.fallback, (s32)sizeof(out.fallback), KeyToLabel(code));
+
+            SheetState& sheet = GetKeyboardSheet();
+            if (!EnsureSheetLoaded(sheet, true)) {
+                return out.HasFallback();
+            }
+
+            PromptRect rect = KeyToRect(code, sheet.width, sheet.height);
+            if (!rect.IsValid()) {
+                return out.HasFallback();
+            }
+
+            out.tex = sheet.tex;
+            out.texW = sheet.width;
+            out.texH = sheet.height;
+            out.rect = rect;
+            out.isGamepad = false;
+            return true;
+        }
+
+        const s32 mouseButton = (-code) - 1;
+        CopyText(out.fallback, (s32)sizeof(out.fallback), MouseButtonToLabel(mouseButton));
+
+        SheetState& sheet = GetKeyboardSheet();
+        if (!EnsureSheetLoaded(sheet, true)) {
+            return out.HasFallback();
+        }
+
+        PromptRect rect = MouseButtonToRect(mouseButton, sheet.width, sheet.height);
+        if (!rect.IsValid()) {
+            return out.HasFallback();
+        }
+
+        out.tex = sheet.tex;
+        out.texW = sheet.width;
+        out.texH = sheet.height;
+        out.rect = rect;
+        out.isGamepad = false;
+        return true;
+    }
+
+    static f32 GetPromptScale(const ResolvedPrompt& prompt) {
+        return prompt.isGamepad ? 1.0f : 1.6f;
+    }
+
+    static f32 GetDrawHeight(const ResolvedPrompt& prompt, f32 drawHeight) {
+        return drawHeight * GetPromptScale(prompt);
     }
 
     static f32 GetDrawWidth(const ResolvedPrompt& prompt, f32 drawHeight) {
         if (!prompt.HasIcon() || drawHeight <= 0.0f) {
             return 0.0f;
         }
-        return drawHeight * ((f32)prompt.rect.w / (f32)prompt.rect.h);
+        const f32 effectiveHeight = GetDrawHeight(prompt, drawHeight);
+        return effectiveHeight * ((f32)prompt.rect.w / (f32)prompt.rect.h);
     }
 
     static void DrawPrompt(const ResolvedPrompt& prompt, f32 x, f32 y, f32 drawHeight, u8 alpha) {
@@ -160,12 +263,31 @@ public:
             return;
         }
 
+        const f32 effectiveHeight = GetDrawHeight(prompt, drawHeight);
         const f32 drawWidth = GetDrawWidth(prompt, drawHeight);
-        const f32 u0 = (f32)prompt.rect.x / (f32)prompt.texW;
-        const f32 v0 = (f32)prompt.rect.y / (f32)prompt.texH;
-        const f32 u1 = (f32)(prompt.rect.x + prompt.rect.w) / (f32)prompt.texW;
-        const f32 v1 = (f32)(prompt.rect.y + prompt.rect.h) / (f32)prompt.texH;
-        ScreenDraw::DrawQuad(prompt.tex, x, y, drawWidth, drawHeight,
+        const f32 drawY = y - ((effectiveHeight - drawHeight) * 0.5f);
+        f32 u0 = (f32)prompt.rect.x / (f32)prompt.texW;
+        f32 v0 = (f32)prompt.rect.y / (f32)prompt.texH;
+        f32 u1 = (f32)(prompt.rect.x + prompt.rect.w) / (f32)prompt.texW;
+        f32 v1 = (f32)(prompt.rect.y + prompt.rect.h) / (f32)prompt.texH;
+
+        if (u1 < u0) {
+            const f32 tmp = u0;
+            u0 = u1;
+            u1 = tmp;
+        }
+        if (v1 < v0) {
+            const f32 tmp = v0;
+            v0 = v1;
+            v1 = tmp;
+        }
+
+        if (u0 < 0.0f) u0 = 0.0f;
+        if (v0 < 0.0f) v0 = 0.0f;
+        if (u1 > 1.0f) u1 = 1.0f;
+        if (v1 > 1.0f) v1 = 1.0f;
+
+        ScreenDraw::DrawQuad(prompt.tex, x, drawY, drawWidth, effectiveHeight,
                              u0, v0, u1, v1,
                              128, 128, 128, alpha);
     }
@@ -281,127 +403,149 @@ private:
         }
     }
 
-    static PromptRect KeyToRect(s32 key, s32 texW, s32 texH) {
-        PromptGridIndex idx;
-        switch (key) {
-            case KEY_A: idx = MakeGridIndex(GetKeyboardMainGrid(), 0, 0); break;
-            case KEY_B: idx = MakeGridIndex(GetKeyboardMainGrid(), 1, 0); break;
-            case KEY_C: idx = MakeGridIndex(GetKeyboardMainGrid(), 2, 0); break;
-            case KEY_D: idx = MakeGridIndex(GetKeyboardMainGrid(), 3, 0); break;
-            case KEY_E: idx = MakeGridIndex(GetKeyboardMainGrid(), 4, 0); break;
-            case KEY_F: idx = MakeGridIndex(GetKeyboardMainGrid(), 5, 0); break;
-            case KEY_G: idx = MakeGridIndex(GetKeyboardMainGrid(), 6, 0); break;
-            case KEY_H: idx = MakeGridIndex(GetKeyboardMainGrid(), 7, 0); break;
-            case KEY_I: idx = MakeGridIndex(GetKeyboardMainGrid(), 8, 0); break;
-            case KEY_J: idx = MakeGridIndex(GetKeyboardMainGrid(), 9, 0); break;
-
-            case KEY_K: idx = MakeGridIndex(GetKeyboardMainGrid(), 0, 1); break;
-            case KEY_L: idx = MakeGridIndex(GetKeyboardMainGrid(), 1, 1); break;
-            case KEY_M: idx = MakeGridIndex(GetKeyboardMainGrid(), 2, 1); break;
-            case KEY_N: idx = MakeGridIndex(GetKeyboardMainGrid(), 3, 1); break;
-            case KEY_O: idx = MakeGridIndex(GetKeyboardMainGrid(), 4, 1); break;
-            case KEY_P: idx = MakeGridIndex(GetKeyboardMainGrid(), 5, 1); break;
-            case KEY_Q: idx = MakeGridIndex(GetKeyboardMainGrid(), 6, 1); break;
-            case KEY_R: idx = MakeGridIndex(GetKeyboardMainGrid(), 7, 1); break;
-            case KEY_S: idx = MakeGridIndex(GetKeyboardMainGrid(), 8, 1); break;
-            case KEY_T: idx = MakeGridIndex(GetKeyboardMainGrid(), 9, 1); break;
-
-            case KEY_U: idx = MakeGridIndex(GetKeyboardMainGrid(), 0, 2); break;
-            case KEY_V: idx = MakeGridIndex(GetKeyboardMainGrid(), 1, 2); break;
-            case KEY_X: idx = MakeGridIndex(GetKeyboardMainGrid(), 2, 2); break;
-            case KEY_W: idx = MakeGridIndex(GetKeyboardMainGrid(), 3, 2); break;
-            case KEY_Y: idx = MakeGridIndex(GetKeyboardMainGrid(), 4, 2); break;
-            case KEY_Z: idx = MakeGridIndex(GetKeyboardMainGrid(), 5, 2); break;
-
-            case KEY_0: idx = MakeGridIndex(GetKeyboardMainGrid(), 6, 2); break;
-            case KEY_1: idx = MakeGridIndex(GetKeyboardMainGrid(), 7, 2); break;
-            case KEY_2: idx = MakeGridIndex(GetKeyboardMainGrid(), 8, 2); break;
-            case KEY_3: idx = MakeGridIndex(GetKeyboardMainGrid(), 9, 2); break;
-            case KEY_4: idx = MakeGridIndex(GetKeyboardMainGrid(), 0, 3); break;
-            case KEY_5: idx = MakeGridIndex(GetKeyboardMainGrid(), 1, 3); break;
-            case KEY_6: idx = MakeGridIndex(GetKeyboardMainGrid(), 2, 3); break;
-            case KEY_7: idx = MakeGridIndex(GetKeyboardMainGrid(), 3, 3); break;
-            case KEY_8: idx = MakeGridIndex(GetKeyboardMainGrid(), 4, 3); break;
-            case KEY_9: idx = MakeGridIndex(GetKeyboardMainGrid(), 5, 3); break;
-
-            case KEY_F1: idx = MakeGridIndex(GetKeyboardMainGrid(), 6, 3); break;
-            case KEY_F2: idx = MakeGridIndex(GetKeyboardMainGrid(), 7, 3); break;
-            case KEY_F3: idx = MakeGridIndex(GetKeyboardMainGrid(), 8, 3); break;
-            case KEY_F4: idx = MakeGridIndex(GetKeyboardMainGrid(), 9, 3); break;
-            case KEY_F5: idx = MakeGridIndex(GetKeyboardMainGrid(), 0, 4); break;
-            case KEY_F6: idx = MakeGridIndex(GetKeyboardMainGrid(), 1, 4); break;
-            case KEY_F7: idx = MakeGridIndex(GetKeyboardMainGrid(), 2, 4); break;
-            case KEY_F8: idx = MakeGridIndex(GetKeyboardMainGrid(), 3, 4); break;
-            case KEY_F9: idx = MakeGridIndex(GetKeyboardMainGrid(), 4, 4); break;
-            case KEY_F10: idx = MakeGridIndex(GetKeyboardMainGrid(), 5, 4); break;
-            case KEY_F11: idx = MakeGridIndex(GetKeyboardMainGrid(), 6, 4); break;
-            case KEY_F12: idx = MakeGridIndex(GetKeyboardMainGrid(), 7, 4); break;
-
-            case KEY_MINUS: idx = MakeGridIndex(GetKeyboardMainGrid(), 8, 4); break;
-            case KEY_EQUAL: idx = MakeGridIndex(GetKeyboardMainGrid(), 9, 4); break;
-            case KEY_GRAVE: idx = MakeGridIndex(GetKeyboardMainGrid(), 0, 5); break;
-            case KEY_SEMICOLON: idx = MakeGridIndex(GetKeyboardMainGrid(), 2, 5); break;
-            case KEY_SLASH: idx = MakeGridIndex(GetKeyboardMainGrid(), 3, 5); break;
-            case KEY_LEFT_BRACKET: idx = MakeGridIndex(GetKeyboardMainGrid(), 4, 5); break;
-            case KEY_RIGHT_BRACKET: idx = MakeGridIndex(GetKeyboardMainGrid(), 5, 5); break;
-            case KEY_APOSTROPHE: idx = MakeGridIndex(GetKeyboardMainGrid(), 6, 5); break;
-            case KEY_BACKSLASH: idx = MakeGridIndex(GetKeyboardMainGrid(), 7, 5); break;
-            case KEY_LEFT_ALT:
-            case KEY_RIGHT_ALT:
-                idx = MakeGridIndex(GetKeyboardMainGrid(), 8, 5);
-                break;
-            case KEY_COMMA: idx = MakeGridIndex(GetKeyboardMainGrid(), 9, 5); break;
-
-            case KEY_PERIOD:
-                return RectFromAtlasPixels(5, 323, 32, 33, texW, texH);
-
-            case KEY_ENTER:
-                return RectFromAtlasPixels(162, 372, 34, 33, texW, texH);
-            case KEY_ESCAPE:
-                return RectFromAtlasPixels(5, 424, 32, 33, texW, texH);
-            case KEY_TAB:
-                return RectFromAtlasPixels(213, 477, 34, 33, texW, texH);
-            case KEY_BACKSPACE:
-                return RectFromAtlasPixels(317, 477, 32, 33, texW, texH);
-            case KEY_INSERT:
-                return RectFromAtlasPixels(265, 477, 32, 33, texW, texH);
-            case KEY_DELETE:
-                return RectFromAtlasPixels(317, 424, 32, 33, texW, texH);
-
-            case KEY_LEFT:
-                return RectFromAtlasPixels(5, 477, 32, 33, texW, texH);
-            case KEY_RIGHT:
-                return RectFromAtlasPixels(57, 477, 32, 33, texW, texH);
-            case KEY_UP:
-                return RectFromAtlasPixels(421, 424, 32, 33, texW, texH);
-            case KEY_DOWN:
-                return RectFromAtlasPixels(473, 424, 32, 33, texW, texH);
-
-            case KEY_PAGE_UP:
-                return RectFromAtlasPixels(213, 424, 32, 33, texW, texH);
-            case KEY_PAGE_DOWN:
-                return RectFromAtlasPixels(161, 424, 32, 33, texW, texH);
-            case KEY_HOME:
-                return RectFromAtlasPixels(161, 477, 32, 33, texW, texH);
-            case KEY_END:
-                return RectFromAtlasPixels(109, 424, 32, 33, texW, texH);
-
-            case KEY_CAPS_LOCK:
-                return RectFromAtlasPixels(473, 372, 39, 33, texW, texH);
-            case KEY_LEFT_SHIFT:
-                return RectFromAtlasPixels(317, 372, 44, 33, texW, texH);
-            case KEY_RIGHT_SHIFT:
-                return RectFromAtlasPixels(369, 372, 44, 33, texW, texH);
-            case KEY_LEFT_CONTROL:
-            case KEY_RIGHT_CONTROL:
-                return RectFromAtlasPixels(57, 424, 32, 33, texW, texH);
-            case KEY_SPACE:
-                return RectFromAtlasPixels(369, 424, 47, 33, texW, texH);
-
-            default:
-                return {};
+    static const char* MouseButtonToLabel(s32 button) {
+        switch (button) {
+            case MouseBtn::Left: return "Mouse1";
+            case MouseBtn::Right: return "Mouse2";
+            case MouseBtn::Middle: return "Mouse3";
+            default: return nullptr;
         }
-        return RectFromGridIndex(idx, texW, texH);
+    }
+
+    static const s16 kKeyboardAtlasCols = 16;
+    static const s16 kKeyboardAtlasRows = 8;
+
+    static PromptRect KeyboardRectByIndex(s16 index, s32 texW, s32 texH) {
+        if (index < 0) {
+            return {};
+        }
+
+        const s16 maxCells = (s16)(kKeyboardAtlasCols * kKeyboardAtlasRows);
+        if (index >= maxCells) {
+            return {};
+        }
+
+        const s16 col = (s16)(index % kKeyboardAtlasCols);
+        const s16 row = (s16)(index / kKeyboardAtlasCols);
+        return RectFromUniformGrid(col, row, kKeyboardAtlasCols, kKeyboardAtlasRows, texW, texH);
+    }
+
+    static s16 KeyToAtlasIndex(s32 key) {
+        // Keep this in keycode declaration order so atlas slots match key enum order.
+        switch (key) {
+            case KEY_SPACE: return 0;
+            case KEY_APOSTROPHE: return 1;
+            case KEY_COMMA: return 2;
+            case KEY_MINUS: return 3;
+            case KEY_PERIOD: return 4;
+            case KEY_SLASH: return 5;
+            case KEY_0: return 6;
+            case KEY_1: return 7;
+            case KEY_2: return 8;
+            case KEY_3: return 9;
+            case KEY_4: return 10;
+            case KEY_5: return 11;
+            case KEY_6: return 12;
+            case KEY_7: return 13;
+            case KEY_8: return 14;
+            case KEY_9: return 15;
+            case KEY_SEMICOLON: return 16;
+            case KEY_EQUAL: return 17;
+            case KEY_A: return 18;
+            case KEY_B: return 19;
+            case KEY_C: return 20;
+            case KEY_D: return 21;
+            case KEY_E: return 22;
+            case KEY_F: return 23;
+            case KEY_G: return 24;
+            case KEY_H: return 25;
+            case KEY_I: return 26;
+            case KEY_J: return 27;
+            case KEY_K: return 28;
+            case KEY_L: return 29;
+            case KEY_M: return 30;
+            case KEY_N: return 31;
+            case KEY_O: return 32;
+            case KEY_P: return 33;
+            case KEY_Q: return 34;
+            case KEY_R: return 35;
+            case KEY_S: return 36;
+            case KEY_T: return 37;
+            case KEY_U: return 38;
+            case KEY_V: return 39;
+            case KEY_W: return 40;
+            case KEY_X: return 41;
+            case KEY_Y: return 42;
+            case KEY_Z: return 43;
+            case KEY_LEFT_BRACKET: return 44;
+            case KEY_BACKSLASH: return 45;
+            case KEY_RIGHT_BRACKET: return 46;
+            case KEY_GRAVE: return 47;
+            case KEY_ESCAPE: return 48;
+            case KEY_ENTER: return 49;
+            case KEY_TAB: return 50;
+            case KEY_BACKSPACE: return 51;
+            case KEY_INSERT: return 52;
+            case KEY_DELETE: return 53;
+            case KEY_RIGHT: return 54;
+            case KEY_LEFT: return 55;
+            case KEY_DOWN: return 56;
+            case KEY_UP: return 57;
+            case KEY_PAGE_UP: return 58;
+            case KEY_PAGE_DOWN: return 59;
+            case KEY_HOME: return 60;
+            case KEY_END: return 61;
+            case KEY_CAPS_LOCK: return 62;
+            case KEY_F1: return 63;
+            case KEY_F2: return 64;
+            case KEY_F3: return 65;
+            case KEY_F4: return 66;
+            case KEY_F5: return 67;
+            case KEY_F6: return 68;
+            case KEY_F7: return 69;
+            case KEY_F8: return 70;
+            case KEY_F9: return 71;
+            case KEY_F10: return 72;
+            case KEY_F11: return 73;
+            case KEY_F12: return 74;
+            case KEY_KP_0: return 75;
+            case KEY_KP_1: return 76;
+            case KEY_KP_2: return 77;
+            case KEY_KP_3: return 78;
+            case KEY_KP_4: return 79;
+            case KEY_KP_5: return 80;
+            case KEY_KP_6: return 81;
+            case KEY_KP_7: return 82;
+            case KEY_KP_8: return 83;
+            case KEY_KP_9: return 84;
+            case KEY_KP_DECIMAL: return 85;
+            case KEY_KP_DIVIDE: return 86;
+            case KEY_KP_MULTIPLY: return 87;
+            case KEY_KP_SUBTRACT: return 88;
+            case KEY_KP_ADD: return 89;
+            case KEY_KP_ENTER: return 90;
+            case KEY_KP_EQUAL: return 91;
+            case KEY_LEFT_SHIFT: return 92;
+            case KEY_LEFT_CONTROL: return 93;
+            case KEY_LEFT_ALT: return 94;
+            case KEY_RIGHT_SHIFT: return 95;
+            case KEY_RIGHT_CONTROL: return 96;
+            case KEY_RIGHT_ALT: return 97;
+            default: return -1;
+        }
+    }
+
+    static s16 MouseButtonToAtlasIndex(s32 button) {
+        switch (button) {
+            case MouseBtn::Left: return 112;
+            case MouseBtn::Middle: return 113;
+            case MouseBtn::Right: return 114;
+            default: return -1;
+        }
+    }
+
+    static PromptRect KeyToRect(s32 key, s32 texW, s32 texH) {
+        return KeyboardRectByIndex(KeyToAtlasIndex(key), texW, texH);
     }
 
     static PromptRect GamepadButtonToRect(s32 button, s32 texW, s32 texH) {
@@ -437,6 +581,10 @@ private:
         return RectFromGridIndex(idx, texW, texH);
     }
 
+    static PromptRect MouseButtonToRect(s32 button, s32 texW, s32 texH) {
+        return KeyboardRectByIndex(MouseButtonToAtlasIndex(button), texW, texH);
+    }
+
     static PromptGridIndex MakeGridIndex(const PromptGrid& grid, s16 col, s16 row) {
         PromptGridIndex idx;
         idx.grid = &grid;
@@ -454,10 +602,17 @@ private:
         const f32 scaleX = (f32)texW / (f32)grid.baseTexW;
         const f32 scaleY = (f32)texH / (f32)grid.baseTexH;
 
-        s32 x = (s32)(((f32)grid.originX + (f32)idx.col * (f32)grid.stepX) * scaleX + 0.5f);
-        s32 y = (s32)(((f32)grid.originY + (f32)idx.row * (f32)grid.stepY) * scaleY + 0.5f);
-        s32 w = (s32)((f32)grid.cellW * scaleX + 0.5f);
-        s32 h = (s32)((f32)grid.cellH * scaleY + 0.5f);
+        const f32 baseX0 = (f32)grid.originX + (f32)idx.col * (f32)grid.stepX;
+        const f32 baseY0 = (f32)grid.originY + (f32)idx.row * (f32)grid.stepY;
+        const f32 baseX1 = baseX0 + (f32)grid.cellW;
+        const f32 baseY1 = baseY0 + (f32)grid.cellH;
+
+        s32 x = (s32)(baseX0 * scaleX + 0.5f);
+        s32 y = (s32)(baseY0 * scaleY + 0.5f);
+        s32 x1 = (s32)(baseX1 * scaleX + 0.5f);
+        s32 y1 = (s32)(baseY1 * scaleY + 0.5f);
+        s32 w = x1 - x;
+        s32 h = y1 - y;
 
         if (x < 0) x = 0;
         if (y < 0) y = 0;
@@ -478,33 +633,28 @@ private:
         return out;
     }
 
-    static PromptRect RectFromAtlasPixels(s16 baseX, s16 baseY, s16 baseW, s16 baseH, s32 texW, s32 texH) {
-        if (texW <= 0 || texH <= 0 || baseW <= 0 || baseH <= 0) {
+    static PromptRect RectFromUniformGrid(s16 col, s16 row, s16 cols, s16 rows, s32 texW, s32 texH) {
+        if (cols <= 0 || rows <= 0 || texW <= 0 || texH <= 0) {
+            return {};
+        }
+        if (col < 0 || col >= cols || row < 0 || row >= rows) {
             return {};
         }
 
-        const f32 scaleX = (f32)texW / 512.0f;
-        const f32 scaleY = (f32)texH / 512.0f;
+        const s32 x0 = (s32)(((s64)col * texW) / cols);
+        const s32 y0 = (s32)(((s64)row * texH) / rows);
+        const s32 x1 = (s32)(((s64)(col + 1) * texW) / cols);
+        const s32 y1 = (s32)(((s64)(row + 1) * texH) / rows);
 
-        s32 x = (s32)((f32)baseX * scaleX + 0.5f);
-        s32 y = (s32)((f32)baseY * scaleY + 0.5f);
-        s32 w = (s32)((f32)baseW * scaleX + 0.5f);
-        s32 h = (s32)((f32)baseH * scaleY + 0.5f);
-
-        if (x < 0) x = 0;
-        if (y < 0) y = 0;
-        if (x >= texW || y >= texH) {
-            return {};
-        }
-        if (x + w > texW) w = texW - x;
-        if (y + h > texH) h = texH - y;
+        s32 w = x1 - x0;
+        s32 h = y1 - y0;
         if (w <= 0 || h <= 0) {
             return {};
         }
 
         PromptRect out;
-        out.x = (s16)x;
-        out.y = (s16)y;
+        out.x = (s16)x0;
+        out.y = (s16)y0;
         out.w = (s16)w;
         out.h = (s16)h;
         return out;
@@ -536,16 +686,6 @@ private:
             4, 1350,
             120, 121,
             120, 121
-        };
-        return grid;
-    }
-
-    static const PromptGrid& GetKeyboardMainGrid() {
-        static const PromptGrid grid = {
-            512, 512,
-            5, 5,
-            32, 32,
-            52, 53
         };
         return grid;
     }

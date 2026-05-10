@@ -681,9 +681,9 @@ void Camera::DebugCam() {
         camAngleX -= (s32)(mdy * MOUSE_SENSITIVITY);
     }
 
-    s32 speed = 4000;
+    s32 speed = 125;
     if (p3d::input->IsKeyDown(KEY_LEFT_SHIFT)) {
-        speed = 14000;
+        speed = 300;
     }
 
     s32 ddx = 0;
