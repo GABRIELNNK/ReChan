@@ -3,6 +3,7 @@
 #include "gen/particle.h"
 
 #include "gen/camera.h"
+#include "gen/model.h"
 #include "gen/weffect.h"
 
 #include "p3d/context.h"
@@ -201,6 +202,16 @@ static s32 Reciprocal16(s32 value) {
     }
 
     return rmDiv16i(0x10000, value);
+}
+
+static bool ParticleGeoEligible(const OriginalGeo* geo) {
+    return geo
+        && geo->meshBuffer
+        && geo->dynamicVerts
+        && geo->dynamicVertCount > 0
+        && geo->dynamicPrimStart
+        && geo->dynamicPrimVertCount
+        && geo->dynamicPrimCount > 0;
 }
 
 static void BuildParticleScaleMatrix(s32 scale, Mat4& out) {
@@ -431,17 +442,17 @@ s32 ParticleSystem::ParseData(const u8* body, u32 bodySize) {
         }
         else if (tag == 0x0840) {
             if (readLongAt(0) != 0) {
-                flags |= 0x1000u;
+                flags |= 2u;
             }
         }
         else if (tag == 0x0850) {
             if (readLongAt(0) != 0) {
-                flags |= 0x4000u;
+                flags |= 0x1000u;
             }
         }
         else if (tag == 0x0860) {
             if (readLongAt(0) != 0) {
-                flags |= 2u;
+                flags |= 0x4000u;
             }
         }
         else if (tag == 0x0870) {
@@ -519,20 +530,26 @@ s32 ParticleSystem::AnalyzeMesh() {
             return 0;
         }
 
-        meshEntryCount = static_cast<u16>(geoCount);
+        u16 entryCount = 0;
 
         for (s32 i = 0; i < geoCount; i++) {
-            meshEntries[i].geoIndex = static_cast<u16>(i);
-            meshEntries[i].localMatrix = Mat4();
-
             OriginalGeo* geo = nullptr;
             Mat4 localMatrix = Mat4();
-            if (stats->comEffect->ResolveGeoByIndex(static_cast<u32>(i), &geo, &localMatrix) && geo) {
-                meshEntries[i].localMatrix = localMatrix;
+            if (!stats->comEffect->ResolveGeoByIndex(static_cast<u32>(i), &geo, &localMatrix) || !geo) {
+                continue;
             }
+
+            if (!ParticleGeoEligible(geo)) {
+                continue;
+            }
+
+            meshEntries[entryCount].geoIndex = static_cast<u16>(i);
+            meshEntries[entryCount].localMatrix = localMatrix;
+            entryCount++;
         }
 
-        return geoCount;
+        meshEntryCount = entryCount;
+        return meshEntryCount;
     }
 
     if (geoCount <= 0 || geoCount >= 33) {
@@ -662,9 +679,9 @@ s32 ParticleSystem::CreateParticles(const LVector& origin, ParticleStats* overri
         return 0;
     }
 
-    s32 created = 0;
+    s32 pendingCount = 0;
 
-    while (created < static_cast<s32>(stats->spawnPerBurst)) {
+    while (pendingCount < static_cast<s32>(stats->spawnPerBurst)) {
         if (!g_particleAvailList.head) {
             break;
         }
@@ -675,22 +692,26 @@ s32 ParticleSystem::CreateParticles(const LVector& origin, ParticleStats* overri
         }
 
         particleList->AddNodeTail(info);
-        created++;
+        pendingCount++;
     }
 
-    s32 pendingInitCount = 0;
-    for (ccMinNode* node = particleList->head; node; node = node->next) {
-        ParticleInfo* info = static_cast<ParticleInfo*>(node);
-        if (info->life == 0) {
-            pendingInitCount++;
+    if (pendingCount < static_cast<s32>(stats->spawnPerBurst) && particleList->head) {
+        for (ccMinNode* node = particleList->head; node; node = node->next) {
+            ParticleInfo* info = static_cast<ParticleInfo*>(node);
+            if (info->life == 0) {
+                pendingCount++;
+                if (pendingCount >= static_cast<s32>(stats->spawnPerBurst)) {
+                    break;
+                }
+            }
         }
     }
 
-    if (pendingInitCount > 0) {
+    if (pendingCount > 0) {
         InitParticles(origin);
     }
 
-    return created;
+    return pendingCount;
 }
 
 s32 ParticleSystem::InitParticles(const LVector& origin) {
@@ -720,14 +741,7 @@ s32 ParticleSystem::InitParticles(const LVector& origin) {
         info->active = 0;
 
         const s32 lifeRand = static_cast<s32>((static_cast<s64>(RandomSigned16()) * stats->lifeRange) >> 16);
-        s32 life = static_cast<s32>(stats->lifeBase) + lifeRand;
-        if (life < 0) {
-            life = 0;
-        }
-        if (life > 255) {
-            life = 255;
-        }
-        info->life = static_cast<u8>(life);
+        info->life = static_cast<u8>(static_cast<s32>(stats->lifeBase) + lifeRand);
 
         info->posX = origin.x;
         info->posY = origin.y;
@@ -831,7 +845,7 @@ s32 ParticleSystem::InitParticles(const LVector& origin) {
         }
 
         if ((stats->flags & 0x8000u) != 0u && meshFrameMask != 0) {
-            info->meshIndex = static_cast<u16>(rmRangedRandom(0x1FFFFu) & meshFrameMask);
+            info->meshIndex = static_cast<u16>(RandomSigned16() & static_cast<s32>(meshFrameMask));
         }
     }
 
@@ -850,10 +864,12 @@ s32 ParticleSystem::Update() {
     averagePos.z = 0;
 
     s32 activeCount = 0;
+    bool hadAnyNode = false;
 
     for (ccMinNode* node = particleList->head; node;) {
         ParticleInfo* info = static_cast<ParticleInfo*>(node);
         node = node->next;
+        hadAnyNode = true;
 
         if (info->life == 0) {
             info->active = 0;
@@ -936,12 +952,9 @@ s32 ParticleSystem::Update() {
         averagePos = basePos;
     }
 
-    if (activeCount == 0) {
+    if (!hadAnyNode) {
         if (freeLife == 0) {
             activeFlag = 0;
-        }
-        else {
-            freeLife--;
         }
     }
 
@@ -957,27 +970,33 @@ void ParticleSystem::Display() {
 
     u32 renderFlags = ((stats->flags & 0x800u) != 0u) ? 0x800u : 0u;
     if ((stats->flags & 0x10000u) != 0u) {
-        renderFlags |= 0x800000u;
-        stats->comEffect->InitFastRender();
+        stats->comEffect->InitFastRender(stats->comEffect->GetGeo());
+        if (stats->comEffect->FastRenderReady()) {
+            renderFlags |= 0x800000u;
+        }
     }
 
     const bool billboard = (stats->flags & 8u) != 0u;
     const Mat4& parentWorld = p3d::context->GetWorldMatrix();
 
-    LVector cullPos = averagePos;
-    if (displayOffset) {
-        cullPos.x += displayOffset->x;
-        cullPos.y += displayOffset->y;
-        cullPos.z += displayOffset->z;
-    }
-    else {
-        cullPos.x += static_cast<s32>(parentWorld.m[12]);
-        cullPos.y += static_cast<s32>(parentWorld.m[13]);
-        cullPos.z += static_cast<s32>(parentWorld.m[14]);
-    }
+    const LVector cullPos = {
+        averagePos.x + static_cast<s32>(parentWorld.m[12]),
+        averagePos.y + static_cast<s32>(parentWorld.m[13]),
+        averagePos.z + static_cast<s32>(parentWorld.m[14]),
+    };
 
     if (!stats->comEffect->PointInView(cullPos, 512)) {
         return;
+    }
+
+    Mat4 billboardMatrix;
+    if (billboard) {
+        const LVector billboardPos = {
+            averagePos.x + static_cast<s32>(parentWorld.m[12]),
+            averagePos.y + static_cast<s32>(parentWorld.m[13]),
+            averagePos.z + static_cast<s32>(parentWorld.m[14]),
+        };
+        BuildBillboardMatrixPSX(billboardPos, billboardMatrix, false);
     }
 
     for (ccMinNode* node = particleList->head; node; node = node->next) {
@@ -1017,14 +1036,6 @@ void ParticleSystem::Display() {
         }
 
         if (billboard) {
-            LVector billboardPos = renderPos;
-            billboardPos.x += static_cast<s32>(parentWorld.m[12]);
-            billboardPos.y += static_cast<s32>(parentWorld.m[13]);
-            billboardPos.z += static_cast<s32>(parentWorld.m[14]);
-
-            Mat4 billboardMatrix;
-            BuildBillboardMatrixPSX(billboardPos, billboardMatrix, false);
-
             if (angle16 != 0) {
                 PreMultiplyRotZ(world, angle16);
             }
@@ -1034,41 +1045,44 @@ void ParticleSystem::Display() {
 
         p3dFillTransMatrix(renderPos, world);
 
+        Mat4 particleWorld = world;
+
         if ((stats->flags & 0x10u) != 0u && meshEntries && meshEntryCount > 0) {
             const u16 meshIndex = static_cast<u16>(info->meshIndex % meshEntryCount);
             const ParticleMeshEntry& entry = meshEntries[meshIndex];
 
-            Mat4 entryWorld = world * entry.localMatrix;
-            if (!stats->comEffect->RenderGeoByIndex(entry.geoIndex, entryWorld, renderFlags)) {
-                stats->comEffect->SetFrame(info->animFrame);
-                stats->comEffect->Render(entryWorld, renderFlags);
-            }
+            Mat4 entryWorld = particleWorld * entry.localMatrix;
+            stats->comEffect->RenderGeoByIndex(entry.geoIndex, entryWorld, renderFlags);
             continue;
         }
 
-        if ((stats->flags & 0x4000u) != 0u && stats->fastRenderInfo) {
-            u32* swapWord = static_cast<u32*>(stats->fastRenderInfo);
-            const u32 previousWord = *swapWord;
-            *swapWord = stats->fastRenderValue;
+        if ((stats->flags & 0x4000u) != 0u && stats->comEffect) {
 
-            stats->comEffect->SetFrame(info->animFrame);
-            stats->comEffect->Render(world, renderFlags);
+            if (!stats->fastRenderInfo) {
+                stats->fastRenderInfo = static_cast<void*>(stats->comEffect->GetGeoSwapWordSlot(0));
+            }
 
-            *swapWord = previousWord;
-            continue;
+            if (stats->fastRenderInfo) {
+                u32* swapWord = static_cast<u32*>(stats->fastRenderInfo);
+                stats->comEffect->SetFrame(info->animFrame);
+                const u32 previousWord = *swapWord;
+                *swapWord = stats->fastRenderValue;
+
+                stats->comEffect->Render(particleWorld, renderFlags);
+
+                *swapWord = previousWord;
+                continue;
+            }
         }
 
         if ((stats->flags & 0x8000u) != 0u && meshFrameList) {
             const u32 geoIndex = meshFrameList[info->meshIndex & meshFrameMask];
-            if (!stats->comEffect->RenderGeoByIndex(geoIndex, world, renderFlags)) {
-                stats->comEffect->SetFrame(info->animFrame);
-                stats->comEffect->Render(world, renderFlags);
-            }
+            stats->comEffect->RenderGeoByIndex(geoIndex, particleWorld, renderFlags);
             continue;
         }
 
         stats->comEffect->SetFrame(info->animFrame);
-        stats->comEffect->Render(world, renderFlags);
+        stats->comEffect->Render(particleWorld, renderFlags);
     }
 
     if ((stats->flags & 0x10000u) != 0u) {
@@ -1098,6 +1112,28 @@ s32 ParticleSystem_LoadChunk(const u8* body, u32 bodySize) {
 
     system->activeFlag = 1;
     system->ParseData(body, bodySize);
+
+    if (system->stats) {
+        const char* particleName = system->GetName();
+        const u32 effectHash = system->stats->comEffect ? system->stats->comEffect->resourceHash : 0;
+        const u32 animHash = system->stats->comEffect ? system->stats->comEffect->miscAnimHash : 0;
+        LOG("[Particle] load hash=0x%08X name=%s flags=0x%08X effect=0x%08X anim=0x%08X life=(%u,%u) spawn=%u maxActive=%u maxParticles=%u scale=(%d,%d) dir=(%d,%d) fast=0x%08X",
+            system->nameCRC,
+            particleName ? particleName : "",
+            system->stats->flags,
+            effectHash,
+            animHash,
+            system->stats->lifeBase,
+            system->stats->lifeRange,
+            system->stats->spawnPerBurst,
+            system->stats->maxActive,
+            system->stats->maxParticles,
+            system->stats->scaleBase,
+            system->stats->scaleRange,
+            system->stats->dirX,
+            system->stats->dirY,
+            system->stats->fastRenderValue);
+    }
 
     if (system->stats && (system->stats->flags & 0x4000u) != 0u && system->stats->comEffect) {
         system->stats->fastRenderInfo = static_cast<void*>(system->stats->comEffect->GetGeoSwapWordSlot(0));

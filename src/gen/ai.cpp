@@ -5,6 +5,7 @@
 #include "gen/envmgr.h"
 #include "gen/charmgr.h"
 #include "gen/model.h"
+#include "gen/deadpool.h"
 #include "gen/animstruct.h"
 #include "gen/scoremgr.h"
 #include "gen/blockmgr.h"
@@ -372,8 +373,14 @@ void AI::AddThingNoTagList(const char* name, u16 type,
             else if (type == AITypes::TT_EXPLOSIVE || type == AITypes::TT_EXPLOSIVE_OBJ) {
                 thing = new Explosive(pos, type);
             }
-            else if (type == AITypes::TT_DESTRUCTIBLE || type == AITypes::TT_DESTRUCTIBLE_DP) {
+            else if (type == AITypes::TT_DESTRUCTIBLE) {
                 thing = new DestructibleThing(pos, type);
+            }
+            else if (type == AITypes::TT_DESTRUCTIBLE_DP) {
+                const u32 uidHash = p3dHash(name);
+                if (!levelDeadPool.IsUIDInDeadPool(uidHash)) {
+                    thing = new DestructibleThing(pos, type);
+                }
             }
             else if (type == AITypes::TT_CRUSHER) {
                 thing = new Crusher(pos, type);

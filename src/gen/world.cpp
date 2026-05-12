@@ -11,6 +11,7 @@
 #include "gen/envmgr.h"
 #include "gen/game.h"
 #include "gen/blockmgr.h"
+#include "gen/deadpool.h"
 #include "gen/geometry.h"
 #include "gen/effects.h"
 #include "gen/geffect.h"
@@ -3925,10 +3926,11 @@ void World::ResetLevel() {
         Player::s_player->checkpoint.SetValidState(0);
     }
 
-    // PSX also resets dead pool state here.
     if (g_director) {
         g_director->LevelReset();
     }
+
+    levelDeadPool.InternalReset();
 }
 
 // PSX: LevelMenuExecute__5WorldP10hdMenuItem (WORLD.CPP:868, 0x80045634)

@@ -451,11 +451,15 @@ void hdHits::SetVisible(s32 /*vis*/) {
 }
 
 // PSX: DoScoreTally__7hdTallyPcb (HDITEM.CPP:794, 0x800900A0)
-static s32 DoScoreTally(hdTally* tally, char* scoreBuf, bool fastForward) {
+static s32 DoScoreTally(hdTally* tally, char* scoreBuf, s32 scoreBufLen, bool fastForward) {
     MARKFUNCTION(0x800900A0);
 
+    if (!scoreBuf || scoreBufLen <= 0) {
+        return 1;
+    }
+
     if (fastForward) {
-        std::snprintf(scoreBuf, 12, "%d", tally->targetScore);
+        std::snprintf(scoreBuf, (size_t)scoreBufLen, "%d", tally->targetScore);
         return 1;
     }
 
@@ -476,7 +480,7 @@ static s32 DoScoreTally(hdTally* tally, char* scoreBuf, bool fastForward) {
         tally->currentScore = current + 451;
     }
 
-    std::snprintf(scoreBuf, 12, "%d", tally->currentScore);
+    std::snprintf(scoreBuf, (size_t)scoreBufLen, "%d", tally->currentScore);
     return 0;
 }
 
@@ -498,7 +502,7 @@ static s32 UpdateCombo(hdTally* tally, bool fastForward) {
         }
     }
 
-    if (tally->frameCounter == 0 && DoScoreTally(tally, tally->comboScoreBuf, fastForward)) {
+    if (tally->frameCounter == 0 && DoScoreTally(tally, tally->comboScoreBuf, (s32)sizeof(tally->comboScoreBuf), fastForward)) {
         if (g_frontEndSound) {
             g_frontEndSound->ProcessSoundEvent(27);
         }
@@ -527,7 +531,7 @@ static s32 UpdateFight(hdTally* tally, bool fastForward) {
         }
     }
 
-    if (tally->frameCounter == 0 && DoScoreTally(tally, tally->fightScoreBuf, fastForward)) {
+    if (tally->frameCounter == 0 && DoScoreTally(tally, tally->fightScoreBuf, (s32)sizeof(tally->fightScoreBuf), fastForward)) {
         if (g_frontEndSound) {
             g_frontEndSound->ProcessSoundEvent(29);
         }
@@ -557,7 +561,7 @@ static s32 UpdateStyle(hdTally* tally, bool fastForward) {
         }
     }
 
-    if (tally->frameCounter == 0 && DoScoreTally(tally, tally->styleScoreBuf, fastForward)) {
+    if (tally->frameCounter == 0 && DoScoreTally(tally, tally->styleScoreBuf, (s32)sizeof(tally->styleScoreBuf), fastForward)) {
         if (tally->delayCounter == 15 && g_frontEndSound) {
             g_frontEndSound->ProcessSoundEvent(31);
         }
@@ -784,36 +788,36 @@ void hdTally::Init(oxScreenManager* scrmgr) {
 
     if (comboOvl.overlay && rawData) {
         xcTextPrim* tp;
-        tp = (xcTextPrim*)comboOvl.overlay->GetTextObj(0xB4B3B4F7, rawData);
+        tp = (xcTextPrim*)comboOvl.overlay->GetTextObj(0xB4B11177, rawData);
         if (tp) {
             tp->StringHashes()[tp->paletteIdx] = xcRegisterRuntimeString(fightScoreBuf);
         }
-        tp = (xcTextPrim*)comboOvl.overlay->GetTextObj(0xA0D90F75, rawData);
+        tp = (xcTextPrim*)comboOvl.overlay->GetTextObj(0xA04AB9F5, rawData);
         if (tp) {
             tp->StringHashes()[tp->paletteIdx] = xcRegisterRuntimeString(comboScoreBuf);
         }
-        tp = (xcTextPrim*)comboOvl.overlay->GetTextObj(0x37B9FCA6, rawData);
+        tp = (xcTextPrim*)comboOvl.overlay->GetTextObj(0x37B46CB6, rawData);
         if (tp) {
             tp->StringHashes()[tp->paletteIdx] = xcRegisterRuntimeString(styleScoreBuf);
         }
     }
 
     if (rdragonOvl.overlay && rawData) {
-        xcTextPrim* tp = (xcTextPrim*)rdragonOvl.overlay->GetTextObj(0x7AB6E4C0, rawData);
+        xcTextPrim* tp = (xcTextPrim*)rdragonOvl.overlay->GetTextObj(0x7ABBECC0, rawData);
         if (tp) {
             tp->StringHashes()[tp->paletteIdx] = xcRegisterRuntimeString(rdragonBuf);
         }
     }
 
     if (gdragonOvl.overlay && rawData) {
-        xcTextPrim* tp = (xcTextPrim*)gdragonOvl.overlay->GetTextObj(0x7AB6E4C0, rawData);
+        xcTextPrim* tp = (xcTextPrim*)gdragonOvl.overlay->GetTextObj(0x7ABBECC0, rawData);
         if (tp) {
             tp->StringHashes()[tp->paletteIdx] = xcRegisterRuntimeString(gdragonBuf);
         }
     }
 
     if (fightOvl.overlay && rawData) {
-        doneTextPrim = (xcTextPrim*)fightOvl.overlay->GetTextObj(0xCFC98BEA, rawData);
+        doneTextPrim = (xcTextPrim*)fightOvl.overlay->GetTextObj(0xCFCAFC6A, rawData);
     }
 
     Show(0);

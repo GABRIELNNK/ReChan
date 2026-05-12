@@ -1,9 +1,15 @@
 #include "common.h"
 #include "gen/director.h"
 #include "gen/ai.h"
+#include "gen/animmat.h"
+#include "gen/cammgr.h"
 #include "gen/effects.h"
+#include "gen/geffect.h"
+#include "gen/deadpool.h"
 #include "gen/model.h"
+#include "gen/weffect.h"
 #include "ai/behaviour.h"
+#include "ai/destroy.h"
 #include "ai/obstacle.h"
 #include "ai/humanoid.h"
 #include "ai/player.h"
@@ -46,6 +52,35 @@
     // the door/ladder from this global. SetCodeSnip stores the thing here via gp[869].
     static Thing*& g_selectedDoorOrLadder = g_codeSnipThing;
     static s32 g_dialogHandle = 0;          // PSX: gp[3496/4=874]
+    static s32 g_checkpointDataValue = 0;   // PSX: dword_800D6F90
+    static s32 g_checkpointBlockIndex = 0;  // PSX: gp+0xDA0 (source for opcodes 0x7B/0x7D)
+    static u8 g_checkpointPetalIndex = 0;   // PSX: gp+0xDA4 (0='a', 1='b', ...)
+
+    static constexpr u32 kDirectorMatrixEffectHash = 0x004CC954u;
+    static constexpr u32 kDirectorAttackEffectHash = 0x03E24164u;
+    static constexpr u32 kDirectorPosBEffectHash = 0x0B0E21C4u;
+    static constexpr u32 kDirectorNisEffectHash = 0x0FF877C4u;
+    static constexpr u32 kDirectorFallbackCheckpointHash = 0x0E6B6563u;
+
+    // PSX intro scripts pass these BOL overlay string virtual addresses into
+    // HudFunc 'M' (ShowBossHealth). We resolve them to the corresponding boss CRC.
+    static bool ResolveHudBossHashArg(u32 arg, u32* outBossHash) {
+        if (!outBossHash) {
+            return false;
+        }
+
+        switch (arg) {
+            case 0x8001FA34u: *outBossHash = 0x004A85A5u; return true; // intro_all_dante
+            case 0x8001FA4Cu: *outBossHash = 0x00049EB6u; return true; // intro_chef
+            case 0x8001FBF4u: *outBossHash = 0x004A36DEu; return true; // intro_clown
+            case 0x8001FD8Cu: *outBossHash = 0x048894C9u; return true; // intro_grontar
+            case 0x8001FEE4u: *outBossHash = 0x004B099Fu; return true; // intro_disco
+            default:
+                break;
+        }
+
+        return false;
+    }
 
     void runDirector(Handler* h);
     void DrawDirectorOverlays(Handler* h);
@@ -353,6 +388,30 @@
         268447933, 268447941, 268447951, 268497114, 268497124, 268542186, 268509435, 0
     };
 
+    // PSX: china NIS sound tables at 0x800D69E4/0x800D6A44/0x800D6A84.
+    // Packed format: high nibble event type, middle sound id, low 12 bits frame.
+    static s32 sndchina1[24] = {
+        0x1001200A, 0x2000B00B, 0x3000B05E, 0x20020062, 0x3002007B,
+        0x1000C096, 0x10088096, 0x1000C0AD, 0x100030AE, 0x100030B0,
+        0x100030B9, 0x100030C0, 0x100880C2, 0x100030E2, 0x100030F4,
+        0x1001B110, 0x1001B11A, 0x10003129, 0x10083130, 0x1001A14A,
+        0x1001A155, 0x1001A162, 0x1000316D, 0x00000000,
+    };
+
+    static s32 sndchina2[16] = {
+        0x10003001, 0x10003009, 0x1000700C, 0x1000300F, 0x10003020,
+        0x10003028, 0x1000302D, 0x1001A033, 0x1008303A, 0x10003050,
+        0x1001A05B, 0x1000B06F, 0x1000B075, 0x10003083, 0x10003086,
+        0x00000000,
+    };
+
+    static s32 sndchina3[18] = {
+        0x10003003, 0x1000300B, 0x10003013, 0x1000301B, 0x10003021,
+        0x10082034, 0x1001A04B, 0x1001A063, 0x1000B070, 0x1000307B,
+        0x10003080, 0x1000308D, 0x1001A091, 0x1001A09D, 0x100030B8,
+        0x100030C2, 0x100030C9, 0x00000000,
+    };
+
     // PSX: fade script at 0x800CC36C.
     // Called by victory_poor/ok/good/perfect before tally/dialog branches.
     static s32 fade[8] = {
@@ -503,6 +562,9 @@
         registerCompiledOverlayScript(0x800207D8u, sndvicgrontar, ScriptArrayWordCount(sndvicgrontar));
         registerCompiledOverlayScript(0x80020828u, sndvicclown, ScriptArrayWordCount(sndvicclown));
         registerCompiledOverlayScript(0x8002089Cu, sndvicdisco, ScriptArrayWordCount(sndvicdisco));
+        registerCompiledOverlayScript(0x800D69E4u, sndchina1, ScriptArrayWordCount(sndchina1));
+        registerCompiledOverlayScript(0x800D6A44u, sndchina2, ScriptArrayWordCount(sndchina2));
+        registerCompiledOverlayScript(0x800D6A84u, sndchina3, ScriptArrayWordCount(sndchina3));
         registerCompiledOverlayScript(0x800208BCu, boss_setup, ScriptArrayWordCount(boss_setup));
         registerCompiledOverlayScript(0x80020904u, boss_genericStartNIS, ScriptArrayWordCount(boss_genericStartNIS));
         registerCompiledOverlayScript(0x80020918u, boss_victory_widescreen, ScriptArrayWordCount(boss_victory_widescreen));
@@ -734,6 +796,37 @@
         }
 
         return g_game->GetWorld()->GetCurLevelID();
+    }
+
+    static s32 checkPoint(const LVector& pos, s32 blockNum);
+
+    // PSX: setJackieCheckpoint__FUl (DIRECTOR.CPP:4697, 0x8003F138)
+    static s32 setJackieCheckpoint(u32 pointCRC) {
+        MARKFUNCTION(0x8003F138);
+
+        WorldPointNode* point = WorldPoints_GetNISPoint(pointCRC);
+        if (!point) {
+            return 0;
+        }
+
+        checkPoint(point->pos, point->parValue);
+        return 1;
+    }
+
+    // PSX: checkPoint__FR10tagLVectorl (DIRECTOR.CPP:4705, 0x8003F184)
+    static s32 checkPoint(const LVector& pos, s32 blockNum) {
+        MARKFUNCTION(0x8003F184);
+
+        if (!Player::s_player) {
+            return 0;
+        }
+
+        Player::s_player->OnCheckpoint();
+        Player::s_player->checkpoint.field0 = pos.x;
+        Player::s_player->checkpoint.field4 = pos.y;
+        Player::s_player->checkpoint.field8 = pos.z;
+        Player::s_player->checkpoint.field24 = blockNum;
+        return blockNum;
     }
 
     // PSX: sets Thing::flags bit 0x200 on all humanoids during script processing.
@@ -1054,7 +1147,13 @@ void Director::Process() {
 
                 Humanoid* humanoid = FindHumanoidInHumanoidListByScriptRef(thingRef);
                 if (humanoid) {
-                    humanoid->FaceThing(nullptr, 0);
+                    Camera* camera = GetGameCamera();
+                    if (camera) {
+                        humanoid->FacePoint(camera->GetPosition(), 0);
+                    }
+                    else {
+                        ASSERT(false);
+                    }
                     humanoid->SetDesiredMoveDirection(humanoid->orientation.y);
                 }
                 else
@@ -1216,8 +1315,10 @@ void Director::Process() {
             {
                 // PSX: reads UID, calls setJackieCheckpoint(uid).
                 // If checkpoint set fails, calls OnCheckpoint as fallback.
+                const u32 pointCRC = static_cast<u32>(scriptPtr[1]);
                 scriptPtr += 2;
-                if (Player::s_player) {
+
+                if (!setJackieCheckpoint(pointCRC) && Player::s_player) {
                     Player::s_player->OnCheckpoint();
                 }
                 break;
@@ -1225,6 +1326,7 @@ void Director::Process() {
 
             case DirectorOpcode::SetCheckpointData:
                 // PSX: dword_800D6F90 = scriptPtr[1] (checkpoint data value)
+                g_checkpointDataValue = scriptPtr[1];
                 scriptPtr += 2;
                 break;
 
@@ -1244,43 +1346,118 @@ void Director::Process() {
                 break;
 
             case DirectorOpcode::SpawnEffectFromMatrix:
-                scriptPtr += 4;
+            {
+                const u32 thingRef = static_cast<u32>(scriptPtr[1]);
+                scriptPtr += 2;
+
+                Humanoid* humanoid = FindHumanoidInHumanoidListByScriptRef(thingRef);
+                if (!humanoid) {
+                    scriptPtr += 1;
+                    break;
+                }
+
+                HumanoidModel* model = humanoid->model ? static_cast<HumanoidModel*>(humanoid->model) : nullptr;
+                AnimationMatrices* animMatrices = model ? model->animMatrices : nullptr;
+                const s32* matrix = animMatrices ? animMatrices->GetMatrix(0) : nullptr;
+                if (matrix) {
+                    const LVector pos = { matrix[5], matrix[6], matrix[7] };
+                    const s32 lifeFrames = *scriptPtr;
+                    scriptPtr += 1;
+                    GEffect_Create(kDirectorMatrixEffectHash, &pos, nullptr, nullptr, 0, lifeFrames, 0x80000001u);
+                }
                 break;
+            }
 
             case DirectorOpcode::SpawnEffectFromAttack:
+            {
+                const u32 thingRef = static_cast<u32>(scriptPtr[1]);
                 scriptPtr += 2;
+
+                Humanoid* humanoid = FindHumanoidInHumanoidListByScriptRef(thingRef);
+                if (!humanoid || !humanoid->model) {
+                    break;
+                }
+
+                HumanoidModel* model = static_cast<HumanoidModel*>(humanoid->model);
+                AnimationMatrices* animMatrices = model->animMatrices;
+                if (!animMatrices) {
+                    break;
+                }
+
+                LVector prev = {};
+                LVector cur = {};
+                animMatrices->GetAttack(0u, prev, cur);
+                GEffect_Create(kDirectorAttackEffectHash, &cur, nullptr, nullptr, 0, 0, 0x80000000u);
                 break;
+            }
 
             case DirectorOpcode::SpawnEffectAtPosA:
+            {
+                const LVector pos = { scriptPtr[1], scriptPtr[2], scriptPtr[3] };
                 scriptPtr += 4;
+                GEffect_Create(kDirectorAttackEffectHash, &pos, nullptr, nullptr, 0, 0, 0x80000000u);
                 break;
+            }
 
             case DirectorOpcode::SpawnEffectAtPosB:
+            {
+                const LVector pos = { scriptPtr[1], scriptPtr[2], scriptPtr[3] };
                 scriptPtr += 4;
+                GEffect_Create(kDirectorPosBEffectHash, &pos, nullptr, nullptr, 0, 25, 0);
                 break;
+            }
 
             case DirectorOpcode::SpawnEffectByUidAtPos:
+            {
+                const u32 effectHash = static_cast<u32>(scriptPtr[1]);
+                const LVector pos = { scriptPtr[2], scriptPtr[3], scriptPtr[4] };
                 scriptPtr += 5;
+                GEffect_Create(effectHash, &pos, nullptr, nullptr, 0, 0, 0);
                 break;
+            }
 
             case DirectorOpcode::SpawnFwEffectAtPos:
+            {
+                const u32 effectHash = static_cast<u32>(scriptPtr[1]);
+                const LVector pos = { scriptPtr[2], scriptPtr[3], scriptPtr[4] };
                 scriptPtr += 5;
+
+                FWEffect* fwEffect = FWEffect::Find(effectHash);
+                if (fwEffect) {
+                    const s32 savedPosX = fwEffect->pos.x;
+                    GEffect_Create(effectHash, &pos, nullptr, nullptr, 0, 0, 0);
+                    fwEffect->pos.x = savedPosX;
+                }
                 break;
+            }
 
             case DirectorOpcode::DestroyDestructible:
             {
                 const u32 thingRef = static_cast<u32>(scriptPtr[1]);
                 scriptPtr += 2;
 
-                Thing* thing = FindThingByScriptRef(thingRef);
-                if (thing) {
-                    thing->Kill();
+                // PSX: FindNodeCRC(list=88 moveList, ref), call DestructibleThing::Destroy,
+                // then set destroy flag (+128) and add UID to dead pool.
+                Thing* thing = nullptr;
+                if (g_ai) {
+                    thing = FindThingInListByScriptRef(g_ai->moveList, thingRef);
+                }
+
+                DestructibleThing* destructible = dynamic_cast<DestructibleThing*>(thing);
+                if (destructible) {
+                    destructible->Destroy();
+                    destructible->destroyFlag = 1;
+                    levelDeadPool.AddUID(destructible->nameCRC);
                 }
                 break;
             }
 
             case DirectorOpcode::RemoveNisEffect:
                 scriptPtr += 1;
+                if (WEffect* effect = WEffect::Find(kDirectorNisEffectHash)) {
+                    effect->pos.z -= 10000;
+                    effect->NISRemoveEffect();
+                }
                 break;
 
             case DirectorOpcode::SetPlayerFlag:
@@ -1357,7 +1534,13 @@ void Director::Process() {
             {
                 const u32 thingRef = static_cast<u32>(scriptPtr[1]);
                 scriptPtr += 2;
-                Thing* thing = FindThingByScriptRef(thingRef);
+
+                // PSX: FindNodeCRC(list=52 humanoidList, ref)
+                Thing* thing = nullptr;
+                if (g_ai) {
+                    thing = FindThingInListByScriptRef(g_ai->humanoidList, thingRef);
+                }
+
                 if (thing) {
                     thing->flags |= 0x8u;
                 }
@@ -1368,7 +1551,13 @@ void Director::Process() {
             {
                 const u32 thingRef = static_cast<u32>(scriptPtr[1]);
                 scriptPtr += 2;
-                Thing* thing = FindThingByScriptRef(thingRef);
+
+                // PSX: FindNodeCRC(list=52 humanoidList, ref)
+                Thing* thing = nullptr;
+                if (g_ai) {
+                    thing = FindThingInListByScriptRef(g_ai->humanoidList, thingRef);
+                }
+
                 if (thing) {
                     thing->flags |= 0x28u;
                 }
@@ -1379,7 +1568,13 @@ void Director::Process() {
             {
                 const u32 thingRef = static_cast<u32>(scriptPtr[1]);
                 scriptPtr += 2;
-                Thing* thing = FindThingByScriptRef(thingRef);
+
+                // PSX: FindNodeCRC(list=52 humanoidList, ref)
+                Thing* thing = nullptr;
+                if (g_ai) {
+                    thing = FindThingInListByScriptRef(g_ai->humanoidList, thingRef);
+                }
+
                 if (thing) {
                     thing->flags &= ~0x28u;
                     thing->Kill();
@@ -1388,11 +1583,32 @@ void Director::Process() {
             }
 
             case DirectorOpcode::KillThingType52:
+            {
+                const u32 thingRef = static_cast<u32>(scriptPtr[1]);
+                scriptPtr += 2;
+
+                // PSX: FindNodeCRC(list=52 humanoidList, ref)
+                Thing* thing = nullptr;
+                if (g_ai) {
+                    thing = FindThingInListByScriptRef(g_ai->humanoidList, thingRef);
+                }
+                if (thing) {
+                    thing->Kill();
+                }
+                break;
+            }
+
             case DirectorOpcode::KillThingType88:
             {
                 const u32 thingRef = static_cast<u32>(scriptPtr[1]);
                 scriptPtr += 2;
-                Thing* thing = FindThingByScriptRef(thingRef);
+
+                // PSX: FindNodeCRC(list=88 moveList, ref)
+                Thing* thing = nullptr;
+                if (g_ai) {
+                    thing = FindThingInListByScriptRef(g_ai->moveList, thingRef);
+                }
+
                 if (thing) {
                     thing->Kill();
                 }
@@ -1414,6 +1630,9 @@ void Director::Process() {
             case DirectorOpcode::ResetCameraManager:
                 // PSX: calls cameraManager vtable func (InternalReset)
                 scriptPtr += 1;
+                if (g_cameraManager) {
+                    g_cameraManager->Reset();
+                }
                 break;
 
             case DirectorOpcode::SetDesiredWideScreen:
@@ -1428,7 +1647,9 @@ void Director::Process() {
                 wsAlphaStep = 10;
                 wsMode = 2;
                 scriptPtr += 1;
-                // PSX: SetHUDVisible__3HUDii(0, 0, 0)
+                if (g_hud) {
+                    g_hud->SetHUDVisible(0, 0);
+                }
                 break;
 
             case DirectorOpcode::SetSoundScript:
@@ -1518,7 +1739,8 @@ void Director::Process() {
 
             case DirectorOpcode::SetNisPoint:
             {
-                // PSX: reads point CRC, looks up WorldPoints, stores position
+                // PSX: reads point CRC, looks up WorldPoints, stores director NIS point,
+                // and immediately copies it to player pos/homePos.
                 const s32 pointIdx = scriptPtr[1];
                 scriptPtr += 2;
                 WorldPointNode* wpn = WorldPoints_GetNISPoint(static_cast<u32>(pointIdx));
@@ -1526,15 +1748,66 @@ void Director::Process() {
                     nisPointX = wpn->pos.x;
                     nisPointY = wpn->pos.y;
                     nisPointZ = wpn->pos.z;
+
+                    if (Player::s_player) {
+                        Player::s_player->pos = wpn->pos;
+                        Player::s_player->homePos = wpn->pos;
+                    }
                 }
                 break;
             }
 
             case DirectorOpcode::SetGotoCheckpoint:
-            case DirectorOpcode::SetFallbackCheckpoint:
-            case DirectorOpcode::SetBlockCheckpoint:
+            {
                 scriptPtr += 1;
+
+                char gotoPointName[32];
+                const char petalLetter = static_cast<char>(g_checkpointPetalIndex + 'a');
+                std::snprintf(gotoPointName, sizeof(gotoPointName), "goto%c%d", petalLetter, g_checkpointBlockIndex);
+
+                if (!setJackieCheckpoint(p3dHash(gotoPointName))) {
+                    scriptPtr = defaultBeginScript;
+                }
+
+                if (Player::s_player) {
+                    Player::s_player->SetLivesLeft(Player::s_player->GetLivesLeft() + 1);
+                }
                 break;
+            }
+
+            case DirectorOpcode::SetFallbackCheckpoint:
+                scriptPtr += 1;
+
+                if (!setJackieCheckpoint(kDirectorFallbackCheckpointHash)) {
+                    scriptPtr = defaultBeginScript;
+                }
+
+                if (Player::s_player) {
+                    Player::s_player->SetLivesLeft(Player::s_player->GetLivesLeft() + 1);
+                }
+                levelDeadPool.InternalReset();
+                break;
+
+            case DirectorOpcode::SetBlockCheckpoint:
+            {
+                const s32 blockNum = g_checkpointBlockIndex;
+                scriptPtr += 1;
+
+                Block* block = g_blockManager ? g_blockManager->GetBlock(static_cast<u32>(blockNum)) : nullptr;
+                if (block) {
+                    LVector checkpointPos = { block->posX, block->posY, block->posZ };
+                    checkpointPos.y += block->dimY / 2;
+                    checkPoint(checkpointPos, blockNum);
+
+                    if (Player::s_player) {
+                        Player::s_player->SetLivesLeft(Player::s_player->GetLivesLeft() + 1);
+                    }
+                }
+                else {
+                    scriptPtr = defaultBeginScript;
+                }
+                break;
+            }
 
             case DirectorOpcode::DetermineVictory:
                 scriptPtr += 1;
@@ -1918,7 +2191,7 @@ void Director::ProcessHudFunc() {
     switch (op) {
         case DirectorHudCmd::HideHud:
             if (g_hud) {
-                g_hud->SetHUDVisible(0, 1);
+                g_hud->SetHUDVisible(0, 0);
             }
             break;
 
@@ -1939,8 +2212,29 @@ void Director::ProcessHudFunc() {
         }
 
         case DirectorHudCmd::ShowBossHealth:
+        {
+            const u32 bossArg = static_cast<u32>(*scriptPtr);
             scriptPtr += 1;
+
+            if (!g_hud || !g_ai || bossArg == 0) {
+                break;
+            }
+
+            u32 bossHash = bossArg;
+            u32 mappedHash = 0;
+            if (ResolveHudBossHashArg(bossArg, &mappedHash)) {
+                bossHash = mappedHash;
+            }
+
+            Thing* boss = static_cast<Thing*>(g_ai->humanoidList.FindNodeCRC(bossHash, nullptr));
+            if (boss) {
+                const char* bossName = boss->GetName();
+                if (bossName) {
+                    g_hud->ShowBossHealth(bossName);
+                }
+            }
             break;
+        }
 
         default:
             LogDirectorUnknownCommand("Hud", opPtr, static_cast<s32>(op));
