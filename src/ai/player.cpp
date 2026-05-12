@@ -2898,13 +2898,6 @@ void Player::Debug_ApplyForcedAnimation() {
         return;
     }
 
-    if (((flags2 >> 4) & 1u) == 0) {
-        flags2 = static_cast<s32>((flags2 | 0x10u) & ~0x60u);
-        field516 = 0;
-        field520 = 0;
-        field524 = 0;
-    }
-
     Model* m = static_cast<Model*>(model);
     AnimStructure* anim = m ? static_cast<AnimStructure*>(m->animStructure) : nullptr;
     if (!anim) {
@@ -2952,12 +2945,6 @@ bool Player::Debug_PlayAnimation(s32 animEnum, s32 loopType) {
     debugAnimOverrideActive = true;
 
     debugAnimOverrideApplying = true;
-    if (((flags2 >> 4) & 1u) == 0) {
-        flags2 = static_cast<s32>((flags2 | 0x10u) & ~0x60u);
-        field516 = 0;
-        field520 = 0;
-        field524 = 0;
-    }
 
     m->ApplyAnimToModel(0, animEnum, loopType, 0, 0);
     debugAnimOverrideApplying = false;
@@ -3005,11 +2992,6 @@ void Player::Debug_StopAnimation() {
     debugAnimOverrideApplying = false;
     debugAnimOverrideEnum = -1;
     debugAnimOverrideLoopType = ANIM_LOOP;
-
-    flags2 &= ~0x70u;
-    field516 = 0;
-    field520 = 0;
-    field524 = 0;
 
     if (!model) {
         return;
