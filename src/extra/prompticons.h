@@ -243,7 +243,7 @@ public:
     }
 
     static f32 GetPromptScale(const ResolvedPrompt& prompt) {
-        return prompt.isGamepad ? 1.0f : 1.6f;
+        return prompt.isGamepad ? 1.0f : 1.5f;
     }
 
     static f32 GetDrawHeight(const ResolvedPrompt& prompt, f32 drawHeight) {

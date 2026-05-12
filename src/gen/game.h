@@ -135,6 +135,10 @@ private:
     // PSX: PlayMovie__4GamePcii (GAME.CPP:3309, 0x8002BBF0)
     void PlayMovie(const char* name, s32 skippable, s32 unloadLevel);
 
+#if CUSTOM_MENU
+    void RenderTitleWithCustomBackground(bool drawPressStartOverlay);
+#endif
+
     static void FadeBegin();
     // Returns true (1) if fade is still in progress, false (0) when complete.
     static s32 FadeUpdate();

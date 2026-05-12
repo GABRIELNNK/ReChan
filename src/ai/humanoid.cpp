@@ -1776,6 +1776,7 @@ void Humanoid::HandleCollision(Thing* other, s32 damage, ...) {
                 clampedDamage = 0xFFFFu;
             }
             SubtractHitPoints(static_cast<u16>(clampedDamage));
+            HandleHitShock(hitType);
 
             if (appliedDamage > DROP_PICKUP_DAMAGE_THRESHOLD && rightHandObj) {
                 // PSX writes held pickup +0x134 before forced drop.

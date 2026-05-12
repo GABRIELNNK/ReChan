@@ -32,6 +32,7 @@ enum MenuPage : s32 {
     MenuPage_ExitLevelConfirm,
     MenuPage_QuitConfirm,
     MenuPage_Quitting,
+    MenuPage_Location,
     MenuPage_Count,
 };
 
@@ -50,6 +51,7 @@ enum EntryBinding : u8 {
     EntryBinding_DialogVol,
     EntryBinding_Stereo,
     EntryBinding_Shock,
+    EntryBinding_PlayerConfig,
     EntryBinding_DisplayResolution,
     EntryBinding_DisplayScreenMode,
     EntryBinding_DisplayVsync,
@@ -72,6 +74,7 @@ enum EntryEvent : u8 {
     EntryEvent_LoadConfirmYes,
     EntryEvent_SaveConfirmYes,
     EntryEvent_DeleteConfirmYes,
+    EntryEvent_LocationSelect,
 };
 
 #define MAX_ENTRIES_PER_MENU (12)
@@ -294,6 +297,8 @@ struct Entry {
     s32 step;
     s32 lo;
     s32 hi;
+    s32 posX;
+    s32 posY;
 };
 
 struct PageDef {
@@ -304,6 +309,8 @@ struct PageDef {
     bool isPause;
     s32 frameW;
     s32 frameH;
+    s32 entriesOffsetX;
+    s32 entriesOffsetY;
     s32 numEntries;
     Entry entries[MAX_ENTRIES_PER_MENU];
 
@@ -315,6 +322,8 @@ struct PageDef {
         isPause = false;
         frameW = 260;
         frameH = 150;
+        entriesOffsetX = 0;
+        entriesOffsetY = 0;
         numEntries = 0;
         memset(entries, 0, sizeof(entries));
     }
@@ -327,10 +336,15 @@ public:
 
     s32 Invoke(); // 1 = stay in menu, 4 = state change, 8 = resume play
     void Render();
+    bool DrawTitleScreen();
+    bool DrawLoadingScreen();
+    void DrawTitleStartPrompt(s32 baseX, s32 baseY, u32 pulseColorABGR);
+    bool GetSplashScreenRect(f32* outX, f32* outY, f32* outW, f32* outH) const;
 
     void Activate(MenuPage startPage = MenuPage_Frontend);
     void Deactivate();
     bool IsActive() const { return m_active; }
+    MenuPage GetCurrentPage() const { return m_currPage; }
 
 private:
     void BuildPages();
@@ -341,7 +355,12 @@ private:
     s32 GetEntryExtraHeight(const PageDef& page, const Entry& entry, xcFont* font) const;
     s32 CalcEntryYExtra(const PageDef& page, s32 upToIndex, xcFont* font) const;
     s32 CalcPageExtraHeight(const PageDef& page, xcFont* font) const;
-    void SetEntries(PageDef& page, std::initializer_list<Entry> list);
+    void ResolveEntryLayout(const PageDef& page, s32 entryIndex, xcFont* font,
+                            s32 firstY, s32 baseLabelX, s32 baseValueX, s32 baseCenterX,
+                            s32* outRowTop, s32* outRowTextY,
+                            s32* outLabelX, s32* outValueX, s32* outCenterX) const;
+    void SetEntries(PageDef& page, std::initializer_list<Entry> list,
+                    s32 entriesOffsetX = 0, s32 entriesOffsetY = 0);
     static Entry Button(const char* tok, EntryEvent ev, MenuPage go = MenuPage::MenuPage_None);
     static Entry Slider(const char* tok, EntryBinding binding, s32 step, s32 lo, s32 hi);
     Entry List(const char* tok, EntryBinding binding, s32 step, s32 lo, s32 hi);
@@ -361,7 +380,19 @@ private:
 
     struct CellTex { tTexture* tex; s16 w, h; u32 nameHash; };
 
+    void LoadControllerOverlayTexture();
+    void LoadSplashTextures();
     void EnsureTextures();
+
+    static constexpr const char* kControllerOverlayTexturePath = "pc/textures/frontend/controller_overlay_default.png";
+    static constexpr const char* kTitleScreenTexturePath        = "pc/textures/frontend/title_screen.png";
+    static constexpr const char* kLoadingScreenTexturePath      = "pc/textures/frontend/loading_screen.png";
+    static constexpr const char* kRedDragonTexturePath          = "pc/textures/frontend/red_dragon.png";
+    static constexpr const char* kGoldDragonTexturePath         = "pc/textures/frontend/gold_dragon.png";
+    static constexpr const char* kGreyDragonTexturePath         = "pc/textures/frontend/grey_dragon.png";
+    static constexpr f32 kSplashScreenAspect = 16.0f / 9.0f;
+
+    void DrawSplashTexture16x9(tTexture* texture);
 
     void DrawMenuWindow(s32 x, s32 y, s32 w, s32 h, const char* title) const;
 
@@ -373,17 +404,31 @@ private:
 
     const char* Localize(const char* token) const;
 
+    void RenderControllerOverlay(s32 panelX, s32 panelY) const;
+    void RenderKeyBindingsPage(s32 panelX, s32 panelY, s32 panelW, s32 panelH,
+                               xcFont* bodyFont, u32 normalColor, u32 selectedColor) const;
+    void RenderLocationPage() const;
+    bool InvokeLocationSelection();
+
     CustomText* m_text = nullptr;
     PageDef m_pages[MenuPage_Count];
     std::vector<CellTex> m_cellTextures;
     xcSectionMan* m_menuArt = nullptr;
+    tTexture* m_titleScreenTexture = nullptr;
+    tTexture* m_loadingScreenTexture = nullptr;
+    mutable tTexture* m_controllerTexture = nullptr;
+    mutable tTexture* m_redDragonTex      = nullptr;
+    mutable tTexture* m_goldDragonTex     = nullptr;
+    mutable tTexture* m_greyDragonTex     = nullptr;
+    bool m_titleScreenTextureTried = false;
+    bool m_loadingScreenTextureTried = false;
+    mutable bool m_dragonTexTried  = false;
     bool m_texReady = false;
     MenuPage m_currPage = MenuPage_None;
     MenuPage m_prevPage = MenuPage_None;
     s32 m_cursor = 0;
     s32 m_result = 1;
     xcColour1555 m_pulse{ 0x8000 };
-
     // Resolution selection is staged while focused and committed on confirm.
     bool m_pendingResolutionActive = false;
     s32 m_pendingResolutionIndex = 0;

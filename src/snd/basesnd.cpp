@@ -84,10 +84,10 @@ s32 CSound::PlayTransientStereo(u16 sndL, u16 sndR) {
 
     CSound* tmpL = nullptr;
     CSound* tmpR = nullptr;
-    CSoundFactory::CreateObject(10070, &tmpL, sndL);
-    CSoundFactory::CreateObject(10070, &tmpR, sndR);
+    const s32 resL = CSoundFactory::CreateObject(10070, &tmpL, sndL);
+    const s32 resR = CSoundFactory::CreateObject(10070, &tmpR, sndR);
 
-    if (tmpR) {
+    if (tmpL && tmpR) {
         CGenericTransientSound* transL = static_cast<CGenericTransientSound*>(tmpL);
         CGenericTransientSound* transR = static_cast<CGenericTransientSound*>(tmpR);
 
@@ -96,12 +96,26 @@ s32 CSound::PlayTransientStereo(u16 sndL, u16 sndR) {
         transL->Trigger(0);
         transR->Trigger(0);
     }
+    else if (tmpL) {
+        CGenericTransientSound* transL = static_cast<CGenericTransientSound*>(tmpL);
+        transL->InitializeStereo(100, 100);
+        transL->Trigger(0);
+    }
+    else if (tmpR) {
+        CGenericTransientSound* transR = static_cast<CGenericTransientSound*>(tmpR);
+        transR->InitializeStereo(100, 100);
+        transR->Trigger(0);
+    }
 
     if (tmpL) {
         delete tmpL;
     }
     if (tmpR) {
         delete tmpR;
+    }
+
+    if (!tmpL && !tmpR) {
+        return (resL < 0) ? resL : resR;
     }
     return 0;
 }

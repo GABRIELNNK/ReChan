@@ -43,7 +43,14 @@ project "rechan"
     filter "system:windows"
         systemversion "latest"
         defines { "RC_PLATFORM_WINDOWS" }
-        links { "opengl32" }
+        links {
+            "opengl32",
+            "cfgmgr32",
+            "imm32",
+            "setupapi",
+            "version",
+            "winmm",
+        }
 
     filter "system:linux"
         defines { "PLATFORM_LINUX" }

@@ -1,6 +1,8 @@
 #include "gen/control.h"
 #include "config.h"
 #include "pc/inputaction.h"
+#include "p3d/context.h"
+#include "p3d/input.h"
 
 // Global singleton (PSX: 0x800DD69C)
 InputManager* g_inputManager = nullptr;
@@ -206,8 +208,11 @@ void InputManager::ServiceHostPads(const ActionInput* actionInput, bool commitNo
         const bool menuActionsEnabled = (controls[0].modeMap == sMenuControlMode);
         buttons = actionInput->GetPadButtons(menuActionsEnabled);
 
-        if (controls[0].modeMap == sTitleControlMode && actionInput->IsHeld(ACTION_MENU_CONFIRM)) {
-            buttons |= PsxPad::Start;
+        if (controls[0].modeMap == sTitleControlMode) {
+            buttons &= ~PsxPad::Start;
+            if (actionInput->IsHeld(ACTION_TITLE_START)) {
+                buttons |= PsxPad::Start;
+            }
         }
     }
 
@@ -267,6 +272,7 @@ void InputManager::Step() {
     MARKFUNCTION(0x8002E6E8);
     controlValFlags[0] = 0;
     controlValFlags[1] = 0;
+    UpdateActuator(0);
 }
 
 // InputManager::GetControlVal (0x8002E5BC)
@@ -387,6 +393,29 @@ void InputManager::InternalReset() {
 
 // PSX: gp+144 - shock enabled flag (0 on PC, no DualShock)
 static s32 g_shockEnabled = 0;
+static s32 g_actuatorFramesRemaining = 0;
+static u8 g_actuatorMotor = 0;
+static u8 g_actuatorSpeed = 0;
+static s32 g_actuatorSkipNextUpdate = 0;
+
+static bool ApplyActuatorVibration(u8 motor, u8 speed) {
+    if (!p3d::input) {
+        return false;
+    }
+
+    f32 amplitude = (f32)speed / 255.0f;
+    f32 low = 0.0f;
+    f32 high = 0.0f;
+
+    if (motor == 0) {
+        low = amplitude;
+    }
+    else {
+        high = amplitude;
+    }
+
+    return p3d::input->SetGamepadVibration(low, high);
+}
 
 s32 GetShock() {
     return g_shockEnabled;
@@ -398,25 +427,82 @@ s32 IsDualShock() {
 
 void SetShock(s32 enabled) {
     g_shockEnabled = enabled ? 1 : 0;
+    if (!g_shockEnabled) {
+        ClearActuator();
+    }
 }
 
-// PSX: PadGetState (Sony lib) - PC stub returns 0 (not state 6)
-s32 PadGetState(s32 /*port*/) {
-    return 0;
+// PSX: PadGetState (Sony lib) - host reports state 6 when rumble-capable pad 0 is available
+s32 PadGetState(s32 port) {
+    if (port != 0) {
+        return 0;
+    }
+
+    if (!p3d::input) {
+        return 0;
+    }
+
+    if (!p3d::input->IsGamepadConnected()) {
+        return 0;
+    }
+
+    return p3d::input->IsGamepadVibrationSupported() ? 6 : 0;
 }
 
-// PSX: SetActuator (CONTROL.CPP:250, 0x8002D540) - PC no-op
-void SetActuator(u8 /*motor*/, u8 /*speed*/, u32 /*duration*/) {}
+// PSX: SetActuator (CONTROL.CPP:250, 0x8002D540)
+void SetActuator(u8 motor, u8 speed, u32 duration) {
+    g_actuatorMotor = motor;
+    g_actuatorSpeed = speed;
+    g_actuatorFramesRemaining = (s32)duration;
 
-// PSX: ClearActuator (CONTROL.CPP:242, 0x8002D52C) - PC no-op
-void ClearActuator() {}
+    if (g_actuatorFramesRemaining <= 0 || g_actuatorSpeed == 0) {
+        ClearActuator();
+        return;
+    }
 
-// PSX: UpdateActuator (CONTROL.CPP:262, 0x8002D564) - PC no-op
-void UpdateActuator(s32 /*param*/) {}
+    g_actuatorSkipNextUpdate = 1;
+    (void)ApplyActuatorVibration(g_actuatorMotor, g_actuatorSpeed);
+}
+
+// PSX: ClearActuator (CONTROL.CPP:242, 0x8002D52C)
+void ClearActuator() {
+    g_actuatorFramesRemaining = 0;
+    g_actuatorMotor = 0;
+    g_actuatorSpeed = 0;
+    g_actuatorSkipNextUpdate = 0;
+
+    if (p3d::input) {
+        (void)p3d::input->SetGamepadVibration(0.0f, 0.0f);
+    }
+}
+
+// PSX: UpdateActuator (CONTROL.CPP:262, 0x8002D564)
+void UpdateActuator(s32 /*param*/) {
+    if (g_actuatorSkipNextUpdate) {
+        g_actuatorSkipNextUpdate = 0;
+        return;
+    }
+
+    if (g_actuatorFramesRemaining <= 0) {
+        return;
+    }
+
+    g_actuatorFramesRemaining--;
+    if (g_actuatorFramesRemaining <= 0) {
+        ClearActuator();
+    }
+}
 
 // PSX: Shock (CONTROL.CPP, 0x8002D6C0)
 void Shock(ShockEnum type) {
     MARKFUNCTION(0x8002D6C0);
+
+    if (type == SHOCK_CLEAR) {
+        ClearActuator();
+        UpdateActuator(0);
+        return;
+    }
+
     if (!g_shockEnabled) {
         return;
     }
@@ -445,10 +531,6 @@ void Shock(ShockEnum type) {
         case SHOCK_15: motor = 0; speed = 255; duration = 15; break;
         case SHOCK_16: motor = 0; speed = 255; duration = 20; break;
         case SHOCK_17: motor = 0; speed = 255; duration = 20; break;
-        case SHOCK_CLEAR:
-            ClearActuator();
-            UpdateActuator(0);
-            return;
         default:
             motor = 1; speed = 0; duration = 15; break;
     }

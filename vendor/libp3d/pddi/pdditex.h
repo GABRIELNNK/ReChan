@@ -14,6 +14,8 @@ public:
     virtual void SetData(int width, int height, int bpp, int alphaDepth,
                          const void* rgba) = 0;
 
+    virtual void SetFilterMode(pddiFilterMode mode) = 0;
+
     // Bind for rendering on a texture unit
     virtual void Bind(int unit) = 0;
 };

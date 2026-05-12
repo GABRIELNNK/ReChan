@@ -31,12 +31,22 @@ project "libp3d"
         libp3d_root .. "/vendor/glfw/src/window.c",
     }
 
+    removefiles {
+        libp3d_root .. "/vendor/sdl2/**.h",
+        libp3d_root .. "/vendor/sdl2/**.hpp",
+        libp3d_root .. "/vendor/sdl2/**.cpp",
+        libp3d_root .. "/vendor/sdl2/**.cc",
+        libp3d_root .. "/vendor/sdl2/**.mm",
+        libp3d_root .. "/vendor/sdl2/**.m",
+    }
+
     includedirs {
         libp3d_root,
         libp3d_root .. "/vendor/glad/include",
         libp3d_root .. "/vendor/glfw/include",
         libp3d_root .. "/vendor/imgui",
         libp3d_root .. "/vendor/imgui/backends",
+        libp3d_root .. "/vendor/sdl2/include",
     }
 
     filter "system:windows"
@@ -52,8 +62,74 @@ project "libp3d"
             libp3d_root .. "/vendor/glfw/src/wgl_context.c",
             libp3d_root .. "/vendor/glfw/src/egl_context.c",
             libp3d_root .. "/vendor/glfw/src/osmesa_context.c",
+
+            libp3d_root .. "/vendor/sdl2/src/*.c",
+            libp3d_root .. "/vendor/sdl2/src/atomic/*.c",
+            libp3d_root .. "/vendor/sdl2/src/audio/*.c",
+            libp3d_root .. "/vendor/sdl2/src/audio/directsound/*.c",
+            libp3d_root .. "/vendor/sdl2/src/audio/disk/*.c",
+            libp3d_root .. "/vendor/sdl2/src/audio/dummy/*.c",
+            libp3d_root .. "/vendor/sdl2/src/audio/wasapi/*.c",
+            libp3d_root .. "/vendor/sdl2/src/audio/winmm/*.c",
+            libp3d_root .. "/vendor/sdl2/src/core/windows/*.c",
+            libp3d_root .. "/vendor/sdl2/src/cpuinfo/*.c",
+            libp3d_root .. "/vendor/sdl2/src/dynapi/*.c",
+            libp3d_root .. "/vendor/sdl2/src/events/*.c",
+            libp3d_root .. "/vendor/sdl2/src/file/*.c",
+            libp3d_root .. "/vendor/sdl2/src/filesystem/windows/*.c",
+            libp3d_root .. "/vendor/sdl2/src/haptic/*.c",
+            libp3d_root .. "/vendor/sdl2/src/haptic/dummy/*.c",
+            libp3d_root .. "/vendor/sdl2/src/haptic/windows/*.c",
+            libp3d_root .. "/vendor/sdl2/src/hidapi/*.c",
+            libp3d_root .. "/vendor/sdl2/src/hidapi/windows/*.c",
+            libp3d_root .. "/vendor/sdl2/src/joystick/*.c",
+            libp3d_root .. "/vendor/sdl2/src/joystick/dummy/*.c",
+            libp3d_root .. "/vendor/sdl2/src/joystick/hidapi/*.c",
+            libp3d_root .. "/vendor/sdl2/src/joystick/virtual/*.c",
+            libp3d_root .. "/vendor/sdl2/src/joystick/windows/*.c",
+            libp3d_root .. "/vendor/sdl2/src/libm/*.c",
+            libp3d_root .. "/vendor/sdl2/src/loadso/windows/*.c",
+            libp3d_root .. "/vendor/sdl2/src/locale/*.c",
+            libp3d_root .. "/vendor/sdl2/src/locale/windows/*.c",
+            libp3d_root .. "/vendor/sdl2/src/misc/*.c",
+            libp3d_root .. "/vendor/sdl2/src/misc/windows/*.c",
+            libp3d_root .. "/vendor/sdl2/src/power/*.c",
+            libp3d_root .. "/vendor/sdl2/src/power/windows/*.c",
+            libp3d_root .. "/vendor/sdl2/src/render/*.c",
+            libp3d_root .. "/vendor/sdl2/src/render/direct3d/*.c",
+            libp3d_root .. "/vendor/sdl2/src/render/direct3d11/*.c",
+            libp3d_root .. "/vendor/sdl2/src/render/direct3d12/*.c",
+            libp3d_root .. "/vendor/sdl2/src/render/opengl/*.c",
+            libp3d_root .. "/vendor/sdl2/src/render/opengles2/*.c",
+            libp3d_root .. "/vendor/sdl2/src/render/software/*.c",
+            libp3d_root .. "/vendor/sdl2/src/sensor/*.c",
+            libp3d_root .. "/vendor/sdl2/src/sensor/dummy/*.c",
+            libp3d_root .. "/vendor/sdl2/src/sensor/windows/*.c",
+            libp3d_root .. "/vendor/sdl2/src/stdlib/*.c",
+            libp3d_root .. "/vendor/sdl2/src/thread/*.c",
+            libp3d_root .. "/vendor/sdl2/src/thread/generic/*.c",
+            libp3d_root .. "/vendor/sdl2/src/thread/windows/*.c",
+            libp3d_root .. "/vendor/sdl2/src/timer/*.c",
+            libp3d_root .. "/vendor/sdl2/src/timer/windows/*.c",
+            libp3d_root .. "/vendor/sdl2/src/video/*.c",
+            libp3d_root .. "/vendor/sdl2/src/video/dummy/*.c",
+            libp3d_root .. "/vendor/sdl2/src/video/windows/*.c",
+            libp3d_root .. "/vendor/sdl2/src/video/yuv2rgb/*.c",
         }
-        defines { "_GLFW_WIN32", "_CRT_SECURE_NO_WARNINGS" }
+        links {
+            "cfgmgr32",
+            "imm32",
+            "setupapi",
+            "version",
+            "winmm",
+        }
+        defines {
+            "_GLFW_WIN32",
+            "_CRT_SECURE_NO_WARNINGS",
+            "P3D_USE_VENDORED_SDL2",
+            "SDL_MAIN_HANDLED",
+            "SDL_STATIC",
+        }
 
     filter "configurations:Debug"
         runtime "Debug"

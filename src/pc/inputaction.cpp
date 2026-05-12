@@ -1,6 +1,7 @@
 #include "pc/inputaction.h"
 #include "p3d/input.h"
 #include "pddi/pddidev.h"
+#include "gen/control.h"
 #include <cmath>
 #include <cstring>
 #include <cstdio>
@@ -23,6 +24,7 @@ static const char* kActionTokens[ACTION_COUNT] = {
     "LOOK_LEFT",
     "LOOK_RIGHT",
     "OPEN_CLOSE_MENU",
+    "TITLE_START",
     "MENU_UP",
     "MENU_DOWN",
     "MENU_LEFT",
@@ -33,6 +35,12 @@ static const char* kActionTokens[ACTION_COUNT] = {
 };
 
 static constexpr s32 kDesktopBindingSlotCount = 2;
+
+#if MENU_BACK_USES_CIRCLE
+static constexpr s32 kDefaultMenuBackGamepadButton = GpBtn::B;
+#else
+static constexpr s32 kDefaultMenuBackGamepadButton = GpBtn::Y;
+#endif
 
 static const s32 kBindableKeys[] = {
     KEY_SPACE,
@@ -282,13 +290,14 @@ ActionInput::ActionInput() {
     bindings[ACTION_LOOK_RIGHT] = { { 0, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::NONE, GpBtn::NONE, GpAxis::RightX, 0.3f };
 
     bindings[ACTION_OPEN_CLOSE_MENU] = { { KEY_ESCAPE, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::Start, GpBtn::NONE, GpAxis::NONE, 0 };
+    bindings[ACTION_TITLE_START] = { { KEY_ENTER, 0 }, { MouseBtn::NONE, MouseBtn::Left }, GpBtn::Start, GpBtn::NONE, GpAxis::NONE, 0 };
 
     bindings[ACTION_MENU_UP] = { { KEY_UP, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::DpadUp, GpBtn::NONE, GpAxis::LeftY, -0.5f };
     bindings[ACTION_MENU_DOWN] = { { KEY_DOWN, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::DpadDown, GpBtn::NONE, GpAxis::LeftY, 0.5f };
     bindings[ACTION_MENU_LEFT] = { { KEY_LEFT, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::DpadLeft, GpBtn::NONE, GpAxis::LeftX, -0.5f };
     bindings[ACTION_MENU_RIGHT] = { { KEY_RIGHT, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::DpadRight, GpBtn::NONE, GpAxis::LeftX, 0.5f };
     bindings[ACTION_MENU_CONFIRM] = { { KEY_ENTER, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::A, GpBtn::NONE, GpAxis::NONE, 0 };
-    bindings[ACTION_MENU_BACK] = { { KEY_ESCAPE, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::B, GpBtn::NONE, GpAxis::NONE, 0 };
+    bindings[ACTION_MENU_BACK] = { { KEY_ESCAPE, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, kDefaultMenuBackGamepadButton, GpBtn::NONE, GpAxis::NONE, 0 };
     bindings[ACTION_MENU_CLEAR] = { { KEY_DELETE, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::Y, GpBtn::NONE, GpAxis::NONE, 0 };
 }
 
@@ -682,7 +691,7 @@ u32 ActionInput::GetPadButtons(bool menuActionsEnabled) const {
         buttons |= 0x0020;
     }
     if (menuActionsEnabled && IsHeld(ACTION_MENU_BACK)) {
-        buttons |= 0x0010;
+        buttons |= PsxPad::MenuBack;
     }
     if (IsHeld(ACTION_JUMP) || (menuActionsEnabled && IsHeld(ACTION_MENU_CONFIRM))) {
         buttons |= 0x0040;

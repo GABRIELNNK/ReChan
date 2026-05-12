@@ -21,14 +21,20 @@
 // let it back out of submenu pages before closing the whole menu.
 #define ESC_BACKS_OUT_SUBMENUS_FIRST 1
 
+// Menu back button shape policy:
+// 0 = PSX-original Triangle, 1 = Circle (Xbox B)
+#define MENU_BACK_USES_CIRCLE 1
+
+// Original FE asset button glyph bytes used by menu prompt text objects.
+// 0xFB = Triangle glyph, 0xFC = Circle glyph in FE/GAMEMENU assets.
+#define MENU_BACK_PROMPT_GLYPH_TRIANGLE ((char)0xFB)
+#define MENU_BACK_PROMPT_GLYPH_CIRCLE ((char)0xFC)
+
 // Custom text files with localization support, parsed from game directory (requires .txt files for each language).
 #define CUSTOM_TEXT 1
 
 // Custom reimplementation of the game menus, allowing mouse support and custom settings. (Requires CUSTOM_TEXT for the text strings)
 #define CUSTOM_MENU 1
-
-// Treat GameState::End as an application-exit request in main loop so game actually closes instead of returning to title screen.
-#define QUIT_GAME_CLOSES_GAME 1
 
 // Experimental: Keep simulation fixed at 30 fps while rendering at higher frame rates, with interpolation for smoothness.
 #define HIGH_FPS_PLAY_PRESENTATION 0

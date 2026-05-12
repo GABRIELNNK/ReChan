@@ -530,7 +530,7 @@ void feMenuMgr::QueryInput(bool processInput) {
         InputPadRight();
     }
 
-    if ((buttons & PsxPad::Triangle) != 0) {
+    if ((buttons & PsxPad::MenuBack) != 0) {
         InputItemPop();
     }
     if ((buttons & PsxPad::Cross) != 0) {

@@ -179,6 +179,38 @@ float PlatformInput::GetGamepadAxis(int axis) const {
     return gpAxes[axis];
 }
 
+bool PlatformInput::IsGamepadVibrationSupported() const {
+    if (!gamepad || !gamepadConnected) {
+        return false;
+    }
+
+    return gamepad->SupportsVibration();
+}
+
+bool PlatformInput::SetGamepadVibration(float lowFrequency, float highFrequency) {
+    if (!gamepad) {
+        return false;
+    }
+
+    float low = lowFrequency;
+    float high = highFrequency;
+    if (low < 0.0f) {
+        low = 0.0f;
+    }
+    else if (low > 1.0f) {
+        low = 1.0f;
+    }
+
+    if (high < 0.0f) {
+        high = 0.0f;
+    }
+    else if (high > 1.0f) {
+        high = 1.0f;
+    }
+
+    return gamepad->SetVibration(low, high);
+}
+
 float PlatformInput::GetLeftStickX() const {
     return ApplyDeadzone(gpAxes[GamepadAxis::LeftX], STICK_DEADZONE);
 }

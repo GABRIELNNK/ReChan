@@ -1,5 +1,6 @@
 // glrender.cpp - OpenGL implementation of pddi interfaces
 #include "pddi/gl/glrender.h"
+#include "pddi/gl/glgamepadrumble_sdl.h"
 
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
@@ -255,6 +256,24 @@ void glPrimBuffer::SetupVertexAttribs() {
 
 // glTexture
 
+static void ApplyTextureFilterMode(u32 handle, pddiFilterMode mode) {
+    if (!handle) {
+        return;
+    }
+
+    GLint minFilter = GL_NEAREST;
+    GLint magFilter = GL_NEAREST;
+    if (mode == PDDI_FILTER_BILINEAR || mode == PDDI_FILTER_TRILINEAR) {
+        minFilter = GL_LINEAR;
+        magFilter = GL_LINEAR;
+    }
+
+    glBindTexture(GL_TEXTURE_2D, handle);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, minFilter);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, magFilter);
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
+
 glTexture::glTexture() = default;
 
 glTexture::~glTexture() {
@@ -275,11 +294,16 @@ void glTexture::SetData(int w, int h, int b, int a, const void* rgba) {
     glBindTexture(GL_TEXTURE_2D, handle);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0,
                  GL_RGBA, GL_UNSIGNED_BYTE, rgba);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glBindTexture(GL_TEXTURE_2D, 0);
+
+    ApplyTextureFilterMode(handle, filterMode);
+}
+
+void glTexture::SetFilterMode(pddiFilterMode mode) {
+    filterMode = mode;
+    ApplyTextureFilterMode(handle, filterMode);
 }
 
 void glTexture::Bind(int unit) {
@@ -1409,17 +1433,30 @@ pddiBaseShader* glDevice::NewShader(const char*) { return new glShader(); }
 
 void glGamepad::Poll() {
     connected = false;
+    activeJoystickId = -1;
+
+#if defined(P3D_USE_VENDORED_SDL2)
+    if (glGamepadPollState(buttons, axes)) {
+        connected = true;
+        activeJoystickId = GLFW_JOYSTICK_1;
+        return;
+    }
+#endif
+
     for (int jid = GLFW_JOYSTICK_1; jid <= GLFW_JOYSTICK_LAST; jid++) {
-        if (glfwJoystickIsGamepad(jid)) {
-            GLFWgamepadstate state;
-            if (glfwGetGamepadState(jid, &state)) {
-                connected = true;
-                for (int b = 0; b < GamepadButton::COUNT; b++) {
-                    buttons[b] = (state.buttons[b] == GLFW_PRESS);
-                }
-                for (int a = 0; a < GamepadAxis::COUNT; a++) {
-                    axes[a] = state.axes[a];
-                }
+        if (!glfwJoystickIsGamepad(jid)) {
+            continue;
+        }
+
+        GLFWgamepadstate state;
+        if (glfwGetGamepadState(jid, &state)) {
+            connected = true;
+            activeJoystickId = jid;
+            for (int b = 0; b < GamepadButton::COUNT; b++) {
+                buttons[b] = (state.buttons[b] == GLFW_PRESS);
+            }
+            for (int a = 0; a < GamepadAxis::COUNT; a++) {
+                axes[a] = state.axes[a];
             }
             break;
         }
@@ -1428,6 +1465,10 @@ void glGamepad::Poll() {
     if (!connected) {
         std::memset(buttons, 0, sizeof(buttons));
         std::memset(axes, 0, sizeof(axes));
+        glGamepadRumbleUpdateActive(-1, nullptr);
+    }
+    else {
+        glGamepadRumbleUpdateActive(activeJoystickId - GLFW_JOYSTICK_1, glfwGetJoystickGUID(activeJoystickId));
     }
 }
 
@@ -1443,6 +1484,46 @@ float glGamepad::GetAxis(int axis) const {
         return 0.0f;
     }
     return axes[axis];
+}
+
+bool glGamepad::SupportsVibration() const {
+#if defined(P3D_USE_VENDORED_SDL2)
+    (void)glGamepadRumbleUpdateActive(-1, nullptr);
+    return glGamepadRumbleSupports();
+#else
+    const int hintIndex = (connected && activeJoystickId >= GLFW_JOYSTICK_1)
+        ? (activeJoystickId - GLFW_JOYSTICK_1)
+        : -1;
+    const char* guid = (connected && activeJoystickId >= GLFW_JOYSTICK_1)
+        ? glfwGetJoystickGUID(activeJoystickId)
+        : nullptr;
+
+    if (!glGamepadRumbleUpdateActive(hintIndex, guid)) {
+        return false;
+    }
+
+    return glGamepadRumbleSupports();
+#endif
+}
+
+bool glGamepad::SetVibration(float lowFrequency, float highFrequency) {
+#if defined(P3D_USE_VENDORED_SDL2)
+    (void)glGamepadRumbleUpdateActive(-1, nullptr);
+    return glGamepadRumbleSet(lowFrequency, highFrequency);
+#else
+    const int hintIndex = (connected && activeJoystickId >= GLFW_JOYSTICK_1)
+        ? (activeJoystickId - GLFW_JOYSTICK_1)
+        : -1;
+    const char* guid = (connected && activeJoystickId >= GLFW_JOYSTICK_1)
+        ? glfwGetJoystickGUID(activeJoystickId)
+        : nullptr;
+
+    if (!glGamepadRumbleUpdateActive(hintIndex, guid)) {
+        return false;
+    }
+
+    return glGamepadRumbleSet(lowFrequency, highFrequency);
+#endif
 }
 
 // Platform factory

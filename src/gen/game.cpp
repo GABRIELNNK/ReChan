@@ -22,6 +22,7 @@
 #include "snd/rsevent.h"
 #include "snd/fesnd.h"
 #include "ai/player.h"
+#include "ai/fevolume.h"
 #include "fe/femenumgr.h"
 #include "fe/gamemenu.h"
 #include "fe/titlescreen.h"
@@ -433,9 +434,27 @@ static s32 MenuDraw(MenuMgr* menuMgr) {
 }
 
 #if CUSTOM_MENU
-static void HideTitlePressStartText(TitleScreen* title) {
-    if (title && title->pressStartText) {
-        title->pressStartText->colorA = 0;
+void Game::RenderTitleWithCustomBackground(bool drawPressStartOverlay) {
+    if (!titleScreen) {
+        return;
+    }
+
+    titleScreen->Render();
+
+    if (!g_feCustomMenuMgr || !g_feCustomMenuMgr->DrawTitleScreen()) {
+        return;
+    }
+
+    if (drawPressStartOverlay) {
+        s32 promptX = DEFAULT_SCREEN_WIDTH / 2;
+        s32 promptY = 192;
+        u32 promptColor = titleScreen->menuColor.Get8();
+        if (titleScreen->pressStartText) {
+            promptX = titleScreen->pressStartText->mtx.GetX();
+            promptY = titleScreen->pressStartText->mtx.GetY();
+        }
+
+        g_feCustomMenuMgr->DrawTitleStartPrompt(promptX, promptY, promptColor);
     }
 }
 
@@ -463,26 +482,22 @@ static s32 CustomMenuDraw(feCustomMenuMgr* menuMgr) {
     return result;
 }
 
-static s32 CustomTitleMenuDraw(Game* game, feCustomMenuMgr* menuMgr) {
-    s32 result = menuMgr ? menuMgr->Invoke() : 1;
-    feCustomMenuMgr* renderMgr = menuMgr;
-    if (result == 8 || result == 4) {
-        renderMgr->Deactivate();
-        renderMgr = nullptr;
+static void ApplyLocationMenuCloseSideEffects(feMenuMgr* menuMgr, s32 menuResult) {
+    if (!menuMgr || menuMgr->feMode != 1) {
+        return;
     }
 
-    g_display->BeginFrame();
-    TitleScreen* title = game ? game->GetTitleScreen() : nullptr;
-    if (title) {
-        HideTitlePressStartText(title);
-        title->Render();
+    if (menuResult == 8) {
+        if (menuMgr->frontEndVolume && menuMgr->humanoid) {
+            menuMgr->frontEndVolume->HandleVolumeExit(menuMgr->humanoid);
+        }
     }
-    if (renderMgr) {
-        renderMgr->Render();
+    else if (menuMgr->frontEndVolume) {
+        g_destSelectReturnPos = menuMgr->frontEndVolume->savedPos;
+        g_destSelectReturnPosValid = true;
     }
-    g_display->EndFrame();
-    return result;
 }
+
 #endif
 
 // PSX: EndFrameHandler (GAME.CPP:2205, pri=-64 in handlerSet2)
@@ -671,9 +686,10 @@ bool Game::gsTitleLoopState(Game* game) {
         if (game->titleScreen) {
             game->titleScreen->Update();
 #if CUSTOM_MENU
-            HideTitlePressStartText(game->titleScreen);
-#endif
+            game->RenderTitleWithCustomBackground(false);
+#else
             game->titleScreen->Render();
+#endif
         }
 
         s32 stillFading = FadeUpdate();
@@ -753,7 +769,22 @@ bool Game::gsTitleLoopState(Game* game) {
 
 #if CUSTOM_MENU
     if (g_feCustomMenuMgr && g_feCustomMenuMgr->IsActive()) {
-        const s32 menuResult = CustomTitleMenuDraw(game, g_feCustomMenuMgr);
+        s32 menuResult = g_feCustomMenuMgr->Invoke();
+        feCustomMenuMgr* renderMgr = g_feCustomMenuMgr;
+        if (menuResult == 8 || menuResult == 4) {
+            renderMgr->Deactivate();
+            renderMgr = nullptr;
+        }
+
+        g_display->BeginFrame();
+        if (game->titleScreen) {
+            game->RenderTitleWithCustomBackground(false);
+        }
+        if (renderMgr) {
+            renderMgr->Render();
+        }
+        g_display->EndFrame();
+
         if (menuResult == 4) {
             rsEvent(RS_STOP_MUSIC, 0, 0, 0);
             FadeBegin();
@@ -769,7 +800,11 @@ bool Game::gsTitleLoopState(Game* game) {
     g_display->BeginFrame();
     if (game->titleScreen) {
         game->titleScreen->Update();
+#if CUSTOM_MENU
+        game->RenderTitleWithCustomBackground(true);
+#else
         game->titleScreen->Render();
+#endif
     }
     g_display->EndFrame();
 
@@ -815,6 +850,13 @@ bool Game::gsTitleLoopState(Game* game) {
 
 bool Game::gsInitState(Game* game) {
     MARKFUNCTION(0x80029460); // gsInitState
+
+#if CUSTOM_MENU
+    if (!g_feCustomMenuMgr) {
+        g_feCustomMenuMgr = new feCustomMenuMgr();
+        g_feCustomMenuMgr->Init(&g_customText);
+    }
+#endif
 
     // PSX: ClearImage, DisplayTIM(gp[24]), StartLogo(655360), FillMeter(100)
     DisplayTIM("RUNFIRST.TIM");
@@ -1209,7 +1251,27 @@ bool Game::gsLocationMenuState(Game* game) {
     MARKFUNCTION(0x8002A128); // gsLocationMenuState
 
     // PSX 0x8002A128: result = MenuDraw(feMenuMgr); if result==8, return to Play.
-    if (MenuDraw(g_feMenuMgr) == 8) {
+    s32 menuResult = 1;
+
+#if CUSTOM_MENU
+    if (g_feCustomMenuMgr) {
+        if (!g_feCustomMenuMgr->IsActive() || g_feCustomMenuMgr->GetCurrentPage() != MenuPage_Location) {
+            g_feCustomMenuMgr->Activate(MenuPage_Location);
+        }
+        menuResult = CustomMenuDraw(g_feCustomMenuMgr);
+    }
+    else {
+        menuResult = MenuDraw(g_feMenuMgr);
+    }
+
+    if (menuResult == 4 || menuResult == 8) {
+        ApplyLocationMenuCloseSideEffects(g_feMenuMgr, menuResult);
+    }
+#else
+    menuResult = MenuDraw(g_feMenuMgr);
+#endif
+
+    if (menuResult == 8) {
         if (g_feMenuMgr) {
             g_feMenuMgr->ShowNewGameMenu();
         }

@@ -22,6 +22,7 @@
 #include <algorithm>
 
 static f32 sSavedMasterVolume = 1.0f;
+static bool sWindowedCaptureRequestedByClick = false;
 
 static bool OnWndProc(const pddiWndMessage& msg) {
     switch (msg.event) {
@@ -32,14 +33,28 @@ static bool OnWndProc(const pddiWndMessage& msg) {
                     p3d::input->SetEnabled(true);
                 if (AudioEngine::IsInitialized())
                     AudioEngine::SetMasterVolume(sSavedMasterVolume);
-                // Re-capture mouse only when no UI that needs a free cursor is active.
+                // Keep the mouse free on focus gain in windowed mode so a titlebar
+                // click/drag can move the window. In-content mouse clicks will
+                // recapture below via PDDI_WND_MOUSEBUTTON.
                 if (g_display) {
                     if (DebugUI::IsEnabled()) {
                         g_display->SetCursorCaptured(false);
                         g_display->SetCursorVisible(true);
                     }
                     else if (!g_feCustomMenuMgr || !g_feCustomMenuMgr->IsActive()) {
-                        g_display->SetCursorCaptured(true);
+                        if (g_display->GetScreenMode() == ScreenMode_Windowed) {
+                            if (sWindowedCaptureRequestedByClick) {
+                                g_display->SetCursorCaptured(true);
+                            }
+                            else {
+                                g_display->SetCursorCaptured(false);
+                                g_display->SetCursorVisible(true);
+                            }
+                            sWindowedCaptureRequestedByClick = false;
+                        }
+                        else {
+                            g_display->SetCursorCaptured(true);
+                        }
                     }
                 }
             }
@@ -54,6 +69,19 @@ static bool OnWndProc(const pddiWndMessage& msg) {
                 // Always release mouse when losing focus
                 if (g_display)
                     g_display->SetCursorCaptured(false);
+                sWindowedCaptureRequestedByClick = false;
+            }
+            break;
+        case PDDI_WND_MOUSEBUTTON:
+            // GLFW mouse button callbacks only fire for client-area clicks, not
+            // non-client titlebar drags. Use that to defer recapture in windowed
+            // mode until the user clicks back into game content.
+            if (msg.param2 && g_display &&
+                g_display->GetScreenMode() == ScreenMode_Windowed &&
+                !DebugUI::IsEnabled() &&
+                (!g_feCustomMenuMgr || !g_feCustomMenuMgr->IsActive())) {
+                sWindowedCaptureRequestedByClick = true;
+                g_display->SetCursorCaptured(true);
             }
             break;
         case PDDI_WND_SCROLL:
@@ -147,11 +175,11 @@ int main() {
 
         bool running = game.Step();
         if (!running) {
-#if QUIT_GAME_CLOSES_GAME
+            // PC: If the game loop signals to stop, break out of the loop to shut down.
             if (game.GetState() == GameState::End) {
                 break;
             }
-#endif
+
             // PSX: SetLivesLeft(g_player, savedLives)
             Player::s_player->SetLivesLeft(4);
             game.SetState(GameState::QueueLevelLoad);
@@ -163,7 +191,7 @@ int main() {
         g_time->WaitForFrameEnd(frameStart);
 
         // Update title bar with FPS every 30 frames
-        static u32 titleCounter = 0;
+        static u32 titleCounter = 30;
         if (++titleCounter >= 30) {
             char titleBuf[128];
             snprintf(titleBuf, sizeof(titleBuf), "%s - %.1f fps (%.2f ms)", JCSM_TITLE, g_time->fps, g_time->deltaTime * 1000.0f);

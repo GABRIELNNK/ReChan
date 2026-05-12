@@ -17,6 +17,7 @@
 #include "gen/scoremgr.h"
 #include "gen/world.h"
 #include "p3d/texture.h"
+#include "pddi/pdditex.h"
 #include <cmath>
 #include <cstdio>
 
@@ -25,6 +26,21 @@ feCustomMenuMgr* g_feCustomMenuMgr = nullptr;
 static constexpr s32 kFrameRateOptionValues[] = { 30, 60, 120, 0 };
 static constexpr s32 kMsaaOptionValues[] = { 0, 2, 4, 8, 16 };
 static constexpr s32 kKeyBindingActionCount = ACTION_OPEN_CLOSE_MENU;
+static constexpr u32 HASH_LEVEL_SCREEN = 0x0598ABF8;
+static constexpr u32 HASH_LEVEL_EXECUTE = 0x893DA6B2;
+static constexpr u32 HASH_LOCATION_OVERLAY = 42519405;
+static constexpr u32 HASH_TEXT_LEVELNAME = 0x39AA5899;
+static constexpr u32 HASH_TEXT_DRAGONBAR = 0x3E799456;
+static constexpr u32 HASH_TEXT_GOLDDRAGON = 0x07C775B9;
+static constexpr u32 HASH_TEXT_LEVELGRADE = 0x6E7FDFDB;
+
+struct LocationOverlayText {
+    xcSection* section = nullptr;
+    xcTextPrim* levelName = nullptr;
+    xcTextPrim* dragonBar = nullptr;
+    xcTextPrim* goldDragon = nullptr;
+    xcTextPrim* grade = nullptr;
+};
 
 static void BeginNewGameReset() {
     if (g_scoreManager) {
@@ -97,6 +113,20 @@ static void BuildActionDisplayName(Action action, char* outText, s32 outTextLen)
         outText[write++] = ch;
     }
     outText[write] = '\0';
+}
+
+static const char* GetControllerLogicalLabelToken(u8 logicalIndex) {
+    switch (logicalIndex) {
+        case 0: return "FE_CSD";
+        case 1: return "FE_CST";
+        case 2: return "FE_CCT";
+        case 3: return "FE_CDR";
+        case 4: return "FE_CKK";
+        case 5: return "FE_CGR";
+        case 6: return "FE_CJP";
+        case 7: return "FE_CPN";
+        default: return nullptr;
+    }
 }
 
 static void BuildDesktopBindingPromptText(Action action, s32 slot, char* outText, s32 outTextLen) {
@@ -293,6 +323,58 @@ static bool IsSaveSlotPage(MenuPage page) {
         || page == MenuPage_DeleteSlots;
 }
 
+static bool IsAutoEntryPosition(const Entry& entry) {
+    return entry.posX == 0 && entry.posY == 0;
+}
+
+static const char* ResolveTextPrimString(xcSection* section, const xcTextPrim* text) {
+    if (!section || !text || text->numStrings == 0) {
+        return nullptr;
+    }
+
+    const u32 strHash = text->GetStringHash();
+    const char* runtimeStr = xcResolveRuntimeString(strHash);
+    if (runtimeStr) {
+        return runtimeStr;
+    }
+
+    return section->FindString(strHash);
+}
+
+static bool ResolveLocationOverlayText(LocationOverlayText* outText) {
+    if (!outText || !g_feMenuMgr) {
+        return false;
+    }
+
+    *outText = {};
+
+    xcSection* section = g_feMenuMgr->GetSection();
+    xcOverlayData* overlay = g_feMenuMgr->FindOverlay(HASH_LOCATION_OVERLAY);
+    if (!section || !section->rawData || !overlay) {
+        return false;
+    }
+
+    u8* raw = section->rawData;
+    outText->section = section;
+    outText->levelName = (xcTextPrim*)overlay->GetTextObj(HASH_TEXT_LEVELNAME, raw);
+    outText->dragonBar = (xcTextPrim*)overlay->GetTextObj(HASH_TEXT_DRAGONBAR, raw);
+    outText->goldDragon = (xcTextPrim*)overlay->GetTextObj(HASH_TEXT_GOLDDRAGON, raw);
+    outText->grade = (xcTextPrim*)overlay->GetTextObj(HASH_TEXT_LEVELGRADE, raw);
+
+    return outText->levelName || outText->dragonBar || outText->goldDragon || outText->grade;
+}
+
+static xcFont* ResolveTextPrimFont(const xcTextPrim* textPrim, xcFont* fallback) {
+    if (textPrim && g_feMenuMgr && g_feMenuMgr->sectionMan) {
+        xcFont* font = g_feMenuMgr->sectionMan->FindFont(textPrim->fontHash);
+        if (font) {
+            return font;
+        }
+    }
+
+    return fallback;
+}
+
 void feCustomMenuMgr::BuildPages() {
     auto& feTitle = AddPage(MenuPage_Title, "FE_TTL", "Menu_Title", MenuPage_None, 0, false, -1, -1);
     SetEntries(feTitle, {
@@ -327,11 +409,11 @@ void feCustomMenuMgr::BuildPages() {
         Button("FE_BCK", EntryEvent_Back),
                });
 
-    auto& feCtrl = AddPage(MenuPage_Controller, "FE_CTL", "Menu_Controller", MenuPage_Options, 0, false, -1, -1);
+    auto& feCtrl = AddPage(MenuPage_Controller, "FE_CTL", "Menu_Controller", MenuPage_Options, 0, false, DEF_KEYBIND_WINDOW_W, DEF_KEYBIND_WINDOW_H);
     SetEntries(feCtrl, {
         Toggle("FE_CSH", EntryBinding_Shock),
-        Button("FE_BCK", EntryEvent_Back),
-               });
+        List("FE_CCF", EntryBinding_PlayerConfig, 1, 0, 2),
+               }, 0, 28);
 
     AddPage(MenuPage_KeyBindings, "FE_KBD", "Menu_Controller", MenuPage_Controller, 1, false,
             DEF_KEYBIND_WINDOW_W, DEF_KEYBIND_WINDOW_H);
@@ -448,6 +530,11 @@ void feCustomMenuMgr::BuildPages() {
         Button("FE_EXL", EntryEvent_GoPage, MenuPage_ExitLevelConfirm),
         Button("FE_QTG", EntryEvent_GoPage, MenuPage_QuitConfirm),
                });
+
+    auto& feLocation = AddPage(MenuPage_Location, "", "Menu_Location", MenuPage_None, 0, false, DEF_WINDOW_W, 130);
+    SetEntries(feLocation, {
+        Button("", EntryEvent_LocationSelect),
+               });
 }
 
 void feCustomMenuMgr::Init(CustomText* textSystem) {
@@ -463,6 +550,8 @@ void feCustomMenuMgr::Init(CustomText* textSystem) {
     }
 
     BuildPages();
+    LoadControllerOverlayTexture();
+    LoadSplashTextures();
 
     MenuColorStart(m_pulse);
     SetPage(MenuPage_None);
@@ -471,6 +560,33 @@ void feCustomMenuMgr::Init(CustomText* textSystem) {
 void feCustomMenuMgr::Shutdown() {
     m_cellTextures.clear();
     m_texReady = false;
+    if (m_titleScreenTexture) {
+        m_titleScreenTexture->Release();
+        m_titleScreenTexture = nullptr;
+    }
+    if (m_loadingScreenTexture) {
+        m_loadingScreenTexture->Release();
+        m_loadingScreenTexture = nullptr;
+    }
+    if (m_controllerTexture) {
+        m_controllerTexture->Release();
+        m_controllerTexture = nullptr;
+    }
+    if (m_redDragonTex) {
+        m_redDragonTex->Release();
+        m_redDragonTex = nullptr;
+    }
+    if (m_goldDragonTex) {
+        m_goldDragonTex->Release();
+        m_goldDragonTex = nullptr;
+    }
+    if (m_greyDragonTex) {
+        m_greyDragonTex->Release();
+        m_greyDragonTex = nullptr;
+    }
+    m_titleScreenTextureTried = false;
+    m_loadingScreenTextureTried = false;
+    m_dragonTexTried = false;
     delete m_menuArt;
     m_menuArt = nullptr;
     m_text = nullptr;
@@ -885,10 +1001,16 @@ s32 feCustomMenuMgr::Invoke() {
         const s32 bodyAvailH = page->frameH - DEF_TITLE_BAR_H - DEF_BOTTOM_BAR_H - DEF_CONTENT_TOP_PAD - DEF_CONTENT_BOTTOM_PAD;
         const s32 bodyCenterPad = (bodyAvailH > entryBlockH) ? ((bodyAvailH - entryBlockH) / 2) : 0;
         const s32 firstY = panelY + DEF_TITLE_BAR_H + DEF_CONTENT_TOP_PAD + bodyCenterPad + DEF_CONTENT_PAD;
+        const s32 baseLabelX = panelX + DEF_LABEL_X_PAD;
+        const s32 baseValueX = panelX + page->frameW - DEF_VALUE_X_PAD;
+        const s32 baseCenterX = DEF_WINDOW_CENTER_X;
 
         if (psxX >= (f32)panelX && psxX < (f32)(panelX + page->frameW)) {
             for (s32 i = 0; i < page->numEntries; i++) {
-                const s32 rowTop = firstY + i * DEF_ROW_STEP + CalcEntryYExtra(*page, i, hoverFont);
+                s32 rowTop = 0;
+                ResolveEntryLayout(*page, i, hoverFont,
+                                   firstY, baseLabelX, baseValueX, baseCenterX,
+                                   &rowTop, nullptr, nullptr, nullptr, nullptr);
                 const s32 rowH = DEF_ROW_STEP + GetEntryExtraHeight(*page, page->entries[i], hoverFont);
                 if (psxY >= (f32)rowTop && psxY < (f32)(rowTop + rowH)) {
                     if (i != m_cursor && page->entries[i].type != EntryType_Info) {
@@ -1041,6 +1163,7 @@ void feCustomMenuMgr::SetPage(MenuPage page) {
 void feCustomMenuMgr::Activate(MenuPage startPage) {
     m_active = true;
     m_cursor = 0;
+    LoadControllerOverlayTexture();
 
     if (g_display) {
         g_display->SetCursorCaptured(false);
@@ -1101,6 +1224,33 @@ void feCustomMenuMgr::MoveCursor(s32 dir) {
             m_pendingMsaaActive = false;
         }
     }
+}
+
+bool feCustomMenuMgr::InvokeLocationSelection() {
+    if (!g_feMenuMgr) {
+        return false;
+    }
+
+    hdMenu* levelMenu = g_feMenuMgr->FindMenu(HASH_LEVEL_SCREEN);
+    if (!levelMenu) {
+        LOG("[CustomMenu] Location select failed: level menu not found");
+        return false;
+    }
+
+    hdMenuItem* executeItem = levelMenu->FindItem(HASH_LEVEL_EXECUTE);
+    if (!executeItem || !executeItem->callback) {
+        LOG("[CustomMenu] Location select failed: execute callback missing");
+        return false;
+    }
+
+    const s32 callbackResult = executeItem->callback(executeItem);
+    if (callbackResult == 4 || callbackResult == 8) {
+        m_result = callbackResult;
+        return true;
+    }
+
+    LOG("[CustomMenu] Location select callback returned unexpected result=%d", callbackResult);
+    return false;
 }
 
 void feCustomMenuMgr::Confirm() {
@@ -1288,6 +1438,11 @@ void feCustomMenuMgr::Confirm() {
                 PlaySound(FE_SND_MENU_7);
             }
             break;
+        case EntryEvent_LocationSelect:
+            if (!InvokeLocationSelection()) {
+                PlaySound(FE_SND_MENU_7);
+            }
+            break;
     }
 }
 
@@ -1300,6 +1455,11 @@ void feCustomMenuMgr::GoBack() {
     }
     if (m_currPage == MenuPage_DeleteConfirm) {
         m_pendingDeleteSlot = -1;
+    }
+
+    if (m_currPage == MenuPage_Location) {
+        m_result = 8;
+        return;
     }
 
     if (m_currPage == MenuPage::MenuPage_Frontend || m_currPage == MenuPage::MenuPage_Pause || m_currPage == MenuPage::MenuPage_Title) {
@@ -1327,6 +1487,12 @@ void feCustomMenuMgr::Adjust(s32 dir) {
         ApplyValue(*e, v);
     }
     else if (e->type == EntryType_List) {
+        if (e->binding == EntryBinding_PlayerConfig) {
+            const s32 v = WrapStepValue(GetBoundValue(*e), e->step, e->lo, e->hi, dir);
+            ApplyValue(*e, v);
+            return;
+        }
+
         if (e->binding == EntryBinding_DisplayResolution) {
             const s32 current = m_pendingResolutionActive ? m_pendingResolutionIndex : GetBoundValue(*e);
             s32 maxIndex = 0;
@@ -1404,6 +1570,7 @@ s32 feCustomMenuMgr::GetBoundValue(const Entry& e) const {
         case EntryBinding_DialogVol: return g_sound ? (s32)g_sound->flag1 : 100;
         case EntryBinding_Stereo: return (g_sound && g_sound->activeFlag) ? 1 : 0;
         case EntryBinding_Shock: return GetShock() ? 1 : 0;
+        case EntryBinding_PlayerConfig: return g_inputManager ? (s32)g_inputManager->GetPlayerConfig() : 0;
         case EntryBinding_DisplayResolution: return g_display ? g_display->GetResolutionIndex() : 0;
         case EntryBinding_DisplayScreenMode: return g_display ? g_display->GetScreenMode() : Display::GetDefaultScreenMode();
         case EntryBinding_DisplayVsync: return g_display ? g_display->GetVsync() : Display::GetDefaultVsync();
@@ -1444,7 +1611,27 @@ void feCustomMenuMgr::ApplyValue(const Entry& e, s32 v) {
     }
     else if (e.binding == EntryBinding_Shock) {
         SetShock(v);
-        Shock(v ? SHOCK_0 : SHOCK_CLEAR);
+        if (v) {
+            // Menu feedback: full-strength pulse that survives high-FPS frame pacing.
+            SetActuator(0, 255, 60);
+            UpdateActuator(0);
+        }
+        else {
+            Shock(SHOCK_CLEAR);
+        }
+    }
+    else if (e.binding == EntryBinding_PlayerConfig) {
+        if (g_inputManager) {
+            g_inputManager->SetPlayerConfig((u8)v);
+            const s16* gameMode = GameControlModeArray();
+            const s16* menuMode = MenuControlModeArray();
+            const u8* playerMap = g_inputManager->PlayerMapArray();
+            for (s16 padIndex = 0; padIndex < 2; ++padIndex) {
+                const s16* modeMap = (m_active && m_currPage != MenuPage_None) ? menuMode : gameMode;
+                g_inputManager->SetControlModeArray(padIndex, modeMap);
+                g_inputManager->SetControlMapArray(padIndex, playerMap);
+            }
+        }
     }
     else if (e.binding == EntryBinding_DisplayScreenMode) {
         if (g_display) g_display->SetScreenMode(v);
@@ -1531,13 +1718,16 @@ PageDef& feCustomMenuMgr::AddPage(
     def.isPause = pause;
     def.frameW = (frameW == -1) ? DEF_WINDOW_W : frameW;
     def.frameH = frameH;
+    def.entriesOffsetX = 0;
+    def.entriesOffsetY = 0;
     def.numEntries = 0;
 
     m_pages[id] = def;
     return m_pages[id];
 }
 
-void feCustomMenuMgr::SetEntries(PageDef& page, std::initializer_list<Entry> list) {
+void feCustomMenuMgr::SetEntries(PageDef& page, std::initializer_list<Entry> list,
+                                 s32 entriesOffsetX, s32 entriesOffsetY) {
     s32 n = 0;
     for (const Entry& e : list) {
         if (n >= MAX_ENTRIES_PER_MENU)
@@ -1545,6 +1735,8 @@ void feCustomMenuMgr::SetEntries(PageDef& page, std::initializer_list<Entry> lis
         page.entries[n++] = e;
     }
     page.numEntries = n;
+    page.entriesOffsetX = entriesOffsetX;
+    page.entriesOffsetY = entriesOffsetY;
     if (page.frameH == -1) {
         xcFont* bodyFont = FindFont("Beats_lo", "Beats_mid");
         if (bodyFont)
@@ -1563,6 +1755,7 @@ Entry feCustomMenuMgr::Button(const char* tok, EntryEvent ev, MenuPage go) {
     e.goPage = go;
     e.binding = EntryBinding_None;
     e.step = 0; e.lo = 0; e.hi = 0;
+    e.posX = 0; e.posY = 0;
     return e;
 }
 
@@ -1575,6 +1768,7 @@ Entry feCustomMenuMgr::Slider(const char* tok, EntryBinding binding, s32 step, s
     e.goPage = MenuPage_None;
     e.binding = binding;
     e.step = step; e.lo = lo; e.hi = hi;
+    e.posX = 0; e.posY = 0;
     return e;
 }
 
@@ -1587,6 +1781,7 @@ Entry feCustomMenuMgr::List(const char* tok, EntryBinding binding, s32 step, s32
     e.goPage = MenuPage_None;
     e.binding = binding;
     e.step = step; e.lo = lo; e.hi = hi;
+    e.posX = 0; e.posY = 0;
     return e;
 }
 
@@ -1599,6 +1794,7 @@ Entry feCustomMenuMgr::Toggle(const char* tok, EntryBinding binding) {
     e.goPage = MenuPage_None;
     e.binding = binding;
     e.step = 1; e.lo = 0; e.hi = 1;
+    e.posX = 0; e.posY = 0;
     return e;
 }
 
@@ -1611,6 +1807,7 @@ Entry feCustomMenuMgr::Info(const char* tok) {
     e.goPage = MenuPage_None;
     e.binding = EntryBinding_None;
     e.step = 0; e.lo = 0; e.hi = 0;
+    e.posX = 0; e.posY = 0;
     return e;
 }
 
@@ -1659,6 +1856,53 @@ s32 feCustomMenuMgr::CalcPageExtraHeight(const PageDef& page, xcFont* font) cons
     return extra;
 }
 
+void feCustomMenuMgr::ResolveEntryLayout(const PageDef& page, s32 entryIndex, xcFont* font,
+                                         s32 firstY, s32 baseLabelX, s32 baseValueX, s32 baseCenterX,
+                                         s32* outRowTop, s32* outRowTextY,
+                                         s32* outLabelX, s32* outValueX, s32* outCenterX) const {
+    const Entry& entry = page.entries[entryIndex];
+    const s32 autoRowTop = firstY + entryIndex * DEF_ROW_STEP + CalcEntryYExtra(page, entryIndex, font);
+    const s32 autoRowTextY = autoRowTop + DEF_TEXT_Y_OFF;
+
+    s32 rowTop = autoRowTop;
+    s32 rowTextY = autoRowTextY;
+    s32 labelX = baseLabelX;
+    s32 valueX = baseValueX;
+    s32 centerX = baseCenterX;
+
+    if (IsAutoEntryPosition(entry)) {
+        rowTop += page.entriesOffsetY;
+        rowTextY += page.entriesOffsetY;
+        labelX += page.entriesOffsetX;
+        valueX += page.entriesOffsetX;
+        centerX += page.entriesOffsetX;
+    }
+    else {
+        const s32 rowShiftX = entry.posX - baseCenterX;
+        centerX = entry.posX;
+        labelX = baseLabelX + rowShiftX;
+        valueX = baseValueX + rowShiftX;
+        rowTextY = entry.posY;
+        rowTop = rowTextY - DEF_TEXT_Y_OFF;
+    }
+
+    if (outRowTop) {
+        *outRowTop = rowTop;
+    }
+    if (outRowTextY) {
+        *outRowTextY = rowTextY;
+    }
+    if (outLabelX) {
+        *outLabelX = labelX;
+    }
+    if (outValueX) {
+        *outValueX = valueX;
+    }
+    if (outCenterX) {
+        *outCenterX = centerX;
+    }
+}
+
 void feCustomMenuMgr::EnsureTextures() {
     if (m_texReady)
         return;
@@ -1701,6 +1945,148 @@ void feCustomMenuMgr::EnsureTextures() {
         const u32 nameHash = imgItems ? imgItems[i].hash : 0u;
         m_cellTextures.push_back({ tex, (s16)cell->width, (s16)cell->height, nameHash });
     }
+}
+
+void feCustomMenuMgr::LoadControllerOverlayTexture() {
+    if (m_controllerTexture) {
+        return;
+    }
+
+    m_controllerTexture = tTexture::LoadFromImagePath(kControllerOverlayTexturePath);
+    if (!m_controllerTexture) {
+        LOG("[CustomMenu] Failed to load %s", kControllerOverlayTexturePath);
+    }
+}
+
+void feCustomMenuMgr::LoadSplashTextures() {
+    if (!m_titleScreenTexture && !m_titleScreenTextureTried) {
+        m_titleScreenTextureTried = true;
+        m_titleScreenTexture = tTexture::LoadFromImagePath(kTitleScreenTexturePath);
+        if (m_titleScreenTexture && m_titleScreenTexture->GetTexture()) {
+            m_titleScreenTexture->GetTexture()->SetFilterMode(PDDI_FILTER_BILINEAR);
+        }
+        if (!m_titleScreenTexture) {
+            LOG("[CustomMenu] Failed to load title splash texture (%s)", kTitleScreenTexturePath);
+        }
+    }
+
+    if (!m_loadingScreenTexture && !m_loadingScreenTextureTried) {
+        m_loadingScreenTextureTried = true;
+        m_loadingScreenTexture = tTexture::LoadFromImagePath(kLoadingScreenTexturePath);
+        if (m_loadingScreenTexture && m_loadingScreenTexture->GetTexture()) {
+            m_loadingScreenTexture->GetTexture()->SetFilterMode(PDDI_FILTER_BILINEAR);
+        }
+        if (!m_loadingScreenTexture) {
+            LOG("[CustomMenu] Failed to load loading splash texture (%s)", kLoadingScreenTexturePath);
+        }
+    }
+}
+
+bool feCustomMenuMgr::GetSplashScreenRect(f32* outX, f32* outY, f32* outW, f32* outH) const {
+    const f32 screenW = SCREEN_WIDTH;
+    const f32 screenH = SCREEN_HEIGHT;
+    if (screenW <= 0.0f || screenH <= 0.0f) {
+        return false;
+    }
+
+    f32 drawW = screenW;
+    f32 drawH = drawW / kSplashScreenAspect;
+    if (drawH > screenH) {
+        drawH = screenH;
+        drawW = drawH * kSplashScreenAspect;
+    }
+
+    const f32 drawX = (screenW - drawW) * 0.5f;
+    const f32 drawY = (screenH - drawH) * 0.5f;
+
+    if (outX) {
+        *outX = drawX;
+    }
+    if (outY) {
+        *outY = drawY;
+    }
+    if (outW) {
+        *outW = drawW;
+    }
+    if (outH) {
+        *outH = drawH;
+    }
+
+    return true;
+}
+
+void feCustomMenuMgr::DrawSplashTexture16x9(tTexture* texture) {
+    if (!texture) {
+        return;
+    }
+
+    f32 drawX = 0.0f;
+    f32 drawY = 0.0f;
+    f32 drawW = 0.0f;
+    f32 drawH = 0.0f;
+    if (!GetSplashScreenRect(&drawX, &drawY, &drawW, &drawH)) {
+        return;
+    }
+
+    // Clear to black first so narrower/taller targets produce clean letterbox bars.
+    ScreenDraw::DrawColoredRect(0.0f, 0.0f, SCREEN_WIDTH, SCREEN_HEIGHT, 0, 0, 0, 255);
+    ScreenDraw::DrawQuad(texture, drawX, drawY, drawW, drawH);
+}
+
+bool feCustomMenuMgr::DrawTitleScreen() {
+    LoadSplashTextures();
+    if (!m_titleScreenTexture) {
+        return false;
+    }
+
+    DrawSplashTexture16x9(m_titleScreenTexture);
+    return true;
+}
+
+void feCustomMenuMgr::DrawTitleStartPrompt(s32 baseX, s32 baseY, u32 pulseColorABGR) {
+    f32 bgX = 0.0f;
+    f32 bgY = 0.0f;
+    f32 bgW = 0.0f;
+    f32 bgH = 0.0f;
+    if (!GetSplashScreenRect(&bgX, &bgY, &bgW, &bgH)) {
+        return;
+    }
+
+    const f32 refW = SCREEN_SCALE_X(DEFAULT_SCREEN_WIDTH);
+    const f32 refH = SCREEN_SCALE_Y(DEFAULT_SCREEN_HEIGHT);
+    if (refW <= 0.0f || refH <= 0.0f) {
+        return;
+    }
+
+    const f32 splashScaleX = bgW / refW;
+    const f32 splashScaleY = bgH / refH;
+
+    xcFont* promptFont = FindFont("Beats_mid", "Beats_xl");
+    if (!promptFont) {
+        return;
+    }
+
+    const char* promptText = Localize("FE_PST");
+    if (!promptText) {
+        promptText = "Press <ACT:TITLE_START> to Start";
+    }
+
+    const f32 promptX = bgX + SCREEN_SCALE_X((f32)baseX) * splashScaleX;
+    const f32 promptY = bgY + SCREEN_SCALE_Y((f32)baseY) * splashScaleY;
+
+    promptFont->SetScale(SCREEN_SCALE_X(1.0f), SCREEN_SCALE_Y(1.0f));
+    promptFont->DrawText(promptText, promptX + 1.0f, promptY + 1.0f, (u32)(DEF_TEXT_SHADOW_A << 24), XC_JUST_CENTER);
+    promptFont->DrawText(promptText, promptX, promptY, pulseColorABGR, XC_JUST_CENTER);
+}
+
+bool feCustomMenuMgr::DrawLoadingScreen() {
+    LoadSplashTextures();
+    if (!m_loadingScreenTexture) {
+        return false;
+    }
+
+    DrawSplashTexture16x9(m_loadingScreenTexture);
+    return true;
 }
 
 static void DrawGouraudRectPSX(s32 x, s32 y, s32 w, s32 h,
@@ -2042,6 +2428,96 @@ void feCustomMenuMgr::DrawMenuWindow(s32 x, s32 y, s32 w, s32 h, const char* tit
     }
 }
 
+void feCustomMenuMgr::RenderKeyBindingsPage(s32 panelX, s32 panelY, s32 panelW, s32 panelH,
+                                            xcFont* bodyFont, u32 normalColor, u32 selectedColor) const {
+    const s32 contentTop = panelY + DEF_TITLE_BAR_H + DEF_CONTENT_TOP_PAD;
+    const s32 labelX = panelX + DEF_LABEL_X_PAD;
+    const s32 headerY = contentTop + DEF_CONTENT_PAD + DEF_TEXT_Y_OFF;
+    const s32 firstRowY = headerY + DEF_KEYBIND_ROW_STEP;
+    const s32 slotW = DEF_KEYBIND_SLOT_W;
+    const s32 slotGap = DEF_KEYBIND_SLOT_GAP;
+    const s32 slot2Right = panelX + panelW - DEF_VALUE_X_PAD;
+    const s32 slot2Left = slot2Right - slotW;
+    const s32 slot1Right = slot2Left - slotGap;
+    const s32 slot1Left = slot1Right - slotW;
+    const s32 visibleRows = (kKeyBindingActionCount - m_keyBindScrollTop < DEF_KEYBIND_VISIBLE_ROWS)
+        ? (kKeyBindingActionCount - m_keyBindScrollTop)
+        : DEF_KEYBIND_VISIBLE_ROWS;
+
+    const s32 tableLeft = labelX - DEF_KEYBIND_TABLE_SIDE_PAD;
+    const s32 tableRight = slot2Left + slotW + DEF_KEYBIND_TABLE_SIDE_PAD;
+    const s32 tableW = tableRight - tableLeft;
+
+    const f32 headerYScreen = SCREEN_SCALE_Y((f32)headerY);
+    bodyFont->DrawText("Action", SCALE_AND_CENTER_X((f32)labelX), headerYScreen, normalColor, 0);
+    bodyFont->DrawText("Bind 1", SCALE_AND_CENTER_X((f32)(slot1Left + slotW / 2)), headerYScreen, normalColor, XC_JUST_CENTER);
+    bodyFont->DrawText("Bind 2", SCALE_AND_CENTER_X((f32)(slot2Left + slotW / 2)), headerYScreen, normalColor, XC_JUST_CENTER);
+
+    for (s32 row = 0; row < visibleRows; row++) {
+        const s32 actionIndex = m_keyBindScrollTop + row;
+        const Action action = (Action)actionIndex;
+        const bool selectedRow = (actionIndex == m_keyBindActionCursor);
+        const s32 rowY = firstRowY + row * DEF_KEYBIND_ROW_STEP;
+        const s32 rowTextY = rowY + DEF_TEXT_Y_OFF;
+
+        if ((row & 1) == 0) {
+            DrawRect(tableLeft, rowY - DEF_KEYBIND_ROW_TOP_PAD, tableW, DEF_KEYBIND_ROW_STEP,
+                     DEF_KEYBIND_STRIPE_DARK_R, DEF_KEYBIND_STRIPE_DARK_G, DEF_KEYBIND_STRIPE_DARK_B, DEF_KEYBIND_STRIPE_DARK_A);
+        }
+        else {
+            DrawRect(tableLeft, rowY - DEF_KEYBIND_ROW_TOP_PAD, tableW, DEF_KEYBIND_ROW_STEP,
+                     DEF_KEYBIND_STRIPE_WARM_R, DEF_KEYBIND_STRIPE_WARM_G, DEF_KEYBIND_STRIPE_WARM_B, DEF_KEYBIND_STRIPE_WARM_A);
+        }
+
+        if (selectedRow) {
+            const s32 cellLeft = (m_keyBindSlotCursor == 0) ? slot1Left : slot2Left;
+            DrawRect(cellLeft - DEF_KEYBIND_CELL_PAD, rowY - DEF_KEYBIND_ROW_TOP_PAD,
+                     slotW + DEF_KEYBIND_CELL_PAD * 2, DEF_KEYBIND_ROW_STEP,
+                     DEF_KEYBIND_ACTIVE_FILL_R, DEF_KEYBIND_ACTIVE_FILL_G, DEF_KEYBIND_ACTIVE_FILL_B, DEF_KEYBIND_ACTIVE_FILL_A);
+            DrawUniformBorderRectPSX(cellLeft - DEF_KEYBIND_CELL_PAD, rowY - DEF_KEYBIND_ROW_TOP_PAD,
+                                     slotW + DEF_KEYBIND_CELL_PAD * 2, DEF_KEYBIND_ROW_STEP,
+                                     GetMenuBorderPx(), m_pulse.GetRed8(), m_pulse.GetGreen8(), m_pulse.GetBlue8(), 255);
+        }
+
+        char actionName[64] = {};
+        char slot0Label[32] = {};
+        char slot1Label[32] = {};
+        BuildActionDisplayName(action, actionName, (s32)sizeof(actionName));
+        BuildDesktopBindingPromptText(action, 0, slot0Label, (s32)sizeof(slot0Label));
+        BuildDesktopBindingPromptText(action, 1, slot1Label, (s32)sizeof(slot1Label));
+
+        if (selectedRow && m_keyBindCaptureActive) {
+            if (m_keyBindSlotCursor == 0) {
+                snprintf(slot0Label, (s32)sizeof(slot0Label), "?");
+            }
+            else {
+                snprintf(slot1Label, (s32)sizeof(slot1Label), "?");
+            }
+        }
+
+        const bool selectedSlot0 = selectedRow && m_keyBindSlotCursor == 0;
+        const bool selectedSlot1 = selectedRow && m_keyBindSlotCursor == 1;
+        const u32 actionColor = normalColor;
+        const u32 slot0Color = selectedSlot0 ? selectedColor : normalColor;
+        const u32 slot1Color = selectedSlot1 ? selectedColor : normalColor;
+        const f32 rowScreenY = SCREEN_SCALE_Y((f32)rowTextY);
+        bodyFont->DrawText(actionName, SCALE_AND_CENTER_X((f32)labelX), rowScreenY, actionColor, 0);
+        bodyFont->DrawText(slot0Label, SCALE_AND_CENTER_X((f32)(slot1Left + slotW / 2)), rowScreenY, slot0Color, XC_JUST_CENTER);
+        bodyFont->DrawText(slot1Label, SCALE_AND_CENTER_X((f32)(slot2Left + slotW / 2)), rowScreenY, slot1Color, XC_JUST_CENTER);
+    }
+
+    char scrollText[32] = {};
+    snprintf(scrollText, (s32)sizeof(scrollText), "%d-%d/%d",
+             m_keyBindScrollTop + 1,
+             m_keyBindScrollTop + visibleRows,
+             kKeyBindingActionCount);
+    bodyFont->DrawText(scrollText,
+                       SCALE_AND_CENTER_X((f32)(panelX + panelW - DEF_VALUE_X_PAD)),
+                       SCREEN_SCALE_Y((f32)(panelY + panelH - DEF_BOTTOM_BAR_H - DEF_CONTENT_BOTTOM_PAD - DEF_ROW_TEXT_H + DEF_TEXT_Y_OFF)),
+                       normalColor,
+                       XC_JUST_RIGHT);
+}
+
 void feCustomMenuMgr::Render() {
     if (!m_active)
         return;
@@ -2061,6 +2537,19 @@ void feCustomMenuMgr::Render() {
     const char* title = Localize(page->titleToken);
     if (!title)
         title = page->titleToken;
+
+    // For the location page the title bar must show the level name, not a
+    // localised token.  Resolve the level name string from the overlay prim
+    // and substitute it, matching the original PSX title-bar render path.
+    if (m_currPage == MenuPage_Location) {
+        LocationOverlayText locationOverlay;
+        if (ResolveLocationOverlayText(&locationOverlay)) {
+            const char* levelNameStr = ResolveTextPrimString(locationOverlay.section, locationOverlay.levelName);
+            if (levelNameStr && levelNameStr[0] != '\0') {
+                title = levelNameStr;
+            }
+        }
+    }
 
     DrawMenuWindow(panelX, panelY, panelW, panelH, title);
 
@@ -2103,106 +2592,43 @@ void feCustomMenuMgr::Render() {
         ? (panelX + DEF_BORDER_W + (dragonBoxX - DEF_BORDER_W - panelX) / 2)
         : DEF_WINDOW_CENTER_X;
 
-    if (m_currPage == MenuPage_KeyBindings) {
-        const s32 headerY = contentTop + DEF_CONTENT_PAD + DEF_TEXT_Y_OFF;
-        const s32 firstRowY = headerY + DEF_KEYBIND_ROW_STEP;
-        const s32 slotW = DEF_KEYBIND_SLOT_W;
-        const s32 slotGap = DEF_KEYBIND_SLOT_GAP;
-        const s32 slot2Right = panelX + panelW - DEF_VALUE_X_PAD;
-        const s32 slot2Left = slot2Right - slotW;
-        const s32 slot1Right = slot2Left - slotGap;
-        const s32 slot1Left = slot1Right - slotW;
-        const s32 visibleRows = (kKeyBindingActionCount - m_keyBindScrollTop < DEF_KEYBIND_VISIBLE_ROWS)
-            ? (kKeyBindingActionCount - m_keyBindScrollTop)
-            : DEF_KEYBIND_VISIBLE_ROWS;
-
-        const s32 tableLeft = labelX - DEF_KEYBIND_TABLE_SIDE_PAD;
-        const s32 tableRight = slot2Left + slotW + DEF_KEYBIND_TABLE_SIDE_PAD;
-        const s32 tableW = tableRight - tableLeft;
-
-        const f32 headerYScreen = SCREEN_SCALE_Y((f32)headerY);
-        bodyFont->DrawText("Action", SCALE_AND_CENTER_X((f32)labelX), headerYScreen, normalColor, 0);
-        bodyFont->DrawText("Bind 1", SCALE_AND_CENTER_X((f32)(slot1Left + slotW / 2)), headerYScreen, normalColor, XC_JUST_CENTER);
-        bodyFont->DrawText("Bind 2", SCALE_AND_CENTER_X((f32)(slot2Left + slotW / 2)), headerYScreen, normalColor, XC_JUST_CENTER);
-
-        for (s32 row = 0; row < visibleRows; row++) {
-            const s32 actionIndex = m_keyBindScrollTop + row;
-            const Action action = (Action)actionIndex;
-            const bool selectedRow = (actionIndex == m_keyBindActionCursor);
-            const s32 rowY = firstRowY + row * DEF_KEYBIND_ROW_STEP;
-            const s32 rowTextY = rowY + DEF_TEXT_Y_OFF;
-
-            if ((row & 1) == 0) {
-                DrawRect(tableLeft, rowY - DEF_KEYBIND_ROW_TOP_PAD, tableW, DEF_KEYBIND_ROW_STEP,
-                         DEF_KEYBIND_STRIPE_DARK_R, DEF_KEYBIND_STRIPE_DARK_G, DEF_KEYBIND_STRIPE_DARK_B, DEF_KEYBIND_STRIPE_DARK_A);
-            }
-            else {
-                DrawRect(tableLeft, rowY - DEF_KEYBIND_ROW_TOP_PAD, tableW, DEF_KEYBIND_ROW_STEP,
-                         DEF_KEYBIND_STRIPE_WARM_R, DEF_KEYBIND_STRIPE_WARM_G, DEF_KEYBIND_STRIPE_WARM_B, DEF_KEYBIND_STRIPE_WARM_A);
-            }
-
-            if (selectedRow) {
-                const s32 cellLeft = (m_keyBindSlotCursor == 0) ? slot1Left : slot2Left;
-                DrawRect(cellLeft - DEF_KEYBIND_CELL_PAD, rowY - DEF_KEYBIND_ROW_TOP_PAD,
-                         slotW + DEF_KEYBIND_CELL_PAD * 2, DEF_KEYBIND_ROW_STEP,
-                         DEF_KEYBIND_ACTIVE_FILL_R, DEF_KEYBIND_ACTIVE_FILL_G, DEF_KEYBIND_ACTIVE_FILL_B, DEF_KEYBIND_ACTIVE_FILL_A);
-                DrawUniformBorderRectPSX(cellLeft - DEF_KEYBIND_CELL_PAD, rowY - DEF_KEYBIND_ROW_TOP_PAD,
-                                         slotW + DEF_KEYBIND_CELL_PAD * 2, DEF_KEYBIND_ROW_STEP,
-                                         GetMenuBorderPx(), m_pulse.GetRed8(), m_pulse.GetGreen8(), m_pulse.GetBlue8(), 255);
-            }
-
-            char actionName[64] = {};
-            char slot0Label[32] = {};
-            char slot1Label[32] = {};
-            BuildActionDisplayName(action, actionName, (s32)sizeof(actionName));
-            BuildDesktopBindingPromptText(action, 0, slot0Label, (s32)sizeof(slot0Label));
-            BuildDesktopBindingPromptText(action, 1, slot1Label, (s32)sizeof(slot1Label));
-
-            if (selectedRow && m_keyBindCaptureActive) {
-                if (m_keyBindSlotCursor == 0) {
-                    snprintf(slot0Label, (s32)sizeof(slot0Label), "?");
-                }
-                else {
-                    snprintf(slot1Label, (s32)sizeof(slot1Label), "?");
-                }
-            }
-
-            const bool selectedSlot0 = selectedRow && m_keyBindSlotCursor == 0;
-            const bool selectedSlot1 = selectedRow && m_keyBindSlotCursor == 1;
-            const u32 actionColor = normalColor;
-            const u32 slot0Color = selectedSlot0 ? selectedColor : normalColor;
-            const u32 slot1Color = selectedSlot1 ? selectedColor : normalColor;
-            const f32 rowScreenY = SCREEN_SCALE_Y((f32)rowTextY);
-            bodyFont->DrawText(actionName, SCALE_AND_CENTER_X((f32)labelX), rowScreenY, actionColor, 0);
-            bodyFont->DrawText(slot0Label, SCALE_AND_CENTER_X((f32)(slot1Left + slotW / 2)), rowScreenY, slot0Color, XC_JUST_CENTER);
-            bodyFont->DrawText(slot1Label, SCALE_AND_CENTER_X((f32)(slot2Left + slotW / 2)), rowScreenY, slot1Color, XC_JUST_CENTER);
-        }
-
-        char scrollText[32] = {};
-        snprintf(scrollText, (s32)sizeof(scrollText), "%d-%d/%d",
-                 m_keyBindScrollTop + 1,
-                 m_keyBindScrollTop + visibleRows,
-                 kKeyBindingActionCount);
-        bodyFont->DrawText(scrollText,
-                           SCALE_AND_CENTER_X((f32)(panelX + panelW - DEF_VALUE_X_PAD)),
-                           SCREEN_SCALE_Y((f32)(panelY + panelH - DEF_BOTTOM_BAR_H - DEF_CONTENT_BOTTOM_PAD - DEF_ROW_TEXT_H + DEF_TEXT_Y_OFF)),
-                           normalColor,
-                           XC_JUST_RIGHT);
+    switch (m_currPage) {
+        case MenuPage_KeyBindings:
+            RenderKeyBindingsPage(panelX, panelY, panelW, panelH, bodyFont, normalColor, selectedColor);
+            break;
+        case MenuPage_Controller:
+            RenderControllerOverlay(panelX, panelY);
+            break;
+        case MenuPage_Location:
+            RenderLocationPage();
+            break;
+        default:
+            break;
     }
-    else {
+
+    bodyFont->SetScale(SCREEN_SCALE_X(1.0f), SCREEN_SCALE_Y(1.0f));
+
+    if (m_currPage != MenuPage_Location) {
         for (s32 i = 0; i < page->numEntries; i++) {
             const Entry& item = page->entries[i];
             const bool selected = (i == m_cursor);
             const u32 color = selected ? selectedColor : normalColor;
-            const s32 rowY = firstY + i * DEF_ROW_STEP + CalcEntryYExtra(*page, i, bodyFont) + DEF_TEXT_Y_OFF;
+
+            s32 rowY = 0;
+            s32 rowLabelX = labelX;
+            s32 rowValueX = valueX;
+            s32 rowCenterX = contentCenterX;
+            ResolveEntryLayout(*page, i, bodyFont,
+                               firstY, labelX, valueX, contentCenterX,
+                               nullptr, &rowY, &rowLabelX, &rowValueX, &rowCenterX);
 
             const char* label = Localize(item.token);
             if (!label) label = item.token;
 
             const f32 rowScreenY = SCREEN_SCALE_Y((f32)rowY);
-            const f32 labelScreenX = SCALE_AND_CENTER_X((f32)labelX);
-            const f32 valueScreenX = SCALE_AND_CENTER_X((f32)valueX);
-            const f32 centerScreenX = SCALE_AND_CENTER_X((f32)contentCenterX);
+            const f32 labelScreenX = SCALE_AND_CENTER_X((f32)rowLabelX);
+            const f32 valueScreenX = SCALE_AND_CENTER_X((f32)rowValueX);
+            const f32 centerScreenX = SCALE_AND_CENTER_X((f32)rowCenterX);
 
             if (item.type == EntryType_Info) {
                 const u32 infoColor = (u32)((DEF_INFO_TEXT_A << 24) | (DEF_INFO_TEXT_B << 16) | (DEF_INFO_TEXT_G << 8) | DEF_INFO_TEXT_R);
@@ -2291,6 +2717,20 @@ void feCustomMenuMgr::Render() {
                     bodyFont->DrawText(frameRateText, valueScreenX + 1.0f, rowScreenY + 1.0f, (u32)(DEF_TEXT_SHADOW_A << 24), XC_JUST_RIGHT);
                     bodyFont->DrawText(frameRateText, valueScreenX, rowScreenY, color, XC_JUST_RIGHT);
                 }
+                else if (item.binding == EntryBinding_PlayerConfig) {
+                    const s32 cfg = GetBoundValue(item);
+                    const char* cfgToken = (cfg == 0) ? "FE_CF1"
+                        : (cfg == 1) ? "FE_CF2"
+                        : "FE_CF3";
+                    const char* cfgText = Localize(cfgToken);
+
+                    if (!cfgText) {
+                        continue;
+                    }
+
+                    bodyFont->DrawText(cfgText, valueScreenX + 1.0f, rowScreenY + 1.0f, (u32)(DEF_TEXT_SHADOW_A << 24), XC_JUST_RIGHT);
+                    bodyFont->DrawText(cfgText, valueScreenX, rowScreenY, color, XC_JUST_RIGHT);
+                }
             }
             else if (item.type == EntryType_Slider && item.binding != EntryBinding_None) {
                 bodyFont->DrawText(label, labelScreenX + 1.0f, rowScreenY + 1.0f, (u32)(DEF_TEXT_SHADOW_A << 24), 0);
@@ -2298,7 +2738,7 @@ void feCustomMenuMgr::Render() {
 
                 DrawSliderCircleMeterPSX(
                     sliderMeterStyle,
-                    valueX + DEF_SLIDER_CIRCLE_X_OFF,
+                    rowValueX + DEF_SLIDER_CIRCLE_X_OFF,
                     rowY,
                     GetBoundValue(item));
             }
@@ -2475,6 +2915,126 @@ void feCustomMenuMgr::Render() {
     }
 }
 
+void feCustomMenuMgr::RenderLocationPage() const {
+    LocationOverlayText overlayText;
+    if (!ResolveLocationOverlayText(&overlayText)) {
+        return;
+    }
+
+    xcFont* bodyFont = FindFont("Beats_lo", "Beats_mid");
+    if (!bodyFont) {
+        return;
+    }
+
+    if (!m_dragonTexTried) {
+        m_dragonTexTried = true;
+        m_redDragonTex = tTexture::LoadFromImagePath(kRedDragonTexturePath);
+        m_goldDragonTex = tTexture::LoadFromImagePath(kGoldDragonTexturePath);
+        m_greyDragonTex = tTexture::LoadFromImagePath(kGreyDragonTexturePath);
+    }
+
+    static constexpr s32 LOC_ICON_SIZE = 28;
+    static constexpr s32 LOC_ICON_GAP = 14;
+
+    const PageDef& locationPage = m_pages[MenuPage_Location];
+    const s32 panelW = locationPage.frameW;
+    const s32 panelH = locationPage.frameH;
+    const s32 panelX = DEF_WINDOW_CENTER_X - panelW / 2;
+    const s32 panelY = DEF_WINDOW_CENTER_Y - panelH / 2;
+    const s32 bodyY0 = panelY + DEF_TITLE_BAR_H;
+    const s32 bodyY1 = panelY + panelH - DEF_BOTTOM_BAR_H;
+    const f32 framePx = GetMenuBorderPx();
+
+    const s32 lineX = panelX + DEF_BORDER_W;
+    const s32 lineW = panelW - DEF_BORDER_W * 2;
+
+    const s32 topLineY = bodyY0;
+    const s32 gradeTopY = bodyY0;
+    const s32 midLineY = gradeTopY + LOC_ICON_SIZE;
+    const s32 row1TopY = midLineY;
+    const s32 row2TopY = row1TopY + LOC_ICON_SIZE;
+    const s32 botLineY = row2TopY + LOC_ICON_SIZE + 2;
+
+    const s32 gridW = 5 * LOC_ICON_SIZE + 4 * LOC_ICON_GAP;
+    const s32 gridLeftX = DEF_WINDOW_CENTER_X - gridW / 2;
+
+    const s32 labelX = panelX - DEF_LABEL_X_PAD + DEF_WINDOW_W / 2;
+    const s32 gradeBoxX = labelX + 12;
+    const s32 gradeBoxW = 64;
+    const s32 gradeBoxH = 18;
+    const s32 goldIconX = gradeBoxX + gradeBoxW + 4;
+    const s32 goldIconY = gradeTopY;
+
+    // Red separator lines
+    DrawUniformHLinePSX(lineX, midLineY, lineW, framePx, DEF_FRAME_R, DEF_FRAME_G, DEF_FRAME_B, DEF_FRAME_A);
+
+    // Grade black box
+    DrawUniformBorderFillRectPSX(gradeBoxX, gradeTopY + 5, gradeBoxW, gradeBoxH, framePx,
+                                 DEF_FRAME_R, DEF_FRAME_G, DEF_FRAME_B, DEF_FRAME_A,
+                                 0, 0, 0, 255);
+
+    // Grade label
+    {
+        const char* lbl = Localize("FE_GRD");
+        const u32 lblColor = (0xFFu << 24) | ((u32)DEF_TEXT_NORM_B << 16) | ((u32)DEF_TEXT_NORM_G << 8) | (u32)DEF_TEXT_NORM_R;
+        bodyFont->SetScale(SCREEN_SCALE_X(1.0f), SCREEN_SCALE_Y(1.0f));
+        const f32 lx = SCALE_AND_CENTER_X((f32)labelX);
+        const f32 ly = SCREEN_SCALE_Y((f32)(gradeTopY + 8));
+        bodyFont->DrawText(lbl, lx + 1.0f, ly + 1.0f, (u32)(DEF_TEXT_SHADOW_A << 24), XC_JUST_RIGHT);
+        bodyFont->DrawText(lbl, lx, ly, lblColor, XC_JUST_RIGHT);
+    }
+
+    // Grade letter: prim string centred inside the grade box, palette-tinted.
+    if (overlayText.grade && overlayText.grade->hdr.subtype != 5) {
+        const char* text = ResolveTextPrimString(overlayText.section, overlayText.grade);
+        if (text && text[0] != '\0') {
+            xcFont* gradeFont = ResolveTextPrimFont(overlayText.grade, bodyFont);
+            if (gradeFont) {
+                gradeFont->SetScale(SCREEN_SCALE_X(1.0f), SCREEN_SCALE_Y(1.0f));
+                const f32 cx = SCALE_AND_CENTER_X((f32)(gradeBoxX + gradeBoxW / 2));
+                const f32 cy = SCREEN_SCALE_Y((f32)(gradeTopY + 8));
+                gradeFont->DrawText(text, cx + 1.0f, cy + 1.0f, (u32)(DEF_TEXT_SHADOW_A << 24), XC_JUST_CENTER);
+                gradeFont->DrawText(text, cx, cy, overlayText.grade->GetColor(), XC_JUST_CENTER);
+            }
+        }
+    }
+
+    // Gold dragon icon at right of grade row.
+    if (overlayText.goldDragon && overlayText.goldDragon->hdr.subtype != 5) {
+        const char* str = ResolveTextPrimString(overlayText.section, overlayText.goldDragon);
+        if (str) {
+            ScreenDraw::DrawQuad(str[0] == '1' ? m_goldDragonTex : m_greyDragonTex,
+                                 SCALE_AND_CENTER_X((f32)goldIconX), SCREEN_SCALE_Y((f32)goldIconY),
+                                 SCREEN_SCALE_Y((f32)LOC_ICON_SIZE), SCREEN_SCALE_Y((f32)LOC_ICON_SIZE),
+                                 0.0f, 0.0f, 1.0f, 1.0f, 128, 128, 128, 255);
+        }
+    }
+
+    // Dragon bar
+    if (overlayText.dragonBar && overlayText.dragonBar->hdr.subtype != 5) {
+        const char* str = ResolveTextPrimString(overlayText.section, overlayText.dragonBar);
+        if (str) {
+            const s32 rowTopY[2] = { row1TopY, row2TopY };
+            for (s32 row = 0; row < 2; row++) {
+                for (s32 col = 0; col < 5; col++) {
+                    const s32 strIdx = col + (row > 0 ? 6 : 0);
+                    const char c = str[strIdx];
+                    if (c == '\0')
+                        break;
+                    tTexture* tex = (c == '1') ? m_redDragonTex : m_greyDragonTex;
+                    if (!tex)
+                        continue;
+                    const s32 ix = gridLeftX + col * (LOC_ICON_SIZE + LOC_ICON_GAP);
+                    ScreenDraw::DrawQuad(tex,
+                                         SCALE_AND_CENTER_X((f32)ix), SCREEN_SCALE_Y((f32)rowTopY[row]),
+                                         SCREEN_SCALE_Y((f32)LOC_ICON_SIZE), SCREEN_SCALE_Y((f32)LOC_ICON_SIZE),
+                                         0.0f, 0.0f, 1.0f, 1.0f, 128, 128, 128, 255);
+                }
+            }
+        }
+    }
+}
+
 void feCustomMenuMgr::DrawRect(s32 x, s32 y, s32 w, s32 h, u8 r, u8 g, u8 b, u8 a) const {
     const f32 nx = SCALE_AND_CENTER_X((f32)x);
     const f32 ny = SCREEN_SCALE_Y((f32)y);
@@ -2520,4 +3080,84 @@ const char* feCustomMenuMgr::Localize(const char* token) const {
         return nullptr;
 
     return m_text->GetString(token);
+}
+
+void feCustomMenuMgr::RenderControllerOverlay(s32 panelX, s32 panelY) const {
+    if (!m_controllerTexture) {
+        return;
+    }
+
+
+    const f32 screenTexW = SCREEN_SCALE_Y(128);
+    const f32 screenTexH = SCREEN_SCALE_Y(128);
+    const f32 screenTexX = SCALE_AND_CENTER_X(DEFAULT_SCREEN_WIDTH / 2);
+    const f32 screenTexY = SCREEN_SCALE_Y(panelY + 32.0f);
+
+    ScreenDraw::DrawQuad(m_controllerTexture, screenTexX - screenTexW / 2, screenTexY, screenTexW, screenTexH,
+                         0.0f, 0.0f, 1.0f, 1.0f, 255, 255, 255, 128);
+
+    struct ButtonLabel {
+        s32 physicalIndex;
+        const char* token;
+        f32 relX;
+        f32 relY;
+        s32 justification;
+    };
+
+    const ButtonLabel buttons[] = {
+        { 0,  nullptr,  -104.0f,  7.0f,  XC_JUST_RIGHT },
+        { 2,  nullptr,  -104.0f,  16.0f, XC_JUST_RIGHT },
+        { -1, "FE_CMV", -104.0f, 37.5f, XC_JUST_RIGHT },
+        { -1, "FE_CMV", -104.0f, 55.5f, XC_JUST_RIGHT },
+        { -1, "FE_CNU", -104.0f, 71.5f, XC_JUST_RIGHT },
+
+        { 1,  nullptr,  104.0f,   7.0f,  XC_JUST_LEFT },
+        { 3,  nullptr,  104.0f,   16.0f, XC_JUST_LEFT },
+        { 4,  nullptr,  104.0f,   23.0f, XC_JUST_LEFT },
+        { 7,  nullptr,  104.0f,   29.5f, XC_JUST_LEFT },
+        { 5,  nullptr,  104.0f,   36.5f, XC_JUST_LEFT },
+        { 6,  nullptr,  104.0f,   44.0f, XC_JUST_LEFT },
+        { -1, "FE_CNU", 104.0f,  54.0f, XC_JUST_LEFT },
+        { -1, "FE_CMO", 104.0f,  71.5f, XC_JUST_LEFT },
+    };
+
+    xcFont* labelFont = FindFont("Beats_lo", "Beats_mid");
+    if (!labelFont) {
+        return;
+    }
+
+    labelFont->SetScale(SCREEN_SCALE_X(0.5f), SCREEN_SCALE_Y(0.5f));
+    const u32 labelColor = (0xFFu << 24) | ((u32)DEF_TEXT_NORM_B << 16) | ((u32)DEF_TEXT_NORM_G << 8) | (u32)DEF_TEXT_NORM_R;
+    const u8* playerMap = g_inputManager ? g_inputManager->PlayerMapArray() : nullptr;
+
+    for (const auto& btn : buttons) {
+        char displayName[32] = {};
+        const char* text = nullptr;
+
+        if (btn.token) {
+            text = Localize(btn.token);
+        }
+        else if (btn.physicalIndex >= 0 && playerMap && btn.physicalIndex < 16) {
+            text = Localize(GetControllerLogicalLabelToken(playerMap[btn.physicalIndex]));
+        }
+
+        if (!text) {
+            displayName[0] = '\0';
+        }
+        else {
+            snprintf(displayName, sizeof(displayName), "%s", text);
+        }
+
+        if (displayName[0] != '\0') {
+            const f32 labelScreenX = screenTexX + SCREEN_SCALE_X(btn.relX);
+            const f32 labelScreenY = screenTexY + SCREEN_SCALE_Y(btn.relY);
+
+            labelFont->DrawText(displayName, labelScreenX + 1.0f, labelScreenY + 1.0f,
+                                (u32)(DEF_TEXT_SHADOW_A << 24), btn.justification);
+            labelFont->DrawText(displayName, labelScreenX, labelScreenY,
+                                labelColor, btn.justification);
+        }
+    }
+
+    labelFont->SetScale(SCREEN_SCALE_X(1.0f), SCREEN_SCALE_Y(1.0f));
 }

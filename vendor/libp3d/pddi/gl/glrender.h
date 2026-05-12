@@ -49,6 +49,7 @@ public:
     int  GetAlphaDepth() override { return alphaDepth; }
 
     void SetData(int w, int h, int bpp, int alphaDepth, const void* rgba) override;
+    void SetFilterMode(pddiFilterMode mode) override;
     void Bind(int unit) override;
 
     u32 GetGLHandle() const { return handle; }
@@ -59,6 +60,7 @@ private:
     int height = 0;
     int bpp = 0;
     int alphaDepth = 0;
+    pddiFilterMode filterMode = PDDI_FILTER_NONE;
 };
 
 // glShader──
@@ -283,9 +285,12 @@ public:
     bool IsConnected() const override { return connected; }
     bool IsButtonDown(int button) const override;
     float GetAxis(int axis) const override;
+    bool SupportsVibration() const override;
+    bool SetVibration(float lowFrequency, float highFrequency) override;
 
 private:
     bool connected = false;
     bool buttons[GamepadButton::COUNT] = {};
     float axes[GamepadAxis::COUNT] = {};
+    int activeJoystickId = -1;
 };

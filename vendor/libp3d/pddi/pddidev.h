@@ -215,6 +215,8 @@ public:
     virtual bool IsConnected() const = 0;
     virtual bool IsButtonDown(int button) const = 0;
     virtual float GetAxis(int axis) const = 0;
+    virtual bool SupportsVibration() const = 0;
+    virtual bool SetVibration(float lowFrequency, float highFrequency) = 0;
 };
 
 // pddiDevice - factory for all pddi objects

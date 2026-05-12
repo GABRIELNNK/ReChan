@@ -25,6 +25,12 @@ namespace PsxPad {
     static constexpr u32 Circle = 0x0020;
     static constexpr u32 Cross = 0x0040;
     static constexpr u32 Square = 0x0080;
+
+#if MENU_BACK_USES_CIRCLE
+    static constexpr u32 MenuBack = Circle;
+#else
+    static constexpr u32 MenuBack = Triangle;
+#endif
 }
 
 // PSX control mode tables used by gameplay and menu systems.

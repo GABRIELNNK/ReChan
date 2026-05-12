@@ -1,26 +1,29 @@
 #pragma once
 #include "ai/obstacle.h"
 
+class ParticleSystemMgr;
+class CParticleEffectSound;
+
 class Untouchable : public Obstacle {
 public:
     // PSX +116 (ptr): ParticleSystemMgr* (allocated in ctor, released in dtor, a1[29])
-    void* particleMgr = nullptr;
-    // PSX +120..+131: sound-related (3 dwords)
-    s32 field120 = 0;
-    s32 field124 = 0;
-    s32 field128 = 0;
-    // PSX +132 (s32): last hit counter (init 0)
-    s32 lastHitCounter = 0;
+    ParticleSystemMgr* particleMgr = nullptr;
+    // PSX +120..+128: cached effect position
+    s32 effectPosX = 0;
+    s32 effectPosY = 0;
+    s32 effectPosZ = 0;
+    // PSX +132 (s32): pending particle creation flag
+    s32 pendingCreate = 0;
     // PSX +136 (s32): damage type (default 2, from attrib 6)
     s32 damageType = 2;
     // PSX +140 (s32): damage value (default 3, from attrib 7)
     s32 damageValue = 3;
     // PSX +144 (s32): countdown timer (init = damageValue in Reset)
     s32 countdownTimer = 0;
-    // PSX +148 (s32): unknown (init 0 in ctor, a1[38] is +152 but)
+    // PSX +148 (s32): active flag
     s32 field148 = 0;
-    // PSX +152 (ptr): sound pointer (init 0 in ctor, a1[38])
-    void* soundPtr = nullptr;
+    // PSX +152 (ptr): CParticleEffectSound*
+    CParticleEffectSound* soundPtr = nullptr;
 
     Untouchable(const LVector* pos, u16 type);
     ~Untouchable() override;
@@ -30,4 +33,10 @@ public:
     void DeleteModel() override;
     void Reset() override;
     void Think() override;
+    void Draw() override;
+    void HandleHumanoidCollision(Humanoid* hum) override;
+
+private:
+    s32 CreateSound();
+    s32 ReleaseSound();
 };

@@ -34,6 +34,8 @@ public:
     bool IsGamepadButtonDown(int button) const;
     bool IsGamepadButtonTriggered(int button) const;
     float GetGamepadAxis(int axis) const;
+    bool IsGamepadVibrationSupported() const;
+    bool SetGamepadVibration(float lowFrequency, float highFrequency);
 
     // Device activity detection - true if any input on that device this frame
     bool HasAnyKeyboardInput() const;

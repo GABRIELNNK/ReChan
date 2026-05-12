@@ -99,18 +99,20 @@ void MenuMgr::ParseMenu(LineFile& lf, hdMenu* menu) {
 
     // Word(2) = screen name - find and goto the screen
     const char* screenName = lf.Word(2);
+    xcScreenData* screenData = nullptr;
     if (section && section->screens) {
         u32 screenHash = xcHash(screenName);
         const xcInventoryItem* item = section->screens->FindItem(screenHash);
         if (item) {
-            xcScreenData* scr = reinterpret_cast<xcScreenData*>(
+            screenData = reinterpret_cast<xcScreenData*>(
                 section->rawData + item->dataOffset);
-            section->GotoScreen(scr);
+            section->GotoScreen(screenData);
         }
     }
 
     // Word(2) also names the overlay containing item text objects
     xcOverlayData* overlay = FindOverlay(screenName);
+
     u8* rawData = section ? section->rawData : nullptr;
 
     // Parse items until END MENU
@@ -381,18 +383,27 @@ u32 MenuMgr::FilterHostMenuButtons(u32 buttons) const {
     if (g_actionInput && !g_actionInput->IsGamepadActive()) {
         const int openCloseKey = g_actionInput->GetKeyBinding(ACTION_OPEN_CLOSE_MENU);
         const int backKey = g_actionInput->GetKeyBinding(ACTION_MENU_BACK);
-        const bool sharedEsc = (openCloseKey != 0
-            && openCloseKey == backKey
-            && g_actionInput->IsHeld(ACTION_OPEN_CLOSE_MENU)
-            && g_actionInput->IsHeld(ACTION_MENU_BACK));
+        const bool sharedEsc = (openCloseKey != 0 && openCloseKey == backKey);
 
         if (sharedEsc) {
+            const bool sharedPressEdge =
+                g_actionInput->JustPressed(ACTION_OPEN_CLOSE_MENU) ||
+                g_actionInput->JustPressed(ACTION_MENU_BACK);
+
+            if (!sharedPressEdge) {
+                // Avoid immediate open->close loops while shared ESC is held.
+                buttons &= ~(PsxPad::Start | PsxPad::MenuBack);
+                return buttons;
+            }
+
             if (screenStackDepth > 1) {
-                // Going deeper: ESC acts as Triangle (back), suppress Start
+                // Going deeper: ESC acts as Menu Back, suppress Start
                 buttons &= ~PsxPad::Start;
             }
-            // At depth 1: keep both Start and Triangle; the specific menu decides
-            // which one to act on (e.g. level select ignores Start but responds to Triangle)
+            else {
+                // At root level: ESC acts as Open/Close menu, suppress Menu Back.
+                buttons &= ~PsxPad::MenuBack;
+            }
         }
     }
 #endif
@@ -431,7 +442,7 @@ void MenuMgr::QueryInput(bool processInput) {
     if ((buttons & PsxPad::Right) != 0) {
         InputPadRight();
     }
-    if ((buttons & PsxPad::Triangle) != 0) {
+    if ((buttons & PsxPad::MenuBack) != 0) {
         InputItemPop();
     }
     if ((buttons & PsxPad::Cross) != 0) {
