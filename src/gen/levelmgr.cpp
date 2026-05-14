@@ -33,17 +33,17 @@ LevelManager::~LevelManager() {
     g_levelManager = nullptr;
 }
 
-// PSX: InternalOpen__12LevelManager (0x80059388) - NOP stub
+// PSX: InternalOpen__12LevelManager (0x80059388) - NOP/no-op
 void LevelManager::InternalOpen() {
     MARKFUNCTION(0x80059388);
 }
 
-// PSX: InternalClose__12LevelManager (0x80059390) - NOP stub
+// PSX: InternalClose__12LevelManager (0x80059390) - NOP/no-op
 void LevelManager::InternalClose() {
     MARKFUNCTION(0x80059390);
 }
 
-// PSX: InternalReset__12LevelManager (0x80059380) - NOP stub
+// PSX: InternalReset__12LevelManager (0x80059380) - NOP/no-op
 void LevelManager::InternalReset() {
     MARKFUNCTION(0x80059380);
 }

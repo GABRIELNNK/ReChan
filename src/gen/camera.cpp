@@ -16,6 +16,7 @@
 #include "gen/time.h"
 #include "gen/paramanim.h"
 #include "gen/psxmath_helpers.h"
+#include "gen/display.h"
 
 // PSX math helpers
 
@@ -59,6 +60,53 @@ bool EvalCubic(s32* curValue, s32* accel, s32 target, s32 velocity, s32 time) {
 
     *curValue = target;
     *accel = velocity;
+    return true;
+}
+
+bool Camera::WorldToScreen(const LVector& worldPos, f32* outScreenX, f32* outScreenY, f32* outDepth) const {
+    if (!outScreenX || !outScreenY || !g_display) {
+        return false;
+    }
+
+    const Mat4& viewMatrix = p3dCamera.GetWorldToCameraMatrix();
+
+    f32 tx = 0.0f;
+    f32 ty = 0.0f;
+    f32 tz = 0.0f;
+    Mat4TransformPoint(viewMatrix,
+                       static_cast<f32>(worldPos.x),
+                       static_cast<f32>(worldPos.y),
+                       static_cast<f32>(worldPos.z),
+                       tx,
+                       ty,
+                       tz);
+
+    const s32 vx = static_cast<s32>(tx);
+    const s32 vy = static_cast<s32>(-ty);
+    const s32 vz = static_cast<s32>(-tz);
+
+    if (outDepth) {
+        *outDepth = static_cast<f32>(vz);
+    }
+
+    const ChanProjectionState port = g_display->GetChanProjectionState();
+    if (vz <= 0 || vz < static_cast<s32>(port.nearClip) || vz > static_cast<s32>(port.farClip)) {
+        return false;
+    }
+
+    const f32 screenX = static_cast<f32>(port.centerX)
+        + (static_cast<f32>(vx) * port.projectionDistanceX) / static_cast<f32>(vz);
+    const f32 screenY = static_cast<f32>(port.centerY)
+        + (static_cast<f32>(vy) * port.projectionDistanceY) / static_cast<f32>(vz);
+
+    *outScreenX = screenX;
+    *outScreenY = screenY;
+
+    if (screenX < 0.0f || screenX >= static_cast<f32>(port.width)
+        || screenY < 0.0f || screenY >= static_cast<f32>(port.height)) {
+        return false;
+    }
+
     return true;
 }
 

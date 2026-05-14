@@ -14,6 +14,7 @@
 #include "gen/camera.h"
 #include "gen/model.h"
 #include "gen/path.h"
+#include "gen/weffect.h"
 #include "gen/psxmath_helpers.h"
 #include "pc/debugui.h"
 #include "p3d/p3dmath.h"
@@ -131,12 +132,8 @@ static bool IsDantePhase1PressureState(s32 actionState) {
     }
 }
 
-static Thing* FindBossSpotLight() {
-    if (!g_ai) {
-        return nullptr;
-    }
-
-    return g_ai->FindThing(p3dHash(PAUL_SPOTLIGHT_NAME));
+static WEffect* FindBossSpotLight() {
+    return WEffect::Find(p3dHash(PAUL_SPOTLIGHT_NAME));
 }
 
 static s32 GetFaceAngleDataValue(const Humanoid* humanoid, s32 offset) {
@@ -864,27 +861,27 @@ void Behaviour::PaulDMS(Behaviour* self) {
     const s32 strafeSpeed = self->animConfigPtr ? (s16)self->animConfigPtr->strafingSpeed : 0;
 
     s32 shouldDance = 0;
-    Thing* bossSpotLight = FindBossSpotLight();
-    if (bossSpotLight) {
-        LVector spotPos = bossSpotLight->pos;
-        spotPos.y = owner->pos.y;
-
-        if (owner->DistanceFromPoint(spotPos) < PAUL_SPOTLIGHT_RADIUS) {
-            shouldDance = (distanceToPlayer > PAUL_CLOSE_ATTACK_DIST) ? 1 : 0;
-        }
+    WEffect* bossSpotLight = FindBossSpotLight();
+    if (!bossSpotLight) {
+        return;
     }
-    // PSX early-returns when WEffect::Find("BossSpotLight") fails.
-    // TODO: WEffect
+
+    LVector spotPos = bossSpotLight->pos;
+    spotPos.y = owner->pos.y;
+
+    if (owner->DistanceFromPoint(spotPos) < PAUL_SPOTLIGHT_RADIUS) {
+        shouldDance = (distanceToPlayer > PAUL_CLOSE_ATTACK_DIST) ? 1 : 0;
+    }
 
     s32& spotPathWasForcedOff = self->field80To176[3]; // +0x5C
     if (g_director && g_director->scriptState != 0) {
-        // PSX: WEffect::EnablePath(0)
+        bossSpotLight->EnablePath(0);
         spotPathWasForcedOff = 1;
         return;
     }
 
     if (spotPathWasForcedOff != 0) {
-        // PSX: WEffect::EnablePath(1)
+        bossSpotLight->EnablePath(1);
         spotPathWasForcedOff = 0;
     }
 
@@ -892,7 +889,7 @@ void Behaviour::PaulDMS(Behaviour* self) {
     s32& danceTimer = self->field80To176[5]; // +0x64
     if (shouldDance != 0) {
         if (danceActive == 0 && spotRecoverTimer == 0) {
-            // PSX: WEffect::EnablePath(0)
+            bossSpotLight->EnablePath(0);
             danceActive = 1;
             danceTimer = PAUL_DANCE_TIME;
         }
@@ -928,7 +925,7 @@ void Behaviour::PaulDMS(Behaviour* self) {
             }
         }
 
-        // PSX: WEffect::EnablePath(1)
+        bossSpotLight->EnablePath(1);
         danceActive = 0;
         spotRecoverTimer = PAUL_RECOVER_TIME;
         return;

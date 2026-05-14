@@ -131,6 +131,13 @@ public:
         return 0;
     }
 
+    // Returns the level ID for an arbitrary level index.
+    s32 GetLevelIDFromIndex(u32 levelIndex) const {
+        if (levelList && levelIndex < (u32)levelCount)
+            return levelList[levelIndex * 2];
+        return 0;
+    }
+
 private:
     BlockManager blockMgr;
     PsxVRAM vram;

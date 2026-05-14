@@ -402,6 +402,9 @@ static bool ApplyActuatorVibration(u8 motor, u8 speed) {
     if (!p3d::input) {
         return false;
     }
+    
+    if (!g_actionInput->IsGamepadActive())
+        return false;
 
     f32 amplitude = (f32)speed / 255.0f;
     f32 low = 0.0f;

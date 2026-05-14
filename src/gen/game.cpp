@@ -43,6 +43,7 @@
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
 #include "pc/settings.h"
+#include "radlib/rtask.h"
 
 #if CUSTOM_TEXT
 #include "extra/customtext.h"
@@ -431,6 +432,36 @@ static s32 MenuDraw(MenuMgr* menuMgr) {
     MenuRender(renderMgr);
     g_display->EndFrame();
     return result;
+}
+
+// PSX: MenuFade__Fv (GAME.CPP:1757, 0x80029E34)
+// Blocks until dialog playback gate clears, then runs a blocking fade loop.
+void Game::MenuFade() {
+    MARKFUNCTION(0x80029E34);
+
+    while (jcsIsPlaying()) {
+        const f64 frameStart = Time::GetTimeInSeconds();
+        rDoTaskList(&rMainTaskList, 0);
+        if (g_time) {
+            g_time->WaitForFrameEnd(frameStart);
+        }
+    }
+
+    FadeBegin();
+    while (FadeUpdate()) {
+        const f64 frameStart = Time::GetTimeInSeconds();
+        g_display->BeginFrame();
+        MenuRender(nullptr);
+        FadeRender();
+        g_display->EndFrame();
+        rDoTaskList(&rMainTaskList, 0);
+        if (g_time) {
+            g_time->WaitForFrameEnd(frameStart);
+        }
+    }
+    FadeEnd();
+
+    rFrameCount60 = 0;
 }
 
 #if CUSTOM_MENU
@@ -967,6 +998,14 @@ bool Game::gsPrePlayState(Game* game) {
     // PSX: theCamera->Think()
     if (g_display && g_display->GetCamera()) {
         g_display->GetCamera()->Think();
+
+        if (levelID == 7 && g_arrowInside != 0 && Player::s_player) {
+            Camera* camera = g_display->GetCamera();
+            const LVector& camPos = camera->GetPosition();
+            Player::s_player->FacePointDesired(camPos);
+            Player::s_player->FacePoint(camPos, 0);
+            Player::s_player->SetDesiredMoveDirection(Player::s_player->orientation.y);
+        }
     }
 
     // PSX: rsEvent(21, player+28, theCamera+384, 0) - set 3D audio listener
@@ -1311,8 +1350,13 @@ bool Game::gsQueueLevelLoad(Game* game) {
     // PSX: Shock(18) - controller vibration pulse
     Shock(ShockEnum::SHOCK_CLEAR);
 
+    // Keep HUD hidden for the full transition fade on PC runtime.
+    if (g_hud) {
+        g_hud->SetHUDVisible(0, 1);
+    }
+
     // PSX: MenuFade() - blocking fade to black
-    // TODO: MenuFade not yet reversed (blocking inline loop on PSX)
+    MenuFade();
 
     // PSX: SetHUDVisible(0, 0, 1) - hide HUD during load
     if (g_hud) {
@@ -1336,10 +1380,18 @@ bool Game::gsQueueLevelLoad(Game* game) {
     // PSX GPU primitive buffers - not applicable on PC
 
     // PSX: DisplayTIM(gp[24]) - show loading screen background
+#if CUSTOM_MENU
+    if (!g_feCustomMenuMgr) {
+        DisplayTIM("RUNFIRST.TIM");
+    }
+#else
     DisplayTIM("RUNFIRST.TIM");
+#endif
 
     // PSX: ShowLoadingScreenText(gameMenu, levelId, petalTarget)
-    // TODO: gameMenu::ShowLoadingScreenText not yet reversed
+    if (g_gameMenu) {
+        g_gameMenu->ShowLoadingScreenText(world->GetTargetLevelIndex(), world->GetTargetPetalIndex());
+    }
 
     // PSX: LoadOverlay(levelType==7) - load code overlay
     // PSX: BossAI overlay switch for levels 1-7 vs 8,11-14
@@ -1404,6 +1456,10 @@ bool Game::gsQueuePetalLoad(Game* game) {
     if (g_hud) {
         g_hud->SetHUDVisible(0, 1);
     }
+    MenuFade();
+    if (g_hud) {
+        g_hud->SetHUDVisible(0, 1);
+    }
     // PSX: SetMemoryState(0), MEMSTAT_CLEAR()
 
     World* world = game->GetWorld();
@@ -1416,10 +1472,18 @@ bool Game::gsQueuePetalLoad(Game* game) {
     world->UnloadPetal();
 
     // PSX: DisplayTIM(gp[24])
+#if CUSTOM_MENU
+    if (!g_feCustomMenuMgr) {
+        DisplayTIM("RUNFIRST.TIM");
+    }
+#else
     DisplayTIM("RUNFIRST.TIM");
+#endif
 
     // PSX: ShowLoadingScreenText(gameMenu, currentLevelIndex, targetPetalIndex)
-    // TODO: not yet reversed
+    if (g_gameMenu) {
+        g_gameMenu->ShowLoadingScreenText(world->GetCurrentLevelIndex(), world->GetTargetPetalIndex());
+    }
 
     // PSX: LoadPetal(world, targetPetalIndex)
     world->LoadPetal(world->GetTargetPetalIndex());

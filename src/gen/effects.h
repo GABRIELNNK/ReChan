@@ -2,6 +2,8 @@
 
 #include "gen/cclist.h"
 
+struct LVector;
+
 class Effects : public ccNode {
 public:
     Effects();
@@ -12,6 +14,7 @@ public:
     virtual s32 Create();
     virtual s32 PutBackEffect();
     virtual bool IsDirectorOverlay() const;
+    virtual bool GetDebugWorldPos(LVector* outPos) const;
 
     s32 effectType = 0;
     s32 blockNum = -1;
@@ -38,6 +41,10 @@ s32 Effects_AddEffect(Effects* effect, s32 addToHead);
 
 // PSX: RemoveEffect__7Effects (EFFECTS.CPP:299, 0x8004CA28)
 Effects* Effects_RemoveEffect(Effects* effect);
+
+// Debug helper: copies pointers to currently active effects.
+// Returns total active count; outEffects may be null to query count only.
+s32 Effects_DebugGetActive(Effects** outEffects, s32 maxCount);
 
 // PSX global frame counter used by WEffect vertex animation paths.
 extern u32 g_wEffectGlobalFrame;

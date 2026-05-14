@@ -70,6 +70,10 @@ public:
     s32 GetOrientY() const { return orientAngles.y; }  // +44
     s32 GetCamAngleY() const { return camAngleY; }     // +384
 
+    // Projects world coordinates into screen-space pixels.
+    // Returns true when point is in front of camera and within the viewport.
+    bool WorldToScreen(const LVector& worldPos, f32* outScreenX, f32* outScreenY, f32* outDepth = nullptr) const;
+
     // cameraAnchor assigned by CameraManager::SetupPaths
     void SetCameraAnchor(CameraAnchor* a) { cameraAnchor = a; }
 

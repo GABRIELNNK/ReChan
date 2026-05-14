@@ -248,6 +248,8 @@ struct DialogEntry {
 static constexpr s32 DIALOG_ENTRY_COUNT = 64;
 static DialogEntry g_dialogEntries[DIALOG_ENTRY_COUNT] = {};
 static s32 g_nextDialogHandle = 1;
+// PSX: dword_800D8808 - default dialog handle used by jcsIsPlaying__Fv.
+static s32 g_primaryDialogHandle = 0;
 
 static DialogEntry* FindDialogEntry(s32 handle) {
     if (handle == 0) {
@@ -346,13 +348,18 @@ static s32 rsDialogEvent(s32 event, s32 param1, s32 param2, s32 param3) {
                 entry->valid = false;
                 return 0;
             }
+            g_primaryDialogHandle = entry->handle;
             return entry->handle;
         }
 
         case RS_PLAY_DIALOG:
         {
             DialogEntry* entry = FindDialogEntry(param1);
-            return PlayDialogHandle(entry, (u32)param3);
+            const s32 started = PlayDialogHandle(entry, (u32)param3);
+            if (started != 0) {
+                g_primaryDialogHandle = param1;
+            }
+            return started;
         }
 
         case RS_STOP_DIALOG:
@@ -371,6 +378,7 @@ static s32 rsDialogEvent(s32 event, s32 param1, s32 param2, s32 param3) {
                     entry.sample = AUDIO_SAMPLE_INVALID;
                 }
             }
+            g_primaryDialogHandle = 0;
             return 0;
         }
 
@@ -389,6 +397,9 @@ static s32 rsDialogEvent(s32 event, s32 param1, s32 param2, s32 param3) {
                 entry->sample = AUDIO_SAMPLE_INVALID;
             }
             entry->valid = false;
+            if (param1 == g_primaryDialogHandle) {
+                g_primaryDialogHandle = 0;
+            }
             return 1;
         }
 
@@ -727,6 +738,12 @@ s32 jcsIsPlayable(s32 handle) {
     return jcsValidateHandle(handle);
 }
 
+// PSX: jcsIsPlaying__Fv (JCSDLG.CPP:488, 0x800429A4)
+s32 jcsIsPlaying() {
+    MARKFUNCTION(0x800429A4);
+    return jcsIsPlaying(g_primaryDialogHandle);
+}
+
 // PSX: jcsIsPlaying(handle) (JCSDLG.CPP:506, 0x800429CC)
 s32 jcsIsPlaying(s32 handle) {
     DialogEntry* entry = FindDialogEntry(handle);
@@ -779,4 +796,5 @@ void jcsStartDialog() {
     }
 
     g_nextDialogHandle = 1;
+    g_primaryDialogHandle = 0;
 }

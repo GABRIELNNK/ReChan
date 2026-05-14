@@ -73,6 +73,20 @@ UVPrimData* FindUVPrimInfo(u32 hash) {
     return nullptr;
 }
 
+// PSX: Init__10UVPrimDataiiii (UVDATA.CPP:251)
+void UVPrimData::Init(s32 newUMask, s32 newVMask, s32 newUStep, s32 newVStep) {
+    MARKFUNCTION(0x800985D8);
+
+    uMask = (u32)newUMask;
+    vMask = (u32)newVMask;
+    uStep = (u16)newUStep;
+    uAccum = 0;
+    vAccum = 0;
+    valid = 1;
+    // PSX stores the negated 4th argument into vStep.
+    vStep = (u16)(-newVStep);
+}
+
 bool UpdateUVPrimData(int blockNum, tPrimGeom* geom) {
     MARKFUNCTION(0x800984E4);
 

@@ -336,6 +336,8 @@ bool Block::Draw(const LVector* drawPos) {
 
     if (!primGeom) return false;
 
+    const Mat4 savedWorld = p3d::context->GetWorldMatrix();
+
     // TransMatrix: set world translation from the passed position
     // (DrawEverythingHandler passes block pos modified by OffsetToPreventSeams)
     // PSX: gte_SetTransMatrix with drawPos directly, no axis flips
@@ -380,6 +382,7 @@ bool Block::Draw(const LVector* drawPos) {
     }
     else {
         RP_ZCullGClip(primGeom, drawPos);
+        p3d::context->SetWorldMatrix(savedWorld);
         return true;
     }
 
@@ -409,6 +412,8 @@ bool Block::Draw(const LVector* drawPos) {
             globalFogFar,
             globalFogColor & 0xFFFFFFu);
     }
+
+    p3d::context->SetWorldMatrix(savedWorld);
 
     return true;
 }

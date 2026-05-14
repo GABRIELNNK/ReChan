@@ -140,6 +140,7 @@ private:
 #endif
 
     static void FadeBegin();
+    static void MenuFade();
     // Returns true (1) if fade is still in progress, false (0) when complete.
     static s32 FadeUpdate();
     static void FadeEnd();

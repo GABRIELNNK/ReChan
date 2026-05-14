@@ -555,11 +555,11 @@ void Model::HandleLoopReverse(AnimStructure* anim) { anim->LoopReverse(); }
 void Model::HandleHoldFirst(AnimStructure* anim) { anim->HoldFirst(); }
 void Model::HandleHoldLast(AnimStructure* anim) { anim->HoldLast(); }
 void Model::HandleRunToLast(AnimStructure* anim) { anim->RunToLast(); }
-void Model::HandleHoldFrame(AnimStructure* /*anim*/) { /* PSX: empty stub */ }
-void Model::HandleRunToFrame(AnimStructure* /*anim*/) { /* PSX: empty stub */ }
-void Model::HandleIncFrame(AnimStructure* /*anim*/) { /* PSX: empty stub */ }
+void Model::HandleHoldFrame(AnimStructure* /*anim*/) { /* PSX: no-op */ }
+void Model::HandleRunToFrame(AnimStructure* /*anim*/) { /* PSX: no-op */ }
+void Model::HandleIncFrame(AnimStructure* /*anim*/) { /* PSX: no-op */ }
 void Model::HandleDecFrame(AnimStructure* anim) { anim->DecFrame(); }
-void Model::HandleLoopDesired(AnimStructure* /*anim*/) { /* PSX: empty stub */ }
+void Model::HandleLoopDesired(AnimStructure* /*anim*/) { /* PSX: no-op */ }
 void Model::HandleRunToLastBlend(AnimStructure* anim) { anim->RunToLastBlend(); }
 
 // PSX: DeleteAnimStructures__5Model (MODEL.CPP:768, 0x8006E83C)
@@ -701,6 +701,7 @@ void SModel::Show(u32 flags) {
     // Translation
     world.SetTranslation((f32)posX, (f32)posY, (f32)posZ);
 
+    const Mat4 savedWorld = p3d::context->GetWorldMatrix();
     p3d::context->SetWorldMatrix(world);
 
     if (useSemiTrans) {
@@ -725,6 +726,8 @@ void SModel::Show(u32 flags) {
             }
         }
     }
+
+    p3d::context->SetWorldMatrix(savedWorld);
 }
 
 // PSX: Animate__6SModel (MODEL.CPP:1416, 0x8006F640)
@@ -1020,6 +1023,7 @@ void GModel::Show(u32 flags) {
     p3dBuildRotMatrixZYX(rotX, rotY, rotZ, world);
     world.SetTranslation((f32)posX, (f32)posY, (f32)posZ);
 
+    const Mat4 savedWorld = p3d::context->GetWorldMatrix();
     p3d::context->SetWorldMatrix(world);
     drawable->Display(flags);
 
@@ -1034,6 +1038,8 @@ void GModel::Show(u32 flags) {
             }
         }
     }
+
+    p3d::context->SetWorldMatrix(savedWorld);
 }
 
 void GModel::SetOriginalGeo(OriginalGeo* original) {
@@ -1141,6 +1147,7 @@ void EModel::Show(u32 flags) {
     p3dBuildRotMatrixZYX(rotX, rotY, rotZ, world);
     world.SetTranslation((f32)posX, (f32)posY, (f32)posZ);
 
+    const Mat4 savedWorld = p3d::context->GetWorldMatrix();
     p3d::context->SetWorldMatrix(world);
     drawable->Display(flags);
 
@@ -1155,6 +1162,8 @@ void EModel::Show(u32 flags) {
             }
         }
     }
+
+    p3d::context->SetWorldMatrix(savedWorld);
 }
 
 // HumanoidModel

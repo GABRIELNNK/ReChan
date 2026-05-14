@@ -4,6 +4,7 @@
 
 #include "gen/camera.h"
 #include "gen/model.h"
+#include "gen/psxmath_helpers.h"
 #include "gen/weffect.h"
 
 #include "p3d/context.h"
@@ -29,17 +30,17 @@ public:
         MARKFUNCTION(0x80097C8C);
     }
 
-    s32 posX = 0;
-    s32 posY = 0;
-    s32 posZ = 0;
+    s16 posX = 0;
+    s16 posY = 0;
+    s16 posZ = 0;
 
-    s32 velX = 0;
-    s32 velY = 0;
-    s32 velZ = 0;
+    s16 velX = 0;
+    s16 velY = 0;
+    s16 velZ = 0;
 
-    s32 velNormX = 0;
-    s32 velNormY = 0;
-    s32 velNormZ = 0;
+    s16 velNormX = 0;
+    s16 velNormY = 0;
+    s16 velNormZ = 0;
 
     s32 scale = 0;
     s32 scaleStep = 0;
@@ -498,6 +499,10 @@ s32 ParticleSystem::ParseData(const u8* body, u32 bodySize) {
     }
 
     stats->flags = flags;
+    if ((flags & 0x10000u) != 0u && stats->comEffect) {
+        (void)stats->comEffect->SetUpFirstGeo();
+    }
+
     return 1;
 }
 
@@ -743,9 +748,9 @@ s32 ParticleSystem::InitParticles(const LVector& origin) {
         const s32 lifeRand = static_cast<s32>((static_cast<s64>(RandomSigned16()) * stats->lifeRange) >> 16);
         info->life = static_cast<u8>(static_cast<s32>(stats->lifeBase) + lifeRand);
 
-        info->posX = origin.x;
-        info->posY = origin.y;
-        info->posZ = origin.z;
+        info->posX = static_cast<s16>(origin.x);
+        info->posY = static_cast<s16>(origin.y);
+        info->posZ = static_cast<s16>(origin.z);
 
         if ((stats->flags & 0x10u) != 0u && meshCounter < static_cast<s32>(stats->spawnPerBurst)) {
             info->meshIndex = static_cast<u16>(meshCounter++);
@@ -769,9 +774,9 @@ s32 ParticleSystem::InitParticles(const LVector& origin) {
 
         if (stats->normalizeFrames != 0) {
             const s32 inv = Reciprocal16(stats->normalizeFrames);
-            info->velNormX = static_cast<s32>((static_cast<s64>(dir.x) * inv) >> 16);
-            info->velNormY = static_cast<s32>((static_cast<s64>(dir.y) * inv) >> 16);
-            info->velNormZ = static_cast<s32>((static_cast<s64>(dir.z) * inv) >> 16);
+            info->velNormX = static_cast<s16>((static_cast<s64>(dir.x) * inv) >> 16);
+            info->velNormY = static_cast<s16>((static_cast<s64>(dir.y) * inv) >> 16);
+            info->velNormZ = static_cast<s16>((static_cast<s64>(dir.z) * inv) >> 16);
 
             if (static_cast<s16>(stats->normalizeFrames) > 0) {
                 info->velX = info->velNormX;
@@ -779,17 +784,17 @@ s32 ParticleSystem::InitParticles(const LVector& origin) {
                 info->velZ = info->velNormZ;
             }
             else {
-                info->velX = dir.x;
-                info->velY = dir.y;
-                info->velZ = dir.z;
+                info->velX = static_cast<s16>(dir.x);
+                info->velY = static_cast<s16>(dir.y);
+                info->velZ = static_cast<s16>(dir.z);
             }
 
             stats->flags |= 0x80000u;
         }
         else {
-            info->velX = dir.x;
-            info->velY = dir.y;
-            info->velZ = dir.z;
+            info->velX = static_cast<s16>(dir.x);
+            info->velY = static_cast<s16>(dir.y);
+            info->velZ = static_cast<s16>(dir.z);
         }
 
         const s32 rotationRandom = static_cast<s32>((static_cast<s64>(stats->dragRange) * RandomSigned16()) >> 16);
@@ -904,9 +909,13 @@ s32 ParticleSystem::Update() {
                 info->life = static_cast<u8>(info->life - 1);
                 info->age = static_cast<u8>(info->age + 1);
 
-                info->posX += info->velX + extraOffset.x;
-                info->posY += info->velY + extraOffset.y;
-                info->posZ += info->velZ + extraOffset.z;
+                const s16 extraX = static_cast<s16>(extraOffset.x);
+                const s16 extraY = static_cast<s16>(extraOffset.y);
+                const s16 extraZ = static_cast<s16>(extraOffset.z);
+
+                info->posX = static_cast<s16>(info->posX + info->velX + extraX);
+                info->posY = static_cast<s16>(info->posY + info->velY + extraY);
+                info->posZ = static_cast<s16>(info->posZ + info->velZ + extraZ);
 
                 averagePos.x += info->posX;
                 averagePos.y += info->posY;
@@ -914,15 +923,15 @@ s32 ParticleSystem::Update() {
                 activeCount++;
 
                 if ((stats->flags & 0x80000u) != 0u && info->age < stats->normalizeFrames) {
-                    info->velX += info->velNormX;
-                    info->velY += info->velNormY;
-                    info->velZ += info->velNormZ;
+                    info->velX = static_cast<s16>(info->velX + info->velNormX);
+                    info->velY = static_cast<s16>(info->velY + info->velNormY);
+                    info->velZ = static_cast<s16>(info->velZ + info->velNormZ);
                 }
 
                 if ((stats->flags & 4u) != 0u) {
-                    info->velX = static_cast<s32>((static_cast<s64>(info->velX) * info->dragScale) >> 16);
-                    info->velY = static_cast<s32>((static_cast<s64>(info->velY) * info->dragScale) >> 16);
-                    info->velZ = static_cast<s32>((static_cast<s64>(info->velZ) * info->dragScale) >> 16);
+                    info->velX = static_cast<s16>((static_cast<s64>(info->velX) * info->dragScale) >> 16);
+                    info->velY = static_cast<s16>((static_cast<s64>(info->velY) * info->dragScale) >> 16);
+                    info->velZ = static_cast<s16>((static_cast<s64>(info->velZ) * info->dragScale) >> 16);
                 }
 
                 if ((stats->flags & 0x40000u) != 0u && info->age < stats->growFrames) {
@@ -936,7 +945,7 @@ s32 ParticleSystem::Update() {
                 info->rotation += info->rotationStep;
 
                 if ((stats->flags & 2u) != 0u) {
-                    info->velY -= static_cast<s16>(stats->gravity) >> 1;
+                    info->velY = static_cast<s16>(info->velY + ((-static_cast<s16>(stats->gravity)) >> 1));
                 }
             }
         }
@@ -968,35 +977,22 @@ void ParticleSystem::Display() {
         return;
     }
 
-    u32 renderFlags = ((stats->flags & 0x800u) != 0u) ? 0x800u : 0u;
-    if ((stats->flags & 0x10000u) != 0u) {
-        stats->comEffect->InitFastRender(stats->comEffect->GetGeo());
-        if (stats->comEffect->FastRenderReady()) {
-            renderFlags |= 0x800000u;
-        }
-    }
-
-    const bool billboard = (stats->flags & 8u) != 0u;
-    const Mat4& parentWorld = p3d::context->GetWorldMatrix();
-
-    const LVector cullPos = {
-        averagePos.x + static_cast<s32>(parentWorld.m[12]),
-        averagePos.y + static_cast<s32>(parentWorld.m[13]),
-        averagePos.z + static_cast<s32>(parentWorld.m[14]),
-    };
-
-    if (!stats->comEffect->PointInView(cullPos, 512)) {
+    if (!stats->comEffect->PointInView(averagePos, 512)) {
         return;
     }
 
-    Mat4 billboardMatrix;
+    u32 renderFlags = ((stats->flags & 0x800u) != 0u) ? 0x800u : 0u;
+    if ((stats->flags & 0x10000u) != 0u) {
+        renderFlags |= 0x800000u;
+        stats->comEffect->InitFastRender(stats->comEffect->GetGeo());
+    }
+
+    const bool billboard = (stats->flags & 8u) != 0u;
+    const bool billboardLockY = (stats->flags & 0x20u) != 0u;
+    const Mat4& parentWorld = p3d::context->GetWorldMatrix();
+    Mat4 parentInverse = Mat4();
     if (billboard) {
-        const LVector billboardPos = {
-            averagePos.x + static_cast<s32>(parentWorld.m[12]),
-            averagePos.y + static_cast<s32>(parentWorld.m[13]),
-            averagePos.z + static_cast<s32>(parentWorld.m[14]),
-        };
-        BuildBillboardMatrixPSX(billboardPos, billboardMatrix, false);
+        PsxInverseOrthMatrix(parentWorld, parentInverse);
     }
 
     for (ccMinNode* node = particleList->head; node; node = node->next) {
@@ -1005,28 +1001,10 @@ void ParticleSystem::Display() {
             continue;
         }
 
-        Mat4 world;
-        BuildParticleScaleMatrix(info->scale, world);
-
-        const s32 angle16 = QuantizeParticleAngle(info->rotation);
-        if (!billboard && angle16 != 0) {
-            if ((info->axisMask & 1u) != 0u) {
-                PreMultiplyRotZ(world, angle16);
-            }
-
-            if ((info->axisMask & 2u) != 0u) {
-                PreMultiplyRotY(world, angle16);
-            }
-
-            if ((info->axisMask & 4u) != 0u) {
-                PreMultiplyRotX(world, angle16);
-            }
-        }
-
         LVector renderPos = {
-            info->posX,
-            info->posY,
-            info->posZ,
+            static_cast<s32>(info->posX),
+            static_cast<s32>(info->posY),
+            static_cast<s32>(info->posZ),
         };
 
         if (displayOffset) {
@@ -1035,12 +1013,64 @@ void ParticleSystem::Display() {
             renderPos.z += displayOffset->z;
         }
 
+        Mat4 world;
+        const s32 angle16 = QuantizeParticleAngle(info->rotation);
+
         if (billboard) {
+            f32 worldX = 0.0f;
+            f32 worldY = 0.0f;
+            f32 worldZ = 0.0f;
+            Mat4TransformPoint(parentWorld,
+                               static_cast<f32>(renderPos.x),
+                               static_cast<f32>(renderPos.y),
+                               static_cast<f32>(renderPos.z),
+                               worldX,
+                               worldY,
+                               worldZ);
+
+            const LVector billboardWorldPos = {
+                static_cast<s32>(worldX),
+                static_cast<s32>(worldY),
+                static_cast<s32>(worldZ),
+            };
+
+            Mat4 billboardWorld = Mat4();
+            BuildBillboardMatrixPSX(billboardWorldPos, billboardWorld, billboardLockY);
+            world = parentInverse * billboardWorld;
+
             if (angle16 != 0) {
-                PreMultiplyRotZ(world, angle16);
+                Mat4 rotZ;
+                p3dBuildRotMatrixZ(ANGLE2RAD(angle16), rotZ);
+                world = world * rotZ;
             }
 
-            world = world * billboardMatrix;
+            const f32 s = FIX16_TO_FLOAT(info->scale);
+            world.m[0] *= s;
+            world.m[1] *= s;
+            world.m[2] *= s;
+            world.m[4] *= s;
+            world.m[5] *= s;
+            world.m[6] *= s;
+            world.m[8] *= s;
+            world.m[9] *= s;
+            world.m[10] *= s;
+        }
+        else {
+            BuildParticleScaleMatrix(info->scale, world);
+
+            if (angle16 != 0) {
+                if ((info->axisMask & 1u) != 0u) {
+                    PreMultiplyRotZ(world, angle16);
+                }
+
+                if ((info->axisMask & 2u) != 0u) {
+                    PreMultiplyRotY(world, angle16);
+                }
+
+                if ((info->axisMask & 4u) != 0u) {
+                    PreMultiplyRotX(world, angle16);
+                }
+            }
         }
 
         p3dFillTransMatrix(renderPos, world);
@@ -1052,7 +1082,7 @@ void ParticleSystem::Display() {
             const ParticleMeshEntry& entry = meshEntries[meshIndex];
 
             Mat4 entryWorld = particleWorld * entry.localMatrix;
-            stats->comEffect->RenderGeoByIndex(entry.geoIndex, entryWorld, renderFlags);
+            stats->comEffect->RenderGeoByIndex(entry.geoIndex, entryWorld, renderFlags | 0x80000u);
             continue;
         }
 
@@ -1064,7 +1094,10 @@ void ParticleSystem::Display() {
 
             if (stats->fastRenderInfo) {
                 u32* swapWord = static_cast<u32*>(stats->fastRenderInfo);
-                stats->comEffect->SetFrame(info->animFrame);
+                const bool queuedFast = ((renderFlags & 0x800000u) != 0u) && stats->comEffect->FastRenderReady();
+                if (!queuedFast) {
+                    stats->comEffect->SetFrame(info->animFrame);
+                }
                 const u32 previousWord = *swapWord;
                 *swapWord = stats->fastRenderValue;
 
@@ -1077,7 +1110,7 @@ void ParticleSystem::Display() {
 
         if ((stats->flags & 0x8000u) != 0u && meshFrameList) {
             const u32 geoIndex = meshFrameList[info->meshIndex & meshFrameMask];
-            stats->comEffect->RenderGeoByIndex(geoIndex, particleWorld, renderFlags);
+            stats->comEffect->RenderGeoByIndex(geoIndex, particleWorld, renderFlags | 0x80000u);
             continue;
         }
 
@@ -1234,6 +1267,20 @@ ParticleSystem* ParticleSystem_Find(u32 hash) {
     }
 
     return nullptr;
+}
+
+const char* ParticleSystem_GetNameByHash(u32 hash) {
+    ParticleSystem* system = ParticleSystem_Find(hash);
+    if (!system) {
+        return nullptr;
+    }
+
+    const char* name = system->GetName();
+    if (!name || name[0] == '\0') {
+        return nullptr;
+    }
+
+    return name;
 }
 
 ParticleSystemMgr::ParticleSystemMgr() {

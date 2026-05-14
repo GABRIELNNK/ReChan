@@ -52,10 +52,11 @@ public:
     void SetFrameReal(s32 frameReal16);
     bool EndOfFrame(s32 frame) const;
     bool PointInView(const LVector& pos, s32 radius) const;
+    OriginalGeo* SetUpFirstGeo();
 
     void Render(const Mat4& worldMatrix, u32 flags);
     void Render(const LVector& pos, const LVector* scale, const u16* rotation, u32 flags);
-    void InitFastRender();
+    void InitFastRender(OriginalGeo* geo);
     void DoFastRender();
 
     void SetUpUVlists();
@@ -65,9 +66,11 @@ public:
     void SetVertexInfo(s16 frame, s16 speed);
 
     u32 GetGeoCount() const;
+    OriginalGeo* GetGeo() const;
     bool ResolveGeoByIndex(u32 geoIndex, OriginalGeo** outGeo, Mat4* outLocalMatrix);
     bool RenderGeoByIndex(u32 geoIndex, const Mat4& worldMatrix, u32 flags);
     u32* GetGeoSwapWordSlot(s32 geoIndex);
+    bool FastRenderReady() const;
 
     u32 GetClut(s32 mode);
     void SetZFar();
@@ -125,13 +128,13 @@ private:
     static constexpr u32 kMaxFastDrawEntries = 32;
     struct FastDrawEntry {
         Mat4 worldMatrix = Mat4();
-        u32 flags = 0;
-        s16 frame = 0;
         u32 swapWord = kGeoSwapWordInactive;
     };
 
     FastDrawEntry fastDrawEntries[kMaxFastDrawEntries];
     u32 fastDrawCount = 0;
+    s32 fastDrawGeoIndex = -1;
+    s32 currentGeoIndex = -1;
     u32 geoSwapWordSlot = kGeoSwapWordInactive;
 };
 
@@ -143,10 +146,12 @@ public:
     s32 Create() override;
     s32 Update() override;
     s32 IsDone(s32& doneMask);
+    void EnablePath(s32 enable);
     void Display(s32 blockNum) override;
     s32 PutBackEffect() override;
     void NISRemoveEffect();
     bool IsDirectorOverlay() const override;
+    bool GetDebugWorldPos(LVector* outPos) const override;
 
     s32 CreateSound(const LVector* posOverride);
     s32 UpdateSound();
@@ -270,6 +275,7 @@ public:
     s32 InitLensFlare(s32 mode, DBPath* path);
     s32 Update() override;
     void Display(s32 blockNum) override;
+    bool GetDebugWorldPos(LVector* outPos) const override;
 
 private:
     u32 BigScreenGlow();

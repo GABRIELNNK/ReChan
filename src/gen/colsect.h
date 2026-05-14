@@ -27,6 +27,7 @@ struct CollisionSector {
         s32& outFloorH, s32& outCeilingH,
         LVector& outFloorNormal, LVector& outCeilingNormal,
         const LVector& pos, s32 radius);
+    static s32 GetBlockNumber(const LVector& pos);
     static s32 FillWorldFloorArray(
         const LVector& searchMin, const LVector& searchMax,
         Floor** outArray, s32 maxCount);

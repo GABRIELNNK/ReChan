@@ -2419,8 +2419,7 @@ void Director::ProcessHumanoidFunc() {
 
             default:
                 LogDirectorUnknownCommand("Humanoid", opPtr, static_cast<s32>(op));
-                ASSERT(false && "Unknown Director humanoid opcode");
-                break;
+                continue;
         }
     }
 

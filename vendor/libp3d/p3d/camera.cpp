@@ -51,21 +51,26 @@ void tCamera::SetState() {
     // Use the aspect selected by the game for this frame when provided.
     f32 aspect = 4.0f / 3.0f;
     if (p3d::context) {
-        f32 overrideAspect = p3d::context->GetCameraAspect();
-        if (overrideAspect > 0.0f) {
-            aspect = overrideAspect;
+        f32 cameraAspect = p3d::context->GetCameraAspect();
+        if (cameraAspect > 0.0f) {
+            aspect = cameraAspect;
         }
         else if (p3d::display) {
             int w = p3d::display->GetWidth();
             int h = p3d::display->GetHeight();
-            if (h > 0) aspect = (f32)w / (f32)h;
+            if (h > 0) {
+                aspect = (f32)w / (f32)h;
+            }
         }
     }
     else if (p3d::display) {
         int w = p3d::display->GetWidth();
         int h = p3d::display->GetHeight();
-        if (h > 0) aspect = (f32)w / (f32)h;
+        if (h > 0) {
+            aspect = (f32)w / (f32)h;
+        }
     }
+    if (aspect < 0.01f) aspect = 4.0f / 3.0f;
 
     Mat4 proj = PerspectiveReversedZ(vfov_rad, aspect, nearPlaneF, farPlaneF);
 

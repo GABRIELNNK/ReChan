@@ -736,6 +736,7 @@ PaletteData* WEffect::SetupPaletteData(u32 paletteHash, u32 clutMode, u32 flags)
         _self->frameCount = 0;                                                                       \
         _self->currentFrame = 0;                                                                     \
         _self->fastDrawCount = 0;                                                                    \
+        _self->currentGeoIndex = -1;                                                                 \
         _self->geoSwapWordSlot = ComEffect::kGeoSwapWordInactive;                                   \
     } while (0)
 
@@ -773,6 +774,7 @@ PaletteData* WEffect::SetupPaletteData(u32 paletteHash, u32 clutMode, u32 flags)
         const s32 _inMiscAnimHash = (inMiscAnimHashArg);                                            \
         _self->resourceHash = static_cast<u32>(_inResourceHash);                                    \
         _self->miscAnimHash = static_cast<u32>(_inMiscAnimHash);                                    \
+        _self->currentGeoIndex = -1;                                                                 \
         _self->geoSwapWordSlot = ComEffect::kGeoSwapWordInactive;                                   \
                                                                                                      \
         _self->miscAnimNode = nullptr;                                                               \
@@ -1113,6 +1115,42 @@ ComEffect::~ComEffect() {
     }
 
     ComEffect_ResetModel(this);
+}
+
+OriginalGeo* ComEffect::SetUpFirstGeo() {
+    MARKFUNCTION(0x8004DB38);
+
+    currentGeoIndex = -1;
+
+    if (!model || !model->drawable) {
+        return nullptr;
+    }
+
+    if (model->drawableType == 3) {
+        DrawableETree* drawable = static_cast<DrawableETree*>(model->drawable);
+        OriginalETree* original = drawable ? drawable->original : nullptr;
+        const u32 geoCount = CountRenderableETreeGeos(original);
+        for (u32 i = 0; i < geoCount; i++) {
+            OriginalGeo* geo = GetRenderableETreeGeoByIndex(original, i, nullptr);
+            if (geo) {
+                currentGeoIndex = static_cast<s32>(i);
+                return geo;
+            }
+        }
+
+        return nullptr;
+    }
+
+    if (model->drawableType == 1) {
+        DrawableGeo* drawable = static_cast<DrawableGeo*>(model->drawable);
+        OriginalGeo* geo = drawable ? drawable->original : nullptr;
+        if (geo && geo->meshBuffer) {
+            currentGeoIndex = 0;
+            return geo;
+        }
+    }
+
+    return nullptr;
 }
 
 bool ComEffect::ApplyVizAnimFrame(VizAnim* vizAnimData, s32 frame) {
@@ -2002,78 +2040,76 @@ bool ComEffect::EndOfFrame(s32 frame) const {
 bool ComEffect::PointInView(const LVector& pos, s32 radius) const {
     MARKFUNCTION(0x8004E8D4);
 
-    auto unk_80000000 = []() {
-    };
-
-    auto TransMatrix = [&](const LVector& inPos) {
-        Mat4 matrix = p3d::context->GetViewMatrix();
-        p3dFillTransMatrix(inPos, matrix);
-    };
-
-    auto P3DClipCodeSphere = [&](const LVector& center, s32 sphereRadius) -> s32 {
-        const Mat4& view = p3d::context->GetViewMatrix();
-
-        f32 tx = 0.0f;
-        f32 ty = 0.0f;
-        f32 tz = 0.0f;
-        Mat4TransformPoint(view,
-                           static_cast<f32>(center.x),
-                           static_cast<f32>(center.y),
-                           static_cast<f32>(center.z),
-                           tx,
-                           ty,
-                           tz);
-
-        const s32 vx = static_cast<s32>(tx);
-        const s32 vy = static_cast<s32>(-ty);
-        const s32 vz = static_cast<s32>(-tz);
-
-        const ChanProjectionState port = g_display->GetChanProjectionState();
-
-        if (vz + sphereRadius < static_cast<s32>(port.nearClip)) {
-            return 1;
-        }
-
-        if (vz - sphereRadius > static_cast<s32>(port.farClip)) {
-            return 1;
-        }
-
-        if (vz <= 0) {
-            return 1;
-        }
-
-        const s32 sx = port.centerX
-            + static_cast<s32>((static_cast<f32>(vx) * port.projectionDistanceX) / static_cast<f32>(vz));
-        const s32 sy = port.centerY
-            + static_cast<s32>((static_cast<f32>(vy) * port.projectionDistanceY) / static_cast<f32>(vz));
-
-        s32 margin = 0;
-        if (sphereRadius > 0) {
-            margin = static_cast<s32>((static_cast<f32>(sphereRadius) * port.projectionDistanceX)
-                                      / static_cast<f32>(vz));
-        }
-
-        // Loosen bounds: allow effect if any part of sphere is on screen (PSX-style)
-        if (sx < (0 - margin) || sx >= (port.width + margin)) {
-            return 1;
-        }
-
-        if (sy < (0 - margin) || sy >= (port.height + margin)) {
-            return 1;
-        }
-
-        return 0;
-    };
-
     if (!g_display || !p3d::context) {
         return true;
     }
 
-    unk_80000000();
-    TransMatrix(pos);
-    const bool inView = (P3DClipCodeSphere(pos, radius) == 0);
-    unk_80000000();
-    return inView;
+    const Mat4& world = p3d::context->GetWorldMatrix();
+    const Mat4& view = p3d::context->GetViewMatrix();
+
+    f32 worldX = 0.0f;
+    f32 worldY = 0.0f;
+    f32 worldZ = 0.0f;
+    Mat4TransformPoint(world,
+                       static_cast<f32>(pos.x),
+                       static_cast<f32>(pos.y),
+                       static_cast<f32>(pos.z),
+                       worldX,
+                       worldY,
+                       worldZ);
+
+    f32 viewX = 0.0f;
+    f32 viewY = 0.0f;
+    f32 viewZ = 0.0f;
+    Mat4TransformPoint(view,
+                       worldX,
+                       worldY,
+                       worldZ,
+                       viewX,
+                       viewY,
+                       viewZ);
+
+    const s32 vx = static_cast<s32>(viewX);
+    const s32 vy = static_cast<s32>(-viewY);
+    const s32 vz = static_cast<s32>(-viewZ);
+
+    const ChanProjectionState port = g_display->GetChanProjectionState();
+
+    if (vz + radius < static_cast<s32>(port.nearClip)) {
+        return false;
+    }
+
+    if (vz - radius > static_cast<s32>(port.farClip)) {
+        return false;
+    }
+
+    if (vz <= 0) {
+        return false;
+    }
+
+    const s32 sx = port.centerX
+        + static_cast<s32>((static_cast<f32>(vx) * port.projectionDistanceX) / static_cast<f32>(vz));
+    const s32 sy = port.centerY
+        + static_cast<s32>((static_cast<f32>(vy) * port.projectionDistanceY) / static_cast<f32>(vz));
+
+    s32 marginX = 0;
+    s32 marginY = 0;
+    if (radius > 0) {
+        marginX = static_cast<s32>((static_cast<f32>(radius) * port.projectionDistanceX)
+            / static_cast<f32>(vz));
+        marginY = static_cast<s32>((static_cast<f32>(radius) * port.projectionDistanceY)
+            / static_cast<f32>(vz));
+    }
+
+    if (sx < (0 - marginX) || sx >= (port.width + marginX)) {
+        return false;
+    }
+
+    if (sy < (0 - marginY) || sy >= (port.height + marginY)) {
+        return false;
+    }
+
+    return true;
 }
 
 void ComEffect::Render(const LVector& pos, const LVector* scale, const u16* rotation, u32 flags) {
@@ -2193,6 +2229,7 @@ void ComEffect::Render(const LVector& pos, const LVector* scale, const u16* rota
 
     const Mat4 savedWorld = p3d::context->GetWorldMatrix();
     const bool useSwapWord = (geoSwapWordSlot != kGeoSwapWordInactive);
+
     if (useSwapWord) {
         p3d::context->SetTexInfoOverride(true, geoSwapWordSlot);
     }
@@ -2215,18 +2252,9 @@ void ComEffect::Render(const Mat4& worldMatrix, u32 flags) {
 
     const Mat4 savedWorld = p3d::context->GetWorldMatrix();
 
-    if ((flags & 0x800000u) != 0u && fastDrawCount < kMaxFastDrawEntries) {
-        FastDrawEntry& entry = fastDrawEntries[fastDrawCount++];
-        entry.worldMatrix = worldMatrix;
-        entry.flags = flags & ~0x800000u;
-        entry.frame = currentFrame;
-        entry.swapWord = geoSwapWordSlot;
-        return;
-    }
-
     MiscAnimNode* liveNode = ComEffect_ResolveLiveMiscAnimNode(this);
-    const bool canApplyFrame = (frameCount > 0) && (currentFrame < frameCount);
-    if (canApplyFrame && liveNode) {
+    const bool allowRenderAnim = (model->drawableType == 2) || (model->drawableType == 3);
+    if (allowRenderAnim && liveNode && (flags & 0x80000u) == 0u) {
         if (!ApplyMiscAnimFrame(liveNode, currentFrame, true) && !warnedSequenceUnsupported) {
             LOG("[WEffect] WARN: unresolved or unsupported misc anim update for effect hash 0x%08X (anim hash 0x%08X)",
                 resourceHash,
@@ -2235,12 +2263,21 @@ void ComEffect::Render(const Mat4& worldMatrix, u32 flags) {
         }
     }
 
+    if ((flags & 0x800000u) != 0u && fastDrawGeoIndex >= 0 && fastDrawCount < kMaxFastDrawEntries) {
+        FastDrawEntry& entry = fastDrawEntries[fastDrawCount++];
+        entry.worldMatrix = worldMatrix;
+        entry.swapWord = geoSwapWordSlot;
+        return;
+    }
+
     const bool useSwapWord = (geoSwapWordSlot != kGeoSwapWordInactive);
+
     if (useSwapWord) {
         p3d::context->SetTexInfoOverride(true, geoSwapWordSlot);
     }
 
-    p3d::context->SetWorldMatrix(worldMatrix);
+    const Mat4 composedWorld = savedWorld * worldMatrix;
+    p3d::context->SetWorldMatrix(composedWorld);
     model->drawable->Display(flags);
     p3d::context->SetWorldMatrix(savedWorld);
 
@@ -2271,6 +2308,38 @@ u32 ComEffect::GetGeoCount() const {
     }
 
     return 0;
+}
+
+OriginalGeo* ComEffect::GetGeo() const {
+    if (!model || !model->drawable) {
+        return nullptr;
+    }
+
+    if (model->drawableType == 3) {
+        DrawableETree* drawable = static_cast<DrawableETree*>(model->drawable);
+        OriginalETree* original = drawable ? drawable->original : nullptr;
+        if (currentGeoIndex >= 0) {
+            OriginalGeo* geo = GetRenderableETreeGeoByIndex(original, static_cast<u32>(currentGeoIndex), nullptr);
+            if (geo) {
+                return geo;
+            }
+        }
+
+        u16 partIndex = 0xFFFFu;
+        return GetRenderableETreeGeoByIndex(original, 0u, &partIndex);
+    }
+
+    if (model->drawableType == 1) {
+        DrawableGeo* drawable = static_cast<DrawableGeo*>(model->drawable);
+        OriginalGeo* geo = drawable ? drawable->original : nullptr;
+        if (currentGeoIndex > 0) {
+            return nullptr;
+        }
+
+        return (geo && geo->meshBuffer) ? geo : nullptr;
+    }
+
+    return nullptr;
 }
 
 bool ComEffect::ResolveGeoByIndex(u32 geoIndex, OriginalGeo** outGeo, Mat4* outLocalMatrix) {
@@ -2366,9 +2435,17 @@ bool ComEffect::RenderGeoByIndex(u32 geoIndex, const Mat4& worldMatrix, u32 flag
         return false;
     }
 
+    OriginalGeo* geo = nullptr;
+    Mat4 localMatrix = Mat4();
+    const bool resolvedGeo = ResolveGeoByIndex(geoIndex, &geo, &localMatrix);
+    const bool allowOriginalFallback = (geoIndex == 0u && original->meshBuffer != nullptr);
+    if (!resolvedGeo && !allowOriginalFallback) {
+        return false;
+    }
+
     MiscAnimNode* liveNode = ComEffect_ResolveLiveMiscAnimNode(this);
     const bool canApplyFrame = (frameCount > 0) && (currentFrame < frameCount);
-    if (canApplyFrame && liveNode) {
+    if (canApplyFrame && liveNode && (flags & 0x80000u) == 0u) {
         if (!ApplyMiscAnimFrame(liveNode, currentFrame, true) && !warnedSequenceUnsupported) {
             LOG("[WEffect] WARN: unresolved or unsupported misc anim update for effect hash 0x%08X (anim hash 0x%08X)",
                 resourceHash,
@@ -2379,42 +2456,30 @@ bool ComEffect::RenderGeoByIndex(u32 geoIndex, const Mat4& worldMatrix, u32 flag
 
     const Mat4 savedWorld = p3d::context->GetWorldMatrix();
 
-    if (g_display) {
-        const Mat4& view = p3d::context->GetViewMatrix();
-
-        f32 tx = 0.0f;
-        f32 ty = 0.0f;
-        f32 tz = 0.0f;
-        Mat4TransformPoint(view,
-                           worldMatrix.m[12],
-                           worldMatrix.m[13],
-                           worldMatrix.m[14],
-                           tx,
-                           ty,
-                           tz);
-
-        const s32 vz = static_cast<s32>(-tz);
-        const ChanProjectionState port = g_display->GetChanProjectionState();
-        if (vz <= 0 || vz < static_cast<s32>(port.nearClip) || vz > static_cast<s32>(port.farClip)) {
-            return false;
-        }
-    }
-
     bool rendered = false;
-
     const bool useSwapWord = (geoSwapWordSlot != kGeoSwapWordInactive);
+
     if (useSwapWord) {
         p3d::context->SetTexInfoOverride(true, geoSwapWordSlot);
     }
 
-    p3d::context->SetWorldMatrix(worldMatrix);
+    Mat4 drawWorld = savedWorld * worldMatrix;
+    if (resolvedGeo) {
+        drawWorld = drawWorld * localMatrix;
+    }
+    p3d::context->SetWorldMatrix(drawWorld);
 
-    OriginalGeo* geo = GetRenderableETreeGeoByIndex(original, geoIndex, nullptr);
     if (geo) {
         if (geo->meshBuffer) {
             if (geo->usesSemiTrans) {
+                u8 semiTransMode = geo->semiTransMode;
+                if (useSwapWord) {
+                    const u16 tpage = static_cast<u16>((geoSwapWordSlot >> 16) & 0xFFFFu);
+                    semiTransMode = static_cast<u8>((tpage >> 5) & 3u);
+                }
+
                 pddiBlendMode blendMode = PDDI_BLEND_ALPHA;
-                switch (geo->semiTransMode & 3u) {
+                switch (semiTransMode & 3u) {
                     case 1: blendMode = PDDI_BLEND_ADD; break;
                     case 2: blendMode = PDDI_BLEND_SUBTRACT; break;
                     case 3: blendMode = PDDI_BLEND_PSX_QUARTER; break;
@@ -2433,8 +2498,14 @@ bool ComEffect::RenderGeoByIndex(u32 geoIndex, const Mat4& worldMatrix, u32 flag
     }
     else if (geoIndex == 0u && original->meshBuffer) {
         if (original->usesSemiTrans) {
+            u8 semiTransMode = original->semiTransMode;
+            if (useSwapWord) {
+                const u16 tpage = static_cast<u16>((geoSwapWordSlot >> 16) & 0xFFFFu);
+                semiTransMode = static_cast<u8>((tpage >> 5) & 3u);
+            }
+
             pddiBlendMode blendMode = PDDI_BLEND_ALPHA;
-            switch (original->semiTransMode & 3u) {
+            switch (semiTransMode & 3u) {
                 case 1: blendMode = PDDI_BLEND_ADD; break;
                 case 2: blendMode = PDDI_BLEND_SUBTRACT; break;
                 case 3: blendMode = PDDI_BLEND_PSX_QUARTER; break;
@@ -2474,9 +2545,36 @@ u32* ComEffect::GetGeoSwapWordSlot(s32 geoIndex) {
     return &geoSwapWordSlot;
 }
 
-void ComEffect::InitFastRender() {
+bool ComEffect::FastRenderReady() const {
+    return fastDrawGeoIndex >= 0;
+}
+
+void ComEffect::InitFastRender(OriginalGeo* geo) {
     MARKFUNCTION(0x8004F288);
     fastDrawCount = 0;
+    if (!geo) {
+        fastDrawGeoIndex = -1;
+        return;
+    }
+
+    fastDrawGeoIndex = -1;
+
+    if (model && model->drawableType == 3) {
+        DrawableETree* drawable = static_cast<DrawableETree*>(model->drawable);
+        OriginalETree* original = drawable ? drawable->original : nullptr;
+        const u32 geoCount = CountRenderableETreeGeos(original);
+        for (u32 i = 0; i < geoCount; i++) {
+            u16 partIndex = 0xFFFFu;
+            OriginalGeo* candidate = GetRenderableETreeGeoByIndex(original, i, &partIndex);
+            if (candidate == geo) {
+                fastDrawGeoIndex = static_cast<s32>(i);
+                break;
+            }
+        }
+    }
+    else {
+        fastDrawGeoIndex = 0;
+    }
 }
 
 void ComEffect::DoFastRender() {
@@ -2486,64 +2584,80 @@ void ComEffect::DoFastRender() {
         return;
     }
 
-    if (!p3d::context) {
+    if (!p3d::context || fastDrawGeoIndex < 0) {
         fastDrawCount = 0;
         return;
     }
 
-    const Mat4& view = p3d::context->GetViewMatrix();
+    if (fastDrawCount > 1) {
+        const Mat4& view = p3d::context->GetViewMatrix();
+        const Mat4 sortBaseWorld = p3d::context->GetWorldMatrix();
 
-    for (u32 i = 0; i + 1 < fastDrawCount; i++) {
-        u32 bestIndex = i;
+        for (u32 i = 0; i + 1 < fastDrawCount; i++) {
+            u32 bestIndex = i;
 
-        f32 bestTx = 0.0f;
-        f32 bestTy = 0.0f;
-        f32 bestTz = 0.0f;
-        Mat4TransformPoint(view,
-                           fastDrawEntries[bestIndex].worldMatrix.m[12],
-                           fastDrawEntries[bestIndex].worldMatrix.m[13],
-                           fastDrawEntries[bestIndex].worldMatrix.m[14],
-                           bestTx,
-                           bestTy,
-                           bestTz);
-        f32 bestDepth = -bestTz;
-
-        for (u32 j = i + 1; j < fastDrawCount; j++) {
-            f32 tx = 0.0f;
-            f32 ty = 0.0f;
-            f32 tz = 0.0f;
+            f32 bestTx = 0.0f;
+            f32 bestTy = 0.0f;
+            f32 bestTz = 0.0f;
+            const Mat4 bestWorld = sortBaseWorld * fastDrawEntries[bestIndex].worldMatrix;
             Mat4TransformPoint(view,
-                               fastDrawEntries[j].worldMatrix.m[12],
-                               fastDrawEntries[j].worldMatrix.m[13],
-                               fastDrawEntries[j].worldMatrix.m[14],
-                               tx,
-                               ty,
-                               tz);
+                       bestWorld.m[12],
+                       bestWorld.m[13],
+                       bestWorld.m[14],
+                       bestTx,
+                       bestTy,
+                       bestTz);
+            f32 bestDepth = -bestTz;
 
-            const f32 depth = -tz;
-            if (depth > bestDepth) {
-                bestDepth = depth;
-                bestIndex = j;
+            for (u32 j = i + 1; j < fastDrawCount; j++) {
+                f32 tx = 0.0f;
+                f32 ty = 0.0f;
+                f32 tz = 0.0f;
+                const Mat4 world = sortBaseWorld * fastDrawEntries[j].worldMatrix;
+                Mat4TransformPoint(view,
+                                   world.m[12],
+                                   world.m[13],
+                                   world.m[14],
+                                   tx,
+                                   ty,
+                                   tz);
+
+                const f32 depth = -tz;
+                if (depth > bestDepth) {
+                    bestDepth = depth;
+                    bestIndex = j;
+                }
             }
-        }
 
-        if (bestIndex != i) {
-            const FastDrawEntry temp = fastDrawEntries[i];
-            fastDrawEntries[i] = fastDrawEntries[bestIndex];
-            fastDrawEntries[bestIndex] = temp;
+            if (bestIndex != i) {
+                const FastDrawEntry temp = fastDrawEntries[i];
+                fastDrawEntries[i] = fastDrawEntries[bestIndex];
+                fastDrawEntries[bestIndex] = temp;
+            }
         }
     }
 
     const u32 drawCount = fastDrawCount;
     fastDrawCount = 0;
     const u32 savedSwapWord = geoSwapWordSlot;
+    const Mat4 savedWorld = p3d::context->GetWorldMatrix();
+    const u32 replayGeoIndex = static_cast<u32>(fastDrawGeoIndex);
 
     for (u32 i = 0; i < drawCount; i++) {
         geoSwapWordSlot = fastDrawEntries[i].swapWord;
-        SetFrame(fastDrawEntries[i].frame);
-        Render(fastDrawEntries[i].worldMatrix, fastDrawEntries[i].flags);
+
+        if (model && model->drawableType == 3) {
+            (void)RenderGeoByIndex(
+                replayGeoIndex,
+                fastDrawEntries[i].worldMatrix,
+                0x80000u);
+        }
+        else {
+            Render(fastDrawEntries[i].worldMatrix, 0x80000u);
+        }
     }
 
+    p3d::context->SetWorldMatrix(savedWorld);
     geoSwapWordSlot = savedSwapWord;
 }
 
@@ -3388,6 +3502,15 @@ void WEffect::Display(s32 inBlockNum) {
     }
 }
 
+bool WEffect::GetDebugWorldPos(LVector* outPos) const {
+    if (!outPos) {
+        return false;
+    }
+
+    *outPos = pos;
+    return true;
+}
+
 s32 WEffect::PutBackEffect() {
     MARKFUNCTION(0x8008B988);
 
@@ -3651,6 +3774,14 @@ s32 WEffect::IsDone(s32& doneMask) {
     }
 
     return doneMask;
+}
+
+void WEffect::EnablePath(s32 enable) {
+    MARKFUNCTION(0x8008BA08);
+
+    if (pathInfo) {
+        pathInfo->allowMove = enable;
+    }
 }
 
 void WEffect::NISRemoveEffect() {
@@ -4453,6 +4584,15 @@ void LensFlare::Display(s32 inBlockNum) {
         };
         glowEffect->Render(flarePos, &glowScale, glowRotation, 268u);
     }
+}
+
+bool LensFlare::GetDebugWorldPos(LVector* outPos) const {
+    if (!outPos) {
+        return false;
+    }
+
+    *outPos = flarePos;
+    return true;
 }
 
 void WEffect_InitWorldEffects(DBPoint* firstPoint) {

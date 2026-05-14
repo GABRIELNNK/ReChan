@@ -4,6 +4,7 @@
 
 #include "gen/ai.h"
 #include "gen/blockmgr.h"
+#include "gen/colsect.h"
 #include "gen/database.h"
 #include "gen/effects.h"
 #include "gen/particle.h"
@@ -17,6 +18,9 @@
 
 #include "snd/esound.h"
 #include "snd/sndfact.h"
+
+#include "p3d/context.h"
+#include "p3d/p3dmath.h"
 
 #include <cstring>
 
@@ -34,6 +38,20 @@ static Effects* RemoveEffect(Effects* effect) {
 
 static u32 GetAttribValue(const DBAttrib* attrib) {
     return attrib ? attrib->value : 0;
+}
+
+static Mat4 BuildEffectWorldMatrix(const LVector& pos, const LVector* scale) {
+    Mat4 world = Mat4();
+    if (scale) {
+        world.m[0] = FIX16_TO_FLOAT(scale->x);
+        world.m[5] = FIX16_TO_FLOAT(scale->y);
+        world.m[10] = FIX16_TO_FLOAT(scale->z);
+    }
+
+    world.m[12] = static_cast<f32>(pos.x);
+    world.m[13] = static_cast<f32>(pos.y);
+    world.m[14] = static_cast<f32>(pos.z);
+    return world;
 }
 
 class PWPathInfo {
@@ -263,6 +281,7 @@ public:
     s32 Update() override;
     void Display(s32 inBlockNum) override;
     s32 PutBackEffect() override;
+    bool GetDebugWorldPos(LVector* outPos) const override;
 
     s32 IsDone(s32& inDoneMask);
 
@@ -301,6 +320,7 @@ public:
     s32 Create() override;
     s32 Update() override;
     void Display(s32 inBlockNum) override;
+    bool GetDebugWorldPos(LVector* outPos) const override;
 
     s32 Create2(const LVector* inPos, const LVector* inDirection, s32 followPos);
     s32 SetMentor();
@@ -429,9 +449,7 @@ s32 PWEffect::Create() {
             pos = *pathPos;
         }
 
-        if (g_blockManager) {
-            blockNum = static_cast<s32>(g_blockManager->GetBlockNumber(pos));
-        }
+        blockNum = CollisionSector::GetBlockNumber(pos);
     }
 
     if (mentor) {
@@ -467,9 +485,7 @@ s32 PWEffect::Update() {
                 pos = *pathPos;
             }
 
-            if (g_blockManager) {
-                blockNum = static_cast<s32>(g_blockManager->GetBlockNumber(pos));
-            }
+            blockNum = CollisionSector::GetBlockNumber(pos);
         }
 
         if (particleMgr) {
@@ -493,12 +509,26 @@ void PWEffect::Display(s32 inBlockNum) {
         mentor->Display(inBlockNum);
     }
 
-    if (!particleMgr) {
+    if (!particleMgr || !p3d::context) {
         return;
     }
 
-    particleMgr->SetDisplayOffset(&pos);
+    particleMgr->SetDisplayOffset(nullptr);
+
+    const Mat4 savedWorld = p3d::context->GetWorldMatrix();
+    const Mat4 effectWorld = BuildEffectWorldMatrix(pos, (createFlags & 4u) != 0u ? scale : nullptr);
+    p3d::context->SetWorldMatrix(savedWorld * effectWorld);
     particleMgr->Display();
+    p3d::context->SetWorldMatrix(savedWorld);
+}
+
+bool PWEffect::GetDebugWorldPos(LVector* outPos) const {
+    if (!outPos) {
+        return false;
+    }
+
+    *outPos = pos;
+    return true;
 }
 
 s32 PWEffect::IsDone(s32& inDoneMask) {
@@ -595,9 +625,7 @@ s32 FPWEffect::Create2(const LVector* inPos, const LVector* inDirection, s32 fol
         pos = { 0, 0, 0 };
     }
 
-    if (g_blockManager) {
-        blockNum = static_cast<s32>(g_blockManager->GetBlockNumber(pos));
-    }
+    blockNum = CollisionSector::GetBlockNumber(pos);
 
     if (inDirection && direction) {
         *direction = *inDirection;
@@ -827,7 +855,7 @@ void FPWEffect::Display(s32 inBlockNum) {
         mentor->Display(inBlockNum);
     }
 
-    if (!particleMgr) {
+    if (!particleMgr || !p3d::context) {
         return;
     }
 
@@ -836,8 +864,27 @@ void FPWEffect::Display(s32 inBlockNum) {
         displayPos = mentorPosRef;
     }
 
-    particleMgr->SetDisplayOffset(displayPos);
+    particleMgr->SetDisplayOffset(nullptr);
+
+    const Mat4 savedWorld = p3d::context->GetWorldMatrix();
+    const Mat4 effectWorld = BuildEffectWorldMatrix(*displayPos, (createFlags & 4u) != 0u ? scale : nullptr);
+    p3d::context->SetWorldMatrix(savedWorld * effectWorld);
     particleMgr->Display();
+    p3d::context->SetWorldMatrix(savedWorld);
+}
+
+bool FPWEffect::GetDebugWorldPos(LVector* outPos) const {
+    if (!outPos) {
+        return false;
+    }
+
+    if (!mentorThing && mentorPosRef) {
+        *outPos = *mentorPosRef;
+        return true;
+    }
+
+    *outPos = pos;
+    return true;
 }
 
 static void PurgePool() {
@@ -1149,17 +1196,17 @@ s32 FPWEffect_Create2(u32 effectHash,
 {
     MARKFUNCTION(0x8009BC38);
 
-    if (!g_blockManager || !pos || !g_pWEffectPool.head) {
+    if (!pos || !g_pWEffectPool.head) {
         return 0;
     }
 
-    if (g_blockManager->GetBlockNumber(*pos) == static_cast<u32>(-1)) {
+    if (CollisionSector::GetBlockNumber(*pos) == -1) {
         return 0;
     }
 
     for (ccMinNode* node = g_pWEffectPool.head; node; node = node->next) {
         PWEffect* base = static_cast<PWEffect*>(static_cast<ccNode*>(node));
-        if (base->effectType != 3 || base->noPool || base->nameCRC != effectHash) {
+        if (base->noPool || base->nameCRC != effectHash) {
             continue;
         }
 
@@ -1181,4 +1228,61 @@ s32 FPWEffect_Create2(u32 effectHash,
     }
 
     return 0;
+}
+
+s32 FPWEffect_DebugSpawnParticle(u32 particleHash,
+                                 const LVector* pos,
+                                 const LVector* direction,
+                                 s32 lifeFrames)
+{
+    if (!pos) {
+        return -1;
+    }
+
+    const s32 collisionBlockNum = CollisionSector::GetBlockNumber(*pos);
+    if (collisionBlockNum == -1) {
+        return -3;
+    }
+
+    ParticleSystem* particleSystem = ParticleSystem_Find(particleHash);
+    if (!particleSystem) {
+        return -2;
+    }
+
+    FPWEffect* effect = new FPWEffect();
+    if (!effect) {
+        return -4;
+    }
+
+    effect->effectType = 3;
+    effect->nameCRC = particleHash;
+    effect->emissionCount = (lifeFrames <= 0) ? 30 : static_cast<s16>(lifeFrames);
+    effect->blockNum = collisionBlockNum;
+    effect->particleMgr = new ParticleSystemMgr(particleSystem);
+
+    if (!effect->particleMgr) {
+        delete effect;
+        return -5;
+    }
+
+    if (direction) {
+        effect->direction = new LVector();
+        if (!effect->direction) {
+            delete effect;
+            return -6;
+        }
+
+        *effect->direction = *direction;
+        effect->createFlags |= 0x110u;
+    }
+
+    effect->Create2(pos, direction, 0);
+
+    // Debug visibility: draw in the player's current render block when available.
+    if (Player::s_player && Player::s_player->blockNum >= 0) {
+        effect->blockNum = Player::s_player->blockNum;
+    }
+
+    AddEffect(effect, 0);
+    return 1;
 }

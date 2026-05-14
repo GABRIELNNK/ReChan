@@ -1,4 +1,5 @@
 #include "gen/colsect.h"
+#include "gen/blockmgr.h"
 #include "gen/colwall.h"
 #include "gen/colfloor.h"
 #include "p3d/p3dmath.h"
@@ -59,6 +60,40 @@ void CollisionSector::Load(u32* data) {
 void CollisionSector::Unload() {
     MARKFUNCTION(0x800422A0);
     Zero();
+}
+
+// PSX: GetBlockNumber__15CollisionSectorRC10tagLVector (COLSECT.CPP:511) 0x80040D8C
+s32 CollisionSector::GetBlockNumber(const LVector& pos) {
+    MARKFUNCTION(0x80040D8C);
+
+    s32 blockNum = -1;
+
+    for (s32 sectorIdx = 0; sectorIdx < MAX_COLLISION_SECTORS; sectorIdx++) {
+        const CollisionSector* sector = &g_collisionSectors[sectorIdx];
+        if (sector->status == -1) {
+            continue;
+        }
+
+        const u32 sectorBlockNum = static_cast<u32>(sector->status);
+        if (g_blockManager && !g_blockManager->IsValidBlockNumber(sectorBlockNum)) {
+            continue;
+        }
+
+        bool inside = false;
+        if (pos.x >= sector->boundsMin.x && sector->boundsMax.x >= pos.x) {
+            if (pos.y >= sector->boundsMin.y && sector->boundsMax.y >= pos.y) {
+                if (pos.z >= sector->boundsMin.z && sector->boundsMax.z >= pos.z) {
+                    inside = true;
+                }
+            }
+        }
+
+        if (inside) {
+            blockNum = sector->status;
+        }
+    }
+
+    return blockNum;
 }
 
 // PSX: GetWorldFloorHeight__15CollisionSectorRC10tagLVectorl (COLSECT.CPP:1105) 0x800417B8

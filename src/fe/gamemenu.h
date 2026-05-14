@@ -28,6 +28,7 @@ public:
     void PopMenu() override;
     void HandleInputChange() override;
     void ShowPauseMenu();
+    s32 ShowLoadingScreenText(u32 levelIndex, u32 petalIndex);
     void ResumeGame();
     void ExitGame();
 };

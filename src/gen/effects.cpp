@@ -1,5 +1,6 @@
 #include "common.h"
 #include "gen/effects.h"
+#include "p3d/lvector.h"
 
 u32 g_wEffectGlobalFrame = 0;
 
@@ -44,6 +45,10 @@ s32 Effects::PutBackEffect() {
 }
 
 bool Effects::IsDirectorOverlay() const {
+    return false;
+}
+
+bool Effects::GetDebugWorldPos(LVector* /*outPos*/) const {
     return false;
 }
 
@@ -166,4 +171,18 @@ Effects* Effects_RemoveEffect(Effects* effect) {
     g_effectsList.RemNode(effect);
     effect->inEffectsList = 0;
     return effect;
+}
+
+s32 Effects_DebugGetActive(Effects** outEffects, s32 maxCount) {
+    s32 count = 0;
+
+    for (ccMinNode* node = g_effectsList.head; node; node = node->next) {
+        Effects* effect = static_cast<Effects*>(static_cast<ccNode*>(node));
+        if (outEffects && count < maxCount) {
+            outEffects[count] = effect;
+        }
+        count++;
+    }
+
+    return count;
 }

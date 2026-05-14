@@ -277,23 +277,23 @@ void AI::AddActiveZone(DBVolume* vol) {
 // Enormous function (~4000 bytes) that creates entities by type.
 // Dispatches based on AI::ThingTypes to create Player, enemies, objects, etc.
 // PSX: after creation, calls SetName, AnalyzeMesh(root), Reset(), AddNode(targetList)
-void AI::AddThingNoTagList(const char* name, u16 type,
-                           const LVector* pos, const SVector* orient,
-                           const char* modelName, const DBRoot* root) {
+Thing* AI::AddThingNoTagList(const char* name, u16 type,
+                             const LVector* pos, const SVector* orient,
+                             const char* modelName, const DBRoot* root) {
     MARKFUNCTION(0x80054404);
 
     if (type == AITypes::TT_LIGHTSPHERE || type == AITypes::TT_LIGHTSPHERE2) {
         if (g_environmentManager) {
             g_environmentManager->lighting.AnalyzeSphere(static_cast<DBPoint*>(const_cast<DBRoot*>(root)));
         }
-        return;
+        return nullptr;
     }
 
     if (type == AITypes::TT_MESHANALYSIS) {
         if (g_database) {
             g_database->AnalyzeMesh(const_cast<DBRoot*>(root));
         }
-        return;
+        return nullptr;
     }
 
     Thing* thing = nullptr;
@@ -430,7 +430,7 @@ void AI::AddThingNoTagList(const char* name, u16 type,
     }
 
     if (!thing)
-        return;
+        return nullptr;
 
     if (name) {
         thing->SetName(name, 0);
@@ -478,6 +478,7 @@ void AI::AddThingNoTagList(const char* name, u16 type,
     }
 
     targetList->AddNodeTail(thing);
+    return thing;
 }
 
 // PSX: HandleHumanoidHumanoidCollision__FP8HumanoidT0 (AI.CPP:986, 0x80055584)
@@ -855,16 +856,30 @@ void AI::Populate() {
                 }
 
                 player->ClearFloorHeight();
-                player->homePos = pt->pos;
-                player->pos = pt->pos;
+                if (player->checkpoint.IsValid()) {
+                    // PSX: checkpoint-valid branch restores position/rotation/block from CheckpointInfo.
+                    player->homePos.x = player->checkpoint.field0;
+                    player->homePos.y = player->checkpoint.field4;
+                    player->homePos.z = player->checkpoint.field8;
+                    player->pos = player->homePos;
 
-                s32 yRot = pt->field44;
-                player->SetDesiredMoveDirection(yRot);
-                player->FaceAngleY(yRot, 0);
+                    s32 yRot = player->checkpoint.field16;
+                    player->SetDesiredMoveDirection(yRot);
+                    player->FaceAngleY(yRot, 0);
+                    player->blockNum = (u16)player->checkpoint.field24;
+                }
+                else {
+                    player->homePos = pt->pos;
+                    player->pos = pt->pos;
 
-                const DBAttrib* a15 = pt->FindAttrib(15);
-                if (a15) {
-                    player->blockNum = (u16)a15->value;
+                    s32 yRot = pt->field44;
+                    player->SetDesiredMoveDirection(yRot);
+                    player->FaceAngleY(yRot, 0);
+
+                    const DBAttrib* a15 = pt->FindAttrib(15);
+                    if (a15) {
+                        player->blockNum = (u16)a15->value;
+                    }
                 }
 
                 player->UpdatePosition();

@@ -114,9 +114,6 @@ void FrontEndVolume::HandleVolumeExit(Humanoid* hum) {
 
     hum->SetActionState(AS_STAND, 0);
 
-    hum->FaceThingDesired(nullptr);
-    hum->FaceThing(nullptr, 0);
-
     if (g_display) {
         Camera* cam = g_display->GetCamera();
         if (cam) {

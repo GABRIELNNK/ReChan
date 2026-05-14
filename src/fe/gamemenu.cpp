@@ -4,6 +4,7 @@
 #include "gen/game.h"
 #include "gen/control.h"
 #include "gen/scoremgr.h"
+#include "gen/world.h"
 #include "fe/hud.h"
 #include "snd/fesnd.h"
 #include "snd/rsevent.h"
@@ -28,6 +29,8 @@ static constexpr u32 HASH_SOUND_STEREO = 1023610618;  // xcHash("Sound_Stereo")
 static constexpr u32 HASH_EXIT_MENU = 2613914;        // xcHash("Exit")
 static constexpr u32 HASH_EXIT_NO = 2685;             // xcHash("No")
 static constexpr u32 HASH_EXIT_YES = 100369;          // xcHash("Yes")
+static constexpr u32 HASH_LOAD_TEXT_OVERLAY = 0x55C01B22;
+static constexpr u32 HASH_LOAD_TEXT = 0x1FBB3816;
 
 struct SoundMenuState {
     u16 musicVol = 0;
@@ -294,6 +297,70 @@ void gameMenu::ShowPauseMenu() {
     MARKFUNCTION(0x80010500);
     pauseIndex = 0;
     SetTopMenu(startScreenHashes[0]);
+}
+
+// PSX: ShowLoadingScreenText__8gameMenuUlUl (Overlay4 0x80037E88)
+s32 gameMenu::ShowLoadingScreenText(u32 levelIndex, u32 petalIndex) {
+    MARKFUNCTION(0x80037E88);
+
+    World* world = g_game ? g_game->GetWorld() : nullptr;
+    if (!world) {
+        return 0;
+    }
+
+    u32 levelID = static_cast<u32>(world->GetLevelIDFromIndex(levelIndex));
+    u8 textIndex = 0;
+    s32 showText = 1;
+
+    switch (levelID) {
+    case 8u:
+        petalIndex = 3;
+        levelID = 5;
+        break;
+    case 11u:
+        petalIndex = 3;
+        levelID = 1;
+        break;
+    case 12u:
+        petalIndex = 3;
+        levelID = 2;
+        break;
+    case 13u:
+        petalIndex = 3;
+        levelID = 3;
+        break;
+    case 14u:
+        petalIndex = 3;
+        levelID = 4;
+        break;
+    default:
+        break;
+    }
+
+    s32 result = (levelID < 7u) ? 1 : 0;
+    if (levelID < 7u && levelID != 0u) {
+        result = static_cast<s32>((levelID - 1u) * 4u);
+        textIndex = static_cast<u8>(result + petalIndex);
+    }
+    else {
+        showText = 0;
+    }
+
+    if (showText) {
+        xcOverlayData* overlay = FindOverlay(HASH_LOAD_TEXT_OVERLAY);
+        xcSection* sec = GetSection();
+        auto* loadText = reinterpret_cast<xcTextPrim*>(overlay->GetTextObj(HASH_LOAD_TEXT, sec->rawData));
+        loadText->paletteIdx = textIndex;
+
+        GotoScreen(startScreenHashes[1]);
+        g_display->BeginFrame();
+        Update();
+        Render();
+        g_display->EndFrame();
+        return 1;
+    }
+
+    return result;
 }
 
 // PSX: ResumeGame__8gameMenu (Overlay4 0x80010600)

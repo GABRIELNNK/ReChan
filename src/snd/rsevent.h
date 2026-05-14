@@ -53,6 +53,9 @@ s32 jcsValidateHandle(s32 handle);
 // Returns non-zero if the loaded dialog handle is currently playable.
 s32 jcsIsPlayable(s32 handle);
 
+// Returns non-zero if the current PSX dialog handle is playing.
+s32 jcsIsPlaying();
+
 // Returns non-zero if the loaded dialog handle is currently playing.
 s32 jcsIsPlaying(s32 handle);
 

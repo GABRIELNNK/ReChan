@@ -1,6 +1,8 @@
 #pragma once
 #include "ai/obstacle.h"
 
+class CDestructibleSound;
+
 class DestructibleThing : public Obstacle {
 public:
     u32 effectHash = 0;
@@ -11,12 +13,12 @@ public:
     s32 field136 = 0;
     u16 generateItemType = 0;
     u16 field142 = 0;
-    const char* itemModelName = nullptr;
+    char* itemModelName = nullptr;
     s32 itemParam1 = 0;
     s32 itemParam2 = 0;
     s32 itemParam3 = 0;
     s32 itemParam4 = 0;
-    void* sound = nullptr;
+    CDestructibleSound* sound = nullptr;
 
     DestructibleThing(const LVector* pos, u16 type);
     ~DestructibleThing() override;

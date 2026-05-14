@@ -1,8 +1,14 @@
+#include "common.h"
+
 #include "gen/geffect.h"
 #include "gen/blockmgr.h"
 #include "gen/effects.h"
 #include "gen/weffect.h"
+#include "gen/pweffect.h"
+#include "gen/particle.h"
 #include "p3d/byteread.h"
+#include "p3d/context.h"
+#include "p3d/p3dmath.h"
 #include "pc/log.h"
 #include "snd/basesnd.h"
 #include "snd/esound.h"
@@ -40,7 +46,7 @@ public:
     s32 holdAlive = 0;
 
     ComEffect* comEffect = nullptr;
-    void* particleMgr = nullptr;
+    ParticleSystemMgr* particleMgr = nullptr;
 
     CWorldEffectSound* worldSound = nullptr;
     CSound* particleSound = nullptr;
@@ -53,17 +59,44 @@ static ccList g_genericEffectPool;
 static GEffect** g_genericEffects = nullptr;
 static u32 g_genericEffectCount = 0;
 
+static Mat4 BuildEffectWorldMatrix(const LVector& pos, const LVector* scale) {
+    Mat4 world = Mat4();
+    if (scale) {
+        world.m[0] = FIX16_TO_FLOAT(scale->x);
+        world.m[5] = FIX16_TO_FLOAT(scale->y);
+        world.m[10] = FIX16_TO_FLOAT(scale->z);
+    }
+
+    world.m[12] = static_cast<f32>(pos.x);
+    world.m[13] = static_cast<f32>(pos.y);
+    world.m[14] = static_cast<f32>(pos.z);
+    return world;
+}
+
 GEffect::GEffect() {
     MARKFUNCTION(0x8008E184);
 }
 
 GEffect::~GEffect() {
     MARKFUNCTION(0x8008E1CC);
+
+    if (particleMgr) {
+        particleMgr->PurgeParticles();
+        delete particleMgr;
+        particleMgr = nullptr;
+    }
+
     ReleaseSound();
 }
 
 s32 GEffect::PutBackEffect() {
     MARKFUNCTION(0x8008E228);
+
+    if (particleMgr) {
+        particleMgr->PurgeParticles();
+        delete particleMgr;
+        particleMgr = nullptr;
+    }
 
     g_genericEffectPool.AddNode(g_genericEffectPool.tail, this);
     return ReleaseSound();
@@ -104,6 +137,26 @@ s32 GEffect::Update() {
         Effects_RemoveEffect(this);
         g_genericEffectPool.AddNode(g_genericEffectPool.tail, this);
         ReleaseSound();
+
+        frame += 1;
+        return frame;
+    }
+
+    if (particleMgr) {
+        const LVector localOrigin = { 0, 0, 0 };
+
+        if (frame < lifeFrames || holdAlive) {
+            particleMgr->CreateParticles(localOrigin, nullptr);
+        }
+
+        particleMgr->Update();
+        UpdateSound();
+
+        if (!holdAlive && frame >= lifeFrames && !particleMgr->ActiveParticles()) {
+            Effects_RemoveEffect(this);
+            g_genericEffectPool.AddNode(g_genericEffectPool.tail, this);
+            ReleaseSound();
+        }
 
         frame += 1;
         return frame;
@@ -152,19 +205,30 @@ void GEffect::Display(s32 inBlockNum) {
         renderRotation = *rotationRef;
     }
 
-    if (!comEffect) {
+    if (comEffect) {
+        comEffect->SetFrame(frame);
+
+        const u16 rotationWords[3] = {
+            static_cast<u16>(renderRotation.x),
+            static_cast<u16>(renderRotation.y),
+            static_cast<u16>(renderRotation.z),
+        };
+
+        comEffect->Render(renderPos, &renderScale, rotationWords, renderFlags);
         return;
     }
 
-    comEffect->SetFrame(frame);
+    if (!particleMgr || !p3d::context) {
+        return;
+    }
 
-    const u16 rotationWords[3] = {
-        static_cast<u16>(renderRotation.x),
-        static_cast<u16>(renderRotation.y),
-        static_cast<u16>(renderRotation.z),
-    };
+    particleMgr->SetDisplayOffset(nullptr);
 
-    comEffect->Render(renderPos, &renderScale, rotationWords, renderFlags);
+    const Mat4 savedWorld = p3d::context->GetWorldMatrix();
+    const Mat4 effectWorld = BuildEffectWorldMatrix(renderPos, &renderScale);
+    p3d::context->SetWorldMatrix(savedWorld * effectWorld);
+    particleMgr->Display();
+    p3d::context->SetWorldMatrix(savedWorld);
 }
 
 s32 GEffect::CreateSound() {
@@ -179,7 +243,9 @@ s32 GEffect::CreateSound() {
         s32 result = CSoundFactory::CreateObject(10000, &createdParticleSound);
         if (result >= 0 && createdParticleSound) {
             particleSound = createdParticleSound;
-            return particleSound->Initialize(const_cast<LVector*>(posRef));
+
+            const LVector* soundPos = posRef ? posRef : &pos;
+            return particleSound->Initialize(const_cast<LVector*>(soundPos));
         }
 
         return result;
@@ -324,7 +390,7 @@ void GEffect_LoadChunk(const u8* body, u32 bodySize) {
 
     if (p + 4 <= bodyEnd) {
         const u32 commonParticleCount = p3dReadU32LE(p);
-        (void)commonParticleCount;
+        ParticleSystem_CommonParticles(static_cast<s32>(commonParticleCount));
     }
 
     LOG("[GEffect] Loaded %u ComEffects and %u generic slots from chunk 0x8A10", g_loadedComEffectCount,
@@ -376,6 +442,8 @@ Effects* GEffect_Create(u32 effectHash,
         fwFlags |= 2;
     }
 
+    s32 fpwFollowPos = ((createFlags & 1u) != 0u) ? 1 : 0;
+
     u16 rotationWords[3] = {};
     const u16* fwRotation = nullptr;
     if (rotation) {
@@ -389,7 +457,9 @@ Effects* GEffect_Create(u32 effectHash,
         createdByOtherEffect = 1;
     }
 
-    // PSX also dispatches through FPWEffect here; FPWEffect runtime is not reversed on PC yet.
+    if (FPWEffect_Create2(effectHash, pos, rotation, lifeFrames, fpwFollowPos)) {
+        createdByOtherEffect += 1;
+    }
 
     if (CBVEffect_CreateForHash(effectHash)) {
         createdByOtherEffect += 1;
@@ -404,9 +474,12 @@ Effects* GEffect_Create(u32 effectHash,
     }
 
     ComEffect* comEffect = GEffect_FindEffect(effectHash);
+    ParticleSystem* particleSystem = nullptr;
     if (!comEffect) {
-        // Particle-system-backed GEffect creation is still pending full reversal.
-        return nullptr;
+        particleSystem = ParticleSystem_Find(effectHash);
+        if (!particleSystem) {
+            return nullptr;
+        }
     }
 
     if (!pos) {
@@ -417,13 +490,27 @@ Effects* GEffect_Create(u32 effectHash,
     }
 
     GEffect* effect = static_cast<GEffect*>(g_genericEffectPool.head);
+
+    if (effect->particleMgr) {
+        effect->particleMgr->PurgeParticles();
+        delete effect->particleMgr;
+        effect->particleMgr = nullptr;
+    }
+
     effect->comEffect = comEffect;
-    effect->particleMgr = nullptr;
+    if (particleSystem) {
+        effect->particleMgr = new ParticleSystemMgr(particleSystem);
+        if (!effect->particleMgr) {
+            return nullptr;
+        }
+    }
 
     effect->frameDelay = frameDelay;
     effect->frame = 0;
     effect->frameCounter = 0;
-    effect->lifeFrames = (lifeFrames != 0) ? lifeFrames : static_cast<s32>(comEffect->GetFrameCount());
+    effect->lifeFrames = comEffect
+        ? ((lifeFrames != 0) ? lifeFrames : static_cast<s32>(comEffect->GetFrameCount()))
+        : ((lifeFrames != 0) ? lifeFrames : 1);
 
     effect->createFlags = createFlags | 8u;
     effect->renderFlags = 0;

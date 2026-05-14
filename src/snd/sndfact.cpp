@@ -4,6 +4,7 @@
 #include "snd/trnssnd.h"
 #include "snd/prstsnd.h"
 #include "snd/hmndsnd.h"
+#include "snd/dstrsnd.h"
 #include "snd/platsnd.h"
 #include "snd/wpnsnd.h"
 #include "snd/rsevent.h"
@@ -37,6 +38,12 @@ struct WorldEffectSoundLoadData {
 struct ParticleEffectSoundLoadData {
     u8 pad0;
     s8 persistentId;
+};
+
+struct DestructibleSoundLoadData {
+    u16 pad16;
+    u16 smashSfx;
+    s32 material;
 };
 
 // PSX: IsBasicSoundLoaded__21CSoundFactoryDatabaseUl (SNDFDB.CPP:1011, 0x800AC240)
@@ -405,6 +412,192 @@ static s32 FillParticleEffectSoundLoadData(u32 soundId, ParticleEffectSoundLoadD
     }
 }
 
+// PSX: CreateDestructibleSound__21CSoundFactoryDatabaseP6CSoundUl (SNDFDB.CPP:718)
+static void FillDestructibleSoundLoadData(u32 soundId, DestructibleSoundLoadData& data) {
+    data = {};
+    data.material = 3;
+
+    u16 smashSfx = 177;
+
+    if (soundId == 0x05064231) {
+        smashSfx = 169;
+    }
+    else if (soundId > 0x05064231) {
+        if (soundId == 0x096B8433) {
+            smashSfx = 163;
+        }
+        else if (soundId > 0x096B8433) {
+            if (soundId == 0x0A6C4D22) {
+                smashSfx = 176;
+            }
+            else if (soundId > 0x0A6C4D22) {
+                if (soundId == 0x0A7A14E1) {
+                    smashSfx = 166;
+                }
+                else if (soundId > 0x0A7A14E1) {
+                    if (soundId == 0x0C995E24) {
+                        smashSfx = 163;
+                    }
+                    else {
+                        smashSfx = 177;
+                    }
+                }
+                else {
+                    smashSfx = 177;
+                    if (soundId >= 0x0A790AE1 && soundId <= 0x0A790AE2) {
+                        data.material = 2;
+                        smashSfx = 171;
+                    }
+                }
+            }
+            else {
+                if (soundId == 0x0997D201) {
+                    data.material = 2;
+                    smashSfx = 171;
+                }
+                else if (soundId <= 0x0997D201) {
+                    if (soundId == 0x0995E2B2) {
+                        smashSfx = 163;
+                    }
+                    else {
+                        smashSfx = 177;
+                    }
+                }
+                else if (soundId == 0x09C33D91 || soundId == 0x09C34277) {
+                    smashSfx = 162;
+                }
+                else {
+                    smashSfx = 177;
+                }
+            }
+        }
+        else {
+            if (soundId == 0x06E3A834) {
+                smashSfx = 163;
+            }
+            else if (soundId <= 0x06E3A834) {
+                if (soundId == 0x06922904) {
+                    data.material = 2;
+                    smashSfx = 168;
+                }
+                else {
+                    smashSfx = 177;
+                    if (soundId >= 0x06B9C331 && soundId <= 0x06B9C334) {
+                        smashSfx = 162;
+                    }
+                }
+            }
+            else if (soundId == 0x08243154 || soundId == 0x08743364) {
+                smashSfx = 161;
+            }
+            else if (soundId <= 0x08243154) {
+                if (soundId == 0x08085A3E) {
+                    data.material = 2;
+                    smashSfx = 165;
+                }
+                else {
+                    smashSfx = 177;
+                }
+            }
+            else if (soundId == 0x090AEE4C) {
+                data.material = 2;
+                smashSfx = 171;
+            }
+            else {
+                smashSfx = 177;
+            }
+        }
+    }
+    else if (soundId == 0x004B14A2) {
+        smashSfx = 167;
+    }
+    else if (soundId > 0x004B14A2) {
+        if (soundId == 0x02FDFA44) {
+            smashSfx = 169;
+        }
+        else if (soundId > 0x02FDFA44) {
+            if (soundId == 0x04C9F96C || soundId == 0x04D82842) {
+                data.material = 2;
+                smashSfx = 170;
+            }
+            else if (soundId <= 0x04C9F96C) {
+                smashSfx = 177;
+                if (soundId >= 0x04317272 && soundId <= 0x04317273) {
+                    smashSfx = 161;
+                }
+            }
+            else {
+                smashSfx = 177;
+            }
+        }
+        else if (soundId == 0x00551544) {
+            data.material = 1;
+            smashSfx = 172;
+        }
+        else if (soundId <= 0x00551544) {
+            if (soundId == 0x004CCDD5) {
+                data.material = 1;
+                smashSfx = 175;
+            }
+            else {
+                smashSfx = 177;
+            }
+        }
+        else if (soundId == 0x0284C70C) {
+            smashSfx = 161;
+        }
+        else {
+            smashSfx = 177;
+        }
+    }
+    else if (soundId == 0x000079DA || soundId == 0x000079E2 || soundId == 0x000079D7) {
+        smashSfx = 173;
+    }
+    else if (soundId >= 0x000079DB) {
+        if (soundId == 0x00047796) {
+            smashSfx = 174;
+        }
+        else if (soundId <= 0x00047796) {
+            if (soundId == 0x000079E2) {
+                smashSfx = 173;
+            }
+            else {
+                smashSfx = 177;
+            }
+        }
+        else if (soundId == 0x00068B7D) {
+            smashSfx = 164;
+        }
+        else if (soundId == 0x0007C895) {
+            data.material = 1;
+            smashSfx = 172;
+        }
+        else {
+            smashSfx = 177;
+        }
+    }
+    else if (soundId == 0x00000453) {
+        data.material = 2;
+        smashSfx = 165;
+    }
+    else if (soundId >= 0x00000454) {
+        if (soundId == 0x000079D7) {
+            smashSfx = 173;
+        }
+        else {
+            smashSfx = 177;
+        }
+    }
+    else if (soundId == 0x00000063) {
+        smashSfx = 163;
+    }
+    else {
+        smashSfx = 177;
+    }
+
+    data.smashSfx = smashSfx;
+}
+
 // PSX: CreateObject__13CSoundFactoryUlPP6CSoundUl (SNDFACT.CPP:178, 0x8005759C)
 // Creates a CSound-derived object by type ID and loads the soundId into it.
 // PSX flow: switch(typeId) -> allocate -> construct -> LoadObject -> Load(soundId data)
@@ -612,6 +805,15 @@ s32 CSoundFactory::CreateObject(u32 typeId, CSound** outObj, u32 soundId) {
             // PSX: writes u8 persistId at sp+17, calls Load(sp+16)
             u8 loadBytes[2] = { 0, (u8)(soundId & 0xFF) };
             obj->Load(loadBytes);
+            *outObj = obj;
+            break;
+        }
+        case 10090:
+        {
+            CDestructibleSound* obj = new CDestructibleSound();
+            DestructibleSoundLoadData data = {};
+            FillDestructibleSoundLoadData(soundId, data);
+            obj->Load(&data);
             *outObj = obj;
             break;
         }

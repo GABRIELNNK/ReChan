@@ -1280,8 +1280,35 @@ void Obstacle_LoadAnimChunk(const u8* body, u32 bodySize) {
 // PSX: MovePassengersBasic__8Obstacle (OBSTACLE.CPP:2348, 0x8007D40C)
 void Obstacle::MovePassengersBasic() {
     MARKFUNCTION(0x8007D40C);
-    // JUMPOUT: passenger linked-list traversal; iterates subNode passenger list,
-    // clamps each passenger's homeY to obstacle top (pos.y + collBox.maxY - 2),
-    // calls DynamicThing::Land() if velY <= 0, then restores homePos/velocity.
-    // Implementation deferred pending DynamicThing passenger/ticket system confirmation.
+
+    const s32 topY = pos.y + static_cast<s32>(collBox.maxY);
+    for (ccMinNode* node = subNode.next; node != nullptr; node = node->next) {
+        Ticket* ticket = static_cast<Ticket*>(node);
+        DynamicThing* passenger = ticket->passenger;
+        if (!passenger) {
+            continue;
+        }
+        const s32 savedHomeX = passenger->homePos.x;
+        s32 savedHomeY = passenger->homePos.y;
+        const s32 savedHomeZ = passenger->homePos.z;
+        const s32 savedVelX = passenger->velocity.x;
+        s32 savedVelY = passenger->velocity.y;
+        const s32 savedVelZ = passenger->velocity.z;
+
+        if (savedHomeY < topY) {
+            savedHomeY = topY - 2;
+        }
+
+        if (savedVelY <= 0) {
+            savedVelY = 0;
+            passenger->Land();
+        }
+
+        passenger->homePos.x = savedHomeX;
+        passenger->homePos.y = savedHomeY;
+        passenger->homePos.z = savedHomeZ;
+        passenger->velocity.x = savedVelX;
+        passenger->velocity.y = savedVelY;
+        passenger->velocity.z = savedVelZ;
+    }
 }

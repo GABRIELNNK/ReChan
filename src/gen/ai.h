@@ -61,10 +61,11 @@ public:
     void AddActiveZone(DBVolume* vol);
 
     // Creates a Thing from type + parameters and adds to thingList.
+    // Returns the created object pointer (null if nothing was created).
     // PSX 6th param is mangled as const LVector* but actually used as const char* model name.
-    void AddThingNoTagList(const char* name, u16 type,
-                           const LVector* pos, const SVector* orient,
-                           const char* modelName, const DBRoot* root);
+    Thing* AddThingNoTagList(const char* name, u16 type,
+                             const LVector* pos, const SVector* orient,
+                             const char* modelName, const DBRoot* root);
 
     // Per-frame: Think → Move → UpdatePosition for all active entities
     void MoveThings();

@@ -690,8 +690,7 @@ s32 feCustomMenuMgr::Invoke() {
             const Action action = (Action)m_keyBindActionCursor;
 
             if (capturedKey == KEY_ESCAPE ||
-                (nonMouseInput && g_actionInput->JustPressed(ACTION_MENU_BACK)) ||
-                (nonMouseInput && g_actionInput->JustPressed(ACTION_OPEN_CLOSE_MENU))) {
+                (nonMouseInput && g_actionInput->JustPressed(ACTION_MENU_BACK))) {
                 m_keyBindCaptureActive = false;
                 PlaySound(FE_SND_MENU_5);
                 return m_result;
@@ -912,8 +911,7 @@ s32 feCustomMenuMgr::Invoke() {
             PlaySound(FE_SND_MENU_5);
         }
 
-        if ((nonMouseInput && g_actionInput->JustPressed(ACTION_MENU_BACK)) ||
-            (nonMouseInput && g_actionInput->JustPressed(ACTION_OPEN_CLOSE_MENU))) {
+        if (nonMouseInput && g_actionInput->JustPressed(ACTION_MENU_BACK)) {
             PlaySound(FE_SND_MENU_5);
             GoBack();
         }
@@ -1081,8 +1079,7 @@ s32 feCustomMenuMgr::Invoke() {
         PlaySound(FE_SND_MENU_5); Confirm();
     }
 
-    if (g_actionInput->JustPressed(ACTION_MENU_BACK) ||
-        g_actionInput->JustPressed(ACTION_OPEN_CLOSE_MENU)) {
+    if (g_actionInput->JustPressed(ACTION_MENU_BACK)) {
         // FE_SND_MENU_SPECIAL_4 triggers HandleCursorEvent(5) -> jcsFadeOutEngine(2),
         // which can leave audio faded out in this custom flow.
         // Use a non-fade back sound for submenu navigation.
@@ -1090,6 +1087,9 @@ s32 feCustomMenuMgr::Invoke() {
             PlaySound(FE_SND_MENU_5);
         }
         GoBack();
+    }
+    else if (g_actionInput->IsGamepadActive() && g_actionInput->JustPressed(ACTION_OPEN_CLOSE_MENU)) {
+        Deactivate();
     }
 
     // Any keyboard/gamepad input disables mouse hover until mouse moves again.

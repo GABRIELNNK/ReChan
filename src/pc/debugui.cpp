@@ -6,6 +6,9 @@
 #include "gen/camera.h"
 #include "gen/animstruct.h"
 #include "gen/model.h"
+#include "gen/effects.h"
+#include "gen/particle.h"
+#include "gen/pweffect.h"
 #include "gen/charmgr.h"
 #include "gen/scoremgr.h"
 #include "gen/time.h"
@@ -21,6 +24,7 @@
 #include "gen/display.h"
 #include "extra/fecustommenumgr.h"
 #include "pc/log.h"
+#include "fe/xcfont.h"
 
 static bool sEnabled = false;
 static bool sShowPlayer = false;
@@ -28,6 +32,8 @@ static bool sShowCamera = false;
 static bool sShowAudio = false;
 static bool sShowAnimation = false;
 static bool sShowGame = false;
+static bool sShowParticles = false;
+static bool sShowDebugging = false;
 static bool sShowConsoleNotes = false;
 static bool sShowImGuiDemo = false;
 static s32 sAnimSelectedEnum = 0;
@@ -37,6 +43,48 @@ static s32 sInputRoutingSelection = 0; // 0 = Camera input, 1 = Player input
 static char sConsoleNoteInput[1024] = {};
 static char sLastConsoleNote[1024] = {};
 static bool sCursorForcedByDebugUI = false;
+
+struct DebugParticleChoice {
+    const char* label;
+    u32 hash;
+};
+
+static const DebugParticleChoice kDebugParticleChoices[] = {
+    { "PBITS", PARTICLE_PBITS },
+    { "PBLKSMOKE", PARTICLE_PBLKSMOKE },
+    { "PCRDUST", PARTICLE_PCRDUST },
+    { "PCRUMB", PARTICLE_PCRUMB },
+    { "PDFRAG", PARTICLE_PDFRAG },
+    { "PDFRAGS", PARTICLE_PDFRAGS },
+    { "PEXPLBLK", PARTICLE_PEXPLBLK },
+    { "PEXPLFRG", PARTICLE_PEXPLFRG },
+    { "PEXPLOR3A", PARTICLE_PEXPLOR3A },
+    { "PFALLMIST", PARTICLE_PFALLMIST },
+    { "PFEATHER", PARTICLE_PFEATHER },
+    { "PFLAMEVENT", PARTICLE_PFLAMEVENT },
+    { "PFLIMPCT", PARTICLE_PFLIMPCT },
+    { "PGLASSHAT", PARTICLE_PGLASSHAT },
+    { "PGOO_L", PARTICLE_PGOO_L },
+    { "PGOO_L2", PARTICLE_PGOO_L2 },
+    { "PGOO_L3", PARTICLE_PGOO_L3 },
+    { "PGOO_R", PARTICLE_PGOO_R },
+    { "PGOO_R2", PARTICLE_PGOO_R2 },
+    { "PGOO_R3", PARTICLE_PGOO_R3 },
+    { "PGRILSMK", PARTICLE_PGRILSMK },
+    { "PLCRUMBL", PARTICLE_PLCRUMBL },
+    { "PROOFSMOKE", PARTICLE_PROOFSMOKE },
+    { "PSHARD", PARTICLE_PSHARD },
+    { "PSHARD2", PARTICLE_PSHARD2 },
+    { "PVENTSTEAM", PARTICLE_PVENTSTEAM },
+};
+
+static s32 sDebugParticleChoiceIndex = 0;
+static s32 sDebugParticleSpawnDistance = 1024;
+static s32 sDebugParticleSpawnHeight = 0;
+static s32 sDebugParticleLifeFrames = 30;
+static s32 sDebugParticleLastSpawnResult = -1;
+static bool sDebugShowHumanoidNames3D = false;
+static bool sDebugShowEffectNames3D = false;
 
 static void ApplyCursorPolicy() {
     if (!g_display) {
@@ -328,6 +376,242 @@ static void SubmitConsoleNote() {
     sConsoleNoteInput[0] = '\0';
 }
 
+static bool BuildDebugParticleSpawnPos(LVector* outPos) {
+    if (!outPos || !Player::s_player) {
+        return false;
+    }
+
+    const Player* player = Player::s_player;
+    *outPos = player->pos;
+
+    const s16 angle = static_cast<s16>(player->orientation.y);
+    const s32 sinY = rmSin16(angle);
+    const s32 cosY = rmSin16(static_cast<s16>(angle + 0x4000));
+
+    outPos->x += static_cast<s32>((static_cast<s64>(sinY) * sDebugParticleSpawnDistance) >> 16);
+    outPos->z += static_cast<s32>((static_cast<s64>(cosY) * sDebugParticleSpawnDistance) >> 16);
+    outPos->y += sDebugParticleSpawnHeight;
+    return true;
+}
+
+static const char* DebugParticleNameByHash(u32 hash) {
+    const char* runtimeName = ParticleSystem_GetNameByHash(hash);
+    if (runtimeName && runtimeName[0] != '\0') {
+        return runtimeName;
+    }
+
+    for (s32 i = 0; i < IM_ARRAYSIZE(kDebugParticleChoices); i++) {
+        if (kDebugParticleChoices[i].hash == hash) {
+            return kDebugParticleChoices[i].label;
+        }
+    }
+
+    return nullptr;
+}
+
+static const char* DebugEffectTypeName(s32 effectType) {
+    switch (effectType) {
+        case 1: return "WEffect";
+        case 2: return "PWEffect";
+        case 3: return "FPWEffect";
+        case 4: return "FW/GEffect";
+        case 5: return "LensFlare";
+        case 6: return "CBVEffect";
+        case 7: return "SpotLight";
+        default: return "Effect";
+    }
+}
+
+static const char* DebugParticleSpawnResultText(s32 result) {
+    switch (result) {
+        case 1: return "Spawned";
+        case -1: return "Failed: invalid position";
+        case -2: return "Failed: particle hash not loaded";
+        case -3: return "Failed: spawn outside collision sectors";
+        case -4: return "Failed: effect allocation";
+        case -5: return "Failed: manager allocation";
+        case -6: return "Failed: direction allocation";
+        default: return "Failed";
+    }
+}
+
+static u32 DebugUIColor(u8 r, u8 g, u8 b, u8 a) {
+    return ((u32)a << 24) | ((u32)b << 16) | ((u32)g << 8) | (u32)r;
+}
+
+static xcFont* ResolveDebugLabelFont() {
+    if (!g_oxFontFile) {
+        return nullptr;
+    }
+
+    xcFont* font = g_oxFontFile->FindFont("Beats_lo");
+    if (!font) {
+        font = g_oxFontFile->FindFont("Beats_mid");
+    }
+    if (!font) {
+        font = g_oxFontFile->FindFont("Red_dr");
+    }
+    if (!font) {
+        font = g_oxFontFile->FindFont("Gold_dr");
+    }
+    return font;
+}
+
+static void DrawDebugLabelText(f32 x, f32 y, const char* text, u32 color, xcFont* font, ImDrawList* fallbackDrawList) {
+    if (!text || text[0] == '\0') {
+        return;
+    }
+
+    if (font) {
+        font->DrawText(text, x, y, color, 0, 0);
+        return;
+    }
+
+    if (fallbackDrawList) {
+        fallbackDrawList->AddText(ImVec2(x, y), (ImU32)color, text);
+    }
+}
+
+static void DrawDebug3DLabels() {
+    if (!g_display || (!sDebugShowHumanoidNames3D && !sDebugShowEffectNames3D)) {
+        return;
+    }
+
+    Camera* camera = g_display->GetCamera();
+    if (!camera) {
+        return;
+    }
+
+    xcFont* labelFont = ResolveDebugLabelFont();
+
+    ImDrawList* fallbackDrawList = nullptr;
+    f32 fallbackOffsetX = 0.0f;
+    f32 fallbackOffsetY = 0.0f;
+    f32 fallbackScaleX = 1.0f;
+    f32 fallbackScaleY = 1.0f;
+
+    if (!labelFont && ImGui::GetCurrentContext()) {
+        fallbackDrawList = ImGui::GetForegroundDrawList();
+
+        const ImGuiViewport* viewport = ImGui::GetMainViewport();
+        if (viewport) {
+            fallbackOffsetX = viewport->Pos.x;
+            fallbackOffsetY = viewport->Pos.y;
+        }
+
+        const ImGuiIO& io = ImGui::GetIO();
+        if (io.DisplayFramebufferScale.x > 0.0f) {
+            fallbackScaleX = io.DisplayFramebufferScale.x;
+        }
+        if (io.DisplayFramebufferScale.y > 0.0f) {
+            fallbackScaleY = io.DisplayFramebufferScale.y;
+        }
+    }
+
+    if (!labelFont && !fallbackDrawList) {
+        return;
+    }
+
+    const f32 prevScaleX = labelFont ? labelFont->scaleX : 1.0f;
+    const f32 prevScaleY = labelFont ? labelFont->scaleY : 1.0f;
+    const f32 prevWrapX = labelFont ? labelFont->wrapX : 0.0f;
+
+    if (labelFont) {
+        labelFont->SetScale(1.0f, 1.0f);
+        labelFont->SetWrapX(0.0f);
+    }
+
+    auto drawLabel = [&](f32 screenX, f32 screenY, const char* text, u32 color) {
+        f32 drawX = screenX;
+        f32 drawY = screenY;
+
+        if (!labelFont) {
+            drawX = screenX / fallbackScaleX + fallbackOffsetX;
+            drawY = screenY / fallbackScaleY + fallbackOffsetY;
+        }
+
+        DrawDebugLabelText(drawX, drawY, text, color, labelFont, fallbackDrawList);
+    };
+
+    const f32 labelYOffset = (labelFont && labelFont->lineHeight > 0)
+        ? (f32)labelFont->lineHeight + 2.0f
+        : 14.0f;
+
+    if (sDebugShowHumanoidNames3D && g_ai) {
+        for (ccMinNode* node = g_ai->humanoidList.head; node; node = node->next) {
+            Thing* thing = static_cast<Thing*>(static_cast<ccNode*>(node));
+            if (!thing) {
+                continue;
+            }
+
+            f32 screenX = 0.0f;
+            f32 screenY = 0.0f;
+            if (!camera->WorldToScreen(thing->pos, &screenX, &screenY)) {
+                continue;
+            }
+
+            char label[128] = {};
+            const char* name = thing->GetName();
+            if (name && name[0] != '\0') {
+                std::snprintf(label, sizeof(label), "%s", name);
+            }
+            else {
+                std::snprintf(label, sizeof(label), "Humanoid 0x%08X", thing->nameCRC);
+            }
+
+            drawLabel(screenX, screenY - labelYOffset, label, DebugUIColor(255, 240, 120, 255));
+        }
+    }
+
+    if (sDebugShowEffectNames3D) {
+        static constexpr s32 kMaxEffects = 1024;
+        Effects* effects[kMaxEffects] = {};
+        const s32 effectCount = Effects_DebugGetActive(effects, kMaxEffects);
+
+        for (s32 i = 0; i < effectCount && i < kMaxEffects; i++) {
+            Effects* effect = effects[i];
+            if (!effect) {
+                continue;
+            }
+
+            LVector worldPos = {};
+            if (!effect->GetDebugWorldPos(&worldPos)) {
+                continue;
+            }
+
+            f32 screenX = 0.0f;
+            f32 screenY = 0.0f;
+            if (!camera->WorldToScreen(worldPos, &screenX, &screenY)) {
+                continue;
+            }
+
+            char label[128] = {};
+            const char* effectTypeName = DebugEffectTypeName(effect->effectType);
+            const char* effectName = effect->GetName();
+            const char* particleName = DebugParticleNameByHash(effect->nameCRC);
+            if (particleName && particleName[0] != '\0') {
+                std::snprintf(label, sizeof(label), "%s (%s:%d)", particleName, effectTypeName, effect->effectType);
+            }
+            else if (effectName && effectName[0] != '\0') {
+                std::snprintf(label, sizeof(label), "%s (%s:%d)", effectName, effectTypeName, effect->effectType);
+            }
+            else if (effect->nameCRC != 0) {
+                std::snprintf(label, sizeof(label), "0x%08X (%s:%d)", effect->nameCRC, effectTypeName, effect->effectType);
+            }
+            else {
+                std::snprintf(label, sizeof(label), "%s:%d", effectTypeName, effect->effectType);
+            }
+
+            drawLabel(screenX, screenY - labelYOffset, label, DebugUIColor(120, 220, 255, 255));
+        }
+    }
+
+    if (labelFont) {
+        labelFont->SetScale(prevScaleX, prevScaleY);
+        labelFont->SetWrapX(prevWrapX);
+    }
+}
+
 void DebugUI::Init() {}
 
 bool DebugUI::IsEnabled() {
@@ -354,6 +638,8 @@ void DebugUI::Draw() {
         }
     }
 
+    DrawDebug3DLabels();
+
     if (!sEnabled) {
         return;
     }
@@ -364,6 +650,8 @@ void DebugUI::Draw() {
         if (ImGui::BeginMenu("Windows")) {
             ImGui::MenuItem("Game", nullptr, &sShowGame);
             ImGui::MenuItem("Player", nullptr, &sShowPlayer);
+            ImGui::MenuItem("Particles", nullptr, &sShowParticles);
+            ImGui::MenuItem("Debugging", nullptr, &sShowDebugging);
             ImGui::MenuItem("Camera", nullptr, &sShowCamera);
             ImGui::MenuItem("Animation", nullptr, &sShowAnimation);
             ImGui::MenuItem("Audio", nullptr, &sShowAudio);
@@ -522,6 +810,7 @@ void DebugUI::Draw() {
                 }
 
                 ImGui::SeparatorText("Animation Runtime");
+
                 if (anim) {
                     ImGui::Text("Anim Current: %d", anim->animEnum);
                     ImGui::Text("Loop Type: %s (%d)", AnimLoopTypeName(anim->loopTypeField), anim->loopTypeField);
@@ -538,6 +827,88 @@ void DebugUI::Draw() {
             else {
                 ImGui::Text("No player");
             }
+        }
+        ImGui::End();
+    }
+
+    if (sShowParticles) {
+        if (ImGui::Begin("Particles", &sShowParticles)) {
+            if (!Player::s_player) {
+                ImGui::Text("No player");
+            }
+            else {
+                if (sDebugParticleChoiceIndex < 0 || sDebugParticleChoiceIndex >= IM_ARRAYSIZE(kDebugParticleChoices)) {
+                    sDebugParticleChoiceIndex = 0;
+                }
+
+                if (ImGui::BeginCombo("Particle Type", kDebugParticleChoices[sDebugParticleChoiceIndex].label)) {
+                    for (s32 i = 0; i < IM_ARRAYSIZE(kDebugParticleChoices); i++) {
+                        const bool selected = (i == sDebugParticleChoiceIndex);
+                        if (ImGui::Selectable(kDebugParticleChoices[i].label, selected)) {
+                            sDebugParticleChoiceIndex = i;
+                        }
+                        if (selected) {
+                            ImGui::SetItemDefaultFocus();
+                        }
+                    }
+                    ImGui::EndCombo();
+                }
+
+                const DebugParticleChoice& choice = kDebugParticleChoices[sDebugParticleChoiceIndex];
+                ImGui::Text("Hash: 0x%08X", choice.hash);
+
+                ImGui::InputInt("Spawn Distance", &sDebugParticleSpawnDistance, 64, 256);
+                ImGui::InputInt("Spawn Height", &sDebugParticleSpawnHeight, 64, 256);
+                ImGui::InputInt("Life Frames", &sDebugParticleLifeFrames, 1, 10);
+
+                if (sDebugParticleSpawnDistance < 0) {
+                    sDebugParticleSpawnDistance = 0;
+                }
+                if (sDebugParticleLifeFrames < 1) {
+                    sDebugParticleLifeFrames = 1;
+                }
+
+                LVector spawnPreview = {};
+                if (BuildDebugParticleSpawnPos(&spawnPreview)) {
+                    ImGui::Text("Spawn Pos: %d, %d, %d", spawnPreview.x, spawnPreview.y, spawnPreview.z);
+                }
+
+                if (ImGui::Button("Spawn Particle In Front")) {
+                    LVector spawnPos = {};
+                    if (BuildDebugParticleSpawnPos(&spawnPos)) {
+                        sDebugParticleLastSpawnResult = FPWEffect_DebugSpawnParticle(
+                            choice.hash,
+                            &spawnPos,
+                            nullptr,
+                            sDebugParticleLifeFrames);
+
+                        LOG("[DebugUI] SpawnParticle hash=0x%08X pos=(%d,%d,%d) distance=%d life=%d result=%d",
+                            choice.hash,
+                            spawnPos.x,
+                            spawnPos.y,
+                            spawnPos.z,
+                            sDebugParticleSpawnDistance,
+                            sDebugParticleLifeFrames,
+                            sDebugParticleLastSpawnResult);
+                    }
+                    else {
+                        sDebugParticleLastSpawnResult = -1;
+                    }
+                }
+
+                ImGui::Text("Last Spawn Result: %d (%s)",
+                            sDebugParticleLastSpawnResult,
+                            DebugParticleSpawnResultText(sDebugParticleLastSpawnResult));
+            }
+        }
+        ImGui::End();
+    }
+
+    if (sShowDebugging) {
+        if (ImGui::Begin("Debugging", &sShowDebugging)) {
+            ImGui::SeparatorText("3D Labels");
+            ImGui::Checkbox("Humanoid names", &sDebugShowHumanoidNames3D);
+            ImGui::Checkbox("Effects/Particles names", &sDebugShowEffectNames3D);
         }
         ImGui::End();
     }
@@ -787,4 +1158,5 @@ void DebugUI::Draw() {
     if (sShowImGuiDemo) {
         ImGui::ShowDemoWindow(&sShowImGuiDemo);
     }
+
 }

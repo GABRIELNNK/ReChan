@@ -156,7 +156,7 @@ void PsxVRAM::DecodePage(u16 tpage, u16 cba, u8* out) const {
     }
 }
 
-static void LoadWEffectChunkStub(const u8* body, u32 bodySize) {
+static void LoadWEffectChunk(const u8* body, u32 bodySize) {
     g_wEffectChunkCount++;
 
     WEffect_LoadChunk(body, bodySize);
@@ -2170,7 +2170,7 @@ static void LoadGeoPair(
             }
 
             else if (chunkId == 0x8A00) {
-                LoadWEffectChunkStub(chunkBody, chunkSize - 6);
+                LoadWEffectChunk(chunkBody, chunkSize - 6);
             }
 
             else if (chunkId == 0x8A10) {
@@ -2869,8 +2869,8 @@ void World::LoadLevelNames() {
 void World::LoadPermanent() {
     LoadLevelNames();
 
-    // PSX: LoadLevel__12LevelManager() - empty stub on PSX
-    // PSX: PurgeLevelP3DInventory__12LevelManager() - also empty stub
+    // PSX: LoadLevel__12LevelManager() - no-op on PSX
+    // PSX: PurgeLevelP3DInventory__12LevelManager() - also no-op
 
     // PSX: OpenCharacter(type=0), EnableCache(type=0, 1)
     if (g_characterManager) {
@@ -3074,6 +3074,38 @@ bool World::LoadLevelIndex(u32 levelIndex) {
         if (levelList[currentLevelIndex * 2] == 7 && Player::s_player) {
             Player* player = Player::s_player;
 
+            bool mappedPrevLevel = false;
+            if (previousLevelIndex < (u32)levelCount) {
+                const s32 prevLevelID = levelList[previousLevelIndex * 2];
+                switch (prevLevelID) {
+                case 6:
+                    mappedPrevLevel = true;
+                    break;
+                case 8:
+                    previousLevelIndex = (u32)LevelIDToIndex(5);
+                    mappedPrevLevel = true;
+                    break;
+                case 11:
+                    previousLevelIndex = (u32)LevelIDToIndex(1);
+                    mappedPrevLevel = true;
+                    break;
+                case 12:
+                    previousLevelIndex = (u32)LevelIDToIndex(2);
+                    mappedPrevLevel = true;
+                    break;
+                case 13:
+                    previousLevelIndex = (u32)LevelIDToIndex(3);
+                    mappedPrevLevel = true;
+                    break;
+                case 14:
+                    previousLevelIndex = (u32)LevelIDToIndex(4);
+                    mappedPrevLevel = true;
+                    break;
+                default:
+                    break;
+                }
+            }
+
             if (g_hud) {
                 g_hud->ShowDestLevel();
             }
@@ -3087,16 +3119,13 @@ bool World::LoadLevelIndex(u32 levelIndex) {
             // PSX: determine if we should show level selection
             bool doShowLevel = false;
             if (previousLevelIndex < (u32)levelCount
-                && previousLevelIndex != currentLevelIndex) {
-                // PSX: additional check: (!v10 || MEMORY[0x24] != 11)
-                doShowLevel = true;
-            }
-            if (g_destSelectReturnPosValid) {
+                && previousLevelIndex != currentLevelIndex
+                && (!mappedPrevLevel || !g_game || g_game->GetState() != GameState::EndLevelExit)) {
                 doShowLevel = true;
             }
 
             LVector returnPos;
-            if (doShowLevel && g_destSelectReturnPosValid) {
+            if (doShowLevel) {
                 returnPos = g_destSelectReturnPos;
                 if (g_hud) {
                     g_hud->destSelect.ShowLevel(0);
@@ -3114,24 +3143,13 @@ bool World::LoadLevelIndex(u32 levelIndex) {
                 g_arrowInside = 0;
             }
 
-            LVector playerDelta = {
-                returnPos.x - player->pos.x,
-                returnPos.y - player->pos.y,
-                returnPos.z - player->pos.z,
-            };
-
             player->homePos = returnPos;
             player->pos = returnPos;
-
-            g_destSelectReturnPosValid = false;
 
             if (g_display) {
                 Camera* cam = g_display->GetCamera();
                 if (cam) {
-                    const LVector& camPos = cam->GetPosition();
-                    cam->SetPosition(camPos.x + playerDelta.x,
-                                     camPos.y + playerDelta.y,
-                                     camPos.z + playerDelta.z);
+                    // PSX: SetLookAtTarget(theCamera, thePlayer, 1)
                     cam->SetLookAtTarget(player, 1);
                 }
             }
@@ -3307,16 +3325,17 @@ static void TransformVector(const Mat4& vm, s32 inX, s32 inY, s32 inZ,
 
 // chanp3dClipCode - PC equivalent of PSX chanp3dClipCode
 // Projects a tPort-space point into screen space and computes PSX-style clip bits.
-// bit 0: left, bit 1: right, bit 2: top, bit 3: bottom, bit 4: near, bit 5: far
+// bit 0: left, bit 1: right, bit 2: top, bit 3: bottom, bit 4: behind camera
 static u32 chanp3dClipCode(const ChanProjectionState& portState, s32 vx, s32 vy, s32 vz) {
     u32 code = 0;
 
-    if (vz < static_cast<s32>(portState.nearClip)) code |= 0x10;
-    if (vz > static_cast<s32>(portState.farClip)) code |= 0x20;
-    if (vz <= 0) return code | 0x10;
+    // PSX chanp3dClipCode only checks z-sign (behind camera), not near/far clip planes.
+    if (vz < 0) code |= 0x10;
 
-    s32 sx = portState.centerX + static_cast<s32>((static_cast<f32>(vx) * portState.projectionDistanceX) / static_cast<f32>(vz));
-    s32 sy = portState.centerY + static_cast<s32>((static_cast<f32>(vy) * portState.projectionDistanceY) / static_cast<f32>(vz));
+    const s32 denom = (vz == 0) ? 1 : vz;
+
+    s32 sx = portState.centerX + static_cast<s32>((static_cast<f32>(vx) * portState.projectionDistanceX) / static_cast<f32>(denom));
+    s32 sy = portState.centerY + static_cast<s32>((static_cast<f32>(vy) * portState.projectionDistanceY) / static_cast<f32>(denom));
 
     if (sx < 0) code |= 0x01;
     else if (sx >= portState.width) code |= 0x02;
@@ -3328,12 +3347,12 @@ static u32 chanp3dClipCode(const ChanProjectionState& portState, s32 vx, s32 vy,
 }
 
 // vecLengthSquared - PC equivalent of PSX vecLengthSquared
-// Returns squared length of view-space vector (with >>8 shift to prevent overflow)
+// PSX formula: ((x*x)>>2) + ((y*y)>>2) + ((z*z)>>2)
 static s32 vecLengthSquared(s32 x, s32 y, s32 z) {
-    s32 sx = x >> 8;
-    s32 sy = y >> 8;
-    s32 sz = z >> 8;
-    return sx * sx + sy * sy + sz * sz;
+    const s64 xx = static_cast<s64>(x) * static_cast<s64>(x);
+    const s64 yy = static_cast<s64>(y) * static_cast<s64>(y);
+    const s64 zz = static_cast<s64>(z) * static_cast<s64>(z);
+    return static_cast<s32>((xx >> 2) + (yy >> 2) + (zz >> 2));
 }
 
 // PSX: DrawLoop__FP6ccListUl (GAME.CPP:2543, 0x8002B224)
@@ -3442,7 +3461,8 @@ void World::DrawEverythingHandler(const LVector* playerPos) {
                 DrawEntityList(g_ai->moveList, bn);
             }
 
-            // PSX: Draw__5BlockRC10tagLVector(block, &localPos)
+            // Host immediate path: draw opaque block first, then effects.
+            // PSX submits both into OT; final composition is depth-sorted at flush.
             entry.block->Draw(&localPos);
 
             Effects_DrawEffects(static_cast<s32>(bn));
@@ -3861,11 +3881,11 @@ void World::LoadPetal(u32 petalIndex) {
             g_database->Scan(data + entries[i].offset, entries[i].size);
         }
 
+        LoadGeoPairsInRange(this, entries, data, dataSize, petalStart, petalEnd, ".PCI", ".PCP", 2);
+
         WEffect_InitWorldEffects(g_database->GetFirstPoint());
         PWEffect_InitWorldEffects(g_database->GetFirstPoint());
         ParticleSystem_InitParticleInfoMemory();
-
-        LoadGeoPairsInRange(this, entries, data, dataSize, petalStart, petalEnd, ".PCI", ".PCP", 2);
 
         // Refresh VRAM GL texture after Geo texture uploads
         RefreshVRAMTexture();

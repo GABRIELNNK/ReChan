@@ -51,6 +51,9 @@
 #define FIX16_TO_FLOAT(v) ((f32)(v) * FIX16_INV)
 #define FLOAT_TO_FIX16(v) ((s32)((v) * FIX16_SCALE))
 
+// Forward declaration for helpers used by p3dFillHeadingMatrix.
+inline void rmV3Normalize(LVector* out, const LVector* in);
+
 // p3dBuildRotMatrixZ / Y / X - single-axis rotation into Mat4
 // PSX: builds into 3×5 s16 Q12 MATRIX. PC: builds into 4×4 float Mat4.
 inline void p3dBuildRotMatrixZ(f32 angle, Mat4& m) {
@@ -208,10 +211,41 @@ inline void p3dFillTransMatrix(const LVector& pos, Mat4& m) {
 // p3dFillHeadingMatrix - build orientation matrix from heading + up vectors
 // PSX: 0x800947F0 - builds right/up/forward basis
 inline void p3dFillHeadingMatrix(const Vec3& heading, const Vec3& up, Mat4& m) {
-    Vec3 fwd = heading.Normalized();
-    Vec3 right = up.Cross(fwd);
-    right.Normalize();
-    Vec3 realUp = fwd.Cross(right);
+    const LVector headingVec = {
+        FLOAT_TO_FIX16(heading.x),
+        FLOAT_TO_FIX16(heading.y),
+        FLOAT_TO_FIX16(heading.z),
+    };
+    const LVector upVec = {
+        FLOAT_TO_FIX16(up.x),
+        FLOAT_TO_FIX16(up.y),
+        FLOAT_TO_FIX16(up.z),
+    };
+
+    // PSX parity (0x80073C8C): rmV3Normalize falls back to (1,0,0) on zero magnitude.
+    LVector fwdVec = {};
+    rmV3Normalize(&fwdVec, &headingVec);
+
+    const LVector rightCross = upVec.Cross(headingVec);
+    LVector rightVec = {};
+    rmV3Normalize(&rightVec, &rightCross);
+
+    const LVector realUpCross = headingVec.Cross(rightVec);
+    LVector realUpVec = {};
+    rmV3Normalize(&realUpVec, &realUpCross);
+
+    const Vec3 fwd(
+        FIX16_TO_FLOAT(fwdVec.x),
+        FIX16_TO_FLOAT(fwdVec.y),
+        FIX16_TO_FLOAT(fwdVec.z));
+    const Vec3 right(
+        FIX16_TO_FLOAT(rightVec.x),
+        FIX16_TO_FLOAT(rightVec.y),
+        FIX16_TO_FLOAT(rightVec.z));
+    const Vec3 realUp(
+        FIX16_TO_FLOAT(realUpVec.x),
+        FIX16_TO_FLOAT(realUpVec.y),
+        FIX16_TO_FLOAT(realUpVec.z));
 
     m = Mat4();
     m.m[0] = right.x;  m.m[1] = right.y;  m.m[2] = right.z;

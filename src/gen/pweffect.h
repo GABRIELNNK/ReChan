@@ -23,3 +23,9 @@ s32 FPWEffect_Create2(u32 effectHash,
                       const LVector* direction,
                       s32 lifeFrames,
                       s32 followPos);
+
+// Debug helper: spawn a particle system hash as a transient FPWEffect at world position.
+s32 FPWEffect_DebugSpawnParticle(u32 particleHash,
+                                 const LVector* pos,
+                                 const LVector* direction,
+                                 s32 lifeFrames);

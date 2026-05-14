@@ -37,6 +37,10 @@ struct UVPrimData {
     u16 vAccum;         // +0x22
     u16 uvCombined;     // +0x24
 
+    // PSX: Init__10UVPrimDataiiii (UVDATA.CPP:251)
+    // Sets masks/steps and marks this UVPrimData entry valid.
+    void Init(s32 newUMask, s32 newVMask, s32 newUStep, s32 newVStep);
+
     // PSX: Update__10UVPrimData (UVDATA.CPP:288) - per-frame accumulator tick
     void Tick() {
         MARKFUNCTION(0x80098604);
