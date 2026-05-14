@@ -21,6 +21,7 @@
 #include "gen/scoremgr.h"
 #include "gen/time.h"
 #include "gen/world.h"
+#include "gen/colsect.h"
 #include "fe/hud.h"
 #include "snd/drctrsnd.h"
 #include "snd/snddrct.h"
@@ -2452,8 +2453,8 @@ void Director::ProcessLadderFunc() {
                 scriptPtr += 1;
 
                 if (Player::s_player) {
-                    LVector target = { nisPointX, nisPointY, nisPointZ };
-                    if (axis == 1 && g_game && g_game->GetWorld() && g_game->GetWorld()->GetCurrentLevelIndex() == 3) {
+                    LVector target = Player::s_player->pos;
+                    if (axis == 1 && GetCurrentWorldLevelID() == 3) {
                         target.x += 1024;
                     }
                     else {
@@ -2481,13 +2482,15 @@ void Director::ProcessLadderFunc() {
 
             case DirectorLadderCmd::CameraLookAtHatch:
                 if (Player::s_player) {
-                    Camera* camera = GetGameCamera();
-                    if (camera) {
-                        LVector target = Player::s_player->homePos;
-                        target.y += 1536;
-                        target.z += 128;
-                        camera->LookAtTarget(&target);
-                    }
+                    LVector normal = { 0, 0, -65536 };
+                    LVector latchPos = Player::s_player->pos;
+                    latchPos.y += 1536;
+                    latchPos.z += 512;
+                    latchPos.y = g_collisionSectors[0].GetWorldFloorHeight(latchPos, 0);
+                    latchPos.z -= 384;
+
+                    Player::s_player->PrepareLedgeLatch(latchPos, normal);
+                    Player::s_player->SetActionState(AS_LEDGE_PULLUP, 0);
                 }
                 break;
 
@@ -2502,7 +2505,10 @@ void Director::ProcessLadderFunc() {
 
             case DirectorLadderCmd::ClearNis:
                 if (Player::s_player) {
-                    Player::s_player->FaceThingDesired(nullptr);
+                    Camera* camera = GetGameCamera();
+                    if (camera) {
+                        Player::s_player->FacePointDesired(camera->GetPosition());
+                    }
                     if (Player::s_player->behaviour) {
                         Player::s_player->behaviour->handlerThisOffset = 0;
                         Player::s_player->behaviour->handlerDispatch = 0;
@@ -2513,8 +2519,7 @@ void Director::ProcessLadderFunc() {
 
             default:
                 LogDirectorUnknownCommand("Ladder", opPtr, static_cast<s32>(op));
-                ASSERT(false && "Unknown Director ladder opcode");
-                break;
+                continue;
         }
     }
 
@@ -3118,6 +3123,9 @@ s32* Director::GetNISDoor1WithDialogScript() {
 }
 
 s32* Director::GetNISLadder1Script() {
+    if (s32* script = ScriptPtrFromWord(0x800D8058u)) {
+        return script;
+    }
     return NISladder1;
 }
 

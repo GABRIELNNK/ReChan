@@ -273,7 +273,7 @@ void Ladder::HandleHumanoidCollision(Humanoid* hum) {
         hum->groundStandHeight = hum->pos.y;
 
         if (teleportTargetCRC != 0) {
-            if (savedHomePos.y >= hatchYTrigger) {
+            if (savedHomePos.y <= hatchYTrigger) {
                 if (g_director) {
                     g_director->SetCodeSnip(Director::GetNISLadder1Script(), this);
                 }

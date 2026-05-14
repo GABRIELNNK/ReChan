@@ -2320,7 +2320,7 @@ s32 Behaviour::MoveToDestinationPoint(u32 threshold) {
 
     u32 dist = (u32)owner->DistanceFromPointXZ(destPoint);
 
-    if (dist >= threshold) {
+    if (dist > threshold) {
         // Far from destination - run
         owner->FacePointDesired(destPoint);
         owner->RequestAction(2);  // GA_RUN
@@ -2332,7 +2332,7 @@ s32 Behaviour::MoveToDestinationPoint(u32 threshold) {
         return 0;
     }
 
-    if (dist >= (threshold >> 1)) {
+    if (dist > (threshold >> 1)) {
         // Close to destination - walk (half speed)
         owner->FacePointDesired(destPoint);
         owner->RequestAction(6);  // GA_WALK
@@ -2352,8 +2352,6 @@ s32 Behaviour::MoveToDestinationPoint(u32 threshold) {
 void Behaviour::NisControl(Behaviour* b) {
     MARKFUNCTION(0x800753C4);
     if (b->MoveToDestinationPoint(0x4B) != 0) {
-        // Reached destination - restore normal player control
-        b->owner->FaceThingDesired(nullptr);
         b->handlerThisOffset = 0;
         b->handlerDispatch = -1;
         b->handler = PlayerUserControl;
