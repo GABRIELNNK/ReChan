@@ -53,6 +53,22 @@ static const u8 sPlayerMap[3][16] = {
     { 1, 2, 0, 3, 5, 6, 4, 7, 8, 9, 10, 11, 12, 13, 14, 15 },
 };
 
+static u32 RemapButtonsForControlMap(u32 logicalButtons, const u8* controlMap) {
+    if (!controlMap) {
+        return logicalButtons;
+    }
+
+    u32 physicalButtons = logicalButtons & ~0xFFFFu;
+    for (u32 i = 0; i < 16; ++i) {
+        const u32 logicalBit = (u32)(controlMap[i] & 0x0F);
+        if ((logicalButtons & (1u << logicalBit)) != 0) {
+            physicalButtons |= (1u << i);
+        }
+    }
+
+    return physicalButtons;
+}
+
 
 // Button
 
@@ -207,6 +223,12 @@ void InputManager::ServiceHostPads(const ActionInput* actionInput, bool commitNo
     if (actionInput) {
         const bool menuActionsEnabled = (controls[0].modeMap == sMenuControlMode);
         buttons = actionInput->GetPadButtons(menuActionsEnabled);
+
+        // Keep desktop action bindings stable across player-config variants.
+        // PSX remap semantics still apply to gamepad input paths.
+        if (!analogPad) {
+            buttons = RemapButtonsForControlMap(buttons, controls[0].controlMap);
+        }
 
         if (controls[0].modeMap == sTitleControlMode) {
             buttons &= ~PsxPad::Start;

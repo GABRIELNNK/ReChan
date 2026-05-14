@@ -1622,14 +1622,18 @@ void feCustomMenuMgr::ApplyValue(const Entry& e, s32 v) {
     }
     else if (e.binding == EntryBinding_PlayerConfig) {
         if (g_inputManager) {
+            const s16* currentMode[2] = {
+                g_inputManager->controls[0].modeMap,
+                g_inputManager->controls[1].modeMap,
+            };
+
             g_inputManager->SetPlayerConfig((u8)v);
-            const s16* gameMode = GameControlModeArray();
-            const s16* menuMode = MenuControlModeArray();
             const u8* playerMap = g_inputManager->PlayerMapArray();
             for (s16 padIndex = 0; padIndex < 2; ++padIndex) {
-                const s16* modeMap = (m_active && m_currPage != MenuPage_None) ? menuMode : gameMode;
-                g_inputManager->SetControlModeArray(padIndex, modeMap);
                 g_inputManager->SetControlMapArray(padIndex, playerMap);
+                if (currentMode[padIndex]) {
+                    g_inputManager->SetControlModeArray(padIndex, currentMode[padIndex]);
+                }
             }
         }
     }
@@ -2808,13 +2812,10 @@ void feCustomMenuMgr::Render() {
         const s32 dragonCountY = dragonIconY + 32;
         const u32 dragonColor = 0xFF808080u;
 
-        // Gold_dr font: character '1' renders the gold dragon glyph
-        xcFont* dragonFont = FindFont("Gold_dr", nullptr);
-        if (dragonFont) {
-            dragonFont->SetScale(SCREEN_SCALE_X(1.25f), SCREEN_SCALE_Y(1.25f));
-            dragonFont->DrawText("1", SCALE_AND_CENTER_X((f32)dragonCenterX) + 1.0f, SCREEN_SCALE_Y((f32)(dragonIconY + DEF_TEXT_Y_OFF)) + 1.0f, (u32)(DEF_TEXT_SHADOW_A << 24), XC_JUST_CENTER);
-            dragonFont->DrawText("1", SCALE_AND_CENTER_X((f32)dragonCenterX), SCREEN_SCALE_Y((f32)(dragonIconY + DEF_TEXT_Y_OFF)), dragonColor, XC_JUST_CENTER);
-        }
+        ScreenDraw::DrawQuad(m_goldDragonTex,
+                             SCALE_AND_CENTER_X((f32)dragonCenterX - 24.0f), SCREEN_SCALE_Y(dragonIconY + DEF_TEXT_Y_OFF),
+                             SCREEN_SCALE_Y(32), SCREEN_SCALE_Y(32),
+                             0.0f, 0.0f, 1.0f, 1.0f, 128, 128, 128, 255);
 
         s32 totalGold = g_scoreManager ? g_scoreManager->GetTotalGoldDragon() : 0;
         if (totalGold > 99) totalGold = 99;
