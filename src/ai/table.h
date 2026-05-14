@@ -62,7 +62,7 @@ public:
 
     virtual void HandleObjectInterAction(Humanoid* hum);
     virtual void Destroy();
-    virtual void HandleEnvironmentCollision(const LVector& normal);
+    virtual void HandleEnvironmentCollision(const LVector& prevPos);
     virtual void MovePassengers();
 
     void AddForce(s32 damage, const LVector* matrix);

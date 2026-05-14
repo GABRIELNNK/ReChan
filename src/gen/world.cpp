@@ -2202,6 +2202,13 @@ static void LoadGeoPair(
                         struct ETreePartEntry {
                             u32 jointHash;
                             u32 modelHash;
+                            u32 jointFlags;
+                            s16 rotX;
+                            s16 rotY;
+                            s16 rotZ;
+                            s32 transX;
+                            s32 transY;
+                            s32 transZ;
                         };
                         std::vector<ETreePartEntry> geoPartEntries;
 
@@ -2227,6 +2234,25 @@ static void LoadGeoPair(
                                     ETreePartEntry entry = {};
                                     entry.jointHash = jointNameHash;
                                     entry.modelHash = modelNameHash;
+
+                                    // ETLOAD AddJoint reads these fields in order after the two names.
+                                    if (subBodyCursor + 22 <= subBodyLen) {
+                                        entry.jointFlags = p3dReadU32LE(subBody + subBodyCursor);
+                                        subBodyCursor += 4;
+                                        entry.rotX = p3dReadS16LE(subBody + subBodyCursor);
+                                        subBodyCursor += 2;
+                                        entry.rotY = p3dReadS16LE(subBody + subBodyCursor);
+                                        subBodyCursor += 2;
+                                        entry.rotZ = p3dReadS16LE(subBody + subBodyCursor);
+                                        subBodyCursor += 2;
+                                        entry.transX = p3dReadS32LE(subBody + subBodyCursor);
+                                        subBodyCursor += 4;
+                                        entry.transY = p3dReadS32LE(subBody + subBodyCursor);
+                                        subBodyCursor += 4;
+                                        entry.transZ = p3dReadS32LE(subBody + subBodyCursor);
+                                        subBodyCursor += 4;
+                                    }
+
                                     geoPartEntries.push_back(entry);
                                 }
                             }
@@ -2247,6 +2273,23 @@ static void LoadGeoPair(
                             et->geoPartJointHashes = new u32[partCount]();
                             et->geoParts = new OriginalGeo*[partCount]();
 
+                            et->skeleton = new STreeData();
+                            if (et->skeleton) {
+                                et->skeleton->numJoints = partCount;
+                                et->skeleton->numMapEntries = partCount;
+                                et->skeleton->joints = static_cast<STreeJoint*>(std::calloc(partCount, sizeof(STreeJoint)));
+                                et->skeleton->jointOrderMap = static_cast<u32*>(std::malloc(sizeof(u32) * partCount));
+                                if (!et->skeleton->joints || !et->skeleton->jointOrderMap) {
+                                    delete et->skeleton;
+                                    et->skeleton = nullptr;
+                                }
+                            }
+
+                            static constexpr u32 ETREE_FLAG_PUSH = 0x00010000;
+                            static constexpr u32 ETREE_FLAG_POP = 0x00020000;
+                            static constexpr u32 ETREE_FLAG_DRAW = 0x00040000;
+                            static constexpr u32 ETREE_FLAG_TRANSFORM_MASK = 0x00300000;
+
                             u16 resolvedParts = 0;
                             for (u16 partIndex = 0; partIndex < partCount; partIndex++) {
                                 const ETreePartEntry& entry = geoPartEntries[partIndex];
@@ -2260,6 +2303,40 @@ static void LoadGeoPair(
                                     if (et->geoParts[partIndex] && et->geoParts[partIndex]->meshBuffer) {
                                         resolvedParts++;
                                     }
+                                }
+
+                                if (et->skeleton && et->skeleton->joints && et->skeleton->jointOrderMap) {
+                                    STreeJoint& joint = et->skeleton->joints[partIndex];
+                                    et->skeleton->jointOrderMap[partIndex] = partIndex;
+                                    joint.nameUID = entry.jointHash;
+                                    joint.flags = 0;
+                                    if (entry.jointFlags & ETREE_FLAG_PUSH) {
+                                        joint.flags |= STF_PUSH_MATRIX;
+                                    }
+                                    if (entry.jointFlags & ETREE_FLAG_POP) {
+                                        joint.flags |= STF_POP_MATRIX;
+                                    }
+                                    if ((entry.jointFlags & ETREE_FLAG_TRANSFORM_MASK) == ETREE_FLAG_TRANSFORM_MASK) {
+                                        joint.flags |= STF_TRANSFORM;
+                                    }
+                                    if (entry.jointFlags & ETREE_FLAG_DRAW) {
+                                        joint.flags |= STF_HAS_MESH;
+                                    }
+
+                                    joint.rotationX = entry.rotX;
+                                    joint.rotationY = entry.rotY;
+                                    joint.rotationZ = entry.rotZ;
+                                    joint.translationX = entry.transX;
+                                    joint.translationY = entry.transY;
+                                    joint.translationZ = entry.transZ;
+
+                                    joint.bindRotationX = entry.rotX;
+                                    joint.bindRotationY = entry.rotY;
+                                    joint.bindRotationZ = entry.rotZ;
+                                    joint.bindTranslationX = entry.transX;
+                                    joint.bindTranslationY = entry.transY;
+                                    joint.bindTranslationZ = entry.transZ;
+                                    joint.captureBufferIdx = -1;
                                 }
 
                                 LOG("[World] ETree '%s' part[%u] jointHash=0x%08X modelHash=0x%08X resolved=%d",

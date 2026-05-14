@@ -4,6 +4,7 @@
 #include "snd/trnssnd.h"
 #include "snd/prstsnd.h"
 #include "snd/hmndsnd.h"
+#include "snd/kndnsnd.h"
 #include "snd/dstrsnd.h"
 #include "snd/platsnd.h"
 #include "snd/wpnsnd.h"
@@ -45,6 +46,79 @@ struct DestructibleSoundLoadData {
     u16 smashSfx;
     s32 material;
 };
+
+CKnockDownSound::CKnockDownSound() {
+    MARKFUNCTION(0x800AD4DC);
+    persistentFallSound = nullptr;
+    multipleKickTimer = 0;
+    multipleImpactTimer = 0;
+}
+
+CKnockDownSound::~CKnockDownSound() {
+    MARKFUNCTION(0x800AD51C);
+    EndFall();
+}
+
+s32 CKnockDownSound::Initialize(const LVector* pos) {
+    MARKFUNCTION(0x800AD3A8);
+    return CSound::Initialize((void*)pos);
+}
+
+s32 CKnockDownSound::BeginFall() {
+    MARKFUNCTION(0x800AD3C8);
+    return BeginPersistent(pub.fallPersistentId, &persistentFallSound);
+}
+
+s32 CKnockDownSound::EndFall() {
+    MARKFUNCTION(0x800AD3EC);
+    return EndPersistent(&persistentFallSound);
+}
+
+s32 CKnockDownSound::Kick() {
+    MARKFUNCTION(0x800AD40C);
+
+    if (multipleKickTimer == 0) {
+        multipleKickTimer = 100;
+        PlayTransient(pub.kickSound, 5, 8);
+    }
+
+    return 0;
+}
+
+s32 CKnockDownSound::Impact() {
+    MARKFUNCTION(0x800AD44C);
+
+    if (multipleImpactTimer == 0) {
+        multipleImpactTimer = 100;
+        PlayTransient(pub.impactSound, 5, 8);
+    }
+
+    return 0;
+}
+
+s32 CKnockDownSound::HitHumanoid() {
+    MARKFUNCTION(0x800AD48C);
+    return Kick();
+}
+
+s32 CKnockDownSound::Think() {
+    MARKFUNCTION(0x800AD4AC);
+
+    if (multipleKickTimer) {
+        multipleKickTimer--;
+    }
+    if (multipleImpactTimer) {
+        multipleImpactTimer--;
+    }
+
+    return 0;
+}
+
+s32 CKnockDownSound::Load(const void* data) {
+    MARKFUNCTION(0x800AD578);
+    std::memcpy(&pub, data, sizeof(pub));
+    return 0;
+}
 
 // PSX: IsBasicSoundLoaded__21CSoundFactoryDatabaseUl (SNDFDB.CPP:1011, 0x800AC240)
 // LocInfo[loc][0] values at 0x800D6588 (GAME_REL.psx.lst):
@@ -813,6 +887,17 @@ s32 CSoundFactory::CreateObject(u32 typeId, CSound** outObj, u32 soundId) {
             CDestructibleSound* obj = new CDestructibleSound();
             DestructibleSoundLoadData data = {};
             FillDestructibleSoundLoadData(soundId, data);
+            obj->Load(&data);
+            *outObj = obj;
+            break;
+        }
+        case 10130:
+        {
+            CKnockDownSound* obj = new CKnockDownSound();
+            CKnockDownPublishedData data = {};
+            data.kickSound = 0x00B3;
+            data.impactSound = 0x00B2;
+            data.fallPersistentId = 0x0A;
             obj->Load(&data);
             *outObj = obj;
             break;

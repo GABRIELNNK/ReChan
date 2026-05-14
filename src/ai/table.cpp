@@ -4,8 +4,14 @@
 #include "gen/common.h"
 #include "gen/database.h"
 #include "gen/levelmgr.h"
+#include "gen/colsect.h"
 #include "gen/colvol.h"
+#include "p3d/p3dmath.h"
 #include "p3d/hash.h"
+
+static s32 Fixed16HighToS32(s32 value) {
+    return (s32)(s16)((u32)value >> 16);
+}
 
 DynamicObstacle::DynamicObstacle(const LVector* pos, u16 type)
     : Obstacle(pos, type) {
@@ -70,6 +76,60 @@ void DynamicObstacle::Think() {
 
 void DynamicObstacle::Move() {
     MARKFUNCTION(0x80014198);
+
+    LVector clearedForce = {};
+    const LVector prevPos = pos;
+    const LVector prevPosForCollision = pos;
+
+    // PSX: orientation integrates angular velocity each frame.
+    orientation.x += angVelX;
+    orientation.y += angVelY;
+    orientation.z += angVelZ;
+
+    // PSX: applies per-frame vertical force bias via stateCounter * field168.
+    forceY += stateCounter * field168;
+
+    s32 forceDeltaX = 0;
+    s32 forceDeltaY = 0;
+    s32 forceDeltaZ = 0;
+
+    s32 absForce = forceX;
+    if (absForce < 0) {
+        absForce = -absForce;
+    }
+    if (absForce >= 6) {
+        forceDeltaX = Fixed16HighToS32(rmDiv16i(forceX, stateCounter));
+    }
+
+    absForce = forceY;
+    if (absForce < 0) {
+        absForce = -absForce;
+    }
+    if (absForce >= 6) {
+        forceDeltaY = Fixed16HighToS32(rmDiv16i(forceY, stateCounter));
+    }
+
+    absForce = forceZ;
+    if (absForce < 0) {
+        absForce = -absForce;
+    }
+    if (absForce >= 6) {
+        forceDeltaZ = Fixed16HighToS32(rmDiv16i(forceZ, stateCounter));
+    }
+
+    linVelX += forceDeltaX;
+    linVelY += forceDeltaY;
+    linVelZ += forceDeltaZ;
+
+    pos.x = prevPos.x + linVelX;
+    pos.y = prevPos.y + linVelY;
+    pos.z = prevPos.z + linVelZ;
+
+    HandleEnvironmentCollision(prevPosForCollision);
+
+    forceX = clearedForce.x;
+    forceY = clearedForce.y;
+    forceZ = clearedForce.z;
 }
 
 void DynamicObstacle::Draw() {
@@ -118,8 +178,117 @@ void DynamicObstacle::HandleAttack(Humanoid* attacker, s32 damageType, s32 damag
     MARKFUNCTION(0x80014CA8);
 }
 
-void DynamicObstacle::HandleEnvironmentCollision(const LVector& normal) {
+void DynamicObstacle::HandleEnvironmentCollision(const LVector& prevPos) {
     MARKFUNCTION(0x80014CB0);
+
+    const s32 sinY = rmSin16((s16)orientation.y);
+    const s32 cosY = rmSin16((s16)(orientation.y + 0x4000));
+
+    const s32 centreX = Div2TowardZero((s32)collBox.minX + (s32)collBox.maxX);
+    const s32 centreZ = Div2TowardZero((s32)collBox.minZ + (s32)collBox.maxZ);
+
+    const s32 centreOffsetX =
+        (s32)(((s64)cosY * (s64)centreX) >> 16) +
+        (s32)(((s64)sinY * (s64)centreZ) >> 16);
+    const s32 centreOffsetZ =
+        (s32)(((s64)(-sinY) * (s64)centreX) >> 16) +
+        (s32)(((s64)cosY * (s64)centreZ) >> 16);
+
+    LVector oldFloorProbePos = prevPos;
+    oldFloorProbePos.x += centreOffsetX;
+    oldFloorProbePos.z += centreOffsetZ;
+    oldFloorProbePos.y += (s32)collBox.minY;
+
+    LVector newFloorProbePos = pos;
+    newFloorProbePos.x += centreOffsetX;
+    newFloorProbePos.z += centreOffsetZ;
+    newFloorProbePos.y += (s32)collBox.minY;
+
+    const s32 halfX = Div2TowardZero((s32)collBox.maxX - (s32)collBox.minX);
+    const s32 halfZ = Div2TowardZero((s32)collBox.maxZ - (s32)collBox.minZ);
+
+    const s32 radiusAlongX =
+        (s32)(((s64)cosY * (s64)halfX) >> 16) +
+        (s32)(((s64)sinY * (s64)halfZ) >> 16);
+    const s32 radiusAlongZ =
+        (s32)(((s64)(-sinY) * (s64)halfX) >> 16) +
+        (s32)(((s64)cosY * (s64)halfZ) >> 16);
+
+    s32 moveDeltaX = newFloorProbePos.x - oldFloorProbePos.x;
+    s32 moveDeltaZ = newFloorProbePos.z - oldFloorProbePos.z;
+    if (moveDeltaX < 0) {
+        moveDeltaX = -moveDeltaX;
+    }
+    if (moveDeltaZ < 0) {
+        moveDeltaZ = -moveDeltaZ;
+    }
+
+    s32 collisionRadius = (moveDeltaZ < moveDeltaX) ? radiusAlongX : radiusAlongZ;
+    if (collisionRadius < 0) {
+        collisionRadius = -collisionRadius;
+    }
+    collisionRadius -= 2;
+
+    s32 collisionRatio = 0;
+    LVector wallNormal = {};
+    LVector wallHitPos = {};
+    s32 wallHorizontal = 0;
+    const bool hitWall = CollisionSector::CheckWorldWallCollision(
+        oldFloorProbePos,
+        newFloorProbePos,
+        collisionRadius,
+        (s32)collBox.minY,
+        (s32)collBox.maxY,
+        collisionRatio,
+        wallNormal,
+        wallHitPos,
+        wallHorizontal) != 0;
+
+    LVector resolvedFloorProbePos = wallHitPos;
+    if (!hitWall) {
+        resolvedFloorProbePos.x = newFloorProbePos.x;
+        resolvedFloorProbePos.z = newFloorProbePos.z;
+    }
+
+    if (hitWall && kickFlag) {
+        Destroy();
+    }
+
+    const s32 oldFloorHeight = g_collisionSectors[0].GetWorldFloorHeight(oldFloorProbePos, collisionRadius);
+    const s32 newFloorHeight = g_collisionSectors[0].GetWorldFloorHeight(newFloorProbePos, collisionRadius);
+
+    static constexpr s32 INVALID_FLOOR_HEIGHT = (s32)0x80000001;
+    const bool steppedOffFloor =
+        oldFloorHeight != INVALID_FLOOR_HEIGHT && newFloorHeight < oldFloorHeight;
+
+    if (steppedOffFloor) {
+        resolvedFloorProbePos.y = oldFloorHeight;
+
+        linVelX = Div2TowardZero(linVelX);
+        linVelY /= -2;
+        linVelZ = Div2TowardZero(linVelZ);
+
+        angVelX = 0;
+        angVelY = 0;
+        angVelZ = 0;
+
+        orientation.x = 0;
+        orientation.y = 0;
+        orientation.z = 0;
+
+        if (linVelY >= 21 && kickFlag) {
+            Destroy();
+        }
+    }
+    else {
+        resolvedFloorProbePos.y = newFloorProbePos.y;
+    }
+
+    resolvedFloorProbePos.x -= centreOffsetX;
+    resolvedFloorProbePos.z -= centreOffsetZ;
+    resolvedFloorProbePos.y -= (s32)collBox.minY;
+
+    pos = resolvedFloorProbePos;
 }
 
 bool DynamicObstacle::CareAboutAttack() const {

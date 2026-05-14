@@ -1,6 +1,9 @@
 #pragma once
 #include "ai/obstacle.h"
 
+class AnimStructure;
+class CKnockDownSound;
+
 class KickNRoll : public Obstacle {
 public:
     // PSX +116 (s32): unknown
@@ -101,45 +104,34 @@ public:
 
 class Stack : public Obstacle {
 public:
-    // PSX +116..+123: unknown (2 dwords)
-    s32 field116 = 0;
-    s32 field120 = 0;
-    // PSX +124 (s32): unknown (init 0 in ctor, a1[31])
-    s32 field124 = 0;
-    // PSX +128 (s32): unknown (init 0 in ctor, a1[32])
-    s32 field128 = 0;
-    // PSX +132 (s32): unknown (init 0 in ctor, a1[33])
-    s32 field132 = 0;
-    // PSX +136 (s32): unknown (init 0 in ctor, a1[34])
-    s32 field136 = 0;
-    // PSX +140 (s32): unknown (init 0 in ctor, a1[35])
-    s32 field140 = 0;
-    // PSX +144..+155: unknown (3 dwords)
-    s32 field144 = 0;
-    s32 field148 = 0;
-    s32 field152 = 0;
-    // PSX +156 (s32): unknown (init 0 in ctor, a1[39])
-    s32 field156 = 0;
-    // PSX +160..+235: unknown (19 dwords = 76 bytes)
-    s32 field160 = 0;
-    s32 field164 = 0;
-    s32 field168 = 0;
-    s32 field172 = 0;
-    s32 field176 = 0;
-    s32 field180 = 0;
-    s32 field184 = 0;
-    s32 field188 = 0;
-    s32 field192 = 0;
-    s32 field196 = 0;
-    s32 field200 = 0;
-    s32 field204 = 0;
-    s32 field208 = 0;
-    s32 field212 = 0;
-    s32 field216 = 0;
-    s32 field220 = 0;
-    s32 field224 = 0;
-    s32 field228 = 0;
-    s32 field232 = 0;
+    // PSX +116 (s32): damage sent to humanoid on hit.
+    s32 damage = 0;
+    // PSX +120 (s32): obstacle animation table index.
+    s32 modelIndex = 0;
+    // PSX +124 (u32): effect hash used when stack finishes.
+    u32 effectHash = 0;
+    // PSX +128 (s32): dialog runtime handle.
+    s32 dialogHandle = 0;
+    // PSX +132 (s32): dialog id copied to player on success.
+    s32 dialogID = 0;
+    // PSX +136 (s32): state.
+    s32 state = 0;
+    // PSX +140 (ptr): active anim structure.
+    AnimStructure* anim = nullptr;
+    // PSX +144 (ptr): cached obstacle anim node.
+    MiscAnimNode* animBasic = nullptr;
+    // PSX +148 (s32): remaining wobble count.
+    s32 timesToWobble = 0;
+    // PSX +152 (s32): current frame counter.
+    s32 currentFrame = 0;
+    // PSX +156 (ptr): knockdown sound object.
+    CKnockDownSound* knockDownSound = nullptr;
+    // PSX +160 (char[50]): generated pushable model name.
+    char pushableName[50] = {};
+    // Align joint position storage to +0xD4 like PSX.
+    u16 pushableNamePad = 0;
+    // Joint positions captured by stack joint callback.
+    LVector jointPositions[3] = {};
 
     Stack(const LVector* pos, u16 type);
     ~Stack() override;
@@ -154,6 +146,7 @@ public:
     void HandlePickupCollision(Thing* pickup) override;
     void HandleHumanoidCollision(Humanoid* hum) override;
     void HandleAttack(Humanoid* attacker, s32 damageType, s32 damage) override;
+    bool CareAboutAttack() const override;
 
     virtual void Wobble();
     virtual void Fall();
@@ -162,6 +155,5 @@ public:
     virtual void TriggerStackAnimation();
     virtual void SetupCallbacks();
     virtual void SetupJointPosition(s32 index, LVector pos);
-
-    static s32 LoadDialog(u32 a, u32 b, u32 c);
+    s32 LoadDialog(u32 dialogId, u32 priority);
 };

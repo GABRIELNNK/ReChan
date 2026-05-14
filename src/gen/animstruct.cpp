@@ -35,6 +35,43 @@ static STreeData* ResolveTransformAnimPuppetTree(const TransformAnim* animation)
         return nullptr;
     }
 
+    auto ResolveSkeletonFromOriginal = [](OriginalBasic* original) -> STreeData* {
+        if (!original) {
+            return nullptr;
+        }
+
+        if (original->GetType() == 1) {
+            OriginalSTree* stree = static_cast<OriginalSTree*>(original);
+            return stree->skeleton;
+        }
+
+        if (original->GetType() != 2) {
+            return nullptr;
+        }
+
+        // ETree carries its own joint list in the PSX path.
+        OriginalETree* etree = static_cast<OriginalETree*>(original);
+        if (etree->skeleton) {
+            return etree->skeleton;
+        }
+
+        // Legacy fallback for older assets that only expose part joint hashes.
+        for (u32 i = 0; i < etree->geoPartCount; i++) {
+            u32 jointHash = etree->geoPartJointHashes ? etree->geoPartJointHashes[i] : 0;
+            if (!jointHash) {
+                continue;
+            }
+
+            OriginalBasic* streeBasic = g_levelManager->FindSTree((s32)jointHash);
+            if (streeBasic && streeBasic->GetType() == 1) {
+                OriginalSTree* stree = static_cast<OriginalSTree*>(streeBasic);
+                return stree->skeleton;
+            }
+        }
+
+        return nullptr;
+    };
+
     OriginalBasic* original = nullptr;
     const s32 targetHash = static_cast<s32>(animation->targetNameUID);
     switch (animation->targetType) {
@@ -54,12 +91,7 @@ static STreeData* ResolveTransformAnimPuppetTree(const TransformAnim* animation)
             break;
     }
 
-    if (!original || original->GetType() != 1) {
-        return nullptr;
-    }
-
-    OriginalSTree* stree = static_cast<OriginalSTree*>(original);
-    return stree->skeleton;
+    return ResolveSkeletonFromOriginal(original);
 }
 
 // PSX: _13AnimStructurelP10tAnimationlP5ModelP13DrawableBasic (0x80070740)
@@ -103,14 +135,11 @@ AnimStructure::AnimStructure(s32 m, void* anim, s32 lt, Model* mdl, void* drawab
         }
     }
     else if ((mode == 1 || mode == 2) && animation) {
-        // PSX mode 1/2 path calls tAnimation::MakePuppet.
-        // For tTransformAnim this resolves target tree by targetType/targetNameUID.
+        // PSX mode 1/2 path calls tAnimation::MakePuppet and always yields a flip object.
+        // For tTransformAnim, target resolution may fail, but SetFrame still operates on a valid puppet.
         STreeData* skeleton = ResolveTransformAnimPuppetTree(animation);
-        if (skeleton) {
-            flip = new TransformFlip();
-            flip->Attach(skeleton, animation);
-            flip->Reset();
-        }
+        flip = new TransformFlip();
+        flip->Attach(skeleton, animation);
     }
 
     ResetCountsToAnim();

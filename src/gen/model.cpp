@@ -185,6 +185,11 @@ OriginalETree::~OriginalETree() {
         meshBuffer = nullptr;
     }
 
+    if (skeleton) {
+        delete skeleton;
+        skeleton = nullptr;
+    }
+
     delete[] geoParts;
     geoParts = nullptr;
 
@@ -408,14 +413,28 @@ void DrawableETree::Display(u32 /*flags*/) {
         const Mat4 baseWorld = p3d::context->GetWorldMatrix();
 
         STreeData* skeleton = nullptr;
+        bool invokeCallbacks = false;
         std::vector<Mat4> partJointMatrices;
         if (ownerModel && ownerModel->animStructure && original->geoPartJointHashes) {
             AnimStructure* anim = static_cast<AnimStructure*>(ownerModel->animStructure);
             TransformFlip* flip = anim ? anim->GetFlip() : nullptr;
             if (flip && flip->tree && flip->tree->joints && flip->tree->numJoints > 0) {
                 skeleton = flip->tree;
-                partJointMatrices.resize(skeleton->numJoints);
+                invokeCallbacks = true;
+            }
+        }
+
+        if (!skeleton && original->skeleton && original->skeleton->joints && original->skeleton->numJoints > 0) {
+            skeleton = original->skeleton;
+        }
+
+        if (skeleton) {
+            partJointMatrices.resize(skeleton->numJoints);
+            if (invokeCallbacks) {
                 skeleton->ComputeWorldMatricesWithCallbacks(partJointMatrices.data());
+            }
+            else {
+                skeleton->ComputeWorldMatrices(partJointMatrices.data());
             }
         }
 
@@ -1091,7 +1110,16 @@ void EModel::ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 /*p
         delete static_cast<AnimStructure*>(animStructure);
         animStructure = nullptr;
     }
-    animStructure = new AnimStructure(2, anim, loopType, this, drawable);
+
+    ApplyAnimToModel(anim, loopType);
+}
+
+AnimStructure* EModel::ApplyAnimToModel(TransformAnim* animation, s32 loopType) {
+    MARKFUNCTION(0x8006FCAC);
+
+    AnimStructure* animStruct = new AnimStructure(2, animation, loopType, this, drawable);
+    animStructure = animStruct;
+    return animStruct;
 }
 
 void EModel::Animate() {

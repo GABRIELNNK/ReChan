@@ -185,6 +185,7 @@ struct OriginalGeo : public OriginalBasic {
 // existing Geo path until dedicated ETree data decoding is implemented.
 struct OriginalETree : public OriginalBasic {
     pddiPrimBuffer* meshBuffer = nullptr;
+    STreeData* skeleton = nullptr;
     OriginalGeo** geoParts = nullptr;
     u32* geoPartJointHashes = nullptr;
     u32* geoPartHashes = nullptr;
@@ -408,6 +409,7 @@ public:
     void Show(u32 flags) override;
     void Animate() override;
     void ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 p4, s32 p5) override;
+    AnimStructure* ApplyAnimToModel(TransformAnim* animation, s32 loopType);
     void SetOriginalETree(OriginalETree* original, TransformAnim* animation = nullptr);
 };
 

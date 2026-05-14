@@ -23,6 +23,7 @@
 #include "gen/world.h"
 #include "p3d/byteread.h"
 #include "p3d/p3dmath.h"
+#include "p3d/skeleton.h"
 #include "snd/snddrct.h"
 #include "gen/time.h"
 
@@ -207,24 +208,30 @@ bool FillVectorArray(LVector* out, u32 count, const DBLine& line) {
 
 // PSX: FillCollisionBox__8ObstacleR15tagCollisionBoxRC6DBRootUl (OBSTACLE.CPP:530, 0x8007AF6C)
 bool ObstacleFillCollisionBox(tagCollisionBox& box, const DBRoot* root, u32 attribNum) {
+    MARKFUNCTION(0x8007AF6C);
+
     const DBAttrib* attrib = root->FindAttrib(attribNum);
     if (!attrib) {
         return false;
     }
-    const char* str = attrib->strValue;
-    if (!str) {
+
+    const char* attribString = attrib->GetAttribString();
+    if (!attribString || attribString[0] == '\0') {
         return false;
     }
-    s32 hash = (s32)p3dHash(str);
+
+    const s32 hash = (s32)p3dHash(attribString);
+
     if (!g_levelManager) {
         return false;
     }
+
     OriginalBasic* geo = g_levelManager->FindGeo(hash);
     if (!geo) {
         return false;
     }
-    OriginalGeo* ogeo = static_cast<OriginalGeo*>(geo);
-    FillCollisionBox(box, *ogeo);
+
+    FillCollisionBox(box, *static_cast<OriginalGeo*>(geo));
     return true;
 }
 
