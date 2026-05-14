@@ -36,7 +36,7 @@ static constexpr s32 CB_GRAB_FWD = (1 << GA_GRAB_FORWARD);  // bit 15: grab forw
 // to runSpeed. AddForce accumulates into DynamicThing::force (80% damped per frame).
 static constexpr s32 PLAYER_RUN_FORCE = 3000;  // per-frame AddForce magnitude
 static constexpr s32 PLAYER_JUMP_FORCE = 17000;  // upward contactForce on jump (gp+460, PSX 0x4268)
-static constexpr s32 PLAYER_RUNNING_JUMP_BONUS = 1500; // running jump Y offset (gp+464, PSX 0xFFFFFA24)
+static constexpr s32 PLAYER_RUNNING_JUMP_BONUS = -1500; // running jump Y offset (gp+464, PSX 0xFFFFFA24)
 static constexpr s32 PLAYER_RUNNING_JUMP_BURST = 2500; // initial horizontal burst (runJumpHold[0], PSX 0x9C4)
 static constexpr s16 TABLE_ROLL_HANGTIME_START = 0;
 static constexpr s16 TABLE_ROLL_HANGTIME_END = 100;
