@@ -3,11 +3,13 @@
 #include "ai/obstacle.h"
 
 class AnimStructure;
+struct TransformAnim;
 
 class Collectible : public Obstacle {
 public:
     AnimStructure* mAnim = nullptr;
     MiscAnimNode* mAnimB = nullptr;
+    TransformAnim* mBoundTransformAnim = nullptr;
     s32 mCurrentFrame = 0;
     s32 mModelIndex = -1;
     s32 mFloatAngle = 0;

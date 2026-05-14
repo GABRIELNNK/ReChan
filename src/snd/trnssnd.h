@@ -8,7 +8,7 @@
 //   byte 5: volume variation (0-100, random reduction)
 //   byte 6: pitch (0-200, 100=normal)
 //   byte 7: pitch variation (random +/- range)
-extern u32 g_transData[512];
+extern u32 g_transData[520];
 
 // PSX: CGenericTransientSound (28 bytes) - inherits CSound (16 bytes)
 // PSX layout:

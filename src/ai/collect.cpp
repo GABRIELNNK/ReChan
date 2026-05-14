@@ -13,6 +13,305 @@
 #include "snd/snddrct.h"
 
 static constexpr s32 COLLECT_FLOAT_STEP = 1092;
+static constexpr s32 COLLECT_MISC_ANIM_MAX_DEPTH = 16;
+
+static s32 Collectible_GetMiscAnimFrameCount(MiscAnimNode* node) {
+    if (!node) {
+        return 0;
+    }
+
+    if (node->anim) {
+        return node->anim->numFrames;
+    }
+
+    if (node->sequenceAnim) {
+        return node->sequenceAnim->numFrames;
+    }
+
+    if (node->compositeAnim) {
+        return static_cast<s32>(node->compositeAnim->field12);
+    }
+
+    if (node->frameList) {
+        return node->frameList->numFrames;
+    }
+
+    return 0;
+}
+
+static MiscAnimNode* Collectible_ResolveCompositePartNode(CompositeAnimPartData& part) {
+    if (part.animNameUID == 0) {
+        return nullptr;
+    }
+
+    if (g_animMgr) {
+        MiscAnimNode* liveNode = g_animMgr->GetMiscAnim(part.animNameUID);
+        if (liveNode && liveNode != part.animNode) {
+            part.animNode = liveNode;
+        }
+    }
+
+    return part.animNode;
+}
+
+static bool Collectible_ResolveSequenceAnimFrame(SequenceAnim* sequence,
+                                                 s32 frame,
+                                                 MiscAnimNode** outNode,
+                                                 TransformAnim** outAnim,
+                                                 s32* outFrame) {
+    if (!sequence || !sequence->parts || sequence->numParts == 0 || !outNode || !outAnim || !outFrame) {
+        return false;
+    }
+
+    s32 sequenceFrame = frame;
+    for (s32 depth = 0; depth < COLLECT_MISC_ANIM_MAX_DEPTH; depth++) {
+        const u32 partIndex = (static_cast<u32>(sequenceFrame) >> 8) & 0xFFu;
+        const s32 partFrame = sequenceFrame & 0xFF;
+        if (partIndex >= sequence->numParts) {
+            return false;
+        }
+
+        SequenceAnimPart& part = sequence->parts[partIndex];
+        if (part.animHash != 0 && g_animMgr) {
+            MiscAnimNode* liveNode = g_animMgr->GetMiscAnim(part.animHash);
+            if (liveNode && liveNode != part.node) {
+                part.node = liveNode;
+                part.anim = liveNode->anim;
+            }
+        }
+
+        MiscAnimNode* partNode = part.node;
+        if (partNode && partNode->sequenceAnim) {
+            sequence = partNode->sequenceAnim;
+            if (!sequence || !sequence->parts || sequence->numParts == 0) {
+                return false;
+            }
+            sequenceFrame = partFrame;
+            continue;
+        }
+
+        if (partNode) {
+            *outNode = partNode;
+            *outAnim = nullptr;
+            *outFrame = partFrame;
+            return true;
+        }
+
+        if (part.anim) {
+            *outNode = nullptr;
+            *outAnim = part.anim;
+            *outFrame = partFrame;
+            return true;
+        }
+
+        return false;
+    }
+
+    return false;
+}
+
+static bool Collectible_ResolveInitialTransformRecursive(MiscAnimNode* node,
+                                                         s32 frame,
+                                                         TransformAnim** outAnim,
+                                                         s32* outFrame,
+                                                         s32 depth) {
+    if (!node || !outAnim || !outFrame || depth >= COLLECT_MISC_ANIM_MAX_DEPTH) {
+        return false;
+    }
+
+    if (node->anim) {
+        *outAnim = node->anim;
+        *outFrame = frame;
+        return true;
+    }
+
+    if (node->sequenceAnim) {
+        MiscAnimNode* partNode = nullptr;
+        TransformAnim* partAnim = nullptr;
+        s32 partFrame = 0;
+        if (!Collectible_ResolveSequenceAnimFrame(node->sequenceAnim, frame, &partNode, &partAnim, &partFrame)) {
+            return false;
+        }
+
+        if (partNode) {
+            return Collectible_ResolveInitialTransformRecursive(partNode, partFrame, outAnim, outFrame, depth + 1);
+        }
+
+        if (partAnim) {
+            *outAnim = partAnim;
+            *outFrame = partFrame;
+            return true;
+        }
+
+        return false;
+    }
+
+    if (node->compositeAnim && node->compositeAnim->parts) {
+        for (u32 i = 0; i < node->compositeAnim->numParts; i++) {
+            CompositeAnimPartData& part = node->compositeAnim->parts[i];
+            MiscAnimNode* partNode = Collectible_ResolveCompositePartNode(part);
+            if (!partNode) {
+                continue;
+            }
+
+            const s32 partFrameCount = Collectible_GetMiscAnimFrameCount(partNode);
+            if (partFrameCount <= 0) {
+                continue;
+            }
+
+            const u32 shift = static_cast<u32>(part.field1) & 31u;
+            s32 partFrame = frame >> shift;
+            if (partFrame >= partFrameCount) {
+                if (part.field0 != 0) {
+                    partFrame %= partFrameCount;
+                }
+                else {
+                    partFrame = partFrameCount - 1;
+                }
+            }
+
+            if (Collectible_ResolveInitialTransformRecursive(partNode, partFrame, outAnim, outFrame, depth + 1)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+static bool Collectible_ResolveInitialTransform(MiscAnimNode* node, s32 frame, TransformAnim** outAnim, s32* outFrame) {
+    if (!outAnim || !outFrame) {
+        return false;
+    }
+
+    *outAnim = nullptr;
+    *outFrame = 0;
+    return Collectible_ResolveInitialTransformRecursive(node, frame, outAnim, outFrame, 0);
+}
+
+static bool Collectible_BindTransformAnim(Collectible* collectible, TransformAnim* anim) {
+    if (!collectible || !anim || !collectible->model) {
+        return false;
+    }
+
+    Model* mdl = static_cast<Model*>(collectible->model);
+    AnimStructure* animStructure = static_cast<AnimStructure*>(mdl->animStructure);
+    if (!animStructure || !animStructure->flip) {
+        return false;
+    }
+
+    if (collectible->mBoundTransformAnim != anim) {
+        animStructure->animation = anim;
+        animStructure->flip->anim = anim;
+        animStructure->flip->dirty = 1;
+        animStructure->ResetCountsToAnim();
+        collectible->mBoundTransformAnim = anim;
+    }
+
+    collectible->mAnim = animStructure;
+    return true;
+}
+
+static bool Collectible_ApplyTransformAnimFrame(Collectible* collectible, TransformAnim* anim, s32 frame, bool updateJoints) {
+    if (!Collectible_BindTransformAnim(collectible, anim)) {
+        return false;
+    }
+
+    AnimStructure* animStructure = collectible->mAnim;
+    if (!animStructure || !animStructure->flip) {
+        return false;
+    }
+
+    animStructure->flip->SetFrame(frame);
+    if (updateJoints) {
+        animStructure->flip->UpdateJoints();
+    }
+
+    return true;
+}
+
+static bool Collectible_ApplyMiscAnimFrameRecursive(Collectible* collectible,
+                                                     MiscAnimNode* node,
+                                                     s32 frame,
+                                                     bool updateJoints,
+                                                     s32 depth) {
+    if (!collectible || !node || depth >= COLLECT_MISC_ANIM_MAX_DEPTH) {
+        return false;
+    }
+
+    if (node->anim) {
+        return Collectible_ApplyTransformAnimFrame(collectible, node->anim, frame, updateJoints);
+    }
+
+    if (node->sequenceAnim) {
+        MiscAnimNode* partNode = nullptr;
+        TransformAnim* partAnim = nullptr;
+        s32 partFrame = 0;
+        if (!Collectible_ResolveSequenceAnimFrame(node->sequenceAnim, frame, &partNode, &partAnim, &partFrame)) {
+            return false;
+        }
+
+        if (partNode) {
+            return Collectible_ApplyMiscAnimFrameRecursive(collectible, partNode, partFrame, updateJoints, depth + 1);
+        }
+
+        if (partAnim) {
+            return Collectible_ApplyTransformAnimFrame(collectible, partAnim, partFrame, updateJoints);
+        }
+
+        return false;
+    }
+
+    if (node->compositeAnim && node->compositeAnim->parts) {
+        bool applied = false;
+        bool resolvedAnyPart = false;
+        for (u32 i = 0; i < node->compositeAnim->numParts; i++) {
+            CompositeAnimPartData& part = node->compositeAnim->parts[i];
+            MiscAnimNode* partNode = Collectible_ResolveCompositePartNode(part);
+            if (!partNode) {
+                continue;
+            }
+
+            resolvedAnyPart = true;
+
+            const s32 partFrameCount = Collectible_GetMiscAnimFrameCount(partNode);
+            if (partFrameCount <= 0) {
+                continue;
+            }
+
+            const u32 shift = static_cast<u32>(part.field1) & 31u;
+            s32 partFrame = frame >> shift;
+            if (partFrame >= partFrameCount) {
+                if (part.field0 != 0) {
+                    partFrame %= partFrameCount;
+                }
+                else {
+                    partFrame = partFrameCount - 1;
+                }
+            }
+
+            if (Collectible_ApplyMiscAnimFrameRecursive(collectible, partNode, partFrame, updateJoints, depth + 1)) {
+                applied = true;
+            }
+        }
+
+        if (!resolvedAnyPart) {
+            return true;
+        }
+
+        return applied;
+    }
+
+    if (node->paramAnim || node->frameList) {
+        return true;
+    }
+
+    return false;
+}
+
+static bool Collectible_ApplyMiscAnimFrame(Collectible* collectible, MiscAnimNode* node, s32 frame, bool updateJoints) {
+    return Collectible_ApplyMiscAnimFrameRecursive(collectible, node, frame, updateJoints, 0);
+}
 
 Collectible::Collectible(const LVector* pos, u16 type)
     : Obstacle(pos, type) {
@@ -20,6 +319,7 @@ Collectible::Collectible(const LVector* pos, u16 type)
 
     mAnim = nullptr;
     mAnimB = nullptr;
+    mBoundTransformAnim = nullptr;
     mCurrentFrame = 0;
     mModelIndex = -1;
     mFloatAngle = 0;
@@ -76,6 +376,8 @@ void Collectible::AnalyzeMesh(DBRoot* root) {
 void Collectible::CreateModel(const char* name) {
     MARKFUNCTION(0x80012970);
 
+    mBoundTransformAnim = nullptr;
+
     if (mModelIndex != -1 && modelHash != 0) {
         Thing::CreateModel(nullptr);
 
@@ -85,26 +387,50 @@ void Collectible::CreateModel(const char* name) {
         }
 
         mAnimB = Obstacle_GetAnimation(mModelIndex);
-        if (mAnimB && mdl && mAnimB->anim) {
-            if (mdl->drawableType == 2) {
-                AnimStructure* as = new AnimStructure(2, mAnimB->anim, ANIM_HOLD_LAST, mdl, mdl->drawable);
-                mAnim = as;
-                mdl->animStructure = as;
+        if (mAnimB && mdl) {
+            TransformAnim* initialAnim = mAnimB->anim;
+            s32 initialFrame = 0;
+            if (!initialAnim) {
+                Collectible_ResolveInitialTransform(mAnimB, 0, &initialAnim, &initialFrame);
+            }
 
-                if (as) {
-                    SModel* sm = static_cast<SModel*>(mdl);
-                    sm->ApplyAnimToModelBasic(mAnimB->anim);
-                    mAnim = static_cast<AnimStructure*>(sm->animStructure);
+            if (initialAnim) {
+                if (mdl->drawableType == 2) {
+                    AnimStructure* as = new AnimStructure(2, initialAnim, ANIM_HOLD_LAST, mdl, mdl->drawable);
+                    mAnim = as;
+                    mdl->animStructure = as;
+
+                    if (as) {
+                        SModel* sm = static_cast<SModel*>(mdl);
+                        sm->ApplyAnimToModelBasic(initialAnim);
+                        mAnim = static_cast<AnimStructure*>(sm->animStructure);
+                        mCurrentFrame = 0;
+                        mBoundTransformAnim = initialAnim;
+                        if (mAnim && mAnim->flip) {
+                            mAnim->flip->SetFrame(initialFrame);
+                            mAnim->flip->UpdateJoints();
+                        }
+                    }
+                }
+                else if (mdl->drawableType == 3) {
+                    delete static_cast<AnimStructure*>(mdl->animStructure);
+                    mdl->animStructure = new AnimStructure(2, initialAnim, ANIM_HOLD_LAST, mdl, mdl->drawable);
+                    mAnim = static_cast<AnimStructure*>(mdl->animStructure);
                     mCurrentFrame = 0;
+                    mBoundTransformAnim = initialAnim;
                     if (mAnim && mAnim->flip) {
-                        mAnim->flip->SetFrame(0);
+                        mAnim->flip->SetFrame(initialFrame);
+                        mAnim->flip->UpdateJoints();
                     }
                 }
             }
-            else if (mdl->drawableType == 3) {
-                delete static_cast<AnimStructure*>(mdl->animStructure);
-                mdl->animStructure = new AnimStructure(2, mAnimB->anim, ANIM_HOLD_LAST, mdl, mdl->drawable);
+            else {
                 mAnim = static_cast<AnimStructure*>(mdl->animStructure);
+            }
+
+            if (mAnimB->compositeAnim) {
+                mCurrentFrame = 0;
+                Collectible_ApplyMiscAnimFrame(this, mAnimB, 0, true);
             }
         }
     }
@@ -125,6 +451,7 @@ void Collectible::CreateModel(const char* name) {
 
 void Collectible::DeleteModel() {
     MARKFUNCTION(0x80012C5C);
+    mBoundTransformAnim = nullptr;
     Thing::DeleteModel();
 }
 
@@ -139,7 +466,18 @@ void Collectible::Think() {
         mTimer--;
     }
 
-    if (mAnim && mAnim->flip && mAnim->flip->anim) {
+    if (mAnimB && mAnimB->compositeAnim) {
+        const s32 frameCount = Collectible_GetMiscAnimFrameCount(mAnimB);
+        if (frameCount > 0 && mCurrentFrame < frameCount) {
+            s32 oldFrame = mCurrentFrame;
+            mCurrentFrame = oldFrame + 1;
+            Collectible_ApplyMiscAnimFrame(this, mAnimB, oldFrame, true);
+        }
+        else {
+            mCurrentFrame = 0;
+        }
+    }
+    else if (mAnim && mAnim->flip && mAnim->flip->anim) {
         TransformFlip* flip = mAnim->flip;
         if (mCurrentFrame < flip->anim->numFrames) {
             s32 oldFrame = mCurrentFrame;
