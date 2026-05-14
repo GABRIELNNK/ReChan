@@ -305,8 +305,7 @@ void DestructibleThing::HandleHumanoidCollision(Humanoid* hum) {
 
     CorrectThingPositionObstacle(
         pos, pos,
-        // PSX passes this->pos.y for both angle params in this path.
-        pos.y, pos.y,
+        orientation.y, orientation.y,
         collBox,
         hum->pos, hum->homePos,
         hum->collBboxMin.x, 0, 0x300,
