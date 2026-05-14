@@ -2812,6 +2812,13 @@ void Player::_Straif() {
         return;
     }
 
+    // Align before Humanoid::_Straif snapshots orientation for attack/strafe transitions.
+    Humanoid* target = reinterpret_cast<Humanoid*>(field256);
+    if (target) {
+        FaceThingDesired(target);
+        FaceAngleY(faceAngle, 1);
+    }
+
     // PSX: a1[52] = (gp+532 * a1[52]) >> 16
     moveSpeed *= STRAFE_MOVE_SPEED >> 16;
 

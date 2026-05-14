@@ -2217,11 +2217,21 @@ void Humanoid::SetActionState(u32 state, s32 param) {
             const s32 nextField484 = field488;
             field488 = 0;
             field484 = nextField484;
+
+            const FightingComboNode* currentNode =
+                ResolveFightingNodeAddressConst(static_cast<u32>(field484));
+            const PsxFightingMoveRaw* move =
+                (currentNode && currentNode->moveData) ? currentNode->moveData : nullptr;
+
             if (model) {
                 Model* m = static_cast<Model*>(model);
-                AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
-                if (anim) {
-                    m->SetAnim(anim->animEnum, param, 0, 0);
+                if (move) {
+                    m->SetAnim(static_cast<s32>(move->anim), currentNode->field07, 1, currentNode->field06);
+
+                    AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+                    if (anim) {
+                        anim->speed = static_cast<s32>(move->firstWord);
+                    }
                 }
             }
             field344 = 0;
