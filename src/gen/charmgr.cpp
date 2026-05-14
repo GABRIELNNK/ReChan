@@ -936,8 +936,8 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
             OriginalSTree* original = new OriginalSTree();
             original->nameCRC = nameHash;
             original->SetStoreID(type == 0 ? 0 : 2);
-                original->xformVertsCallback = RP_XformVertsLitCBF_CL;
-                original->fixUpPolysCallback = RP_FixUpPolysCBF_CL;
+            original->xformVertsCallback = RP_XformVertsLitCBF_CL;
+            original->fixUpPolysCallback = RP_FixUpPolysCBF_CL;
 
             s32 bufSize = rrSize(cf->rrHeader, rrIdx - 1);
             u32 primGeomSize = 0;
@@ -968,7 +968,7 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
                     BuildPerJointMeshes(original, primGeomData, primGeomSize);
                 }
 
-                LOG("[CharMgr] Created OriginalSTree with skeleton for type %u (hash 0x%08X, %u joints)",
+                LOG("[CharMgr] Populated OriginalSTree with skeleton for type %u (hash 0x%08X, %u joints)",
                     type, nameHash, original->skeleton->numJoints);
             }
             else {
@@ -979,7 +979,7 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
                 }
                 original->meshBuffer = meshBuf;
 
-                LOG("[CharMgr] Created OriginalSTree (flat) for type %u (hash 0x%08X)",
+                LOG("[CharMgr] Populated OriginalSTree (flat) for type %u (hash 0x%08X)",
                     type, nameHash);
             }
 

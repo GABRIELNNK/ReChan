@@ -266,6 +266,11 @@ static void RefreshPlayerDrunkenMasterState() {
         return;
     }
 
+    SModel* sModel = static_cast<SModel*>(model);
+    if (sModel) {
+        sModel->SetupModelCallbacks();
+    }
+
     AnimStructure* updatedAnim = model->animStructure ? static_cast<AnimStructure*>(model->animStructure) : nullptr;
     if (updatedAnim) {
         updatedAnim->ReAttachTree(0, animEnum);

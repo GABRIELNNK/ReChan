@@ -886,14 +886,20 @@ void AI::Populate() {
                 player->flags |= TF_ACTIVATED;
 
                 if (g_characterManager) {
+                    const s32 meshTypeBeforeLoad = *GetPlayerMeshType();
                     g_characterManager->LoadCharacter(0);
 
                     const s32 desiredMeshType = (g_scoreManager && g_scoreManager->IsDrunkenMasterSuitEnabled()) ? 1 : 0;
-                    if (desiredMeshType != *GetPlayerMeshType()) {
+                    const s32 meshTypeAfterLoad = *GetPlayerMeshType();
+                    if (desiredMeshType != meshTypeBeforeLoad || desiredMeshType != meshTypeAfterLoad) {
                         g_characterManager->ReloadCharacter(0, desiredMeshType, nullptr);
 
                         Model* model = static_cast<Model*>(player->model);
                         if (model) {
+                            SModel* sModel = static_cast<SModel*>(model);
+                            if (sModel) {
+                                sModel->SetupModelCallbacks();
+                            }
                             AnimStructure* anim = static_cast<AnimStructure*>(model->animStructure);
                             if (anim) {
                                 anim->ReAttachTree(0, 0);
