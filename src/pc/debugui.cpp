@@ -21,6 +21,7 @@
 #include "fe/femenumgr.h"
 #include "gen/ai.h"
 #include "ai/obstacle.h"
+#include "gen/levelmgr.h"
 #include "gen/display.h"
 #include "extra/fecustommenumgr.h"
 #include "pc/log.h"
@@ -84,7 +85,21 @@ static s32 sDebugParticleSpawnHeight = 0;
 static s32 sDebugParticleLifeFrames = 30;
 static s32 sDebugParticleLastSpawnResult = -1;
 static bool sDebugShowHumanoidNames3D = false;
+static bool sDebugShowAllAIThingNames3D = false;
 static bool sDebugShowEffectNames3D = false;
+static bool sDebugShowThingLabelHoverTooltip = true;
+static u16 sDebugSelectedThingUniqueID = INVALID_HANDLE;
+
+struct DebugVisibleThingLabel {
+    Thing* thing = nullptr;
+    char label[128] = {};
+    f32 screenX = 0.0f;
+    f32 screenY = 0.0f;
+};
+
+static constexpr s32 MAX_DEBUG_VISIBLE_THING_LABELS = 2048;
+static DebugVisibleThingLabel sDebugVisibleThingLabels[MAX_DEBUG_VISIBLE_THING_LABELS] = {};
+static s32 sDebugVisibleThingLabelCount = 0;
 
 static void ApplyCursorPolicy() {
     if (!g_display) {
@@ -444,6 +459,337 @@ static u32 DebugUIColor(u8 r, u8 g, u8 b, u8 a) {
     return ((u32)a << 24) | ((u32)b << 16) | ((u32)g << 8) | (u32)r;
 }
 
+static const char* DebugAIThingTypeName(u16 type) {
+    switch (type) {
+        case AITypes::TT_PLAYER: return "Player";
+        case AITypes::TT_COLLECTIBLE: return "CollectiblePickup";
+        case AITypes::TT_PLATFORM: return "Platform";
+        case AITypes::TT_LAUNCHER: return "Launcher";
+        case AITypes::TT_CONVEYOR: return "Conveyor";
+        case AITypes::TT_SLIPPERYFLOOR: return "SlipperyFloor";
+        case AITypes::TT_HORIZONTALPOLE: return "HorizontalPole";
+        case AITypes::TT_EXPLOSIVE: return "Explosive";
+        case AITypes::TT_DESTRUCTIBLE: return "Destructible";
+        case AITypes::TT_CRUSHER: return "Crusher";
+        case AITypes::TT_KNOCKDOWN: return "KnockDown";
+        case AITypes::TT_STACK: return "Stack";
+        case AITypes::TT_KICKNROLL: return "KickNRoll";
+        case AITypes::TT_DESTRUCTIBLE_DP: return "DestructibleDP";
+        case AITypes::TT_UNTOUCHABLE: return "Untouchable";
+        case AITypes::TT_COLLECTIBLE_OBJ: return "Collectible";
+        case AITypes::TT_TRIGGERTHING: return "TriggerThing";
+        case AITypes::TT_GENERATOR: return "Generator";
+        case AITypes::TT_ENEMYGENERATOR: return "EnemyGenerator";
+        case AITypes::TT_EXPLOSIVE_OBJ: return "ExplosiveObj";
+        case AITypes::TT_BLAST: return "Blast";
+        case AITypes::TT_THROWGENERATOR: return "ThrowGenerator";
+        case AITypes::TT_PUSHABLE: return "Pushable";
+        case AITypes::TT_DOOR: return "Door";
+        case AITypes::TT_TELEPORTER: return "Teleporter";
+        case AITypes::TT_PENDULUM: return "Pendulum";
+        case AITypes::TT_TRAPDOOR: return "TrapDoor";
+        case AITypes::TT_TABLE: return "Table";
+        case AITypes::TT_BOSS: return "FrontEndVolume";
+        case AITypes::TT_LADDER: return "Ladder";
+        case AITypes::TT_CHAIR: return "Chair";
+        case AITypes::TT_ARROW: return "Arrow";
+        default:
+            break;
+    }
+
+    if (type >= AITypes::TT_HUMANOID_FIRST && type <= AITypes::TT_HUMANOID_LAST) {
+        return "Humanoid";
+    }
+    if (type >= AITypes::TT_OBSTACLE_FIRST && type <= AITypes::TT_OBSTACLE_LAST) {
+        return "Pickup";
+    }
+    return nullptr;
+}
+
+static bool DebugAIThingTypeLikelyWIP(u16 type) {
+    return type == AITypes::TT_STACK;
+}
+
+static const char* ResolveDebugThingModelName(const Thing* thing) {
+    if (!thing || thing->modelHash == 0 || !g_levelManager) {
+        return nullptr;
+    }
+
+    OriginalBasic* original = g_levelManager->FindModel(thing->modelHash);
+    if (!original) {
+        return nullptr;
+    }
+
+    const char* modelName = original->GetName();
+    if (!modelName || modelName[0] == '\0') {
+        return nullptr;
+    }
+
+    return modelName;
+}
+
+static void BuildDebugThingLabel(char* outLabel, s32 outSize, const Thing* thing, const char* fallbackPrefix) {
+    if (!outLabel || outSize <= 0 || !thing) {
+        return;
+    }
+
+    outLabel[0] = '\0';
+    const char* typeName = DebugAIThingTypeName(thing->thingType);
+    const char* modelName = ResolveDebugThingModelName(thing);
+    const char* wipSuffix = DebugAIThingTypeLikelyWIP(thing->thingType) ? " [WIP]" : "";
+
+    const char* name = thing->GetName();
+    if (name && name[0] != '\0') {
+        if (typeName && typeName[0] != '\0') {
+            std::snprintf(outLabel, (size_t)outSize, "%s (%s)%s", name, typeName, wipSuffix);
+        }
+        else {
+            std::snprintf(outLabel, (size_t)outSize, "%s", name);
+        }
+        return;
+    }
+
+    if (modelName && modelName[0] != '\0') {
+        if (typeName && typeName[0] != '\0') {
+            std::snprintf(outLabel, (size_t)outSize, "%s (%s)%s", modelName, typeName, wipSuffix);
+        }
+        else {
+            std::snprintf(outLabel, (size_t)outSize, "%s", modelName);
+        }
+        return;
+    }
+
+    if (thing->nameCRC != 0) {
+        if (typeName && typeName[0] != '\0') {
+            std::snprintf(outLabel, (size_t)outSize, "%s 0x%08X%s", typeName, thing->nameCRC, wipSuffix);
+        }
+        else {
+            std::snprintf(outLabel, (size_t)outSize, "%s 0x%08X", fallbackPrefix, thing->nameCRC);
+        }
+        return;
+    }
+
+    if (typeName && typeName[0] != '\0') {
+        std::snprintf(outLabel, (size_t)outSize, "%s id:%u%s",
+                      typeName,
+                      (u32)thing->uniqueID,
+                      wipSuffix);
+        return;
+    }
+
+    std::snprintf(outLabel, (size_t)outSize, "%s type:%u id:%u",
+                  fallbackPrefix,
+                  (u32)thing->thingType,
+                  (u32)thing->uniqueID);
+}
+
+static void ResetDebugVisibleThingLabels() {
+    sDebugVisibleThingLabelCount = 0;
+}
+
+static void RegisterDebugVisibleThingLabel(Thing* thing, const char* label, f32 screenX, f32 screenY) {
+    if (!thing || !label || label[0] == '\0') {
+        return;
+    }
+
+    if (sDebugVisibleThingLabelCount >= MAX_DEBUG_VISIBLE_THING_LABELS) {
+        return;
+    }
+
+    DebugVisibleThingLabel& entry = sDebugVisibleThingLabels[sDebugVisibleThingLabelCount++];
+    entry.thing = thing;
+    std::snprintf(entry.label, sizeof(entry.label), "%s", label);
+    entry.screenX = screenX;
+    entry.screenY = screenY;
+}
+
+static bool DebugMouseToScreenPos(f32* outX, f32* outY) {
+    if (!outX || !outY || !ImGui::GetCurrentContext()) {
+        return false;
+    }
+
+    const ImGuiIO& io = ImGui::GetIO();
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    if (!viewport) {
+        return false;
+    }
+
+    f32 scaleX = io.DisplayFramebufferScale.x;
+    f32 scaleY = io.DisplayFramebufferScale.y;
+    if (scaleX <= 0.0f) {
+        scaleX = 1.0f;
+    }
+    if (scaleY <= 0.0f) {
+        scaleY = 1.0f;
+    }
+
+    const ImVec2 mouse = io.MousePos;
+    *outX = (mouse.x - viewport->Pos.x) * scaleX;
+    *outY = (mouse.y - viewport->Pos.y) * scaleY;
+    return true;
+}
+
+static const DebugVisibleThingLabel* FindNearestDebugVisibleThingLabel(f32 screenX, f32 screenY, f32 maxDistancePixels) {
+    if (sDebugVisibleThingLabelCount <= 0) {
+        return nullptr;
+    }
+
+    const f32 maxDistSq = maxDistancePixels * maxDistancePixels;
+    f32 bestDistSq = maxDistSq;
+    const DebugVisibleThingLabel* best = nullptr;
+
+    for (s32 i = 0; i < sDebugVisibleThingLabelCount; i++) {
+        const DebugVisibleThingLabel& entry = sDebugVisibleThingLabels[i];
+        if (!entry.thing) {
+            continue;
+        }
+
+        const f32 dx = screenX - entry.screenX;
+        const f32 dy = screenY - entry.screenY;
+        const f32 distSq = dx * dx + dy * dy;
+        if (distSq <= bestDistSq) {
+            bestDistSq = distSq;
+            best = &entry;
+        }
+    }
+
+    return best;
+}
+
+static void DrawDebugThingHoverTooltip() {
+    if (!sEnabled || !sDebugShowThingLabelHoverTooltip || !ImGui::GetCurrentContext()) {
+        return;
+    }
+
+    if (sDebugVisibleThingLabelCount <= 0) {
+        return;
+    }
+
+    f32 mouseScreenX = 0.0f;
+    f32 mouseScreenY = 0.0f;
+    if (!DebugMouseToScreenPos(&mouseScreenX, &mouseScreenY)) {
+        return;
+    }
+
+    const DebugVisibleThingLabel* hovered = FindNearestDebugVisibleThingLabel(mouseScreenX, mouseScreenY, 20.0f);
+    if (!hovered || !hovered->thing) {
+        return;
+    }
+
+    const Thing* thing = hovered->thing;
+    const char* typeName = DebugAIThingTypeName(thing->thingType);
+    const char* modelName = ResolveDebugThingModelName(thing);
+
+    ImGui::BeginTooltip();
+    ImGui::Text("%s", hovered->label);
+    ImGui::Separator();
+    ImGui::Text("Type: %u (%s)", (u32)thing->thingType, typeName ? typeName : "Unknown");
+    ImGui::Text("ID: %u", (u32)thing->uniqueID);
+    ImGui::Text("Name CRC: 0x%08X", thing->nameCRC);
+    ImGui::Text("Model Hash: 0x%08X", thing->modelHash);
+    if (modelName && modelName[0] != '\0') {
+        ImGui::Text("Model Name: %s", modelName);
+    }
+    ImGui::Text("Pos: %d, %d, %d", thing->pos.x, thing->pos.y, thing->pos.z);
+    ImGui::EndTooltip();
+}
+
+static void DrawDebugThingLabelInspectorPanel() {
+    ImGui::SeparatorText("3D Label Inspect");
+    ImGui::Checkbox("Label hover tooltip", &sDebugShowThingLabelHoverTooltip);
+    ImGui::Text("Visible AI labels: %d", sDebugVisibleThingLabelCount);
+
+    if (sDebugVisibleThingLabelCount <= 0) {
+        ImGui::TextDisabled("No visible AI labels in current camera view.");
+        return;
+    }
+
+    s32 selectedIndex = -1;
+    for (s32 i = 0; i < sDebugVisibleThingLabelCount; i++) {
+        Thing* thing = sDebugVisibleThingLabels[i].thing;
+        if (thing && thing->uniqueID == sDebugSelectedThingUniqueID) {
+            selectedIndex = i;
+            break;
+        }
+    }
+
+    if (selectedIndex < 0) {
+        selectedIndex = 0;
+        if (sDebugVisibleThingLabels[0].thing) {
+            sDebugSelectedThingUniqueID = sDebugVisibleThingLabels[0].thing->uniqueID;
+        }
+    }
+
+    const DebugVisibleThingLabel& selected = sDebugVisibleThingLabels[selectedIndex];
+    const char* previewLabel = selected.label[0] != '\0' ? selected.label : "<unnamed>";
+
+    if (ImGui::BeginCombo("Visible Thing", previewLabel)) {
+        for (s32 i = 0; i < sDebugVisibleThingLabelCount; i++) {
+            const DebugVisibleThingLabel& entry = sDebugVisibleThingLabels[i];
+            if (!entry.thing) {
+                continue;
+            }
+
+            const bool isSelected = entry.thing->uniqueID == sDebugSelectedThingUniqueID;
+            char itemLabel[196] = {};
+            std::snprintf(itemLabel, sizeof(itemLabel), "%s##thing_%u", entry.label, (u32)entry.thing->uniqueID);
+
+            if (ImGui::Selectable(itemLabel, isSelected)) {
+                sDebugSelectedThingUniqueID = entry.thing->uniqueID;
+            }
+            if (isSelected) {
+                ImGui::SetItemDefaultFocus();
+            }
+        }
+        ImGui::EndCombo();
+    }
+
+    Thing* thing = selected.thing;
+    if (!thing) {
+        ImGui::TextDisabled("Selected label has no live Thing pointer.");
+        return;
+    }
+
+    const char* typeName = DebugAIThingTypeName(thing->thingType);
+    const char* modelName = ResolveDebugThingModelName(thing);
+    const char* rawName = thing->GetName();
+
+    ImGui::Separator();
+    ImGui::Text("Label: %s", selected.label);
+    ImGui::Text("Type: %u (%s)", (u32)thing->thingType, typeName ? typeName : "Unknown");
+    if (DebugAIThingTypeLikelyWIP(thing->thingType)) {
+        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Reversal status: WIP");
+    }
+    ImGui::Text("Unique ID: %u", (u32)thing->uniqueID);
+    ImGui::Text("Name: %s", (rawName && rawName[0] != '\0') ? rawName : "<none>");
+    ImGui::Text("Name CRC: 0x%08X", thing->nameCRC);
+    ImGui::Text("Model Hash: 0x%08X", thing->modelHash);
+    if (modelName && modelName[0] != '\0') {
+        ImGui::Text("Model Name: %s", modelName);
+    }
+    ImGui::Text("Block: %u", (u32)thing->blockNum);
+    ImGui::Text("Collision Radius: %u", (u32)thing->collisionRadius);
+    ImGui::Text("Health: %u / %u", (u32)thing->health, (u32)thing->maxHealth);
+    ImGui::Text("Flags: 0x%08X", thing->flags);
+    ImGui::Text("Flags2: 0x%08X", thing->flags2);
+    LVectorText("Pos", thing->pos);
+    LVectorText("Orientation", thing->orientation);
+
+    if (ImGui::Button("Log Selected Thing")) {
+        LOG("[DebugUI] ThingInspect label='%s' type=%u id=%u name='%s' nameCRC=0x%08X modelHash=0x%08X modelName='%s' pos=(%d,%d,%d)",
+            selected.label,
+            (u32)thing->thingType,
+            (u32)thing->uniqueID,
+            (rawName && rawName[0] != '\0') ? rawName : "",
+            thing->nameCRC,
+            thing->modelHash,
+            (modelName && modelName[0] != '\0') ? modelName : "",
+            thing->pos.x,
+            thing->pos.y,
+            thing->pos.z);
+    }
+}
+
 static xcFont* ResolveDebugLabelFont() {
     if (!g_oxFontFile) {
         return nullptr;
@@ -478,7 +824,9 @@ static void DrawDebugLabelText(f32 x, f32 y, const char* text, u32 color, xcFont
 }
 
 static void DrawDebug3DLabels() {
-    if (!g_display || (!sDebugShowHumanoidNames3D && !sDebugShowEffectNames3D)) {
+    ResetDebugVisibleThingLabels();
+
+    if (!g_display || (!sDebugShowHumanoidNames3D && !sDebugShowAllAIThingNames3D && !sDebugShowEffectNames3D)) {
         return;
     }
 
@@ -542,29 +890,49 @@ static void DrawDebug3DLabels() {
         ? (f32)labelFont->lineHeight + 2.0f
         : 14.0f;
 
-    if (sDebugShowHumanoidNames3D && g_ai) {
+    auto drawThingLabel = [&](Thing* thing, u32 color, const char* fallbackPrefix) {
+        if (!thing) {
+            return;
+        }
+
+        f32 screenX = 0.0f;
+        f32 screenY = 0.0f;
+        if (!camera->WorldToScreen(thing->pos, &screenX, &screenY)) {
+            return;
+        }
+
+        char label[128] = {};
+        BuildDebugThingLabel(label, (s32)sizeof(label), thing, fallbackPrefix);
+        const f32 labelScreenX = screenX;
+        const f32 labelScreenY = screenY - labelYOffset;
+        drawLabel(labelScreenX, labelScreenY, label, color);
+        RegisterDebugVisibleThingLabel(thing, label, labelScreenX, labelScreenY);
+    };
+
+    if (sDebugShowAllAIThingNames3D && g_ai) {
+        for (ccMinNode* node = g_ai->humanoidList.head; node; node = node->next) {
+            Thing* thing = static_cast<Thing*>(static_cast<ccNode*>(node));
+            drawThingLabel(thing, DebugUIColor(255, 240, 120, 255), "Humanoid");
+        }
+
+        for (ccMinNode* node = g_ai->moveList.head; node; node = node->next) {
+            Thing* thing = static_cast<Thing*>(static_cast<ccNode*>(node));
+            drawThingLabel(thing, DebugUIColor(120, 255, 140, 255), "Thing");
+        }
+
+        for (ccMinNode* node = g_ai->pickupList.head; node; node = node->next) {
+            Thing* thing = static_cast<Thing*>(static_cast<ccNode*>(node));
+            drawThingLabel(thing, DebugUIColor(255, 200, 120, 255), "Pickup");
+        }
+    }
+
+    if (!sDebugShowAllAIThingNames3D && sDebugShowHumanoidNames3D && g_ai) {
         for (ccMinNode* node = g_ai->humanoidList.head; node; node = node->next) {
             Thing* thing = static_cast<Thing*>(static_cast<ccNode*>(node));
             if (!thing) {
                 continue;
             }
-
-            f32 screenX = 0.0f;
-            f32 screenY = 0.0f;
-            if (!camera->WorldToScreen(thing->pos, &screenX, &screenY)) {
-                continue;
-            }
-
-            char label[128] = {};
-            const char* name = thing->GetName();
-            if (name && name[0] != '\0') {
-                std::snprintf(label, sizeof(label), "%s", name);
-            }
-            else {
-                std::snprintf(label, sizeof(label), "Humanoid 0x%08X", thing->nameCRC);
-            }
-
-            drawLabel(screenX, screenY - labelYOffset, label, DebugUIColor(255, 240, 120, 255));
+            drawThingLabel(thing, DebugUIColor(255, 240, 120, 255), "Humanoid");
         }
     }
 
@@ -648,6 +1016,8 @@ void DebugUI::Draw() {
     if (!sEnabled) {
         return;
     }
+
+    DrawDebugThingHoverTooltip();
 
     ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(), ImGuiDockNodeFlags_PassthruCentralNode);
 
@@ -913,7 +1283,10 @@ void DebugUI::Draw() {
         if (ImGui::Begin("Debugging", &sShowDebugging)) {
             ImGui::SeparatorText("3D Labels");
             ImGui::Checkbox("Humanoid names", &sDebugShowHumanoidNames3D);
+            ImGui::Checkbox("All AI Thing names", &sDebugShowAllAIThingNames3D);
             ImGui::Checkbox("Effects/Particles names", &sDebugShowEffectNames3D);
+
+            DrawDebugThingLabelInspectorPanel();
         }
         ImGui::End();
     }
