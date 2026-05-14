@@ -276,7 +276,7 @@ ActionInput::ActionInput() {
     bindings[ACTION_GRAB] = { { KEY_L, 0 }, { MouseBtn::NONE, MouseBtn::Middle }, GpBtn::B, GpBtn::NONE, GpAxis::NONE, 0 };
     bindings[ACTION_DIVE_ROLL] = { { KEY_LEFT_CONTROL, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::RB, GpBtn::NONE, GpAxis::NONE, 0 };
     bindings[ACTION_STRAFE] = { { KEY_LEFT_SHIFT, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::NONE, GpBtn::NONE, GpAxis::RTrigger, 0.5f };
-    bindings[ACTION_COUNTER] = { { KEY_U, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::LB, GpBtn::NONE, GpAxis::NONE, 0 };
+    bindings[ACTION_COUNTER] = { { KEY_C, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::LB, GpBtn::NONE, GpAxis::NONE, 0 };
     bindings[ACTION_STATUS_DISPLAY] = { { KEY_TAB, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::NONE, GpBtn::NONE, GpAxis::LTrigger, 0.5f };
 
     bindings[ACTION_MOVE_UP] = { { KEY_W, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::NONE, GpBtn::DpadUp, GpAxis::LeftY, -0.3f };
