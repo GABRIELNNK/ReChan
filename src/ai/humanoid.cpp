@@ -43,6 +43,9 @@ static constexpr s16 DIVE_ROLL_FORCE_END_FRAME = 14;
 static constexpr s32 DIVE_ROLL_FORCE = 0xDAC;
 static constexpr s16 DIVE_ROLL_JUMP_PAUSE_FRAME = 0xB;
 static constexpr s16 DIVE_ROLL_RUN_STRAFE_FRAME = 0xD;
+static constexpr s32 HEAD_RISE = 0xA5;
+static constexpr s32 HUMANOID_LEDGE_LATCH_MIN_Y_RISE = 0x40;
+static constexpr s32 HUMANOID_DIVE_ROLL_Y_RISE = 0x180;
 static constexpr s32 LEDGE_TRACE_DISTANCE = 384;
 static constexpr s32 LEDGE_TRACE_MIN_Y = 500;
 static constexpr s32 LEDGE_TRACE_MAX_Y = 750;
@@ -1171,6 +1174,49 @@ void Humanoid::Draw() {
             hm->animMatrices->SetCaptureEnabled(1);
         }
 #endif
+
+        attackJointIndex = -1;
+
+        if (hm->animMatrices && hm->animMatrices->Copy()) {
+            collBboxMin.x = 175;
+            collBboxMin.y = 0;
+            collBboxMax.x = 175;
+
+            const s32* rootMatrix = hm->animMatrices->GetMatrix(0);
+            if (rootMatrix) {
+                collBboxMin.z = rootMatrix[6] - pos.y + HEAD_RISE;
+            }
+            else {
+                collBboxMin.z = HEAD_RISE;
+            }
+
+            const s32 state = actionState;
+            if ((u32)(state - 57) < 2u || state == 53 || state == AS_THROW_FREE_FALL) {
+                s32 maxRadius = 0;
+                for (u32 i = 0; i < 5; i++) {
+                    const s32* matrix = hm->animMatrices->GetMatrix(i);
+                    if (!matrix) {
+                        continue;
+                    }
+                    const s32 radius = (s32)rmMag2((f32)(matrix[5] - pos.x), (f32)(matrix[7] - pos.z));
+                    if (maxRadius < radius) {
+                        maxRadius = radius;
+                    }
+                }
+                collBboxMax.x = maxRadius;
+            }
+
+            if (state == AS_DIVE_ROLL) {
+                if (thingType != 10) {
+                    collBboxMin.z = HUMANOID_DIVE_ROLL_Y_RISE;
+                }
+            }
+            else if (state == AS_LEDGE_LATCH) {
+                if (collBboxMin.z < HUMANOID_LEDGE_LATCH_MIN_Y_RISE) {
+                    collBboxMin.z = HUMANOID_LEDGE_LATCH_MIN_Y_RISE;
+                }
+            }
+        }
 
         return;
     }
@@ -2771,24 +2817,32 @@ void Humanoid::FacePoint(const LVector& point, s32 immediate) {
         return;
     }
 
-    // Gradually turn towards target, limited by turnRate
-    s32 diff = targetAngle - orientation.y;
-
-    // Wrap difference to -32768..32767
-    if (diff > PSX_ANGLE_180) diff -= PSX_ANGLE_360;
-    if (diff < -PSX_ANGLE_180) diff += PSX_ANGLE_360;
-
-    s32 absDiff = (diff >= 0) ? diff : -diff;
-
-    if (absDiff < (s32)turnRate) {
-        // Close enough, snap to target
-        orientation.y = targetAngle;
+    // PSX FacePoint wraps with +/-0xFFFF before applying turn step.
+    const s32 currentY = orientation.y;
+    s32 diff = targetAngle - currentY;
+    if (diff > 0x8000) {
+        diff -= 0xFFFF;
     }
-    else if (diff >= 0) {
-        orientation.y += turnRate;
+    else if (diff < -32768) {
+        diff += 0xFFFF;
+    }
+
+    const s32 step = (s32)(s16)turnRate;
+    if (diff >= 0) {
+        if (diff >= step) {
+            orientation.y = currentY + step;
+        }
+        else {
+            orientation.y = targetAngle;
+        }
     }
     else {
-        orientation.y -= turnRate;
+        if (-diff < step) {
+            orientation.y = targetAngle;
+        }
+        else {
+            orientation.y = currentY - step;
+        }
     }
 }
 
@@ -3247,22 +3301,33 @@ void Humanoid::FaceAngleY(s32 angle, s32 immediate) {
         return;
     }
 
-    s32 diff = angle - orientation.y;
+    const s32 currentY = orientation.y;
+    s32 diff = angle - currentY;
 
-    // Wrap difference to -32768..32767
-    if (diff > PSX_ANGLE_180) diff -= PSX_ANGLE_360;
-    if (diff < -PSX_ANGLE_180) diff += PSX_ANGLE_360;
-
-    s32 absDiff = (diff >= 0) ? diff : -diff;
-
-    if (absDiff < (s32)turnRate) {
-        orientation.y = angle;
+    // PSX wraps with +/-0xFFFF, not +/-0x10000.
+    if (diff > 0x8000) {
+        diff -= 0xFFFF;
     }
-    else if (diff < 0) {
-        orientation.y -= turnRate;
+    else if (diff < -32768) {
+        diff += 0xFFFF;
+    }
+
+    const s32 step = (s32)(s16)turnRate;
+    if (diff >= 0) {
+        if (diff >= step) {
+            orientation.y = currentY + step;
+        }
+        else {
+            orientation.y = angle;
+        }
     }
     else {
-        orientation.y += turnRate;
+        if (-diff < step) {
+            orientation.y = angle;
+        }
+        else {
+            orientation.y = currentY - step;
+        }
     }
 }
 
@@ -3880,8 +3945,8 @@ void Humanoid::_Jump() {
 
     const s16 frame = anim ? static_cast<s16>((u32)anim->currentFrame >> 16) : 0;
 
-    // PSX gates jump kick/punch entry on the current frame hiword > jumpKickEntryFrame (2).
-    if (frame > HUMANOID_JUMP_KICK_ENTRY_FRAME
+    // PSX gates jump kick/punch entry while currentFrame.hi <= jumpKickEntryFrame (2).
+    if (frame <= HUMANOID_JUMP_KICK_ENTRY_FRAME
         && (((commandBits >> 8) & 1) || ((commandBits >> 9) & 1) || ((commandBits >> 14) & 1))) {
         commandBits = (commandBits | 0x4000) & ~0x0100 & ~0x0200;
         SetActionState(AS_PUNCH_ATTACK, 0);
@@ -5141,6 +5206,11 @@ s32 Humanoid::SetCurrentFightingNode() {
     }
     orientation.y = faceAngle;
 
+    if (anim && anim->flip) {
+        anim->flip->SetFrame(0);
+        anim->flip->UpdateJoints();
+    }
+
     flags2 &= ~0x70u;
     if (nextNode->field04) {
         flags2 |= 0x30;
@@ -5866,7 +5936,10 @@ s32 Humanoid::ProcessFightingComboNode() {
         }
         else if (target) {
             const u32 targetState = static_cast<u32>(target->actionState);
-            allowNonThrow = (targetState == 53 || targetState == AS_THROW_FREE_FALL);
+            // PSX accepts 53, 57, 58, and 63 in this continuation gate.
+            allowNonThrow = (targetState == 53 || targetState == 57
+                || targetState == static_cast<u32>(AS_FLYING_BACK_LAND)
+                || targetState == static_cast<u32>(AS_THROW_FREE_FALL));
         }
     }
 

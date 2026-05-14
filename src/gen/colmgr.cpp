@@ -719,6 +719,14 @@ void HandleThingEnvironmentCollisions(ccList& thingList) {
             }
 
             radius = g_colDefaultRadius;
+
+            if (thing == (DynamicThing*)Player::s_player) {
+                yMinOffset = hum->collBboxMin.y;
+                ckHeight = hum->collBboxMin.z;
+                if (ckHeight < 0x80) {
+                    ckHeight = 0x80;
+                }
+            }
         }
 
         // PSX: GetTicketIssuer check
@@ -745,11 +753,11 @@ void HandleThingEnvironmentCollisions(ccList& thingList) {
     // Post-loop: re-process combat targets with their collision bbox
     if (g_combatTarget1 != nullptr) {
         Humanoid* h = (Humanoid*)g_combatTarget1;
-        HandleThingWall(g_combatTarget1, g_colDefaultRadius, h->collBboxMin.y, h->collBboxMax.z);
+        HandleThingWall(g_combatTarget1, g_colDefaultRadius, h->collBboxMin.y, h->collBboxMin.z);
     }
     if (g_combatTarget2 != nullptr) {
         Humanoid* h = (Humanoid*)g_combatTarget2;
-        HandleThingWall(g_combatTarget2, g_colDefaultRadius, h->collBboxMin.y, h->collBboxMax.z);
+        HandleThingWall(g_combatTarget2, g_colDefaultRadius, h->collBboxMin.y, h->collBboxMin.z);
     }
 }
 

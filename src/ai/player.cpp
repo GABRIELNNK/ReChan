@@ -41,7 +41,7 @@ static constexpr s32 PLAYER_RUNNING_JUMP_BURST = 2500; // initial horizontal bur
 static constexpr s16 TABLE_ROLL_HANGTIME_START = 0;
 static constexpr s16 TABLE_ROLL_HANGTIME_END = 100;
 static constexpr s32 TABLE_LOOK_AHEAD_DISTANCE = 200;
-static constexpr s32 STRAFE_MOVE_SPEED = 0x10000;
+static constexpr s32 STRAFE_MOVE_SPEED = 0xC000;
 static constexpr s32 WALL_JUMP_TRACE_DISTANCE = 256;
 static constexpr s32 WALL_JUMP_COLLISION_RADIUS = 16;
 static constexpr s32 WALL_JUMP_COLLISION_HEIGHT = 500;
@@ -50,6 +50,8 @@ static constexpr u32 WALL_JUMP_MIN_WALL_HEIGHT = 0;
 static constexpr u32 WALL_JUMP_MIN_COLLISION_RATIO = 0;
 static constexpr s32 WALL_JUMP_MIN_ANGLE = 0;
 static constexpr s32 PICKUP_MOVE_COMPARE_OFFSET = 384;
+static constexpr s32 PLAYER_STRAFE_TARGET_RANGE = 0x514;
+static constexpr s32 PLAYER_STRAFE_TARGET_HALF_ANGLE = 0x5C71;
 static constexpr s32 THROW_FAR_RANGE = 0x4B0;
 static constexpr s32 THROW_FAR_FIELD = (30 << 16) / 360;
 
@@ -588,7 +590,7 @@ void Player::SetActionState(u32 state, s32 param) {
             // PSX case 11: face enemy + strafe init.
             // FindFoe, SetHumanoidTarget, stateDispatch=26(SD_BACKFLIP)
             stateTimer = 0;
-            SetHumanoidTarget(FindFoe(distantTargetRange, 0, 0));
+            SetHumanoidTarget(FindFoe(PLAYER_STRAFE_TARGET_RANGE, PLAYER_STRAFE_TARGET_HALF_ANGLE, 0));
             field344 = 0;
             stateDispatch = SD_BACKFLIP;
             field348 = 8;
@@ -1975,6 +1977,7 @@ void Player::_Jump() {
 
         // Air movement force with directional input
         if (hasDir) {
+            FaceAngleY(faceAngle, 1);
             SVector dir = {};
             dir.z = (s16)(faceAngle & 0xFFFF);
             s32 forceToAdd = ((flags & TF_ON_GROUND) != 0) ? runSpeed : field712[0];
@@ -2786,7 +2789,7 @@ void Player::_Straif() {
 
     // PSX: if no target (field256 == 0), find one via FindFoe + SetHumanoidTarget
     if (field256 == 0) {
-        Humanoid* foe = FindFoe(distantTargetRange, 0, 0);
+        Humanoid* foe = FindFoe(PLAYER_STRAFE_TARGET_RANGE, PLAYER_STRAFE_TARGET_HALF_ANGLE, 0);
         SetHumanoidTarget(foe);
     }
 
@@ -2812,15 +2815,8 @@ void Player::_Straif() {
         return;
     }
 
-    // Align before Humanoid::_Straif snapshots orientation for attack/strafe transitions.
-    Humanoid* target = reinterpret_cast<Humanoid*>(field256);
-    if (target) {
-        FaceThingDesired(target);
-        FaceAngleY(faceAngle, 1);
-    }
-
     // PSX: a1[52] = (gp+532 * a1[52]) >> 16
-    moveSpeed *= STRAFE_MOVE_SPEED >> 16;
+    moveSpeed = static_cast<s32>((static_cast<s64>(STRAFE_MOVE_SPEED) * static_cast<u32>(moveSpeed)) >> 16);
 
     // Delegate to base Humanoid strafe logic
     Humanoid::_Straif();
