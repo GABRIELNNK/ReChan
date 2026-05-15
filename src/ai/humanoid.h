@@ -441,6 +441,7 @@ public:
     s32 FindChildWithRequestedCommand(const FightingComboNode* root, u32 requestedBits, s32 frame);
     Humanoid* FightTargetAndThrowLatch(u8 fightingType);
     s32 SetCurrentFightingNode();
+    s32 ReSyncOrientation(const PsxFightingMoveRaw* move);
     s32 ProcessFightingComboNode();
     s32 TestAndSetWeaponKungFU();
     s32 TestWallContextFightingRequestRemap();

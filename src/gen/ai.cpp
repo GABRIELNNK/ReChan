@@ -12,6 +12,7 @@
 #include "gen/colmgr.h"
 #include "ai/colfight.h"
 #include "ai/colfight.h"
+#include "ai/humndata.h"
 #include "pc/log.h"
 #include "gen/camera.h"
 #include "gen/path.h"
@@ -432,6 +433,70 @@ Thing* AI::AddThingNoTagList(const char* name, u16 type,
     if (!thing)
         return nullptr;
 
+    // PSX AddThingNoTagList supplemental player animation preloads for
+    // specific humanoid/object types (AI.CPP:365, 0x80054404).
+    if (g_characterManager) {
+        s32 playerAnimStart = -1;
+        u32 playerAnimCount = 0;
+        bool togglePlayerCache = false;
+
+        if ((u16)(type - 1) < 28u) {
+            switch (type) {
+                case AITypes::TT_BUTCH:
+                    playerAnimStart = 133;
+                    playerAnimCount = 4;
+                    break;
+                case AITypes::TT_GRONTAR:
+                    playerAnimStart = 137;
+                    playerAnimCount = 2;
+                    break;
+                case AITypes::TT_DANTE:
+                    playerAnimStart = 143;
+                    playerAnimCount = 5;
+                    break;
+                case AITypes::TT_PAUL:
+                    playerAnimStart = 139;
+                    playerAnimCount = 2;
+                    break;
+                case AITypes::TT_OSCAR:
+                    playerAnimStart = 141;
+                    playerAnimCount = 2;
+                    break;
+                default:
+                    break;
+            }
+        }
+        else if (type == AITypes::TT_LAUNCHER) {
+            playerAnimStart = 295;
+            playerAnimCount = 2;
+            togglePlayerCache = true;
+        }
+        else if (type == AITypes::TT_HORIZONTALPOLE) {
+            playerAnimStart = 285;
+            playerAnimCount = 4;
+            togglePlayerCache = true;
+        }
+        else if (type == AITypes::TT_LADDER) {
+            playerAnimStart = 289;
+            playerAnimCount = 6;
+            togglePlayerCache = true;
+        }
+
+        if (playerAnimStart >= 0 && playerAnimCount > 0) {
+            if (togglePlayerCache) {
+                g_characterManager->EnableCache(AITypes::TT_PLAYER, 1);
+            }
+            g_characterManager->LoadAnimation(
+                AITypes::TT_PLAYER,
+                playerAnimStart,
+                playerAnimCount,
+                nullptr);
+            if (togglePlayerCache) {
+                g_characterManager->EnableCache(AITypes::TT_PLAYER, 0);
+            }
+        }
+    }
+
     if (name) {
         thing->SetName(name, 0);
     }
@@ -440,6 +505,18 @@ Thing* AI::AddThingNoTagList(const char* name, u16 type,
         const DBAttrib* a3 = root->FindAttrib(3);
         if (a3) {
             thing->collisionRadius = (u16)a3->value;
+        }
+
+        // PSX: humanoid attrib 31 can request a pre-active stand animation.
+        // This animation is loaded from player animation data before AnalyzeMesh.
+        if (g_characterManager && (u16)(type - 1) < 28u) {
+            const DBAttrib* a31 = root->FindAttrib(31);
+            if (a31) {
+                const s32 preActiveIdle = GetPreActiveIdle((s32)p3dHash(a31->GetAttribString()));
+                if (preActiveIdle != 22) {
+                    g_characterManager->LoadAnimationBatch(AITypes::TT_PLAYER, preActiveIdle, nullptr);
+                }
+            }
         }
     }
 
@@ -886,12 +963,8 @@ void AI::Populate() {
                 player->flags |= TF_ACTIVATED;
 
                 if (g_characterManager) {
-                    const s32 meshTypeBeforeLoad = *GetPlayerMeshType();
-                    g_characterManager->LoadCharacter(0);
-
                     const s32 desiredMeshType = (g_scoreManager && g_scoreManager->IsDrunkenMasterSuitEnabled()) ? 1 : 0;
-                    const s32 meshTypeAfterLoad = *GetPlayerMeshType();
-                    if (desiredMeshType != meshTypeBeforeLoad || desiredMeshType != meshTypeAfterLoad) {
+                    if (desiredMeshType != *GetPlayerMeshType()) {
                         g_characterManager->ReloadCharacter(0, desiredMeshType, nullptr);
 
                         Model* model = static_cast<Model*>(player->model);
@@ -905,8 +978,14 @@ void AI::Populate() {
                                 anim->ReAttachTree(0, 0);
                             }
                             model->ApplyAnimToModel(0, 0, 2, 0, 0);
+                            player->SetActionState(AS_STAND, 0);
                         }
                     }
+
+                    // Keep player textures resident on populate. This refreshes
+                    // the currently selected suit texture page without touching
+                    // player animation slot mappings.
+                    g_characterManager->LoadCharTexture((u32)AITypes::TT_PLAYER);
                 }
             }
         }

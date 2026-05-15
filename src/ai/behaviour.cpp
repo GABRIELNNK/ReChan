@@ -2242,11 +2242,25 @@ void Behaviour::PlayerUserControl(Behaviour* self) {
         targetAngle = cameraAngle - rmATan216((f32)analogX, (f32)(-(s16)analogY)) + ANGLE_QUARTER_TURN;
 
         s32 angleDiff = ownerAngle - targetAngle;
-        while (angleDiff > ANGLE_FULL_ROTATION) {
-            angleDiff -= ANGLE_FULL_ROTATION;
+        if (angleDiff > ANGLE_FULL_ROTATION) {
+            s32 wrapped = angleDiff - ANGLE_FULL_ROTATION;
+            while (wrapped > ANGLE_FULL_ROTATION) {
+                wrapped -= ANGLE_FULL_ROTATION;
+            }
+            angleDiff = wrapped;
         }
-        while (angleDiff < 0) {
-            angleDiff += ANGLE_FULL_ROTATION;
+        if (angleDiff < 0) {
+            s32 wrapped = angleDiff + ANGLE_FULL_ROTATION;
+            // Match PSX MIPS delay-slot flow exactly: the add executes once
+            // even when the branch is not taken.
+            while (true) {
+                const bool wasNegative = wrapped < 0;
+                wrapped += ANGLE_FULL_ROTATION;
+                if (!wasNegative) {
+                    break;
+                }
+            }
+            angleDiff = wrapped - ANGLE_FULL_ROTATION;
         }
 
         if (angleDiff < 0) {

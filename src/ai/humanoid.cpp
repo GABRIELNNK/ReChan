@@ -27,6 +27,7 @@
 #include "p3d/hash.h"
 #include "p3d/p3dmath.h"
 #include "p3d/skeleton.h"
+#include "pc/debugui.h"
 #include "pc/log.h"
 
 
@@ -2001,6 +2002,13 @@ void Humanoid::AnalyzeMesh(DBRoot* root) {
 // PSX: SubtractHitPoints__8HumanoidUs (HUMANOID.CPP:9388, 0x8006CEB4)
 s32 Humanoid::SubtractHitPoints(u16 hitPoints) {
     MARKFUNCTION(0x8006CEB4);
+
+    if (DebugUI::IsHumanoidDamageDisabled()) {
+        if (g_hud) {
+            g_hud->UpdateFoe(this);
+        }
+        return health;
+    }
 
     if (hitPoints >= health) {
         health = 0;
@@ -5114,25 +5122,42 @@ static bool IsThrowLatchDisallowedState(u32 state) {
     }
 }
 
-static void ReSyncOrientationFromMove(Humanoid* humanoid, const PsxFightingMoveRaw* move) {
-    if (!humanoid || !move) {
-        return;
+// PSX: ReSyncOrientation__8HumanoidRC12FightingMove (HUMANOID.CPP:8311)
+s32 Humanoid::ReSyncOrientation(const PsxFightingMoveRaw* move) {
+    MARKFUNCTION(0x8006BF04);
+
+    if (!move) {
+        faceAngle = orientation.y;
+        return orientation.y;
     }
 
-    s32 nextFaceAngle = humanoid->orientation.y;
-    if (move->anim == 73 || move->anim == 107) {
-        nextFaceAngle = humanoid->orientation.y + 0x8000;
-        s32 absAngle = nextFaceAngle;
-        if (absAngle < 0) {
-            absAngle = -absAngle;
+    const u16 anim = move->anim;
+    const bool rotateHalfTurn = (anim == 107 || anim == 73
+        || (anim == 120 && this == static_cast<Humanoid*>(Player::s_player)));
+    if (!rotateHalfTurn) {
+        faceAngle = orientation.y;
+        return orientation.y;
+    }
+
+    const s32 currentOrientY = orientation.y;
+    const s32 rotated = currentOrientY + 0x8000;
+    s32 absRotated = rotated;
+    if (absRotated < 0) {
+        absRotated = -absRotated;
+    }
+
+    faceAngle = rotated;
+    if (absRotated > 0x7FFF) {
+        if (rotated > 0) {
+            faceAngle = currentOrientY - 0x7FFF;
         }
-        if (absAngle > 0x7FFF) {
-            nextFaceAngle += (nextFaceAngle > 0) ? -65535 : 0xFFFF;
+        else {
+            faceAngle = rotated + 0xFFFF;
         }
     }
 
-    humanoid->faceAngle = nextFaceAngle;
-    humanoid->orientation.y = nextFaceAngle;
+    orientation.y = faceAngle;
+    return faceAngle;
 }
 
 // PSX: GetWeaponTransitionIdle__FP6Pickup (HUMANOID.CPP:2671, 0x80065420)
@@ -5228,15 +5253,24 @@ s32 Humanoid::SetCurrentFightingNode() {
     field488 = 0;
 
     const PsxFightingMoveRaw* move = nextNode->moveData;
+    HumanoidModel* hm = static_cast<HumanoidModel*>(model);
+    if (!hm->IsAnimationLoaded(static_cast<s32>(move->anim))) {
+        SetActionState(AS_STAND, 0);
+        return 0;
+    }
+
     Model* m = static_cast<Model*>(model);
 
     combatFlag = 0;
     m->SetAnim(static_cast<s32>(move->anim), nextNode->field07, 1, nextNode->field06);
 
     AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
-    if (anim) {
-        anim->speed = static_cast<s32>(move->firstWord);
+    if (!anim) {
+        SetActionState(AS_STAND, 0);
+        return 0;
     }
+
+    anim->speed = static_cast<s32>(move->firstWord);
 
     s32 nextFaceAngle = orientation.y + move->turnDelta;
     s32 absAngle = nextFaceAngle;
@@ -5940,7 +5974,7 @@ s32 Humanoid::ProcessFightingComboNode() {
                 if (this == static_cast<Humanoid*>(Player::s_player)) {
                     KillDialog(0, 0, 512);
                 }
-                ReSyncOrientationFromMove(this, currentMove);
+                ReSyncOrientation(currentMove);
                 field484 = 0;
                 ReleaseTarget();
                 SetActionState(AS_STAND, 0);
@@ -6002,7 +6036,7 @@ s32 Humanoid::ProcessFightingComboNode() {
         if (this == static_cast<Humanoid*>(Player::s_player)) {
             KillDialog(0, 0, 512);
         }
-        ReSyncOrientationFromMove(this, currentMove);
+        ReSyncOrientation(currentMove);
         field484 = 0;
         field488 = 0;
         ReleaseTarget();

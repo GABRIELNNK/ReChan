@@ -89,6 +89,7 @@ static bool sDebugShowAllAIThingNames3D = false;
 static bool sDebugShowEffectNames3D = false;
 static bool sDebugShowThingLabelHoverTooltip = true;
 static u16 sDebugSelectedThingUniqueID = INVALID_HANDLE;
+static bool sDisableHumanoidDamage = false;
 
 struct DebugVisibleThingLabel {
     Thing* thing = nullptr;
@@ -991,6 +992,10 @@ bool DebugUI::IsEnabled() {
     return sEnabled;
 }
 
+bool DebugUI::IsHumanoidDamageDisabled() {
+    return sDisableHumanoidDamage;
+}
+
 void DebugUI::Draw() {
     if (ImGui::IsKeyPressed(ImGuiKey_M, false) && ImGui::GetIO().KeyCtrl) {
         sEnabled = !sEnabled;
@@ -1281,6 +1286,9 @@ void DebugUI::Draw() {
 
     if (sShowDebugging) {
         if (ImGui::Begin("Debugging", &sShowDebugging)) {
+            ImGui::SeparatorText("Combat Testing");
+            ImGui::Checkbox("Disable player/enemy HP loss", &sDisableHumanoidDamage);
+
             ImGui::SeparatorText("3D Labels");
             ImGui::Checkbox("Humanoid names", &sDebugShowHumanoidNames3D);
             ImGui::Checkbox("All AI Thing names", &sDebugShowAllAIThingNames3D);

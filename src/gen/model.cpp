@@ -860,11 +860,6 @@ void SModel::ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 p4,
     if (!rawAnimation) {
         rawAnimation = g_characterManager->GetAnimation(0, animEnum);
         if (!rawAnimation) {
-            g_characterManager->LoadAnimationBatch(0, animEnum, nullptr);
-            rawAnimation = g_characterManager->GetAnimation(0, animEnum);
-        }
-
-        if (!rawAnimation) {
             rawAnimation = g_characterManager->GetAnimation(0, 22);
             animEnum = 22;
         }

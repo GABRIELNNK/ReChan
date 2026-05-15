@@ -1204,6 +1204,24 @@ static void LoadSwitchLoadGroup(const char* name, u32 hash) {
     g_switchLoadGroupIndex = (slot == 0) ? 1 : 0;
 }
 
+// PSX: gSyncLoadGroup__Fi (SWITCH.CPP:788, 0x80094418)
+// Re-loads the stored async load-group hash for a slot after world setup.
+static void SyncSwitchLoadGroup(s32 slot) {
+    if (!g_characterManager || slot < 0 || slot >= 2) {
+        return;
+    }
+
+    const u32 hash = g_switchLoadGroupHash[slot];
+    if (hash == 0) {
+        return;
+    }
+
+    g_switchLoadGroupIndex = (slot == 0) ? 1 : 0;
+    g_characterManager->EnableCache(AITypes::TT_PLAYER, 1);
+    g_characterManager->LoadAnimation(AITypes::TT_PLAYER, hash, nullptr);
+    g_characterManager->EnableCache(AITypes::TT_PLAYER, 0);
+}
+
 static PlayerModel* ResolveSwitchPlayerModel(Thing* thing) {
     if (!thing || !thing->model) {
         return nullptr;
@@ -2965,8 +2983,9 @@ void World::LoadPermanent() {
         g_characterManager->LoadAnimation(0, 0, 124, callback);
         // PSX spins again - PC is synchronous
 
-        // PSX queues the same load again asynchronously here. In the host sync port,
-        // reissuing it would repeat the full 124-animation traversal on the main thread.
+        // PSX immediately issues the same load again without waiting. This keeps
+        // a second reference on the core 0..123 player set.
+        g_characterManager->LoadAnimation(0, 0, 124, nullptr);
 
         // PSX: EnableCache(type=0, 0), delete callback
         g_characterManager->EnableCache(0, 0);
@@ -3232,6 +3251,10 @@ bool World::LoadLevelIndex(u32 levelIndex) {
             }
         }
     }
+
+    // PSX: gSyncLoadGroup(0); gSyncLoadGroup(1)
+    SyncSwitchLoadGroup(0);
+    SyncSwitchLoadGroup(1);
 
     // PSX: rsEvent(5, 0, 0, 0) - start music for current location
     rsEvent(RS_LEVEL_BEGIN, 0, 0, 0);

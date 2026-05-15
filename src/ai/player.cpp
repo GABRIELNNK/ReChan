@@ -231,12 +231,6 @@ static bool EnsurePlayerAnimationLoaded(s32 animEnum) {
     if (!g_characterManager || animEnum < 0) {
         return false;
     }
-    if (g_characterManager->GetAnimation(0, animEnum)) {
-        return true;
-    }
-
-    // Current load path is synchronous on PC.
-    g_characterManager->LoadAnimationBatch(0, animEnum, nullptr);
     return g_characterManager->GetAnimation(0, animEnum) != nullptr;
 }
 
@@ -483,13 +477,57 @@ void Player::SetActionState(u32 state, s32 param) {
         }
         case AS_WALL_JUMP_TAUNT:
         {
-            // PSX case 3: wall jump taunt/idle - loads angle-based animations (308-315)
-            // Uses InactiveIdle handler. Complex anim selection not yet reversed.
+            // PSX case 3: select anim 308-315 based on health ratio/random,
+            // preload it, and transition to InactiveIdle callback flow.
+            const s32 healthRatio = rmDiv16i((s32)((u32)health << 16), (s32)((u32)maxHealth << 16));
+            s32 dialogID = 33;
+
+            if (healthRatio <= 45874) {
+                if (healthRatio <= 39320) {
+                    dialogID = 34;
+                    if (healthRatio < 19660) {
+                        dialogID = 31;
+                        if (healthRatio < 13107) {
+                            currentAnimEnum = 315;
+                        }
+                        else {
+                            dialogID = 32;
+                            currentAnimEnum = 314;
+                        }
+                    }
+                    else {
+                        currentAnimEnum = 313;
+                    }
+                }
+                else {
+                    currentAnimEnum = 312;
+                }
+            }
+            else {
+                currentAnimEnum = (s32)rmRangedRandom(4) + 308;
+                dialogID = 36;
+                if (currentAnimEnum != 309) {
+                    dialogID = 35;
+                    if (currentAnimEnum >= 310) {
+                        dialogID = 38;
+                        if (currentAnimEnum != 310) {
+                            dialogID = (currentAnimEnum == 311) ? 37 : 35;
+                        }
+                    }
+                }
+            }
+
             field344 = 0;
             stateDispatch = SD_INACTIVE_IDLE;
             animCallbackData = 0;
-            currentAnimEnum = PLAYER_ANIM_FLIP_VARIANT; // placeholder
             animLoadState = 2;
+
+            if (g_characterManager) {
+                g_characterManager->LoadAnimationBatch(AITypes::TT_PLAYER, currentAnimEnum, nullptr);
+                animCallbackData = g_characterManager->GetAnimation(AITypes::TT_PLAYER, currentAnimEnum) ? 1 : 0;
+            }
+
+            LoadDialog((u32)dialogID, 0x36);
             actionState = (s32)state;
             return;
         }
