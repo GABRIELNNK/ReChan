@@ -12,7 +12,6 @@
 #include "gen/model.h"
 #include "gen/animmat.h"
 #include "gen/colvol.h"
-#include "pc/log.h"
 
 static s32 g_floorDebugCounter = 0;
 
@@ -391,17 +390,6 @@ void HandleThingFloor(DynamicThing* thing, s32 radius, s32 yMinOffset, s32 check
     s32 floorCount = CollisionSector::FillWorldFloorArray(searchMin, searchMax, floorArray, 64);
     if (floorCount > 64) floorCount = 64;
 
-    static s32 floorDbgCount = 0;
-    if (floorDbgCount < 3) {
-        LOG("[ColMgr] HandleThingFloor: pos=(%d,%d,%d) home=(%d,%d,%d) search=(%d,%d,%d)-(%d,%d,%d) floors=%d",
-            thing->pos.x, thing->pos.y, thing->pos.z,
-            localHomePosX, localHomePosY, localHomePosZ,
-            searchMin.x, searchMin.y, searchMin.z,
-            searchMax.x, searchMax.y, searchMax.z,
-            floorCount);
-        floorDbgCount++;
-    }
-
     // PSX: climbing offset (v83, v85)
     s32 climbOffX = 0;
     s32 climbOffY = 0;
@@ -691,61 +679,79 @@ void HandleThingEnvironmentCollisions(ccList& thingList) {
     g_combatTarget2 = nullptr;
 
     for (ccMinNode* node = thingList.head; node != nullptr; node = node->next) {
-        DynamicThing* thing = (DynamicThing*)node;
+        DynamicThing* thing = static_cast<DynamicThing*>(node);
 
-        if (!(thing->flags & TF_MODEL_CREATED)) continue;
+        if ((thing->flags & TF_MODEL_CREATED) == 0) {
+            continue;
+        }
 
-        // PSX defaults for all entities
-        bool doWall = true;
+        s32 skipWall = 0;
         s32 radius = 128;
         s32 yMinOffset = 0;
-        s32 ckHeight = 768;
+        s32 checkHeight = 768;
 
         if (thing->thingType >= 29) {
-            // Non-humanoid: keep defaults (radius=128, ckHeight=768)
-            // Pickups (type 301-328) override yMinOffset
             if (thing->thingType >= 301 && thing->thingType < 329) {
                 yMinOffset = static_cast<Pickup*>(thing)->GetCollisionYMin();
             }
         }
         else {
-            // Humanoid path
-            Humanoid* hum = (Humanoid*)thing;
-            s32 state = hum->actionState;
-
-            // Climbing/hanging states skip wall collision
-            if (state == 23 || state == 24) {
-                doWall = false;
-            }
+            Humanoid* hum = static_cast<Humanoid*>(thing);
+            const s32 state = hum->actionState;
 
             radius = g_colDefaultRadius;
 
-            if (thing == (DynamicThing*)Player::s_player) {
-                yMinOffset = hum->collBboxMin.y;
-                ckHeight = hum->collBboxMin.z;
-                if (ckHeight < 0x80) {
-                    ckHeight = 0x80;
+            if (hum->collBboxMin.z < g_colDefaultHeight) {
+                if (state != AS_THROW_CHARACTER_RECEIVE) {
+                    radius = g_colMaxRadius;
+                    checkHeight = g_colDefaultHeight;
+
+                    bool useRootRadius = false;
+                    if ((state >= 69 && state <= AS_DEAD) || state == 56) {
+                        useRootRadius = true;
+                    }
+                    else if (state == 53 || state == 57 || state == AS_FLYING_BACK_LAND || state == AS_THROW_FREE_FALL) {
+                        useRootRadius = true;
+                    }
+
+                    if (useRootRadius && thing->model) {
+                        HumanoidModel* hmodel = static_cast<HumanoidModel*>(static_cast<Model*>(thing->model));
+                        AnimationMatrices* animMatrices = hmodel ? hmodel->animMatrices : nullptr;
+                        if (animMatrices) {
+                            s32* rootMatrix = AnimationMatrices::GetMatrix(animMatrices, 0);
+                            if (rootMatrix) {
+                                const s32 rootRadius = (s32)rmMag2(
+                                    (f32)(rootMatrix[5] - thing->pos.x),
+                                    (f32)(rootMatrix[7] - thing->pos.z));
+
+                                if (g_colDefaultRadius < rootRadius && rootRadius < g_colMaxRadius) {
+                                    radius = rootRadius;
+                                }
+                            }
+                        }
+                    }
                 }
+            }
+
+            if (state == AS_LEDGE_LATCH || state == AS_LEDGE_PULLUP) {
+                skipWall = 1;
             }
         }
 
-        // PSX: GetTicketIssuer check
         Thing* ticketIssuer = thing->GetTicketIssuer();
 
-        if (doWall) {
-            HandleThingWall(thing, radius, yMinOffset, ckHeight);
+        if (skipWall == 0) {
+            HandleThingWall(thing, radius, yMinOffset, checkHeight);
         }
 
         if (ticketIssuer) {
-            // Standing on an obstacle - just land, skip floor check
             thing->Land();
         }
         else {
-            HandleThingFloor(thing, radius, yMinOffset, ckHeight);
+            HandleThingFloor(thing, radius, yMinOffset, checkHeight);
         }
 
-        // PSX: if climbing state and not on ground and no ticket, let go of ledge
-        if (!doWall && !thing->GetTicketIssuer() && !(thing->flags & TF_ON_GROUND)) {
+        if (skipWall != 0 && !thing->GetTicketIssuer() && (thing->flags & TF_ON_GROUND) == 0) {
             static_cast<Humanoid*>(thing)->LetGoOfLedge();
         }
     }

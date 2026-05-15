@@ -140,8 +140,40 @@ static const CharSubTypeData kCharSubTypeDataTable[] = {
     { -1, 0, 0, -1, -1 },
 };
 
-// PSX: global humanoidDataTable pointer (HUMNDATA.CPP)
-const HumanoidDataEntry* humanoidDataTable = nullptr;
+// PSX: HUMNDATA.CPP inline table at 0x800D9090, scanned in 12-byte entries
+// by GetHumanoidData__FQ22AI10ThingTypes until thingType == -1.
+static const HumanoidDataEntry kHumanoidDataTable[] = {
+    { 0, nullptr, 25 },
+    { 1, nullptr, 25 },
+    { 2, nullptr, 32 },
+    { 3, nullptr, 32 },
+    { 4, nullptr, 30 },
+    { 5, nullptr, 32 },
+    { 6, nullptr, 30 },
+    { 7, nullptr, 32 },
+    { 8, nullptr, 30 },
+    { 9, nullptr, 28 },
+    { 10, reinterpret_cast<void*>(1), 34 },
+    { 11, nullptr, 32 },
+    { 12, nullptr, 30 },
+    { 13, reinterpret_cast<void*>(1), 34 },
+    { 14, nullptr, 30 },
+    { 15, reinterpret_cast<void*>(1), 34 },
+    { 16, nullptr, 30 },
+    { 17, reinterpret_cast<void*>(1), 30 },
+    { 18, nullptr, 30 },
+    { 19, nullptr, 28 },
+    { 20, nullptr, 25 },
+    { 21, nullptr, 30 },
+    { 23, nullptr, 35 },
+    { 24, nullptr, 30 },
+    { 25, nullptr, 30 },
+    { 26, nullptr, 30 },
+    { 27, nullptr, 30 },
+    { -1, nullptr, 0xFFFF },
+};
+
+const HumanoidDataEntry* humanoidDataTable = kHumanoidDataTable;
 
 s32 GetEnumFromHashTable(const HashEnum* table, u32 count, s32 hash) {
     if (!hash) {

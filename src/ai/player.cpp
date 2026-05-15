@@ -838,7 +838,8 @@ void Player::SetActionState(u32 state, s32 param) {
             }
 
             field344 = 0;
-            stateDispatch = SD_PICKUP;
+            // PSX case 44 uses direct callback Pickup__8Humanoid.
+            stateDispatch = SD_NONE;
             actionState = (s32)state;
             return;
         }

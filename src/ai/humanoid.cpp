@@ -262,8 +262,10 @@ static void UpdateHumanoidRenderAnimPose(HumanoidModel* model, HumanoidRenderSmo
 
 // PSX gp+1764 (0x800DD030): gravityReduction
 static s32 s_gravityReduction = 3;
-// PSX gp+1860 (0x800DD094): soundFrame
-static s32 s_flyingBackGravityScale = 20;
+// PSX gp+1860 (0x800DD094): flying-back gravity scale
+static s32 s_flyingBackGravityScale = 1;
+// PSX gp+1958 (0x800DD0F2): zeroGHangTime
+static s32 s_zeroGHangTime = 5;
 
 static s32 GetFlyingBackFallDivisor() {
     if (s_gravityReduction == 0) {
@@ -860,6 +862,22 @@ s32 Humanoid::FindChildWithRequestedCommand(
     return FindSiblingWithRequestedCommand(root->child, requestedBits, frame);
 }
 
+static const STreeJoint* GetBip01Joint(const STreeData* skeleton) {
+    if (!skeleton || !skeleton->joints || skeleton->numJoints == 0) {
+        return nullptr;
+    }
+
+    static const u32 s_bip01Hash = p3dHash("Bip01");
+    for (u32 jointIndex = 0; jointIndex < skeleton->numJoints; jointIndex++) {
+        const STreeJoint* joint = &skeleton->joints[jointIndex];
+        if (joint->nameUID == s_bip01Hash) {
+            return joint;
+        }
+    }
+
+    return skeleton->GetJoint(0);
+}
+
 // PSX: HandleAnimationControl__8Humanoid (HUMANOID.CPP:1590)
 s32 Humanoid::HandleAnimationControl() {
     MARKFUNCTION(0x80064194);
@@ -884,7 +902,7 @@ s32 Humanoid::HandleAnimationControl() {
 
     OriginalSTree* source = GetActiveSTree(m->drawable);
     STreeData* skeleton = source ? source->skeleton : nullptr;
-    const STreeJoint* joint = skeleton ? skeleton->GetJoint(0) : nullptr;
+    const STreeJoint* joint = GetBip01Joint(skeleton);
     if (!joint) {
         return 0;
     }
@@ -1300,7 +1318,7 @@ s32 Humanoid::RestorePositionFromBip01() {
 
     OriginalSTree* source = GetActiveSTree(m->drawable);
     STreeData* skeleton = source ? source->skeleton : nullptr;
-    const STreeJoint* joint = skeleton ? skeleton->GetJoint(0) : nullptr;
+    const STreeJoint* joint = GetBip01Joint(skeleton);
     if (!joint) {
         return 0;
     }
@@ -1633,7 +1651,7 @@ void Humanoid::HandleCollisionReactionStates(s32 hitType, s32 impactRegion) {
         case AS_FLIP:
         case 33:
         case 35:
-            SetActionState((hitType == 18) ? 46 : 57, 0);
+            SetActionState((hitType == 18) ? 46 : AS_FLYING_BACK, 0);
             DropPickup(1, 1);
             break;
 
@@ -1642,14 +1660,14 @@ void Humanoid::HandleCollisionReactionStates(s32 hitType, s32 impactRegion) {
             contactForce = {};
             break;
 
-        case 53:
-        case 57:
+        case AS_GOT_HIT_FREEFORM:
+        case AS_FLYING_BACK:
         case AS_FLYING_BACK_LAND:
         case AS_THROW_FREE_FALL:
-            SetActionState(53, 0);
+            SetActionState(AS_GOT_HIT_FREEFORM, 0);
             break;
 
-        case 56:
+        case AS_SPIN_BACK:
         case AS_THROW_CHARACTER_RECEIVE:
             return;
 
@@ -1666,7 +1684,7 @@ void Humanoid::HandleCollisionReactionStates(s32 hitType, s32 impactRegion) {
                 case 12:
                 case 17:
                     maxFallDivisor = GetFlyingBackFallDivisor();
-                    SetActionState(57, 0);
+                    SetActionState(AS_FLYING_BACK, 0);
                     DropPickup(1, 1);
                     break;
 
@@ -1674,20 +1692,20 @@ void Humanoid::HandleCollisionReactionStates(s32 hitType, s32 impactRegion) {
                 case 11:
                 case 14:
                 case 15:
-                    SetActionState(56, 0);
+                    SetActionState(AS_SPIN_BACK, 0);
                     DropPickup(1, 1);
                     break;
 
                 case 8:
                 case 13:
-                    SetActionState(55, 0);
+                    SetActionState(AS_STUNNED, 0);
                     DropPickup(1, 1);
                     break;
 
                 default:
                     if (hitType == 2 && !humanoidData) {
                         maxFallDivisor = GetFlyingBackFallDivisor();
-                        SetActionState(57, 0);
+                        SetActionState(AS_FLYING_BACK, 0);
                         DropPickup(1, 1);
                         break;
                     }
@@ -2303,7 +2321,8 @@ void Humanoid::SetActionState(u32 state, s32 param) {
             break;
         case AS_PICKUP:
         {
-            stateDispatch = SD_PICKUP;
+            // PSX case 44 uses direct callback Pickup__8Humanoid.
+            stateDispatch = SD_NONE;
             s32 pickupAnim = 44;
             if (rightHandObj) {
                 Pickup* pickup = static_cast<Pickup*>(rightHandObj);
@@ -2409,10 +2428,11 @@ void Humanoid::SetActionState(u32 state, s32 param) {
             orientation.x = 0;
             flags2 &= ~0x70u;
             break;
-        case 53:
+        case AS_GOT_HIT_FREEFORM:
             stateTimer = 0;
             field344 = 0;
-            stateDispatch = SD_PICKUP;
+            // PSX case 53 uses slot 40 in ProcessAction dispatch.
+            stateDispatch = SD_GOT_HIT_FREEFORM;
             field348 = 8;
             if (model) {
                 Model* m = static_cast<Model*>(model);
@@ -2427,7 +2447,7 @@ void Humanoid::SetActionState(u32 state, s32 param) {
                 field524 = 0;
             }
             break;
-        case 56:
+        case AS_SPIN_BACK:
             combatFlag = 0;
             if (model) {
                 Model* m = static_cast<Model*>(model);
@@ -2443,7 +2463,7 @@ void Humanoid::SetActionState(u32 state, s32 param) {
                 field524 = 0;
             }
             break;
-        case 57:
+        case AS_FLYING_BACK:
             if (model) {
                 Model* m = static_cast<Model*>(model);
                 m->SetAnim(14, param, 1, 0);
@@ -2618,6 +2638,14 @@ void Humanoid::SetActionState(u32 state, s32 param) {
 // state handler. On PC, we dispatch via stateDispatch (the vtable index).
 void Humanoid::ProcessAction() {
     MARKFUNCTION(0x8006538C);
+
+    // PSX case 44 uses a direct callback (field346=-1 + Pickup__8Humanoid).
+    // Host preserves that behavior via action-state direct routing.
+    if (actionState == AS_PICKUP) {
+        _Pickup();
+        return;
+    }
+
     if (stateDispatch == SD_NONE) return;
 
     switch (stateDispatch) {
@@ -2671,7 +2699,7 @@ void Humanoid::ProcessAction() {
         case SD_COUNTER_ATTACK_RECOVERY: CounterAttackRecovery(); break;
         case SD_THROW_CHARACTER_RECEIVE: ThrowCharacterReceive(); break;
         case SD_THROW_FREE_FALL: ThrowFreeFall(); break;
-        case SD_PICKUP:       _Pickup(); break;
+        case SD_GOT_HIT_FREEFORM: GotHitFreeForm(); break;
         case SD_LEDGE_LATCH:  _LedgeLatch(); break;
         case SD_LEDGE_PULLUP: _LedgePullup(); break;
         case SD_LADDER_LATCH_TOP: _LadderLatchTop(); break;
@@ -4514,6 +4542,21 @@ s32 Humanoid::TestAndSetBackGrab() {
     return 1;
 }
 
+// PSX: GotHitFreeForm__8Humanoid (HUMANOID.CPP:8682, 0x8006C3EC)
+// AS_GOT_HIT_FREEFORM hang-time handler: hold fall divisor at 0, then resume
+// flying-back handling once zeroGHangTime has elapsed.
+void Humanoid::GotHitFreeForm() {
+    MARKFUNCTION(0x8006C3EC);
+
+    stateTimer += 1;
+    if (stateTimer > s_zeroGHangTime) {
+        _FlyingBack();
+        return;
+    }
+
+    maxFallDivisor = 0;
+}
+
 // PSX: LetGoOfLedge__8Humanoid (HUMANOID.CPP:8735, 0x8006C478)
 // Releases from ledge: repositions away from ledge face and transitions to fall.
 s32 Humanoid::LetGoOfLedge() {
@@ -5051,16 +5094,16 @@ s32 Humanoid::KillDialog(s32 force, s32 minPriority, s32 maxPriority) {
 
 static bool IsThrowLatchDisallowedState(u32 state) {
     switch (state) {
-    case 13:
-    case 14:
+    case AS_FALL:
+    case AS_HARDFALL:
     case AS_COUNTER_ATTACK_PRE_LATCH:
     case AS_COUNTER_ATTACK_LATCH:
     case AS_COUNTER_ATTACK:
     case 51:
     case 52:
-    case 53:
-    case 57:
-    case 58:
+    case AS_GOT_HIT_FREEFORM:
+    case AS_FLYING_BACK:
+    case AS_FLYING_BACK_LAND:
     case AS_BACK_GRAB_RECEIVE_PRE_LATCH:
     case AS_BACK_GRAB_RECEIVE_LATCH:
     case AS_BACK_GRAB_RECEIVE:
@@ -5501,7 +5544,7 @@ s32 Humanoid::ProcessFightingMoveStrikeJoint(
             humanoidSound->WeaponHit();
         }
 
-        victim->field466 = static_cast<u16>(static_cast<u8>(joint->HitForce()));
+        victim->field466 = static_cast<s16>(static_cast<s8>(joint->HitForce()));
 
         if (isPlayerAttacker) {
             if (g_hud) {

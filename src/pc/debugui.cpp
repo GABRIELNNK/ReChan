@@ -315,7 +315,7 @@ static const char* StateDispatchName(u16 d) {
         case SD_FLYING_BACK: return "FlyingBack";
         case SD_STUNNED: return "Stunned";
         case SD_THROW: return "Throw";
-        case SD_PICKUP: return "Pickup";
+        case SD_GOT_HIT_FREEFORM: return "GotHitFreeForm";
         case SD_GET_UP: return "GetUp";
         case SD_HORIZONTAL_POLE: return "HorizontalPole";
         case SD_SLOPE_SLIDE: return "SlopeSlide";

@@ -55,7 +55,10 @@ enum ActionState : u32 {
     AS_COUNTER_ATTACK_RECOVERY = 43,
     AS_PICKUP = 44,           // PSX Player case 44: pick up object
     AS_THROW_PICKUP = 45,
+    AS_GOT_HIT_FREEFORM = 53, // PSX case 53: got-hit freeform hang/fall
     AS_STUNNED = 55,
+    AS_SPIN_BACK = 56,        // PSX case 56: spin-back knockback
+    AS_FLYING_BACK = 57,      // PSX case 57: flying-back knockback
     AS_FLYING_BACK_LAND = 58,
     AS_THROW_CHARACTER_RECEIVE = 59,
     AS_BACK_GRAB_RECEIVE_PRE_LATCH = 60,
@@ -98,7 +101,8 @@ enum StateDispatch : u16 {
     SD_STUNNED = 38,
     SD_FLOATING = 274,
     SD_THROW = 39,
-    SD_PICKUP = 40,
+    // PSX vtable slot 40 (case 53) -> GotHitFreeForm.
+    SD_GOT_HIT_FREEFORM = 40,
     // PSX state 70/71 dispatch target (vtable slot 41) for knockdown recovery.
     SD_COLLAPSE_RECOVER = 41,
     // PSX vtable indices 41-48 include shared and Player-specific handlers.
@@ -326,8 +330,8 @@ public:
     // PSX +464 (u16): humanoid data ID
     u16 humanoidDataID = 20;
 
-    // PSX +466,+468,+470 (u16): combat counters
-    u16 field466 = 0;
+    // PSX +466,+468,+470 (s16,u16,u16): combat counters
+    s16 field466 = 0;
     u16 field468 = 0;
     u16 comboCount = 1;
 
@@ -440,6 +444,7 @@ public:
     s32 ProcessFightingComboNode();
     s32 TestAndSetWeaponKungFU();
     s32 TestWallContextFightingRequestRemap();
+    void GotHitFreeForm();
     void PrepareLedgeLatch(const LVector& correctionPos, const LVector& normal);
     s32 CheckForLanding();
     bool CheckForLedges();
