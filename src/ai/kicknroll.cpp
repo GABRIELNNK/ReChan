@@ -183,6 +183,33 @@ void KnockDown::HandleAttack(Humanoid* attacker, s32 damageType, s32 damage) {
 
 static const u32 STACK_DEFAULT_EFFECT_HASH = 0x065C8E90;
 static const char STACK_DEFAULT_PUSHABLE_NAME[] = "BoxStack1";
+static constexpr u32 STACK_CALLBACK_JOINT_HASH_A = 0x08857E62;
+static constexpr u32 STACK_CALLBACK_JOINT_HASH_B = 0x08857E63;
+
+static void StackBuildModelWorldMatrix(const Model* model, Mat4& worldMatrix) {
+    worldMatrix = Mat4();
+    if (!model) {
+        return;
+    }
+
+    p3dBuildRotMatrixZYX(model->rotX, model->rotY, model->rotZ, worldMatrix);
+    worldMatrix.SetTranslation((f32)model->posX, (f32)model->posY, (f32)model->posZ);
+}
+
+static STreeJoint* StackFindJointByHash(STreeData* skeleton, u32 jointHash) {
+    if (!skeleton || !skeleton->joints || jointHash == 0) {
+        return nullptr;
+    }
+
+    for (u32 i = 0; i < skeleton->numJoints; i++) {
+        STreeJoint* joint = &skeleton->joints[i];
+        if (joint->nameUID == jointHash) {
+            return joint;
+        }
+    }
+
+    return nullptr;
+}
 
 static s32 StackEJointCallback(STreeJoint* joint, u32 jointIndex, const Mat4& currentMatrix) {
     MARKFUNCTION(0x8001F5A0);
@@ -192,11 +219,29 @@ static s32 StackEJointCallback(STreeJoint* joint, u32 jointIndex, const Mat4& cu
     }
 
     Stack* stack = static_cast<Stack*>(joint->callbackData);
+
+    Mat4 worldMatrix = currentMatrix;
+    Model* stackModel = static_cast<Model*>(stack->model);
+    if (stackModel) {
+        Mat4 modelWorld = Mat4();
+        StackBuildModelWorldMatrix(stackModel, modelWorld);
+        worldMatrix = modelWorld * currentMatrix;
+    }
+
     LVector jointPos = {};
-    jointPos.x = (s32)currentMatrix.GetTransX();
-    jointPos.y = (s32)currentMatrix.GetTransY();
-    jointPos.z = (s32)currentMatrix.GetTransZ();
-    stack->SetupJointPosition((s32)jointIndex, jointPos);
+    jointPos.x = (s32)worldMatrix.GetTransX();
+    jointPos.y = (s32)worldMatrix.GetTransY();
+    jointPos.z = (s32)worldMatrix.GetTransZ();
+
+    s32 callbackJointIndex = (s32)jointIndex;
+    if (joint->nameUID == STACK_CALLBACK_JOINT_HASH_A) {
+        callbackJointIndex = 2;
+    }
+    else if (joint->nameUID == STACK_CALLBACK_JOINT_HASH_B) {
+        callbackJointIndex = 3;
+    }
+
+    stack->SetupJointPosition(callbackJointIndex, jointPos);
     return 1;
 }
 
@@ -567,9 +612,12 @@ void Stack::HandleHumanoidCollision(Humanoid* hum) {
         *reinterpret_cast<const tagCollisionCylinder*>(&hum->collBboxMin);
     tagCollisionSphere sphere = { 200 };
 
-    bool hit = CheckStaticCylinderSphereCollision(hum->pos, humCylinder, jointPositions[1], sphere);
+    const bool hit0 = CheckStaticCylinderSphereCollision(hum->pos, humCylinder, jointPositions[0], sphere);
+    bool hit1 = false;
+    bool hit = hit0;
     if (!hit) {
-        hit = CheckStaticCylinderSphereCollision(hum->pos, humCylinder, jointPositions[2], sphere);
+        hit1 = CheckStaticCylinderSphereCollision(hum->pos, humCylinder, jointPositions[1], sphere);
+        hit = hit1;
         if (hit && currentFrame < 31) {
             hit = false;
         }
@@ -637,17 +685,31 @@ void Stack::SetupCallbacks() {
 
     STreeData* skeleton = animStruct->flip->tree;
 
-    for (s32 i = 2; i <= 3; i++) {
-        STreeJoint* joint = skeleton->GetJoint(i);
-        if (!joint) {
-            continue;
-        }
-
-        joint->postCallback = StackEJointCallback;
-        joint->callbackData = this;
-        joint->flags |= STF_POST_CALLBACK_MASK;
+    STreeJoint* jointA = StackFindJointByHash(skeleton, STACK_CALLBACK_JOINT_HASH_A);
+    if (jointA) {
+        jointA->postCallback = StackEJointCallback;
+        jointA->callbackData = this;
+        jointA->flags |= STF_POST_CALLBACK_MASK;
     }
 
+    STreeJoint* jointB = StackFindJointByHash(skeleton, STACK_CALLBACK_JOINT_HASH_B);
+    if (jointB) {
+        jointB->postCallback = StackEJointCallback;
+        jointB->callbackData = this;
+        jointB->flags |= STF_POST_CALLBACK_MASK;
+    }
+
+    if (!jointA || !jointB) {
+        for (s32 i = 2; i <= 3; i++) {
+            STreeJoint* joint = skeleton->GetJoint(i);
+            if (!joint) {
+                continue;
+            }
+            joint->postCallback = StackEJointCallback;
+            joint->callbackData = this;
+            joint->flags |= STF_POST_CALLBACK_MASK;
+        }
+    }
 }
 
 void Stack::SetupJointPosition(s32 index, LVector pos) {

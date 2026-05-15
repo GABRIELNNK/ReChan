@@ -128,10 +128,8 @@ public:
     CKnockDownSound* knockDownSound = nullptr;
     // PSX +160 (char[50]): generated pushable model name.
     char pushableName[50] = {};
-    // Align joint position storage to +0xD4 like PSX.
-    u16 pushableNamePad = 0;
     // Joint positions captured by stack joint callback.
-    LVector jointPositions[3] = {};
+    LVector jointPositions[2] = {};
 
     Stack(const LVector* pos, u16 type);
     ~Stack() override;
