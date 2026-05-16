@@ -74,8 +74,9 @@ static constexpr s16 BACK_GRAB_RELEASE_SPEED_FRAME = 13;
 static constexpr s32 BACK_GRAB_RECOVERY_START_FRAME = 7;
 static constexpr s32 BACK_GRAB_RECEIVE_PRE_LATCH_FRAMES = 31;
 static constexpr s32 BACK_GRAB_ATTACH_Z = 0x1C2;
-// PSX gp+0x738, passed as Pickup::Release forceMag in _Throw directional release.
-static s32 s_throwPickupReleaseForce = 0;
+// PSX gp+0x738 (0x800DD084), passed as Pickup::Release forceMag in _Throw directional release.
+// Symbol dump labels this as THROW_PROJECTILE_VELOCITY with default value 0x59D8.
+static s32 s_throwPickupReleaseForce = 0x59D8;
 static constexpr s32 DROP_PICKUP_DAMAGE_THRESHOLD = 14;
 static constexpr s32 BACK_GRAB_MIN_RELATIVE_ANGLE = 5461;
 static constexpr u32 BACK_GRAB_RELATIVE_ANGLE_RANGE = 0xD8E3;
@@ -1196,6 +1197,15 @@ void Humanoid::Draw() {
 
         attackJointIndex = -1;
 
+        if (rightHandObj) {
+            rightHandObj->UpdatePosition();
+            rightHandObj->Draw();
+        }
+        if (leftHandObj) {
+            leftHandObj->UpdatePosition();
+            leftHandObj->Draw();
+        }
+
         if (hm->animMatrices && hm->animMatrices->Copy()) {
             collBboxMin.x = 175;
             collBboxMin.y = 0;
@@ -1479,10 +1489,25 @@ s32 Humanoid::CheckForPickup() {
         return 0;
     }
 
+    // PSX: bail out if the pickup animation for this model is not resident.
+    if (!model) {
+        return 0;
+    }
+    HumanoidModel* hm = static_cast<HumanoidModel*>(model);
+    if (!hm->IsAnimationLoaded(static_cast<s32>(pickup->GetPickupMove()))) {
+        return 0;
+    }
+
     // PSX removes from inactivePickupList, stores owner pointer in pickup, clears combat flag,
     // plays GrabWeapon SFX, then enters AS_PICKUP.
-    g_ai->inactivePickupList.RemNode(static_cast<ccMinNode*>(pickup));
-    SetRightHandObj(pickup);
+    ccMinNode* removed = g_ai->inactivePickupList.RemNode(static_cast<ccMinNode*>(pickup));
+    if (!removed) {
+        return 0;
+    }
+
+    Pickup* heldPickup = static_cast<Pickup*>(removed);
+    heldPickup->attachedOwner = this;
+    rightHandObj = heldPickup;
     combatFlag = 0;
 
     if (humanoidSound) {
@@ -1806,7 +1831,12 @@ void Humanoid::HandleCollision(Thing* other, s32 damage, ...) {
     }
 
     if (forceMagnitude != 0) {
-        AddForce(-forceMagnitude, reinterpret_cast<const SVector*>(&orientation));
+        SVector forceDir = {};
+        forceDir.x = static_cast<s16>(orientation.x);
+        forceDir.y = 0;
+        forceDir.z = static_cast<s16>(orientation.y);
+        forceDir.pad = 0;
+        AddForce(-forceMagnitude, &forceDir);
     }
 
     if (impulse) {
@@ -4100,6 +4130,7 @@ void Humanoid::_Pickup() {
     const s16 frame = static_cast<s16>((u32)anim->currentFrame >> 16);
     if (rightHandObj != 0 && frame >= static_cast<s16>(static_cast<Pickup*>(rightHandObj)->GetPickupMoveGrabFrame())) {
         flags2 |= 0x0001;
+        static_cast<Pickup*>(rightHandObj)->SetupPickup(this, 2);
     }
 
     if (anim->loopCount > 0) {
@@ -4652,11 +4683,17 @@ void Humanoid::_Throw() {
                 PlayDialog(84, 10);
             }
 
+            SVector throwDir = {};
+            throwDir.x = static_cast<s16>(orientation.x);
+            throwDir.y = 0;
+            throwDir.z = static_cast<s16>(orientation.y);
+            throwDir.pad = 0;
+
             pickup->field308 = 1;
             pickup->Release(
                 this,
                 pickupList,
-                reinterpret_cast<const SVector*>(&orientation),
+                &throwDir,
                 s_throwPickupReleaseForce);
             flags2 &= ~0x0001u;
         }
@@ -5602,6 +5639,16 @@ s32 Humanoid::ProcessFightingMoveStrikeJoint(
         Thing* brokenWeapon = rightHandObj;
         if (brokenWeapon->health == 0 && weaponBreakOnEmpty != 0) {
             DropPickup(1, 1);
+
+            if (rightHandObj == brokenWeapon) {
+                rightHandObj = nullptr;
+                flags2 &= ~1u;
+            }
+            if (leftHandObj == brokenWeapon) {
+                leftHandObj = nullptr;
+                flags2 &= ~2u;
+            }
+
             brokenWeapon->Kill();
             field472 = 0;
         }
@@ -5800,6 +5847,16 @@ s32 Humanoid::ProcessBodyThrow(const PsxFightingMoveRaw* move, s32 frame) {
             Thing* brokenWeapon = rightHandObj;
             if (brokenWeapon->health == 0 && move->weaponBreakOnEmpty != 0) {
                 DropPickup(1, 1);
+
+                if (rightHandObj == brokenWeapon) {
+                    rightHandObj = nullptr;
+                    flags2 &= ~1u;
+                }
+                if (leftHandObj == brokenWeapon) {
+                    leftHandObj = nullptr;
+                    flags2 &= ~2u;
+                }
+
                 brokenWeapon->Kill();
                 field472 = 0;
             }

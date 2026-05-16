@@ -2,7 +2,9 @@
 #include "gen/database.h"
 #include "gen/geometry.h"
 #include "gen/colsect.h"
+#include "gen/game.h"
 #include "gen/uvdata.h"
+#include "gen/world.h"
 #include "p3d/byteread.h"
 #include "p3d/context.h"
 #include "pddi/pddi.h"
@@ -346,6 +348,15 @@ bool Block::Draw(const LVector* drawPos) {
                          static_cast<f32>(drawPos->y),
                          static_cast<f32>(drawPos->z));
     p3d::context->SetWorldMatrix(world);
+
+    // Keep block rendering deterministic even if previous effect/model draws
+    // changed context state and did not restore it.
+    if (g_game && g_game->GetWorld()) {
+        p3d::context->SetVRAMHandle(g_game->GetWorld()->GetVRAMHandle());
+    }
+    p3d::context->SetTexInfoOverride(false, 0);
+    p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+    p3d::context->SetCullMode(PDDI_CULL_NONE);
 
     UpdateUVPrimData(blockNum, primGeom);
     UpdateCBVPrimData(blockNum, primGeom);

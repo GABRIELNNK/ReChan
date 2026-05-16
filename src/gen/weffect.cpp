@@ -14,6 +14,7 @@
 #include "gen/model.h"
 #include "gen/paldata.h"
 #include "gen/path.h"
+#include "gen/psxmath_helpers.h"
 #include "gen/pweffect.h"
 #include "gen/scaledata.h"
 #include "gen/uvdata.h"
@@ -2087,10 +2088,8 @@ bool ComEffect::PointInView(const LVector& pos, s32 radius) const {
         return false;
     }
 
-    const s32 sx = port.centerX
-        + static_cast<s32>((static_cast<f32>(vx) * port.projectionDistanceX) / static_cast<f32>(vz));
-    const s32 sy = port.centerY
-        + static_cast<s32>((static_cast<f32>(vy) * port.projectionDistanceY) / static_cast<f32>(vz));
+    const s32 sx = PsxProjectScreenCoord(port.centerX, vx, port.projectionDistanceX, vz);
+    const s32 sy = PsxProjectScreenCoord(port.centerY, vy, port.projectionDistanceY, vz);
 
     s32 marginX = 0;
     s32 marginY = 0;

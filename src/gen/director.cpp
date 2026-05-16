@@ -64,7 +64,7 @@
     static constexpr u32 kDirectorFallbackCheckpointHash = 0x0E6B6563u;
 
     // PSX intro scripts pass these BOL overlay string virtual addresses into
-    // HudFunc 'M' (ShowBossHealth). We resolve them to the corresponding boss CRC.
+    // HudFunc 'M' (ShowBossHealth). Resolve them to the corresponding boss CRC.
     static bool ResolveHudBossHashArg(u32 arg, u32* outBossHash) {
         if (!outBossHash) {
             return false;
@@ -74,8 +74,8 @@
             case 0x8001FA34u: *outBossHash = 0x004A85A5u; return true; // intro_all_dante
             case 0x8001FA4Cu: *outBossHash = 0x00049EB6u; return true; // intro_chef
             case 0x8001FBF4u: *outBossHash = 0x004A36DEu; return true; // intro_clown
-            case 0x8001FD8Cu: *outBossHash = 0x048894C9u; return true; // intro_grontar
-            case 0x8001FEE4u: *outBossHash = 0x004B099Fu; return true; // intro_disco
+            case 0x8001FDDCu: *outBossHash = 0x048894C9u; return true; // intro_grontar
+            case 0x8002001Cu: *outBossHash = 0x004B099Fu; return true; // intro_disco
             default:
                 break;
         }
@@ -673,20 +673,6 @@
         return nullptr;
     }
 
-    static void LogDirectorCommand(const char* streamName, const s32* commandPtr, const char* commandName, s32 commandValue) {
-        const u32 scriptAddress = commandPtr ? ToVirtualAddress(commandPtr) : 0;
-        LOG("[Director][%s] cmd=%s value=%d (0x%X) script=0x%08X",
-            streamName ? streamName : "Main",
-            commandName ? commandName : "Unknown",
-            commandValue,
-            static_cast<u32>(commandValue),
-            scriptAddress);
-    }
-
-    static void LogDirectorUnknownCommand(const char* streamName, const s32* commandPtr, s32 commandValue) {
-        LogDirectorCommand(streamName, commandPtr, "Unknown", commandValue);
-    }
-
     static s32 GetDirectorFrameCounter() {
         if (!g_time) {
             return 0;
@@ -943,8 +929,6 @@ void Director::SetCodeSnip(s32* snip, Thing* thing) {
 
     RegisterKnownDirectorScriptRegions();
 
-    LOG("[Director][SetCodeSnip] script=0x%08X thing=%p", ToVirtualAddress(snip), thing);
-
     scriptState = 537;
 
     directorDialogCounter = -1;
@@ -961,19 +945,12 @@ void Director::SetCodeSnip(s32* snip, Thing* thing) {
 bool Director::TriggerDeathVolume(s32 newDeathType) {
     RegisterKnownDirectorScriptRegions();
 
-    LOG("[Director][TriggerDeathVolume] requestedType=%d currentCodeSnip=0x%08X deathVol=0x%08X",
-        newDeathType,
-        ToVirtualAddress(codeSnipPtr),
-        ToVirtualAddress(death_vol));
-
     if (codeSnipPtr == death_vol) {
-        LOG("[Director][TriggerDeathVolume] ignored (already in death_vol)");
         return false;
     }
 
     deathType = newDeathType;
     SetCodeSnip(death_vol, nullptr);
-    LOG("[Director][TriggerDeathVolume] activated deathType=%d", deathType);
     return true;
 }
 
@@ -1041,9 +1018,7 @@ void Director::Process() {
             return;
         }
 
-        const s32* opcodePtr = scriptPtr;
         const DirectorOpcode opcode = static_cast<DirectorOpcode>(*scriptPtr);
-        LogDirectorCommand("Main", opcodePtr, CmdToString(opcode), static_cast<s32>(opcode));
         switch (opcode) {
             case DirectorOpcode::End:
                 // PSX: clear director state, clear NIS flags, destroy directorSound
@@ -1168,10 +1143,6 @@ void Director::Process() {
                 const u32 thingRef = static_cast<u32>(scriptPtr[1]);
                 scriptPtr += 2;
                 const s32 requestedState = *scriptPtr;
-                LOG("[Director][Main][SetHumanoidAction] targetRef=%u state=%d (0x%X)",
-                    thingRef,
-                    requestedState,
-                    static_cast<u32>(requestedState));
                 Humanoid* humanoid = FindHumanoidInHumanoidListByScriptRef(thingRef);
                 if (humanoid) {
                     humanoid->SetActionState(static_cast<u32>(requestedState), 0);
@@ -1237,7 +1208,6 @@ void Director::Process() {
             {
                 const u32 thingRef = static_cast<u32>(scriptPtr[1]);
                 const s32 animEnumVal = scriptPtr[2];
-                LOG("[Director][Main][PlayThingDynamicAnim] targetRef=%u anim=%d", thingRef, animEnumVal);
                 scriptPtr += 3;
                 Humanoid* humanoid = FindHumanoidInHumanoidListByScriptRef(thingRef);
                 if (humanoid && humanoid->model) {
@@ -1824,7 +1794,6 @@ void Director::Process() {
                 // PSX: unknown opcodes are silently skipped (continue)
                 // PSX doesn't terminate on unknown opcodes.
                 scriptPtr += 1;
-                LogDirectorUnknownCommand("Main", opcodePtr, static_cast<s32>(opcode));
                 ASSERT(false && "Unknown Director main opcode");
                 break;
         }
@@ -1910,9 +1879,7 @@ void Director::SetDesiredWideScreen() {
             return;
         }
 
-        const s32* tokenPtr = scriptPtr;
         const DirectorWideScreenCmd token = static_cast<DirectorWideScreenCmd>(*scriptPtr);
-        LogDirectorCommand("WideScreen", tokenPtr, DirectorWideScreenCmdToString(token), static_cast<s32>(token));
         if (token == DirectorWideScreenCmd::End) {
             scriptPtr += 1;
             return;
@@ -1956,7 +1923,6 @@ void Director::SetDesiredWideScreen() {
             }
 
             default:
-                LogDirectorUnknownCommand("WideScreen", tokenPtr, static_cast<s32>(token));
                 ASSERT(false && "Unknown Director widescreen opcode");
                 break;
         }
@@ -1973,10 +1939,8 @@ void Director::ProcessEdison() {
         return;
     }
 
-    const s32* opcodePtr = scriptPtr;
     const DirectorEdisonCmd opcode = static_cast<DirectorEdisonCmd>(*scriptPtr);
     scriptPtr += 1;
-    LogDirectorCommand("Edison", opcodePtr, DirectorEdisonCmdToString(opcode), static_cast<s32>(opcode));
 
     if (opcode == DirectorEdisonCmd::PlayTransient) {
         // PSX: reads u16 soundID, advances scriptPtr, calls CSoundDirect::PlayTransient(soundID, 0, 0, 0)
@@ -1989,11 +1953,9 @@ void Director::ProcessEdison() {
         CSoundDirect::PlayTransient(soundID, nullptr, 0, 0);
     }
     else if (opcode == DirectorEdisonCmd::StopMusic) {
-        LOG("[Director] Edison StopMusic opcode");
         rsEvent(RS_STOP_MUSIC, 0, 0, 0);
     }
     else {
-        LogDirectorUnknownCommand("Edison", opcodePtr, static_cast<s32>(opcode));
         ASSERT(false && "Unknown Director Edison opcode");
     }
 }
@@ -2005,8 +1967,6 @@ void Director::ProcessModelFunc() {
     if (!scriptPtr) {
         return;
     }
-
-    LogDirectorCommand("Model", scriptPtr, "RawModelToken", *scriptPtr);
 }
 
 // PSX: ProcessCameraFunc__8Director (DIRECTOR.CPP:3716, 0x8003D884)
@@ -2017,10 +1977,8 @@ void Director::ProcessCameraFunc() {
         return;
     }
 
-    const s32* opPtr = scriptPtr;
     const DirectorCameraCmd op = static_cast<DirectorCameraCmd>(*scriptPtr);
     scriptPtr += 1;
-    LogDirectorCommand("Camera", opPtr, DirectorCameraCmdToString(op), static_cast<s32>(op));
 
     Camera* camera = GetGameCamera();
 
@@ -2184,10 +2142,8 @@ void Director::ProcessHudFunc() {
         return;
     }
 
-    const s32* opPtr = scriptPtr;
     const DirectorHudCmd op = static_cast<DirectorHudCmd>(*scriptPtr);
     scriptPtr += 1;
-    LogDirectorCommand("Hud", opPtr, DirectorHudCmdToString(op), static_cast<s32>(op));
 
     switch (op) {
         case DirectorHudCmd::HideHud:
@@ -2238,7 +2194,6 @@ void Director::ProcessHudFunc() {
         }
 
         default:
-            LogDirectorUnknownCommand("Hud", opPtr, static_cast<s32>(op));
             ASSERT(false && "Unknown Director HUD opcode");
             break;
     }
@@ -2254,21 +2209,15 @@ void Director::ProcessHumanoidFunc() {
 
     const u32 thingRef = static_cast<u32>(*scriptPtr);
     scriptPtr += 1;
-    LOG("[Director][Humanoid] targetRef=%u (0x%X)", thingRef, thingRef);
 
     Humanoid* humanoid = FindHumanoidInHumanoidListByScriptRef(thingRef);
-    if (!humanoid) {
-        LOG("[Director][Humanoid] targetRef=%u not found", thingRef);
-    }
 
     for (s32 i = 0; i < 128; i++) {
         if (!scriptPtr) {
             return;
         }
 
-        const s32* opPtr = scriptPtr;
         const DirectorHumanoidCmd op = static_cast<DirectorHumanoidCmd>(*scriptPtr);
-        LogDirectorCommand("Humanoid", opPtr, DirectorHumanoidCmdToString(op), static_cast<s32>(op));
         if (op == DirectorHumanoidCmd::End) {
             scriptPtr += 1;
             return;
@@ -2322,16 +2271,6 @@ void Director::ProcessHumanoidFunc() {
 
             case DirectorHumanoidCmd::StandFacingZero:
                 if (humanoid) {
-                    LOG("[Director][Humanoid][StandFacingZero] ref=%u before pos=(%d,%d,%d) home=(%d,%d,%d) state=%d flags2=0x%X",
-                        thingRef,
-                        humanoid->pos.x,
-                        humanoid->pos.y,
-                        humanoid->pos.z,
-                        humanoid->homePos.x,
-                        humanoid->homePos.y,
-                        humanoid->homePos.z,
-                        humanoid->actionState,
-                        static_cast<u32>(humanoid->flags2));
                     humanoid->flags2 &= ~0x70u;
                     humanoid->SetActionState(AS_NIS_MODE, 0);
                     humanoid->flags &= ~0x800u;
@@ -2348,40 +2287,16 @@ void Director::ProcessHumanoidFunc() {
                     }
 
                     humanoid->flags |= 8u;
-
-                    LOG("[Director][Humanoid][StandFacingZero] ref=%u after pos=(%d,%d,%d) home=(%d,%d,%d) state=%d flags2=0x%X",
-                        thingRef,
-                        humanoid->pos.x,
-                        humanoid->pos.y,
-                        humanoid->pos.z,
-                        humanoid->homePos.x,
-                        humanoid->homePos.y,
-                        humanoid->homePos.z,
-                        humanoid->actionState,
-                        static_cast<u32>(humanoid->flags2));
                 }
                 break;
 
             case DirectorHumanoidCmd::SetPosition:
             {
                 const LVector position = { scriptPtr[0], scriptPtr[1], scriptPtr[2] };
-                LOG("[Director][Humanoid][SetPosition] ref=%u target=(%d,%d,%d)",
-                    thingRef,
-                    position.x,
-                    position.y,
-                    position.z);
                 scriptPtr += 3;
                 if (humanoid) {
                     humanoid->pos = position;
                     humanoid->homePos = position;
-                    LOG("[Director][Humanoid][SetPosition] ref=%u after pos=(%d,%d,%d) home=(%d,%d,%d)",
-                        thingRef,
-                        humanoid->pos.x,
-                        humanoid->pos.y,
-                        humanoid->pos.z,
-                        humanoid->homePos.x,
-                        humanoid->homePos.y,
-                        humanoid->homePos.z);
                 }
                 break;
             }
@@ -2389,11 +2304,6 @@ void Director::ProcessHumanoidFunc() {
             case DirectorHumanoidCmd::PlayDynamicAnim:
             {
                 const s32 animEnumVal = *scriptPtr;
-                LOG("[Director][Humanoid][PlayDynamicAnim] ref=%u anim=%d state=%d flags2=0x%X",
-                    thingRef,
-                    animEnumVal,
-                    humanoid ? humanoid->actionState : -1,
-                    humanoid ? static_cast<u32>(humanoid->flags2) : 0u);
                 scriptPtr += 1;
                 if (humanoid && humanoid->model) {
                     SModel* sm = static_cast<SModel*>(humanoid->model);
@@ -2419,7 +2329,6 @@ void Director::ProcessHumanoidFunc() {
                 break;
 
             default:
-                LogDirectorUnknownCommand("Humanoid", opPtr, static_cast<s32>(op));
                 continue;
         }
     }
@@ -2436,9 +2345,7 @@ void Director::ProcessLadderFunc() {
     }
 
     for (s32 i = 0; i < 128; i++) {
-        const s32* opPtr = scriptPtr;
         const DirectorLadderCmd op = static_cast<DirectorLadderCmd>(*scriptPtr);
-        LogDirectorCommand("Ladder", opPtr, DirectorLadderCmdToString(op), static_cast<s32>(op));
         if (op == DirectorLadderCmd::End) {
             scriptPtr += 1;
             return;
@@ -2518,7 +2425,6 @@ void Director::ProcessLadderFunc() {
                 break;
 
             default:
-                LogDirectorUnknownCommand("Ladder", opPtr, static_cast<s32>(op));
                 continue;
         }
     }
@@ -2535,9 +2441,7 @@ void Director::ProcessDoorFunc() {
     }
 
     for (s32 i = 0; i < 128; i++) {
-        const s32* opPtr = scriptPtr;
         const DirectorDoorCmd op = static_cast<DirectorDoorCmd>(*scriptPtr);
-        LogDirectorCommand("Door", opPtr, DirectorDoorCmdToString(op), static_cast<s32>(op));
         if (op == DirectorDoorCmd::End) {
             scriptPtr += 1;
             return;
@@ -2661,7 +2565,6 @@ void Director::ProcessDoorFunc() {
             }
 
             default:
-                LogDirectorUnknownCommand("Door", opPtr, static_cast<s32>(op));
                 ASSERT(false && "Unknown Director door opcode");
                 break;
         }
@@ -2816,44 +2719,31 @@ void Director::DetermineDeath() {
 
     s32* deathScript = death_generic;
     const s32 levelID = GetCurrentWorldLevelID();
-    const char* deathScriptName = "death_generic";
 
     if (deathType <= 0) {
         if (levelID < 2 || levelID >= 4) {
             deathScript = death_fall_pavement;
-            deathScriptName = "death_fall_pavement";
         }
         else {
             deathScript = death_fall_water;
-            deathScriptName = "death_fall_water";
         }
     }
     else {
         switch (deathType) {
             case 1:
                 deathScript = death_fall_pavement;
-                deathScriptName = "death_fall_pavement";
                 break;
             case 2:
                 deathScript = death_fall_water;
-                deathScriptName = "death_fall_water";
                 break;
             case 4:
                 deathScript = death_fall_goo;
-                deathScriptName = "death_fall_goo";
                 break;
             default:
                 deathScript = death_generic;
-                deathScriptName = "death_generic";
                 break;
         }
     }
-
-    LOG("[Director][DetermineDeath] deathType=%d level=%d selected=%s script=0x%08X",
-        deathType,
-        levelID,
-        deathScriptName,
-        ToVirtualAddress(deathScript));
 
     PushScriptReturnAddress(this, deathScript);
 }
@@ -2895,7 +2785,6 @@ void Director::ProcessDynamicAnimFunc() {
 
     s32* cmd = scriptPtr;
     const DirectorOpcode opcode = static_cast<DirectorOpcode>(cmd[0]);
-    LogDirectorCommand("DynamicAnim", cmd, CmdToString(opcode), static_cast<s32>(opcode));
 
     if (opcode == DirectorOpcode::DynamicAnimWaitLoaded) {
         const u32 thingType = static_cast<u32>(cmd[1]);
@@ -2955,7 +2844,6 @@ void Director::ProcessDynamicAnimFunc() {
 
     scriptPtr = cmd + 1;
     field68 = 0;
-    LogDirectorUnknownCommand("DynamicAnim", cmd, static_cast<s32>(opcode));
     ASSERT(false && "Unknown Director dynamic animation opcode");
 }
 

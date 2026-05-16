@@ -392,6 +392,10 @@ public:
 // Used by props loaded through OriginalGeo/tDynGeom.
 class GModel : public Model {
 public:
+    // Host-side matrix latch for PSX modelFlags bit0 path used by attached pickups.
+    s32 attachedMatrix[8] = {};
+    s32 attachedMatrixActive = 0;
+
     GModel();
     ~GModel() override;
 

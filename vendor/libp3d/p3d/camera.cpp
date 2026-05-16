@@ -4,7 +4,6 @@
 #include "p3d/context.h"
 #include "p3d/p3dmath.h"
 #include "pddi/pddidev.h"
-#include <cmath>
 
 // Global 2-point camera instance (PSX: G_2ptcam at 0x800D3964)
 t2PointMatrixCamera G_2ptcam;
@@ -41,43 +40,13 @@ void tCamera::GetClipPlanes(u16* outNear, u16* outFar) const {
     *outFar = farClip;
 }
 
-// PC bridge: base tCamera SetState only sets projection (no matrix)
+// PC bridge: push the game-provided projection matrix to the render context.
+// The game is responsible for calling SetProjectionMatrix() each frame before
+// view.BeginRender() is called (e.g. in Display::BeginFrame).
 void tCamera::SetState() {
-    // Convert PSX fixed-point FOV to GL perspective
-    // fovB is vertical half-angle tangent in Q16 (65536 = 1.0)
-    f32 vfov_rad = 2.0f * std::atan(FIX16_TO_FLOAT(fovB));
-    if (vfov_rad < 0.01f) vfov_rad = 0.7f; // safety fallback
-
-    // Use the aspect selected by the game for this frame when provided.
-    f32 aspect = 4.0f / 3.0f;
-    if (p3d::context) {
-        f32 cameraAspect = p3d::context->GetCameraAspect();
-        if (cameraAspect > 0.0f) {
-            aspect = cameraAspect;
-        }
-        else if (p3d::display) {
-            int w = p3d::display->GetWidth();
-            int h = p3d::display->GetHeight();
-            if (h > 0) {
-                aspect = (f32)w / (f32)h;
-            }
-        }
+    if (hasProjection) {
+        p3d::context->SetProjectionMatrix(projection);
     }
-    else if (p3d::display) {
-        int w = p3d::display->GetWidth();
-        int h = p3d::display->GetHeight();
-        if (h > 0) {
-            aspect = (f32)w / (f32)h;
-        }
-    }
-    if (aspect < 0.01f) aspect = 4.0f / 3.0f;
-
-    Mat4 proj = PerspectiveReversedZ(vfov_rad, aspect, nearPlaneF, farPlaneF);
-
-    // Standard GL perspective (looks along -Z). The Z-negate in the view
-    // matrix (SetCameraMatrix) converts PSX +Z forward to GL -Z forward,
-    // so no handedness hack is needed in the projection.
-    p3d::context->SetProjectionMatrix(proj);
 }
 
 // PSX: _13tMatrixCameraP6MATRIX (0x8009D5E8)

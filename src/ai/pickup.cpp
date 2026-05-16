@@ -1,8 +1,10 @@
 #include "ai/pickup.h"
 
 #include "gen/animmat.h"
+#include "gen/colsect.h"
 #include "gen/database.h"
 #include "gen/game.h"
+#include "gen/geffect.h"
 #include "gen/levelmgr.h"
 #include "gen/model.h"
 #include "gen/world.h"
@@ -10,8 +12,11 @@
 #include "p3d/p3dmath.h"
 #include "snd/sndfact.h"
 #include "snd/wpnsnd.h"
+#include <cstring>
 
 static constexpr s32 PICKUP_THRESHOLD = 50;
+static constexpr u32 PICKUP_IMPACT_EFFECT_HASH = 0x03E24164u;
+static const LVector PICKUP_IMPACT_EFFECT_SCALE = { 39321, 39321, 39321 };
 
 struct FightingSystemHashEntry {
     u32 hash = 0;
@@ -182,14 +187,14 @@ static const s32* GetMoveStruct(u16 type) {
     }
 }
 
-static u32 FindPickupFightingRootAddress(u32 hash) {
+static u32 FindPickupFightingRootAddress(u32 hash, u32 fallbackAddress = 0) {
     for (const FightingSystemHashEntry& entry : kFightingSystemTable) {
         if (entry.hash == hash) {
             return entry.rootAddress;
         }
     }
 
-    return 0;
+    return fallbackAddress;
 }
 
 static u32 GetPickupFighting(u16 type) {
@@ -270,6 +275,105 @@ static const PsxFightingJointRaw* ResolveFightingJointAddress(u32 address) {
     return nullptr;
 }
 
+struct PickupMoveFallbackEntry {
+    u32 address = 0;
+    u16 anim = 0;
+    u32 jointAddress = 0;
+};
+
+struct PickupJointFallbackEntry {
+    u32 address = 0;
+    s8 attackStartFrame = 0;
+};
+
+// These rows are present in PSX pickup/fighting data but not yet in shared extracted tables.
+static const PickupMoveFallbackEntry kPickupMoveFallbackTable[] = {
+    { 0x800D0410u, 0x0014u, 0x800D1D64u },
+    { 0x800D042Cu, 0x0013u, 0x800D1D7Cu },
+    { 0x800D0448u, 0x0015u, 0x800D1D94u },
+    { 0x800D0F8Cu, 0x00BFu, 0x800D273Cu },
+    { 0x800D0FA8u, 0x00C0u, 0x800D2754u },
+    { 0x800D0FE0u, 0x00CAu, 0x800D2784u },
+    { 0x800D10A4u, 0x00D8u, 0x800D282Cu },
+    { 0x800D10C0u, 0x00D0u, 0x800D2844u },
+    { 0x800D10DCu, 0x00D1u, 0x800D285Cu },
+    { 0x800D11A0u, 0x00E6u, 0x800D2904u },
+    { 0x800D11BCu, 0x00DEu, 0x800D291Cu },
+    { 0x800D11D8u, 0x00DFu, 0x800D2934u },
+    { 0x800D129Cu, 0x00E8u, 0x800D29DCu },
+    { 0x800D12B8u, 0x00E9u, 0x800D29F4u },
+    { 0x800D12D4u, 0x00EEu, 0x800D2A0Cu },
+    { 0x800D1344u, 0x00F5u, 0x800D2A6Cu },
+    { 0x800D1360u, 0x00F6u, 0x800D2A84u },
+    { 0x800D137Cu, 0x00F8u, 0x800D2A9Cu },
+    { 0x800D13ECu, 0x00FFu, 0x800D2AFCu },
+    { 0x800D1408u, 0x0100u, 0x800D2B14u },
+    { 0x800D1424u, 0x0102u, 0x800D2B2Cu },
+    { 0x800D14CCu, 0x0106u, 0x800D2BBCu },
+    { 0x800D14E8u, 0x0107u, 0x800D2BD4u },
+    { 0x800D1504u, 0x0111u, 0x800D2BECu },
+};
+
+static const PickupJointFallbackEntry kPickupJointFallbackTable[] = {
+    { 0x800D1D64u, 6 },
+    { 0x800D1D7Cu, 6 },
+    { 0x800D1D94u, 8 },
+    { 0x800D273Cu, 7 },
+    { 0x800D2754u, 7 },
+    { 0x800D2784u, 8 },
+    { 0x800D282Cu, 8 },
+    { 0x800D2844u, 7 },
+    { 0x800D285Cu, 7 },
+    { 0x800D2904u, 8 },
+    { 0x800D291Cu, 7 },
+    { 0x800D2934u, 7 },
+    { 0x800D29DCu, 7 },
+    { 0x800D29F4u, 7 },
+    { 0x800D2A0Cu, 7 },
+    { 0x800D2A6Cu, 7 },
+    { 0x800D2A84u, 7 },
+    { 0x800D2A9Cu, 7 },
+    { 0x800D2AFCu, 7 },
+    { 0x800D2B14u, 7 },
+    { 0x800D2B2Cu, 7 },
+    { 0x800D2BBCu, 7 },
+    { 0x800D2BD4u, 7 },
+    { 0x800D2BECu, 7 },
+};
+
+static const PickupMoveFallbackEntry* ResolvePickupMoveFallbackAddress(u32 address) {
+    if (!address) {
+        return nullptr;
+    }
+
+    for (const PickupMoveFallbackEntry& entry : kPickupMoveFallbackTable) {
+        if (entry.address == address) {
+            return &entry;
+        }
+    }
+
+    return nullptr;
+}
+
+static s8 ResolvePickupJointAttackStartFrame(u32 address) {
+    if (!address) {
+        return 0;
+    }
+
+    const PsxFightingJointRaw* joint = ResolveFightingJointAddress(address);
+    if (joint) {
+        return joint->AttackStartFrame();
+    }
+
+    for (const PickupJointFallbackEntry& entry : kPickupJointFallbackTable) {
+        if (entry.address == address) {
+            return entry.attackStartFrame;
+        }
+    }
+
+    return 0;
+}
+
 static s32 SetDefaultCollisionPoint(const DBRoot& root, u32 attribNum, LVector& outA, LVector& outB) {
     MARKFUNCTION(0x8006D208);
 
@@ -283,11 +387,69 @@ static s32 SetDefaultCollisionPoint(const DBRoot& root, u32 attribNum, LVector& 
         return 0;
     }
 
-    OriginalBasic* geo = g_levelManager->FindGeo((s32)p3dHash(name));
-    (void)geo;
-    outA = {};
-    outB = {};
-    return 0;
+    OriginalBasic* original = g_levelManager->FindGeo((s32)p3dHash(name));
+    if (!original || original->GetType() != 0) {
+        return 0;
+    }
+
+    OriginalGeo* geo = static_cast<OriginalGeo*>(original);
+    if (!geo->dynamicVerts || geo->dynamicVertCount == 0) {
+        return 0;
+    }
+
+    const GeoRenderVertex& first = geo->dynamicVerts[0];
+    outA.x = static_cast<s32>(first.x);
+    outA.y = static_cast<s32>(first.y);
+    outA.z = static_cast<s32>(first.z);
+    outB = outA;
+
+    s32 farthestMag = rmMag3ff(outA.x, outA.y, outA.z);
+    s32 lowestY = outB.y;
+
+    for (u32 i = 1; i < geo->dynamicVertCount; i++) {
+        const GeoRenderVertex& vertex = geo->dynamicVerts[i];
+        const s32 vx = static_cast<s32>(vertex.x);
+        const s32 vy = static_cast<s32>(vertex.y);
+        const s32 vz = static_cast<s32>(vertex.z);
+        const s32 vertexMag = rmMag3ff(vx, vy, vz);
+
+        if (vertexMag > farthestMag) {
+            farthestMag = vertexMag;
+            outA.x = vx;
+            outA.y = vy;
+            outA.z = vz;
+        }
+
+        if (vy < lowestY) {
+            lowestY = vy;
+            outB.x = vx;
+            outB.y = vy;
+            outB.z = vz;
+        }
+    }
+
+    return 1;
+}
+
+static void TransformVectorByPsxMatrix(const s32* matrix, const LVector& in, LVector& out) {
+    if (!matrix) {
+        out = {};
+        return;
+    }
+
+    const s16* rot = reinterpret_cast<const s16*>(matrix);
+    out.x = matrix[5]
+        + (s32)((((s64)in.x * rot[0])
+            + ((s64)in.y * rot[1])
+            + ((s64)in.z * rot[2])) >> 12);
+    out.y = matrix[6]
+        + (s32)((((s64)in.x * rot[3])
+            + ((s64)in.y * rot[4])
+            + ((s64)in.z * rot[5])) >> 12);
+    out.z = matrix[7]
+        + (s32)((((s64)in.x * rot[6])
+            + ((s64)in.y * rot[7])
+            + ((s64)in.z * rot[8])) >> 12);
 }
 
 Pickup::Pickup(const LVector* initialPos, u16 type)
@@ -340,6 +502,10 @@ void Pickup::Reset() {
 
 void Pickup::CreateModel(const char* name) {
     MARKFUNCTION(0x8006D688);
+
+    if (!model) {
+        model = new GModel();
+    }
 
     Thing::CreateModel(name);
 
@@ -397,7 +563,7 @@ void Pickup::AnalyzeMesh(DBRoot* root) {
     if (const DBAttrib* attrib = root->FindAttrib(30)) {
         const char* attribString = attrib->GetAttribString();
         if (attribString) {
-            fightingSystemRoot = FindPickupFightingRootAddress((u32)p3dHash(attribString));
+            fightingSystemRoot = FindPickupFightingRootAddress((u32)p3dHash(attribString), kPlayerPunchRootAddress);
         }
     }
     if (root->FindAttrib(31)) {
@@ -437,12 +603,15 @@ s32 Pickup::SetupPickup(Thing* owner, u32 joint) {
 
     deactivateFlag = 0;
     pickupFlags |= 4u;
+    s32 result = 0;
     if (model) {
-        static_cast<Model*>(model)->modelFlags |= 1u;
+        Model* pickupModel = static_cast<Model*>(model);
+        pickupModel->modelFlags |= 1u;
+        result = static_cast<s32>(pickupModel->modelFlags);
     }
     attachedOwner = owner;
     attachJoint = static_cast<s32>(joint);
-    return 0;
+    return result;
 }
 
 void Pickup::UpdatePosition() {
@@ -456,19 +625,42 @@ void Pickup::UpdatePosition() {
         if (animMatrices) {
             const s32* matrix = AnimationMatrices::GetMatrix(animMatrices, static_cast<u32>(attachJoint));
             if (matrix) {
-                homePos.x = matrix[5];
-                homePos.y = matrix[6];
-                homePos.z = matrix[7];
-                pos = homePos;
-                if (g_blockManager) {
-                    blockNum = g_blockManager->GetBlockNumber(homePos);
+                s32 modelMatrix[8] = {};
+                std::memcpy(modelMatrix, matrix, sizeof(modelMatrix));
+
+                const s32 ownerScale = modelPtr->scale;
+                if (ownerScale != FIX16_ONE) {
+                    const s32 invScale = rmDiv16i(FIX16_ONE, ownerScale);
+                    s16* rot = reinterpret_cast<s16*>(modelMatrix);
+                    for (s32 i = 0; i < 9; i++) {
+                        rot[i] = (s16)(((s64)rot[i] * invScale) >> 16);
+                    }
                 }
-                return;
+
+                LVector attachWorld = {};
+                TransformVectorByPsxMatrix(matrix, attachOffset, attachWorld);
+                modelMatrix[5] = attachWorld.x;
+                modelMatrix[6] = attachWorld.y;
+                modelMatrix[7] = attachWorld.z;
+
+                if (model) {
+                    Model* pickupModel = static_cast<Model*>(model);
+                    if (pickupModel->drawableType == 1) {
+                        GModel* geoModel = static_cast<GModel*>(pickupModel);
+                        std::memcpy(geoModel->attachedMatrix, modelMatrix, sizeof(modelMatrix));
+                        geoModel->attachedMatrixActive = 1;
+                    }
+                }
+
+                homePos = attachWorld;
             }
         }
     }
 
-    DynamicThing::UpdatePosition();
+    pos = homePos;
+    if (g_blockManager) {
+        blockNum = g_blockManager->GetBlockNumber(homePos);
+    }
 }
 
 s32 Pickup::Release(Thing* owner, ccList* list, const SVector* forceDir, s32 forceMag) {
@@ -481,12 +673,43 @@ s32 Pickup::Release(Thing* owner, ccList* list, const SVector* forceDir, s32 for
     flags &= ~TF_ON_GROUND;
     pickupFlags &= ~4u;
     if (model) {
-        static_cast<Model*>(model)->modelFlags &= ~1u;
+        Model* pickupModel = static_cast<Model*>(model);
+        pickupModel->modelFlags &= ~1u;
+        if (pickupModel->drawableType == 1) {
+            static_cast<GModel*>(pickupModel)->attachedMatrixActive = 0;
+        }
     }
     ignoreCollisionOwner = owner;
 
     if (forceDir && forceMag != 0) {
         AddForce(forceMag, forceDir);
+    }
+
+    Thing* heldBy = attachedOwner;
+    if (heldBy) {
+        s32 hitRatio = 0;
+        LVector wallNormal = {};
+        LVector hitPoint = {};
+        s32 wallHorizontal = 0;
+
+        if (CollisionSector::CheckWorldWallCollision(
+                heldBy->pos,
+                pos,
+                0,
+                0,
+                0,
+                hitRatio,
+                wallNormal,
+                hitPoint,
+                wallHorizontal)) {
+            const s32 currentY = pos.y;
+            const s32 currentZ = pos.z;
+            pos.x = hitPoint.x;
+            pos.y = currentY;
+            pos.z = currentZ;
+            PlayEffect();
+            Kill();
+        }
     }
 
     attachedOwner = nullptr;
@@ -512,6 +735,8 @@ void Pickup::DamageExtra() {
 
 s32 Pickup::PlayEffect() {
     MARKFUNCTION(0x8006DD64);
+
+    GEffect_Create(PICKUP_IMPACT_EFFECT_HASH, &pos, &PICKUP_IMPACT_EFFECT_SCALE, nullptr, 0, 0, 0x80000010u);
 
     if (weaponSound) {
         weaponSound->Explode();
@@ -567,36 +792,54 @@ u16 Pickup::GetPickupMove() const {
     MARKFUNCTION(0x8006DFD8);
 
     const PsxFightingMoveRaw* move = ResolveFightingMoveAddress(currentPickupMove);
-    return move ? move->anim : 0;
+    if (move) {
+        return move->anim;
+    }
+
+    const PickupMoveFallbackEntry* fallback = ResolvePickupMoveFallbackAddress(currentPickupMove);
+    return fallback ? fallback->anim : 0;
 }
 
 s8 Pickup::GetPickupMoveGrabFrame() const {
     MARKFUNCTION(0x8006DFEC);
 
     const PsxFightingMoveRaw* move = ResolveFightingMoveAddress(currentPickupMove);
-    if (!move) {
+    if (move) {
+        return ResolvePickupJointAttackStartFrame(move->data20);
+    }
+
+    const PickupMoveFallbackEntry* fallback = ResolvePickupMoveFallbackAddress(currentPickupMove);
+    if (!fallback) {
         return 0;
     }
 
-    const PsxFightingJointRaw* joint = ResolveFightingJointAddress(move->data20);
-    return joint ? joint->AttackStartFrame() : 0;
+    return ResolvePickupJointAttackStartFrame(fallback->jointAddress);
 }
 
 u16 Pickup::GetThrowMove() const {
     MARKFUNCTION(0x8006E008);
 
     const PsxFightingMoveRaw* move = ResolveFightingMoveAddress(throwMove);
-    return move ? move->anim : 0;
+    if (move) {
+        return move->anim;
+    }
+
+    const PickupMoveFallbackEntry* fallback = ResolvePickupMoveFallbackAddress(throwMove);
+    return fallback ? fallback->anim : 0;
 }
 
 s8 Pickup::GetThrowMoveThrowFrame() const {
     MARKFUNCTION(0x8006E01C);
 
     const PsxFightingMoveRaw* move = ResolveFightingMoveAddress(throwMove);
-    if (!move) {
+    if (move) {
+        return ResolvePickupJointAttackStartFrame(move->data20);
+    }
+
+    const PickupMoveFallbackEntry* fallback = ResolvePickupMoveFallbackAddress(throwMove);
+    if (!fallback) {
         return 0;
     }
 
-    const PsxFightingJointRaw* joint = ResolveFightingJointAddress(move->data20);
-    return joint ? joint->AttackStartFrame() : 0;
+    return ResolvePickupJointAttackStartFrame(fallback->jointAddress);
 }

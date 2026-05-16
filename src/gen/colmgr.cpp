@@ -12,6 +12,8 @@
 #include "gen/model.h"
 #include "gen/animmat.h"
 #include "gen/colvol.h"
+#include "fe/hud.h"
+#include "gen/scoremgr.h"
 
 static s32 g_floorDebugCounter = 0;
 
@@ -345,6 +347,15 @@ void HandleThingWall(DynamicThing* thing, s32 radius, s32 height, s32 checkHeigh
         thing->homePos.y = HTW_HomePosY;
         thing->homePos.z = HTW_HomePosZ;
     }
+
+    const u16 thingType = thing->thingType;
+    const bool isPickupWeaponType =
+        static_cast<u16>(thingType - AITypes::TT_OBSTACLE_FIRST) < 28u;
+    if (wallHit && isPickupWeaponType) {
+        Pickup* pickup = static_cast<Pickup*>(thing);
+        pickup->PlayEffect();
+        pickup->Kill();
+    }
 }
 
 // PSX: HandleThingFloor__FP12DynamicThinglll (COLMGR.CPP:795) 0x800A8614
@@ -633,8 +644,16 @@ void HandleThingFloor(DynamicThing* thing, s32 radius, s32 yMinOffset, s32 check
                 humanoid->field436 = ceilingNormNew.x;
             }
 
-            // PSX: pickup/obstacle effect after landing (not yet reversed)
-            // Checks thing+308 != 0, then calls PlayEffect + Kill
+            const u16 thingType = thing->thingType;
+            const bool isPickupWeaponType =
+                static_cast<u16>(thingType - AITypes::TT_OBSTACLE_FIRST) < 28u;
+            if (isPickupWeaponType) {
+                Pickup* pickup = static_cast<Pickup*>(thing);
+                if (pickup->field308 != 0) {
+                    pickup->PlayEffect();
+                    pickup->Kill();
+                }
+            }
         }
     }
 
@@ -805,32 +824,56 @@ void HandleHumanoidPickupCollisions(ccList& humanoidList, ccList& pickupList) {
     tagCollisionSphere sphere;
     sphere.radius = 128;
 
+    static constexpr s32 COLLISION_TAG_IMPACT_REGION = static_cast<s32>(0x80000002u);
+    static constexpr s32 COLLISION_TAG_HIT_TYPE = static_cast<s32>(0x80000003u);
+    static constexpr s32 COLLISION_TAG_FORCE = static_cast<s32>(0x80000005u);
+    static constexpr s32 COLLISION_TAG_DAMAGE = static_cast<s32>(0x80000007u);
+    static constexpr s32 COLLISION_TAG_END = 0;
+
     for (ccMinNode* hNode = humanoidList.head; hNode != nullptr;) {
         ccMinNode* hNext = hNode->next;
-        DynamicThing* humanoid = (DynamicThing*)hNode;
+        Humanoid* humanoid = static_cast<Humanoid*>(static_cast<Thing*>(hNode));
 
         if (humanoid->flags & TF_MODEL_CREATED) {
             for (ccMinNode* pNode = pickupList.head; pNode != nullptr;) {
                 ccMinNode* pNext = pNode->next;
-                DynamicThing* pickup = (DynamicThing*)pNode;
+                Pickup* pickup = static_cast<Pickup*>(static_cast<Thing*>(pNode));
 
-                // PSX: check if pickup has damage (velocity.x, PSX +100) or knockback (velocity.z, PSX +108)
-                s32 hasEffect = 0;
-                if (pickup->maxSpeed != 0 || pickup->velocity.z != 0) {
-                    hasEffect = 1;
-                }
+                const s32 hasEffect = (pickup->velocity.x != 0 || pickup->velocity.z != 0) ? 1 : 0;
+                if ((pickup->flags & TF_MODEL_CREATED) && hasEffect && pickup->ignoreCollisionOwner != humanoid) {
+                    const tagCollisionCylinder& humCylinder =
+                        *reinterpret_cast<const tagCollisionCylinder*>(&humanoid->collBboxMin);
 
-                if ((pickup->flags & TF_MODEL_CREATED) && hasEffect) {
-                    // PSX +204: pickup owner check (can't hit self)
-                    // PSX: CheckStaticCylinderSphereCollision(humanoid.pos, humanoid.collCyl, pickup.pos, &sphere)
-                    // PSX: if hit -> humanoid->ProcessHit(pickup, 1, 3, 14, 7, pickup[76], 5, 10000, 0, sphere.radius)
-                    //              SetFoe(theHudMgr, humanoid)
-                    //              AddFightingPoints(theScoreManager, 100)
-                    //              AddStylePoints(theScoreManager, 100)
-                    //              pickup->PlayEffect()
-                    //              pickup->Kill()
-                    // Requires: Pickup class, CheckStaticCylinderSphereCollision (COLVOL),
-                    // HUD::SetFoe, Humanoid::ProcessHit virtual - not yet reversed.
+                    if (CheckStaticCylinderSphereCollision(
+                            humanoid->pos,
+                            humCylinder,
+                            pickup->pos,
+                            sphere)) {
+                        humanoid->HandleCollision(
+                            pickup,
+                            1,
+                            COLLISION_TAG_HIT_TYPE,
+                            14,
+                            COLLISION_TAG_DAMAGE,
+                            pickup->damage,
+                            COLLISION_TAG_FORCE,
+                            10000,
+                            COLLISION_TAG_IMPACT_REGION,
+                            sphere.radius,
+                            COLLISION_TAG_END);
+
+                        if (g_hud) {
+                            g_hud->SetFoe(humanoid);
+                        }
+
+                        if (g_scoreManager) {
+                            g_scoreManager->AddFightingPoints(100);
+                            g_scoreManager->AddStylePoints(100);
+                        }
+
+                        pickup->PlayEffect();
+                        pickup->Kill();
+                    }
                 }
                 pNode = pNext;
             }

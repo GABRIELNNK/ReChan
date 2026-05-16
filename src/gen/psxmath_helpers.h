@@ -14,6 +14,29 @@ inline s32 PsxMulShift16Signed(s32 a, s32 b) {
     return (s32)(((s64)a * (s64)b) >> 16);
 }
 
+template <typename T>
+inline T PsxMin(T leftValue, T rightValue) {
+    return (leftValue < rightValue) ? leftValue : rightValue;
+}
+
+template <typename T>
+inline T PsxMax(T leftValue, T rightValue) {
+    return (leftValue > rightValue) ? leftValue : rightValue;
+}
+
+template <typename T>
+inline T PsxClamp(T value, T minValue, T maxValue) {
+    return PsxMin(PsxMax(value, minValue), maxValue);
+}
+
+inline u32 PsxCeilPositiveF32ToU32(f32 value) {
+    if (value <= 0.0f) {
+        return 0;
+    }
+
+    return static_cast<u32>(std::ceil(value));
+}
+
 inline s32 PsxAbsS32(s32 value) {
     return value < 0 ? -value : value;
 }
@@ -38,6 +61,52 @@ inline s32 PsxLerpAngle16(s32 previous, s32 current, f32 alpha) {
 
 inline s32 PsxTruncToS32(f32 value) {
     return static_cast<s32>(std::trunc(value));
+}
+
+inline f32 PsxTanHalfFromFov(s32 fov) {
+    return FIX16_TO_FLOAT(fov);
+}
+
+inline f32 PsxScaleHorizontalTanForAspect(f32 tanHalfX, f32 aspectRatio, f32 baseAspectRatio) {
+    if (baseAspectRatio <= 0.0f || aspectRatio <= 0.0f) {
+        return tanHalfX;
+    }
+
+    return tanHalfX * (aspectRatio / baseAspectRatio);
+}
+
+inline f32 PsxProjectionDistanceFromTan(s32 screenCenter, f32 tanHalf) {
+    return (tanHalf > 0.0f) ? (static_cast<f32>(screenCenter) / tanHalf) : 0.0f;
+}
+
+inline s32 PsxProjectScreenCoord(s32 screenCenter, s32 viewValue, f32 projectionDistance, s32 viewDepth) {
+    const s32 denominator = (viewDepth == 0) ? 1 : viewDepth;
+    return screenCenter + PsxTruncToS32((static_cast<f32>(viewValue) * projectionDistance) / static_cast<f32>(denominator));
+}
+
+inline void PsxTransformPointToPort(const Mat4& viewMatrix, s32 inX, s32 inY, s32 inZ,
+                                    s32* outX, s32* outY, s32* outZ) {
+    f32 transformedX = 0.0f;
+    f32 transformedY = 0.0f;
+    f32 transformedZ = 0.0f;
+    Mat4TransformPoint(viewMatrix,
+                       static_cast<f32>(inX),
+                       static_cast<f32>(inY),
+                       static_cast<f32>(inZ),
+                       transformedX,
+                       transformedY,
+                       transformedZ);
+
+    *outX = PsxTruncToS32(transformedX);
+    *outY = PsxTruncToS32(-transformedY);
+    *outZ = PsxTruncToS32(-transformedZ);
+}
+
+inline s32 PsxVecLengthSquaredQuarter(s32 xValue, s32 yValue, s32 zValue) {
+    const s64 xSquared = static_cast<s64>(xValue) * static_cast<s64>(xValue);
+    const s64 ySquared = static_cast<s64>(yValue) * static_cast<s64>(yValue);
+    const s64 zSquared = static_cast<s64>(zValue) * static_cast<s64>(zValue);
+    return static_cast<s32>((xSquared >> 2) + (ySquared >> 2) + (zSquared >> 2));
 }
 
 inline s32 PsxAsin16FromFix16Clamped(s32 value) {

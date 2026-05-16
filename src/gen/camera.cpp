@@ -23,7 +23,7 @@
 // PSX FOV push: converts curFOV (= desiredFOV * 3000) to tCamera fovA/fovB.
 // PSX: fovA = (87162 * curFOV) >> 16, fovB = (72744 * curFOV) >> 16
 static void pushFovToCamera(tCamera* cam, s32 curFOV) {
-    cam->SetFOV((s32)((87162LL * curFOV) >> 16), (s32)((72744LL * curFOV) >> 16));
+    cam->SetFOV(PsxMulShift16Signed(87162, curFOV), PsxMulShift16Signed(72744, curFOV));
 }
 
 static constexpr s32 TIME_SCALE = 1000;
@@ -70,20 +70,10 @@ bool Camera::WorldToScreen(const LVector& worldPos, f32* outScreenX, f32* outScr
 
     const Mat4& viewMatrix = p3dCamera.GetWorldToCameraMatrix();
 
-    f32 tx = 0.0f;
-    f32 ty = 0.0f;
-    f32 tz = 0.0f;
-    Mat4TransformPoint(viewMatrix,
-                       static_cast<f32>(worldPos.x),
-                       static_cast<f32>(worldPos.y),
-                       static_cast<f32>(worldPos.z),
-                       tx,
-                       ty,
-                       tz);
-
-    const s32 vx = static_cast<s32>(tx);
-    const s32 vy = static_cast<s32>(-ty);
-    const s32 vz = static_cast<s32>(-tz);
+    s32 vx = 0;
+    s32 vy = 0;
+    s32 vz = 0;
+    PsxTransformPointToPort(viewMatrix, worldPos.x, worldPos.y, worldPos.z, &vx, &vy, &vz);
 
     if (outDepth) {
         *outDepth = static_cast<f32>(vz);
@@ -94,10 +84,8 @@ bool Camera::WorldToScreen(const LVector& worldPos, f32* outScreenX, f32* outScr
         return false;
     }
 
-    const f32 screenX = static_cast<f32>(port.centerX)
-        + (static_cast<f32>(vx) * port.projectionDistanceX) / static_cast<f32>(vz);
-    const f32 screenY = static_cast<f32>(port.centerY)
-        + (static_cast<f32>(vy) * port.projectionDistanceY) / static_cast<f32>(vz);
+    const f32 screenX = static_cast<f32>(PsxProjectScreenCoord(port.centerX, vx, port.projectionDistanceX, vz));
+    const f32 screenY = static_cast<f32>(PsxProjectScreenCoord(port.centerY, vy, port.projectionDistanceY, vz));
 
     *outScreenX = screenX;
     *outScreenY = screenY;

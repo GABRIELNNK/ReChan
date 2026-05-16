@@ -32,6 +32,11 @@ public:
     f32 GetNearPlane() const { return nearPlaneF; }
     f32 GetFarPlane() const { return farPlaneF; }
 
+    // PC bridge: the game must call this before each frame to provide the
+    // projection matrix. SetState() pushes it to the render context.
+    void SetProjectionMatrix(const Mat4& proj) { projection = proj; hasProjection = true; }
+    bool HasProjectionMatrix() const { return hasProjection; }
+
     // PC bridge: push projection + view matrices to pddi context
     virtual void SetState();
 
@@ -42,6 +47,8 @@ protected:
     s32 fovB;      // PSX default 0x2666 (9830)
     f32 nearPlaneF; // PC: GL near plane (default from nearClip)
     f32 farPlaneF;  // PC: GL far plane (default from farClip)
+    Mat4 projection;    // PC: game-provided projection matrix
+    bool hasProjection = false;
 };
 
 // tMatrixCamera - camera with explicit matrix (TMATRIXCAM.CPP)

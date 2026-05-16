@@ -1307,6 +1307,8 @@ int RP_ZCullGClip(tGeometry* geometry, const LVector* drawPos) {
     if (!buffer)
         return 0;
 
+    p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+
     if (usesSemiTrans) {
         pddiBlendMode blendMode = PDDI_BLEND_ALPHA;
         switch (semiTransMode & 3u) {
@@ -1343,6 +1345,8 @@ int RP_ZCullGMFog(tGeometry* geometry, const LVector* drawPos, u16 fogNear, u16 
     pddiPrimBuffer* buffer = BuildPrimBufferFromPrimGeom(primGeom, drawPos, &gmFogState, &usesSemiTrans, &semiTransMode);
     if (!buffer)
         return 0;
+
+    p3d::context->SetBlendMode(PDDI_BLEND_NONE);
 
     if (usesSemiTrans) {
         pddiBlendMode blendMode = PDDI_BLEND_ALPHA;

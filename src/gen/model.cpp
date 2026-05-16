@@ -14,6 +14,7 @@
 #include "snd/hmndsnd.h"
 #include "pc/log.h"
 #include <cstdlib>
+#include <cstring>
 #include <algorithm>
 #include <vector>
 
@@ -52,6 +53,25 @@ static bool IsLiveOriginalSTree(const OriginalSTree* tree) {
     }
 
     return std::find(s_liveOriginalSTrees.begin(), s_liveOriginalSTrees.end(), tree) != s_liveOriginalSTrees.end();
+}
+
+static void BuildMat4FromPsxPackedMatrix(const s32* packedMatrix, Mat4& out) {
+    out = Mat4();
+    if (!packedMatrix) {
+        return;
+    }
+
+    static constexpr f32 kInvQ12 = 1.0f / 4096.0f;
+    const s16* rot = reinterpret_cast<const s16*>(packedMatrix);
+    out.m[0] = (f32)rot[0] * kInvQ12;
+    out.m[1] = (f32)rot[1] * kInvQ12;
+    out.m[2] = (f32)rot[2] * kInvQ12;
+    out.m[4] = (f32)rot[3] * kInvQ12;
+    out.m[5] = (f32)rot[4] * kInvQ12;
+    out.m[6] = (f32)rot[5] * kInvQ12;
+    out.m[8] = (f32)rot[6] * kInvQ12;
+    out.m[9] = (f32)rot[7] * kInvQ12;
+    out.m[10] = (f32)rot[8] * kInvQ12;
 }
 
 static DrawableSTree* GetDrawableSTree(Model* model) {
@@ -983,6 +1003,13 @@ void SModel::PlayDynamicAnim(s32 animEnumVal) {
 
 GModel::GModel() {
     MARKFUNCTION(0x8006E8C8);
+
+    std::memset(attachedMatrix, 0, sizeof(attachedMatrix));
+    s16* rot = reinterpret_cast<s16*>(attachedMatrix);
+    rot[0] = 0x1000;
+    rot[4] = 0x1000;
+    rot[8] = 0x1000;
+    attachedMatrixActive = 0;
 }
 
 GModel::~GModel() {
@@ -1034,7 +1061,12 @@ void GModel::Show(u32 flags) {
     modelFlags |= 0x50;
 
     Mat4 world;
-    p3dBuildRotMatrixZYX(rotX, rotY, rotZ, world);
+    if ((modelFlags & 1u) != 0 && attachedMatrixActive != 0) {
+        BuildMat4FromPsxPackedMatrix(attachedMatrix, world);
+    }
+    else {
+        p3dBuildRotMatrixZYX(rotX, rotY, rotZ, world);
+    }
     world.SetTranslation((f32)posX, (f32)posY, (f32)posZ);
 
     const Mat4 savedWorld = p3d::context->GetWorldMatrix();

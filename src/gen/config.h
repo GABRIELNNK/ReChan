@@ -15,7 +15,7 @@
 #define FIX_ASPECT_RATIO 1
 
 // Director cutscene bars: 0 = PSX-like alpha fade, 1 = slide in/out using alpha as progress.
-#define DIRECTOR_WIDESCREEN_SLIDE_BARS 1
+#define DIRECTOR_WIDESCREEN_SLIDE_BARS 0
 
 // When ESC is bound to both menu back and menu open/close,
 // let it back out of submenu pages before closing the whole menu.
@@ -24,11 +24,6 @@
 // Menu back button shape policy:
 // 0 = PSX-original Triangle, 1 = Circle (Xbox B)
 #define MENU_BACK_USES_CIRCLE 1
-
-// Original FE asset button glyph bytes used by menu prompt text objects.
-// 0xFB = Triangle glyph, 0xFC = Circle glyph in FE/GAMEMENU assets.
-#define MENU_BACK_PROMPT_GLYPH_TRIANGLE ((char)0xFB)
-#define MENU_BACK_PROMPT_GLYPH_CIRCLE ((char)0xFC)
 
 // Custom text files with localization support, parsed from game directory (requires .txt files for each language).
 #define CUSTOM_TEXT 1

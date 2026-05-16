@@ -138,6 +138,20 @@ public:
         return 0;
     }
 
+    // Returns the petal count for an arbitrary level index.
+    s32 GetLevelPetalCountFromIndex(u32 levelIndex) const {
+        if (levelList && levelIndex < (u32)levelCount)
+            return levelList[levelIndex * 2 + 1];
+        return 1;
+    }
+
+    // Returns the level name for an arbitrary level index.
+    const char* GetLevelNameFromIndex(u32 levelIndex) const {
+        if (levelNames && levelIndex < (u32)levelCount)
+            return levelNames[levelIndex];
+        return nullptr;
+    }
+
 private:
     BlockManager blockMgr;
     PsxVRAM vram;

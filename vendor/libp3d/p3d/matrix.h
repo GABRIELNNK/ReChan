@@ -113,6 +113,20 @@ inline Mat4 PerspectiveReversedZ(f32 fovY, f32 aspect, f32 near, f32 far) {
     return p;
 }
 
+inline Mat4 PerspectiveReversedZTangents(f32 tanHalfX, f32 tanHalfY, f32 near, f32 far) {
+    if (tanHalfX < 0.0001f) tanHalfX = 0.0001f;
+    if (tanHalfY < 0.0001f) tanHalfY = 0.0001f;
+
+    Mat4 p;
+    p.m[0] = 1.0f / tanHalfX;
+    p.m[5] = 1.0f / tanHalfY;
+    p.m[10] = near / (far - near);
+    p.m[11] = -1.0f;
+    p.m[14] = (far * near) / (far - near);
+    p.m[15] = 0.0f;
+    return p;
+}
+
 inline Mat4 LookAt(f32 ex, f32 ey, f32 ez, f32 cx, f32 cy, f32 cz, f32 ux, f32 uy, f32 uz) {
     // forward = normalize(eye - center)
     f32 fx = ex - cx, fy = ey - cy, fz = ez - cz;

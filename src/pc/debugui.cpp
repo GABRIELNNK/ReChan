@@ -91,6 +91,38 @@ static bool sDebugShowThingLabelHoverTooltip = true;
 static u16 sDebugSelectedThingUniqueID = INVALID_HANDLE;
 static bool sDisableHumanoidDamage = false;
 
+struct DebugLevelSelectorEntry {
+    s32 levelID;
+    s32 petalIndex;
+    const char* label;
+};
+
+static const DebugLevelSelectorEntry kDebugLevelSelectorEntries[] = {
+    { 1, 0, "Chinatown 1" },
+    { 1, 1, "Chinatown 2" },
+    { 1, 2, "Chinatown 3" },
+    { 11, 0, "Chinatown Boss" },
+    { 2, 0, "Waterfront 1" },
+    { 2, 1, "Waterfront 2" },
+    { 2, 2, "Waterfront 3" },
+    { 12, 0, "Waterfront Boss" },
+    { 3, 0, "Sewer 1" },
+    { 3, 1, "Sewer 2" },
+    { 3, 2, "Sewer 3" },
+    { 13, 0, "Sewer Boss" },
+    { 4, 0, "Roof Top 1" },
+    { 4, 1, "Roof Top 2" },
+    { 4, 2, "Roof Top 3" },
+    { 14, 0, "Roof Top Boss" },
+    { 5, 0, "Factory 1" },
+    { 5, 1, "Factory 2" },
+    { 5, 2, "Factory 3" },
+    { 8, 0, "Factory Boss" },
+    { 6, 0, "Special Level" },
+};
+
+static s32 sDebugLevelSelectorChoice = 0;
+
 struct DebugVisibleThingLabel {
     Thing* thing = nullptr;
     char label[128] = {};
@@ -253,6 +285,52 @@ static const char* ActionStateName(s32 s) {
         case AS_HIT_ENVIRONMENT: return "HitEnvironment";
         default: return "Unknown";
     }
+}
+
+static bool ResolveDebugLevelSelectorEntry(
+    World* world,
+    s32 entryIndex,
+    u32* outLevelIndex,
+    u32* outPetalIndex
+) {
+    if (!world) {
+        return false;
+    }
+
+    const s32 entryCount = (s32)(sizeof(kDebugLevelSelectorEntries) / sizeof(kDebugLevelSelectorEntries[0]));
+    if ((u32)entryIndex >= (u32)entryCount) {
+        return false;
+    }
+
+    const DebugLevelSelectorEntry& entry = kDebugLevelSelectorEntries[entryIndex];
+    const s32 levelIndex = world->LevelIDToIndex(entry.levelID);
+    if (levelIndex < 0) {
+        return false;
+    }
+
+    const u32 levelIndexU = (u32)levelIndex;
+    if (world->GetLevelIDFromIndex(levelIndexU) != entry.levelID) {
+        return false;
+    }
+
+    if (outLevelIndex) {
+        *outLevelIndex = levelIndexU;
+    }
+
+    s32 petalCount = world->GetLevelPetalCountFromIndex(levelIndexU);
+    if (petalCount < 1) {
+        petalCount = 1;
+    }
+
+    if (entry.petalIndex < 0 || entry.petalIndex >= petalCount) {
+        return false;
+    }
+
+    if (outPetalIndex) {
+        *outPetalIndex = (u32)entry.petalIndex;
+    }
+
+    return true;
 }
 
 static void RefreshPlayerDrunkenMasterState() {
@@ -1121,6 +1199,124 @@ void DebugUI::Draw() {
                             }
                         }
                     }
+                }
+            }
+
+            ImGui::SeparatorText("Level Selector");
+            World* world = g_game->GetWorld();
+            if (!world) {
+                ImGui::Text("World: null");
+            }
+            else {
+                const s32 entryCount = (s32)(sizeof(kDebugLevelSelectorEntries) / sizeof(kDebugLevelSelectorEntries[0]));
+                if ((u32)sDebugLevelSelectorChoice >= (u32)entryCount) {
+                    sDebugLevelSelectorChoice = 0;
+                }
+
+                char previewLabel[192] = {};
+                {
+                    const DebugLevelSelectorEntry& selectedEntry = kDebugLevelSelectorEntries[sDebugLevelSelectorChoice];
+                    const bool selectedResolved = ResolveDebugLevelSelectorEntry(
+                        world,
+                        sDebugLevelSelectorChoice,
+                        nullptr,
+                        nullptr);
+
+                    if (selectedResolved) {
+                        std::snprintf(
+                            previewLabel,
+                            sizeof(previewLabel),
+                            "%s [ID %d, petal %d]",
+                            selectedEntry.label,
+                            selectedEntry.levelID,
+                            selectedEntry.petalIndex);
+                    }
+                    else {
+                        std::snprintf(
+                            previewLabel,
+                            sizeof(previewLabel),
+                            "%s [ID %d, petal %d, unavailable]",
+                            selectedEntry.label,
+                            selectedEntry.levelID,
+                            selectedEntry.petalIndex);
+                    }
+                }
+
+                if (ImGui::BeginCombo("Target", previewLabel)) {
+                    for (s32 i = 0; i < entryCount; i++) {
+                        const DebugLevelSelectorEntry& entry = kDebugLevelSelectorEntries[i];
+                        const bool selected = (i == sDebugLevelSelectorChoice);
+
+                        u32 levelIndex = 0;
+                        const bool resolved = ResolveDebugLevelSelectorEntry(world, i, &levelIndex, nullptr);
+
+                        char itemLabel[192] = {};
+                        if (resolved) {
+                            std::snprintf(
+                                itemLabel,
+                                sizeof(itemLabel),
+                                "%s [ID %d, petal %d]",
+                                entry.label,
+                                entry.levelID,
+                                entry.petalIndex);
+                        }
+                        else {
+                            std::snprintf(
+                                itemLabel,
+                                sizeof(itemLabel),
+                                "%s [ID %d, petal %d, unavailable]",
+                                entry.label,
+                                entry.levelID,
+                                entry.petalIndex);
+                        }
+
+                        if (!resolved) {
+                            ImGui::BeginDisabled();
+                        }
+
+                        if (ImGui::Selectable(itemLabel, selected)) {
+                            sDebugLevelSelectorChoice = i;
+                        }
+
+                        if (!resolved) {
+                            ImGui::EndDisabled();
+                        }
+                    }
+
+                    ImGui::EndCombo();
+                }
+
+                u32 targetLevelIndex = 0;
+                u32 targetPetalIndex = 0;
+                const bool targetResolved = ResolveDebugLevelSelectorEntry(
+                    world,
+                    sDebugLevelSelectorChoice,
+                    &targetLevelIndex,
+                    &targetPetalIndex);
+
+                if (targetResolved) {
+                    const DebugLevelSelectorEntry& selectedEntry = kDebugLevelSelectorEntries[sDebugLevelSelectorChoice];
+                    ImGui::Text(
+                        "Resolved: %s [ID %d] -> index %u, petal %u",
+                        selectedEntry.label,
+                        selectedEntry.levelID,
+                        targetLevelIndex,
+                        targetPetalIndex);
+
+                    if (ImGui::Button("Load Selected Level")) {
+                        world->SetTargetLevelPetal(targetLevelIndex, targetPetalIndex);
+                        world->ResetLevel();
+                        g_game->SetState(GameState::QueueLevelPetalLoad);
+                        LOG(
+                            "[DebugUI] Queued level load: target=%s levelID=%d levelIndex=%u petal=%u",
+                            selectedEntry.label,
+                            selectedEntry.levelID,
+                            targetLevelIndex,
+                            targetPetalIndex);
+                    }
+                }
+                else {
+                    ImGui::Text("Selected level is unavailable in this world table.");
                 }
             }
         }

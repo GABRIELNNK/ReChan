@@ -8,6 +8,7 @@
 #include "gen/director.h"
 #include "gen/game.h"
 #include "gen/geffect.h"
+#include "gen/blockmgr.h"
 #include "gen/world.h"
 #include "gen/weffect.h"
 #include "snd/snddrct.h"
@@ -397,6 +398,10 @@ void Door::TeleportPlayer() {
         else {
             LOG("[Door::TeleportPlayer] target NOT FOUND for CRC 0x%08X", targetCRC);
         }
+    }
+
+    if (g_blockManager) {
+        g_blockManager->DemandLoading();
     }
 
     // PSX: clear cutsceneTriggered flag

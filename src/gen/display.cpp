@@ -2,6 +2,7 @@
 #include "gen/display.h"
 #include "gen/camera.h"
 #include "gen/config.h"
+#include "gen/psxmath_helpers.h"
 #include "p3d/context.h"
 #include "p3d/camera.h"
 #include "pddi/pddi.h"
@@ -75,15 +76,15 @@ ChanProjectionState Display::GetChanProjectionState() const {
         return state;
     }
 
-    s32 fovX = 0x3333;
-    s32 fovY = 0x2666;
+    s32 fovX = 0, fovY = 0x2666;
     camera->GetFOV(&fovX, &fovY);
     camera->GetClipPlanes(&state.nearClip, &state.farClip);
 
-    const f32 tanHalfY = static_cast<f32>(fovY) * (1.0f / 65536.0f);
+    const f32 tanHalfY = PsxTanHalfFromFov(fovY);
     if (tanHalfY > 0.0f) {
-        state.projectionDistanceY = static_cast<f32>(state.centerY) / tanHalfY;
-        state.projectionDistanceX = static_cast<f32>(state.centerX) / (cameraAspect * tanHalfY);
+        state.projectionDistanceY = PsxProjectionDistanceFromTan(state.centerY, tanHalfY);
+        const f32 tanHalfX = tanHalfY * cameraAspect;
+        state.projectionDistanceX = PsxProjectionDistanceFromTan(state.centerX, tanHalfX);
     }
 
     return state;
@@ -274,6 +275,23 @@ void Display::BeginFrame() {
     }
 
     p3d::context->SetCameraAspect(cameraAspect);
+
+    // Compute and push projection to the camera before BeginRender triggers SetState.
+    if (theCamera) {
+        tMatrixCamera* p3dCam = theCamera->GetP3DCamera();
+        s32 fovA = 0x3333, fovB = 0x2666;
+        p3dCam->GetFOV(&fovA, &fovB);
+
+        f32 tanHalfY = PsxTanHalfFromFov(fovB);
+        if (tanHalfY < 0.0001f) {
+            tanHalfY = std::tan(0.35f);
+        }
+        const f32 tanHalfX = tanHalfY * cameraAspect;
+        p3dCam->SetProjectionMatrix(
+            PerspectiveReversedZTangents(tanHalfX, tanHalfY,
+                p3dCam->GetNearPlane(), p3dCam->GetFarPlane()));
+    }
+
     p3d::context->BeginFrame();
     p3d::context->Clear(PDDI_BUFFER_ALL);
     view.BeginRender();

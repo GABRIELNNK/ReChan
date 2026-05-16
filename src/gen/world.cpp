@@ -24,6 +24,7 @@
 #include "gen/skeleton.h"
 #include "gen/animmgr.h"
 #include "gen/particle.h"
+#include "gen/psxmath_helpers.h"
 #include "gen/pweffect.h"
 #include "gen/scoremgr.h"
 #include "gen/weffect.h"
@@ -3411,18 +3412,6 @@ void World::Render(const LVector* playerPos) {
     p3d::context->SetVRAMHandle(0);
 }
 
-// TransformVector - PC equivalent of PSX tPort::TransformVector
-// Multiplies world-space point by the current view matrix, then converts the
-// result back into tPort space (+Y down, +Z forward).
-static void TransformVector(const Mat4& vm, s32 inX, s32 inY, s32 inZ,
-                            s32* outX, s32* outY, s32* outZ) {
-    f32 ox, oy, oz;
-    Mat4TransformPoint(vm, (f32)inX, (f32)inY, (f32)inZ, ox, oy, oz);
-    *outX = static_cast<s32>(ox);
-    *outY = static_cast<s32>(-oy);
-    *outZ = static_cast<s32>(-oz);
-}
-
 // chanp3dClipCode - PC equivalent of PSX chanp3dClipCode
 // Projects a tPort-space point into screen space and computes PSX-style clip bits.
 // bit 0: left, bit 1: right, bit 2: top, bit 3: bottom, bit 4: behind camera
@@ -3432,10 +3421,8 @@ static u32 chanp3dClipCode(const ChanProjectionState& portState, s32 vx, s32 vy,
     // PSX chanp3dClipCode only checks z-sign (behind camera), not near/far clip planes.
     if (vz < 0) code |= 0x10;
 
-    const s32 denom = (vz == 0) ? 1 : vz;
-
-    s32 sx = portState.centerX + static_cast<s32>((static_cast<f32>(vx) * portState.projectionDistanceX) / static_cast<f32>(denom));
-    s32 sy = portState.centerY + static_cast<s32>((static_cast<f32>(vy) * portState.projectionDistanceY) / static_cast<f32>(denom));
+    const s32 sx = PsxProjectScreenCoord(portState.centerX, vx, portState.projectionDistanceX, vz);
+    const s32 sy = PsxProjectScreenCoord(portState.centerY, vy, portState.projectionDistanceY, vz);
 
     if (sx < 0) code |= 0x01;
     else if (sx >= portState.width) code |= 0x02;
@@ -3446,22 +3433,15 @@ static u32 chanp3dClipCode(const ChanProjectionState& portState, s32 vx, s32 vy,
     return code;
 }
 
-// vecLengthSquared - PC equivalent of PSX vecLengthSquared
-// PSX formula: ((x*x)>>2) + ((y*y)>>2) + ((z*z)>>2)
-static s32 vecLengthSquared(s32 x, s32 y, s32 z) {
-    const s64 xx = static_cast<s64>(x) * static_cast<s64>(x);
-    const s64 yy = static_cast<s64>(y) * static_cast<s64>(y);
-    const s64 zz = static_cast<s64>(z) * static_cast<s64>(z);
-    return static_cast<s32>((xx >> 2) + (yy >> 2) + (zz >> 2));
-}
-
 // PSX: DrawLoop__FP6ccListUl (GAME.CPP:2543, 0x8002B224)
 // Iterates a ccList and calls Draw() on entities in the given block.
-static void DrawEntityList(ccList& list, u16 blockNum) {
+static void DrawEntityList(ccList& list, u16 blockNum, u32 vramHandle) {
     MARKFUNCTION(0x8002B224);
     for (ccMinNode* n = list.head; n; n = n->next) {
         Thing* thing = static_cast<Thing*>(n);
         if (thing->blockNum == blockNum) {
+            p3d::context->SetVRAMHandle(vramHandle);
+            p3d::context->SetTexInfoOverride(false, 0);
             thing->Draw();
         }
     }
@@ -3551,18 +3531,25 @@ void World::DrawEverythingHandler(const LVector* playerPos) {
 
         u16 bn = entry.block->blockNum;
 
+        p3d::context->SetVRAMHandle(vramHandle);
+        p3d::context->SetTexInfoOverride(false, 0);
+        p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+        p3d::context->SetCullMode(PDDI_CULL_NONE);
+
         // PSX: only draw entities + geometry if block is in draw list
         if (blockMgr.InDrawList(bn)) {
             // PSX: DrawLoop for each entity list
             if (g_ai) {
-                DrawEntityList(g_ai->humanoidList, bn);
-                DrawEntityList(g_ai->inactivePickupList, bn);
-                DrawEntityList(g_ai->pickupList, bn);
-                DrawEntityList(g_ai->moveList, bn);
+                DrawEntityList(g_ai->humanoidList, bn, vramHandle);
+                DrawEntityList(g_ai->inactivePickupList, bn, vramHandle);
+                DrawEntityList(g_ai->pickupList, bn, vramHandle);
+                DrawEntityList(g_ai->moveList, bn, vramHandle);
             }
 
             // Host immediate path: draw opaque block first, then effects.
             // PSX submits both into OT; final composition is depth-sorted at flush.
+            p3d::context->SetVRAMHandle(vramHandle);
+            p3d::context->SetTexInfoOverride(false, 0);
             entry.block->Draw(&localPos);
 
             Effects_DrawEffects(static_cast<s32>(bn));
@@ -3609,10 +3596,10 @@ void World::computeBlockToPointDistances(const Block* block, const LVector* play
     // Corner 0: pos + (negX, negY, negZ)
     {
         s32 wx = pos[0] + bbox[0], wy = pos[1] + bbox[1], wz = pos[2] + bbox[2];
-        TransformVector(vm, wx, wy, wz, &tvx, &tvy, &tvz);
+        PsxTransformPointToPort(vm, wx, wy, wz, &tvx, &tvy, &tvz);
         s32 svx = tvx, svy = tvy, svz = tvz; // save pre-project coords
         clipCodes[0] = chanp3dClipCode(portState, tvx, tvy, tvz);
-        minDistSq = vecLengthSquared(svx, svy, svz);
+        minDistSq = PsxVecLengthSquaredQuarter(svx, svy, svz);
         s32 z = svz;
         if (z > 0xFFFF) z = 0xFFFF;
         if (z > maxZDepth) maxZDepth = z;
@@ -3621,10 +3608,10 @@ void World::computeBlockToPointDistances(const Block* block, const LVector* play
     // Corner 1: pos + (posX, negY, negZ)
     {
         s32 wx = pos[0] + bbox[3], wy = pos[1] + bbox[1], wz = pos[2] + bbox[2];
-        TransformVector(vm, wx, wy, wz, &tvx, &tvy, &tvz);
+        PsxTransformPointToPort(vm, wx, wy, wz, &tvx, &tvy, &tvz);
         s32 svx = tvx, svy = tvy, svz = tvz;
         clipCodes[1] = chanp3dClipCode(portState, tvx, tvy, tvz);
-        s32 d = vecLengthSquared(svx, svy, svz);
+        s32 d = PsxVecLengthSquaredQuarter(svx, svy, svz);
         if (d < minDistSq) minDistSq = d;
         s32 z = svz;
         if (z > 0xFFFF) z = 0xFFFF;
@@ -3634,10 +3621,10 @@ void World::computeBlockToPointDistances(const Block* block, const LVector* play
     // Corner 2: pos + (negX, posY, negZ)
     {
         s32 wx = pos[0] + bbox[0], wy = pos[1] + bbox[4], wz = pos[2] + bbox[2];
-        TransformVector(vm, wx, wy, wz, &tvx, &tvy, &tvz);
+        PsxTransformPointToPort(vm, wx, wy, wz, &tvx, &tvy, &tvz);
         s32 svx = tvx, svy = tvy, svz = tvz;
         clipCodes[2] = chanp3dClipCode(portState, tvx, tvy, tvz);
-        s32 d = vecLengthSquared(svx, svy, svz);
+        s32 d = PsxVecLengthSquaredQuarter(svx, svy, svz);
         if (d < minDistSq) minDistSq = d;
         s32 z = svz;
         if (z > 0xFFFF) z = 0xFFFF;
@@ -3647,10 +3634,10 @@ void World::computeBlockToPointDistances(const Block* block, const LVector* play
     // Corner 3: pos + (posX, posY, negZ)
     {
         s32 wx = pos[0] + bbox[3], wy = pos[1] + bbox[4], wz = pos[2] + bbox[2];
-        TransformVector(vm, wx, wy, wz, &tvx, &tvy, &tvz);
+        PsxTransformPointToPort(vm, wx, wy, wz, &tvx, &tvy, &tvz);
         s32 svx = tvx, svy = tvy, svz = tvz;
         clipCodes[3] = chanp3dClipCode(portState, tvx, tvy, tvz);
-        s32 d = vecLengthSquared(svx, svy, svz);
+        s32 d = PsxVecLengthSquaredQuarter(svx, svy, svz);
         if (d < minDistSq) minDistSq = d;
         s32 z = svz;
         if (z > 0xFFFF) z = 0xFFFF;
@@ -3660,10 +3647,10 @@ void World::computeBlockToPointDistances(const Block* block, const LVector* play
     // Corner 4: pos + (negX, negY, posZ)
     {
         s32 wx = pos[0] + bbox[0], wy = pos[1] + bbox[1], wz = pos[2] + bbox[5];
-        TransformVector(vm, wx, wy, wz, &tvx, &tvy, &tvz);
+        PsxTransformPointToPort(vm, wx, wy, wz, &tvx, &tvy, &tvz);
         s32 svx = tvx, svy = tvy, svz = tvz;
         clipCodes[4] = chanp3dClipCode(portState, tvx, tvy, tvz);
-        s32 d = vecLengthSquared(svx, svy, svz);
+        s32 d = PsxVecLengthSquaredQuarter(svx, svy, svz);
         if (d < minDistSq) minDistSq = d;
         s32 z = svz;
         if (z > 0xFFFF) z = 0xFFFF;
@@ -3673,10 +3660,10 @@ void World::computeBlockToPointDistances(const Block* block, const LVector* play
     // Corner 5: pos + (posX, negY, posZ)
     {
         s32 wx = pos[0] + bbox[3], wy = pos[1] + bbox[1], wz = pos[2] + bbox[5];
-        TransformVector(vm, wx, wy, wz, &tvx, &tvy, &tvz);
+        PsxTransformPointToPort(vm, wx, wy, wz, &tvx, &tvy, &tvz);
         s32 svx = tvx, svy = tvy, svz = tvz;
         clipCodes[5] = chanp3dClipCode(portState, tvx, tvy, tvz);
-        s32 d = vecLengthSquared(svx, svy, svz);
+        s32 d = PsxVecLengthSquaredQuarter(svx, svy, svz);
         if (d < minDistSq) minDistSq = d;
         s32 z = svz;
         if (z > 0xFFFF) z = 0xFFFF;
@@ -3686,10 +3673,10 @@ void World::computeBlockToPointDistances(const Block* block, const LVector* play
     // Corner 6: pos + (negX, posY, posZ)
     {
         s32 wx = pos[0] + bbox[0], wy = pos[1] + bbox[4], wz = pos[2] + bbox[5];
-        TransformVector(vm, wx, wy, wz, &tvx, &tvy, &tvz);
+        PsxTransformPointToPort(vm, wx, wy, wz, &tvx, &tvy, &tvz);
         s32 svx = tvx, svy = tvy, svz = tvz;
         clipCodes[6] = chanp3dClipCode(portState, tvx, tvy, tvz);
-        s32 d = vecLengthSquared(svx, svy, svz);
+        s32 d = PsxVecLengthSquaredQuarter(svx, svy, svz);
         if (d < minDistSq) minDistSq = d;
         s32 z = svz;
         if (z > 0xFFFF) z = 0xFFFF;
@@ -3699,10 +3686,10 @@ void World::computeBlockToPointDistances(const Block* block, const LVector* play
     // Corner 7: pos + (posX, posY, posZ)
     {
         s32 wx = pos[0] + bbox[3], wy = pos[1] + bbox[4], wz = pos[2] + bbox[5];
-        TransformVector(vm, wx, wy, wz, &tvx, &tvy, &tvz);
+        PsxTransformPointToPort(vm, wx, wy, wz, &tvx, &tvy, &tvz);
         s32 svx = tvx, svy = tvy, svz = tvz;
         clipCodes[7] = chanp3dClipCode(portState, tvx, tvy, tvz);
-        s32 d = vecLengthSquared(svx, svy, svz);
+        s32 d = PsxVecLengthSquaredQuarter(svx, svy, svz);
         if (d < minDistSq) minDistSq = d;
         s32 z = svz;
         if (z > 0xFFFF) z = 0xFFFF;
@@ -3712,8 +3699,8 @@ void World::computeBlockToPointDistances(const Block* block, const LVector* play
     // Center (9th point): just blockPos, no bbox offset
     // PSX: TransformVector + vecLengthSquared only (no ProjectVector/chanp3dClipCode)
     {
-        TransformVector(vm, pos[0], pos[1], pos[2], &tvx, &tvy, &tvz);
-        s32 d = vecLengthSquared(tvx, tvy, tvz);
+        PsxTransformPointToPort(vm, pos[0], pos[1], pos[2], &tvx, &tvy, &tvz);
+        s32 d = PsxVecLengthSquaredQuarter(tvx, tvy, tvz);
         if (d < minDistSq) minDistSq = d;
         s32 z = tvz;
         if (z > 0xFFFF) z = 0xFFFF;

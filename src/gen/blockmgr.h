@@ -6,6 +6,9 @@
 #include "gen/block.h"
 #include <vector>
 
+// PSX uses 8 logical block-list slots. PC widens this for widescreen draw/load coverage.
+static constexpr u32 kBlockManagerListCapacity = 16;
+
 // BlockManager = manages level block loading, draw lists, demand loading
 class BlockManager : public Manager {
 public:
@@ -80,17 +83,17 @@ private:
     // +52: currentBlockNum
     u32 currentBlockNum;
 
-    // +64: toBeLoadedList (u16[8]) - block numbers queued for loading
-    u16 toBeLoadedList[8];
+    // PSX +64: toBeLoadedList - block numbers queued for loading
+    u16 toBeLoadedList[kBlockManagerListCapacity];
     u32 toBeLoadedCount;
 
-    // +92: drawListCount + drawList (u16[8]) - blocks in draw range
+    // PSX +92: drawListCount + drawList - blocks in draw range
     u32 drawListCount;
-    u16 drawList[8];
+    u16 drawList[kBlockManagerListCapacity];
 
-    // +112: alreadyLoadedCount + alreadyLoadedList (u16[8]) - currently loaded block nums
+    // PSX +112: alreadyLoadedCount + alreadyLoadedList - currently loaded block nums
     u32 alreadyLoadedCount;
-    u16 alreadyLoadedList[8];
+    u16 alreadyLoadedList[kBlockManagerListCapacity];
 
     // +132-140: flags (all initialized to 1)
     u32 flag1;

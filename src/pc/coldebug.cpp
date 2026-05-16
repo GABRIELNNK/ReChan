@@ -4,6 +4,8 @@
 #include "gen/colwall.h"
 #include "gen/colfloor.h"
 #include "gen/colline.h"
+#include "gen/game.h"
+#include "gen/world.h"
 #include "p3d/context.h"
 #include "p3d/p3dmath.h"
 #include "pddi/pddi.h"
@@ -172,10 +174,15 @@ namespace CollisionDebug {
         buf->SetIndices(indices.data(), static_cast<u32>(indices.size()));
 
         // Draw at world origin (no per-block offset needed, collision data is in world space)
+        const Mat4 savedWorld = p3d::context->GetWorldMatrix();
         Mat4 identity;
         p3d::context->SetWorldMatrix(identity);
         p3d::context->SetVRAMHandle(0);
         p3d::context->DrawPrimBuffer(buf);
+        p3d::context->SetWorldMatrix(savedWorld);
+        if (g_game && g_game->GetWorld()) {
+            p3d::context->SetVRAMHandle(g_game->GetWorld()->GetVRAMHandle());
+        }
 
         buf->Release();
     }

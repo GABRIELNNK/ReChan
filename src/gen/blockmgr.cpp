@@ -4,13 +4,124 @@
 #include "gen/blockmgr.h"
 #include "gen/database.h"
 #include "gen/game.h"
+#include "gen/psxmath_helpers.h"
 #include "gen/world.h"
 #include "gen/weffect.h"
 
+static u32 GetBaseLoadedBlockCount() {
+    return (g_game && g_game->GetWorld() && g_game->GetWorld()->GetCurLevelID() == 7) ? 7u : 6u;
+}
+
 static u32 ClampLoadedBlockCount(u32 totalBlockCount) {
-    const u32 maxLoaded = (g_game && g_game->GetWorld() && g_game->GetWorld()->GetCurLevelID() == 7) ? 7u : 6u;
+    const u32 baseMaxLoaded = GetBaseLoadedBlockCount();
+    u32 maxLoaded = baseMaxLoaded;
+
+#if FIX_ASPECT_RATIO
+    const f32 aspectRatio = g_display ? g_display->GetAspectRatio() : DEFAULT_ASPECT_RATIO;
+    if (aspectRatio > DEFAULT_ASPECT_RATIO + 0.001f) {
+        const f32 scaledMax = (static_cast<f32>(baseMaxLoaded) * aspectRatio) / DEFAULT_ASPECT_RATIO;
+        const u32 widescreenMax = PsxCeilPositiveF32ToU32(scaledMax);
+        if (widescreenMax > maxLoaded) {
+            maxLoaded = widescreenMax;
+        }
+    }
+#endif
+
+    if (maxLoaded > kBlockManagerListCapacity) {
+        maxLoaded = kBlockManagerListCapacity;
+    }
     return (totalBlockCount < maxLoaded) ? totalBlockCount : maxLoaded;
 }
+
+static void FitBlockWindow(u32& previousSlots, u32& nextSlots, u32 previousAvailable, u32 nextAvailable, u32 targetTotal) {
+    previousSlots = PsxMin(previousSlots, previousAvailable);
+    nextSlots = PsxMin(nextSlots, nextAvailable);
+
+    if (targetTotal == 0) {
+        previousSlots = 0;
+        nextSlots = 0;
+        return;
+    }
+    targetTotal = PsxMin(targetTotal, kBlockManagerListCapacity);
+
+    const u32 currentTotal = previousSlots + nextSlots + 1;
+    if (currentTotal > targetTotal) {
+        u32 overflow = currentTotal - targetTotal;
+        const u32 removeNext = PsxMin(nextSlots, overflow);
+        nextSlots -= removeNext;
+        overflow -= removeNext;
+
+        const u32 removePrevious = PsxMin(previousSlots, overflow);
+        previousSlots -= removePrevious;
+    }
+    else if (currentTotal < targetTotal) {
+        u32 deficit = targetTotal - currentTotal;
+        const u32 nextSpare = (nextAvailable > nextSlots) ? (nextAvailable - nextSlots) : 0;
+        const u32 addNext = PsxMin(nextSpare, deficit);
+        nextSlots += addNext;
+        deficit -= addNext;
+
+        const u32 previousSpare = (previousAvailable > previousSlots) ? (previousAvailable - previousSlots) : 0;
+        const u32 addPrevious = PsxMin(previousSpare, deficit);
+        previousSlots += addPrevious;
+    }
+}
+
+#if FIX_ASPECT_RATIO
+// Widescreen variant: distributes extra capacity equally between previous and next
+// blocks (previous gets priority for odd remainder). This ensures that blocks visible
+// behind the player on the left side of an ultrawide display are also drawn.
+static void FitBlockWindowWidescreen(u32& previousSlots, u32& nextSlots, u32 previousAvailable, u32 nextAvailable, u32 targetTotal) {
+    previousSlots = PsxMin(previousSlots, previousAvailable);
+    nextSlots = PsxMin(nextSlots, nextAvailable);
+
+    if (targetTotal == 0) {
+        previousSlots = 0;
+        nextSlots = 0;
+        return;
+    }
+    targetTotal = PsxMin(targetTotal, kBlockManagerListCapacity);
+
+    const u32 currentTotal = previousSlots + nextSlots + 1;
+    if (currentTotal > targetTotal) {
+        u32 overflow = currentTotal - targetTotal;
+        const u32 removeNext = PsxMin(nextSlots, overflow);
+        nextSlots -= removeNext;
+        overflow -= removeNext;
+
+        const u32 removePrevious = PsxMin(previousSlots, overflow);
+        previousSlots -= removePrevious;
+    }
+    else if (currentTotal < targetTotal) {
+        u32 deficit = targetTotal - currentTotal;
+
+        // Split deficit evenly; previous gets the extra slot on odd remainder.
+        u32 addPrev = (deficit + 1) / 2;
+        u32 addNext = deficit / 2;
+
+        const u32 prevSpare = (previousAvailable > previousSlots) ? (previousAvailable - previousSlots) : 0;
+        addPrev = PsxMin(addPrev, prevSpare);
+        previousSlots += addPrev;
+
+        const u32 nextSpare = (nextAvailable > nextSlots) ? (nextAvailable - nextSlots) : 0;
+        addNext = PsxMin(addNext, nextSpare);
+        nextSlots += addNext;
+
+        // If one direction was exhausted, give remaining capacity to the other.
+        u32 remaining = targetTotal - (previousSlots + nextSlots + 1);
+        if (remaining > 0) {
+            const u32 extraNext = (nextAvailable > nextSlots) ? (nextAvailable - nextSlots) : 0;
+            const u32 takeNext = PsxMin(extraNext, remaining);
+            nextSlots += takeNext;
+            remaining -= takeNext;
+        }
+        if (remaining > 0) {
+            const u32 extraPrev = (previousAvailable > previousSlots) ? (previousAvailable - previousSlots) : 0;
+            previousSlots += PsxMin(extraPrev, remaining);
+        }
+    }
+}
+#endif
 
 static const Block* GetBlockByNumber(const std::vector<Block>& blocks, u32 blockNum) {
     for (u32 index = 0; index < blocks.size(); index++) {
@@ -40,6 +151,16 @@ static bool ContainsBlockNumber(const u16* list, u32 count, u16 blockNum) {
     }
 
     return false;
+}
+
+static u16 ResolveBlockNumberFromAllBlocks(const std::vector<Block>& blocks, const LVector& pos) {
+    for (u32 index = 0; index < blocks.size(); index++) {
+        if (blocks[index].PointInBlock(&pos)) {
+            return blocks[index].blockNum;
+        }
+    }
+
+    return BLOCK_UNASSIGNED;
 }
 
 // __12BlockManager (BLKMGR.CPP:148)
@@ -143,7 +264,7 @@ void BlockManager::LoadBlocks(u32 blockNum,
 // PC parses BLKs synchronously, so the logical resident list mirrors toBeLoadedList.
 void BlockManager::UpdateAlreadyLoadedList() {
     alreadyLoadedCount = toBeLoadedCount;
-    for (u32 index = 0; index < 8; index++) {
+    for (u32 index = 0; index < kBlockManagerListCapacity; index++) {
         alreadyLoadedList[index] = (index < alreadyLoadedCount) ? toBeLoadedList[index] : 6969;
     }
 
@@ -236,7 +357,7 @@ bool BlockManager::InDrawList(u32 blockNum) const {
 // PSX: checks toBeLoadedList u16 array for blockNum.
 bool BlockManager::InLoadList(u32 blockNum) const {
     MARKFUNCTION(0x80050CB4);
-    for (u32 i = 0; i < 6; i++) {
+    for (u32 i = 0; i < toBeLoadedCount; i++) {
         if (toBeLoadedList[i] == (u16)blockNum) {
             return true;
         }
@@ -252,18 +373,44 @@ bool BlockManager::CrossedBoundary() const {
         return false;
     }
 
-    const u32 playerBlockNum = Player::s_player->blockNum;
+    u32 playerBlockNum = Player::s_player->blockNum;
+    const u16 resolvedBlockNum = ResolveBlockNumberFromAllBlocks(blocks, Player::s_player->pos);
+    if (resolvedBlockNum != BLOCK_UNASSIGNED) {
+        playerBlockNum = resolvedBlockNum;
+    }
+
     return playerBlockNum != BLOCK_UNASSIGNED && playerBlockNum != currentBlockNum;
 }
 
 s32 BlockManager::DemandLoading() {
     MARKFUNCTION(0x800506E8);
 
-    if (!flag3 || !CrossedBoundary() || !Player::s_player) {
+    if (!flag3 || !Player::s_player) {
         return 0;
     }
 
-    currentBlockNum = Player::s_player->blockNum;
+    u32 playerBlockNum = Player::s_player->blockNum;
+    const u16 resolvedBlockNum = ResolveBlockNumberFromAllBlocks(blocks, Player::s_player->pos);
+    if (resolvedBlockNum != BLOCK_UNASSIGNED) {
+        playerBlockNum = resolvedBlockNum;
+        Player::s_player->blockNum = resolvedBlockNum;
+    }
+
+    if (playerBlockNum == BLOCK_UNASSIGNED) {
+        return 0;
+    }
+
+    const bool blockChanged = (playerBlockNum != currentBlockNum);
+    const bool listsAlreadyValidForPlayerBlock =
+        InDrawList(playerBlockNum)
+        && InActiveList(playerBlockNum)
+        && InLoadList(playerBlockNum);
+
+    if (!blockChanged && listsAlreadyValidForPlayerBlock) {
+        return 0;
+    }
+
+    currentBlockNum = playerBlockNum;
     UpdateToBeLoadedList(currentBlockNum);
     UpdateAlreadyLoadedList();
 
@@ -281,7 +428,7 @@ s32 BlockManager::DemandLoading() {
 bool BlockManager::UpdateToBeLoadedList(u32 blockNum) {
     MARKFUNCTION(0x80050D94);
 
-    for (u32 index = 0; index < 8; index++) {
+    for (u32 index = 0; index < kBlockManagerListCapacity; index++) {
         toBeLoadedList[index] = 6969;
         alreadyLoadedList[index] = 6969;
         drawList[index] = 6969;
@@ -299,13 +446,13 @@ bool BlockManager::UpdateToBeLoadedList(u32 blockNum) {
         return false;
     }
 
-    u16 previousBlocks[8] = {};
-    u16 nextBlocks[8] = {};
+    u16 previousBlocks[kBlockManagerListCapacity] = {};
+    u16 nextBlocks[kBlockManagerListCapacity] = {};
 
     const Block* previousFrontier[2] = { currentBlock, nullptr };
     u32 previousFrontierIndex = 0;
     u32 previousCount = 0;
-    while (previousCount < 7) {
+    while (previousCount < kBlockManagerListCapacity - 1) {
         const u32 otherIndex = (previousFrontierIndex + 1) & 1u;
         const Block* block = previousFrontier[previousFrontierIndex];
         if (!block) {
@@ -361,7 +508,7 @@ bool BlockManager::UpdateToBeLoadedList(u32 blockNum) {
     const Block* nextFrontier[2] = { currentBlock, nullptr };
     u32 nextFrontierIndex = 0;
     u32 nextCount = 0;
-    while (nextCount < 7) {
+    while (nextCount < kBlockManagerListCapacity - 1) {
         const u32 otherIndex = (nextFrontierIndex + 1) & 1u;
         const Block* block = nextFrontier[nextFrontierIndex];
         if (!block) {
@@ -416,44 +563,14 @@ bool BlockManager::UpdateToBeLoadedList(u32 blockNum) {
 
     u32 previousLoad = (previousCount < currentBlock->lodFarX) ? previousCount : (u32)currentBlock->lodFarX;
     u32 nextLoad = (u32)currentBlock->lodNearX;
-    u32 nextSpare = 0;
-    if (nextCount >= nextLoad) {
-        nextSpare = nextCount - nextLoad;
-    }
-    else {
-        nextLoad = nextCount;
-    }
-
-    const u32 loadTotal = previousLoad + nextLoad + 1;
-    if (loadTotal >= numBlocks) {
-        if (loadTotal >= 8) {
-            const u32 overflow = loadTotal - 7;
-            if (nextLoad < overflow) {
-                previousLoad -= overflow - nextLoad;
-                nextLoad = 0;
-            }
-            else {
-                nextLoad -= overflow;
-            }
-        }
-    }
-    else {
-        const u32 deficit = numBlocks - loadTotal;
-        if (nextSpare < deficit) {
-            nextLoad += nextSpare;
-            previousLoad += deficit - nextSpare;
-        }
-        else {
-            nextLoad += deficit;
-        }
-    }
+    FitBlockWindow(previousLoad, nextLoad, previousCount, nextCount, numBlocks);
 
     toBeLoadedCount = 1;
     toBeLoadedList[0] = (u16)blockNum;
-    for (u32 index = 0; index < previousLoad && toBeLoadedCount < 8; index++) {
+    for (u32 index = 0; index < previousLoad && toBeLoadedCount < kBlockManagerListCapacity; index++) {
         toBeLoadedList[toBeLoadedCount++] = previousBlocks[index];
     }
-    for (u32 index = 0; index < nextLoad && toBeLoadedCount < 8; index++) {
+    for (u32 index = 0; index < nextLoad && toBeLoadedCount < kBlockManagerListCapacity; index++) {
         toBeLoadedList[toBeLoadedCount++] = nextBlocks[index];
     }
 
@@ -465,7 +582,9 @@ bool BlockManager::UpdateToBeLoadedList(u32 blockNum) {
             }
         }
 
-        for (s32 filler = (s32)minBlockNum - 1; filler >= 0 && toBeLoadedCount < numBlocks; filler--) {
+        for (s32 filler = (s32)minBlockNum - 1;
+             filler >= 0 && toBeLoadedCount < numBlocks && toBeLoadedCount < kBlockManagerListCapacity;
+             filler--) {
             if (GetBlockByNumber(blocks, (u32)filler)) {
                 toBeLoadedList[toBeLoadedCount++] = (u16)filler;
             }
@@ -492,23 +611,32 @@ bool BlockManager::UpdateToBeLoadedList(u32 blockNum) {
     if (nextCount < nextDraw) {
         nextDraw = nextCount;
     }
-    if (previousDraw + nextDraw + 1 >= 8) {
-        const u32 overflow = previousDraw + nextDraw + 1 - 7;
-        if (nextDraw < overflow) {
-            previousDraw -= overflow - nextDraw;
-            nextDraw = 0;
-        }
-        else {
-            nextDraw -= overflow;
+#if FIX_ASPECT_RATIO
+    {
+        const f32 wsAspect = g_display ? g_display->GetAspectRatio() : DEFAULT_ASPECT_RATIO;
+        if (wsAspect > DEFAULT_ASPECT_RATIO + 0.001f) {
+            FitBlockWindowWidescreen(previousDraw, nextDraw, previousCount, nextCount, numBlocks);
+        } else if (numBlocks > GetBaseLoadedBlockCount()) {
+            FitBlockWindow(previousDraw, nextDraw, previousCount, nextCount, numBlocks);
+        } else if (previousDraw + nextDraw + 1 >= 8) {
+            FitBlockWindow(previousDraw, nextDraw, previousCount, nextCount, 7);
         }
     }
+#else
+    if (numBlocks > GetBaseLoadedBlockCount()) {
+        FitBlockWindow(previousDraw, nextDraw, previousCount, nextCount, numBlocks);
+    }
+    else if (previousDraw + nextDraw + 1 >= 8) {
+        FitBlockWindow(previousDraw, nextDraw, previousCount, nextCount, 7);
+    }
+#endif
 
     drawListCount = 1;
     drawList[0] = (u16)blockNum;
-    for (u32 index = 0; index < previousDraw && drawListCount < 8; index++) {
+    for (u32 index = 0; index < previousDraw && drawListCount < kBlockManagerListCapacity; index++) {
         drawList[drawListCount++] = previousBlocks[index];
     }
-    for (u32 index = 0; index < nextDraw && drawListCount < 8; index++) {
+    for (u32 index = 0; index < nextDraw && drawListCount < kBlockManagerListCapacity; index++) {
         drawList[drawListCount++] = nextBlocks[index];
     }
 
@@ -517,23 +645,32 @@ bool BlockManager::UpdateToBeLoadedList(u32 blockNum) {
     if (nextCount < nextActive) {
         nextActive = nextCount;
     }
-    if (previousActive + nextActive + 1 >= 8) {
-        const u32 overflow = previousActive + nextActive + 1 - 7;
-        if (nextActive < overflow) {
-            previousActive -= overflow - nextActive;
-            nextActive = 0;
-        }
-        else {
-            nextActive -= overflow;
+#if FIX_ASPECT_RATIO
+    {
+        const f32 wsAspect = g_display ? g_display->GetAspectRatio() : DEFAULT_ASPECT_RATIO;
+        if (wsAspect > DEFAULT_ASPECT_RATIO + 0.001f) {
+            FitBlockWindowWidescreen(previousActive, nextActive, previousCount, nextCount, numBlocks);
+        } else if (numBlocks > GetBaseLoadedBlockCount()) {
+            FitBlockWindow(previousActive, nextActive, previousCount, nextCount, numBlocks);
+        } else if (previousActive + nextActive + 1 >= 8) {
+            FitBlockWindow(previousActive, nextActive, previousCount, nextCount, 7);
         }
     }
+#else
+    if (numBlocks > GetBaseLoadedBlockCount()) {
+        FitBlockWindow(previousActive, nextActive, previousCount, nextCount, numBlocks);
+    }
+    else if (previousActive + nextActive + 1 >= 8) {
+        FitBlockWindow(previousActive, nextActive, previousCount, nextCount, 7);
+    }
+#endif
 
     alreadyLoadedCount = 1;
     alreadyLoadedList[0] = (u16)blockNum;
-    for (u32 index = 0; index < previousActive && alreadyLoadedCount < 8; index++) {
+    for (u32 index = 0; index < previousActive && alreadyLoadedCount < kBlockManagerListCapacity; index++) {
         alreadyLoadedList[alreadyLoadedCount++] = previousBlocks[index];
     }
-    for (u32 index = 0; index < nextActive && alreadyLoadedCount < 8; index++) {
+    for (u32 index = 0; index < nextActive && alreadyLoadedCount < kBlockManagerListCapacity; index++) {
         alreadyLoadedList[alreadyLoadedCount++] = nextBlocks[index];
     }
 

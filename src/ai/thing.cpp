@@ -2,9 +2,11 @@
 #include "ai/thing.h"
 #include "gen/blockmgr.h"
 #include "gen/database.h"
+#include "gen/game.h"
 #include "gen/model.h"
 #include "gen/levelmgr.h"
 #include "gen/time.h"
+#include "gen/world.h"
 #include "p3d/hash.h"
 #include "p3d/p3dmath.h"
 #include "p3d/context.h"
@@ -157,10 +159,15 @@ void Thing::Draw() {
     buf->SetVertexData(verts, vi);
     buf->SetIndices(indices, vi);
 
+    const Mat4 savedWorld = p3d::context->GetWorldMatrix();
     Mat4 identity;
     p3d::context->SetWorldMatrix(identity);
     p3d::context->SetVRAMHandle(0);
     p3d::context->DrawPrimBuffer(buf);
+    p3d::context->SetWorldMatrix(savedWorld);
+    if (g_game && g_game->GetWorld()) {
+        p3d::context->SetVRAMHandle(g_game->GetWorld()->GetVRAMHandle());
+    }
     buf->Release();
 }
 
@@ -574,7 +581,7 @@ void DynamicThing::Reset() {
     MARKFUNCTION(0x80061E38);
     Thing::Reset();
 
-    health = 100;
+    maxSpeed = 100;
     gravity = FIX16_HALF;
 
     // Clear all movement vectors
