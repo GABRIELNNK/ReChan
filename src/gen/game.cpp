@@ -479,13 +479,12 @@ void Game::RenderTitleWithCustomBackground(bool drawPressStartOverlay) {
     if (drawPressStartOverlay) {
         s32 promptX = DEFAULT_SCREEN_WIDTH / 2;
         s32 promptY = 192;
-        u32 promptColor = titleScreen->menuColor.Get8();
         if (titleScreen->pressStartText) {
             promptX = titleScreen->pressStartText->mtx.GetX();
             promptY = titleScreen->pressStartText->mtx.GetY();
         }
 
-        g_feCustomMenuMgr->DrawTitleStartPrompt(promptX, promptY, promptColor);
+        g_feCustomMenuMgr->DrawTitleStartPrompt(promptX, promptY);
     }
 }
 

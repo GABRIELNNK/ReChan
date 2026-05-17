@@ -297,26 +297,6 @@ struct xcSection {
 
     void FixScreenAndOverlayandDO();
     void Draw();
-    void DrawScreenPrims(u32 screenHash, bool drawSprites, bool drawPolys, bool drawText);
-    void DrawScreenPrimsScaled(
-        u32 screenHash,
-        bool drawSprites,
-        bool drawPolys,
-        bool drawText,
-        f32 scaleX,
-        f32 scaleY,
-        s32 pivotX,
-        s32 pivotY);
-    void DrawOverlayPrims(u32 overlayHash, bool drawSprites, bool drawPolys, bool drawText);
-    void DrawOverlayPrimsScaled(
-        u32 overlayHash,
-        bool drawSprites,
-        bool drawPolys,
-        bool drawText,
-        f32 scaleX,
-        f32 scaleY,
-        s32 pivotX,
-        s32 pivotY);
     void GotoScreen(xcScreenData* scr);
     void UnloadOverlays();
 
@@ -344,10 +324,7 @@ struct xcSection {
 private:
     void FixInventories();
     void LoadCells();
-
-    // Internal: draw a single prim object at the given raw data pointer
     void DrawPrimObj(u8* primData);
-    void DrawPrimObjScaled(u8* primData, f32 scaleX, f32 scaleY, s32 pivotX, s32 pivotY);
 };
 
 // PSX: xcSectionMan (8 bytes)

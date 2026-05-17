@@ -14,6 +14,95 @@ inline s32 PsxMulShift16Signed(s32 a, s32 b) {
     return (s32)(((s64)a * (s64)b) >> 16);
 }
 
+inline s32 PsxShiftLeft16Wrap(s32 value) {
+    return (s32)((u32)value << 16);
+}
+
+// Integer floor sqrt used by PSX fixed-point magnitude paths.
+inline u32 PsxSqrtFloorU32(u32 value) {
+    u32 result = 0;
+    u32 bit = 1u << 30;
+
+    while (bit > value) {
+        bit >>= 2;
+    }
+
+    while (bit != 0) {
+        if (value >= result + bit) {
+            value -= result + bit;
+            result = (result >> 1) + bit;
+        }
+        else {
+            result >>= 1;
+        }
+        bit >>= 2;
+    }
+
+    return result;
+}
+
+// PSX rmMag3 integer path (radlib MAG3.CPP).
+inline u32 PsxRmMag3(s32 x, s32 y, s32 z) {
+    u8 shift = 0;
+    if (x < 0) {
+        x = -x;
+    }
+    if (y < 0) {
+        y = -y;
+    }
+    if (z < 0) {
+        z = -z;
+    }
+
+    while ((x + y + z) > 46339) {
+        x >>= 2;
+        y >>= 2;
+        z >>= 2;
+        shift += 2;
+    }
+
+    const u32 lengthSquared = (u32)(x * x + y * y + z * z);
+    return PsxSqrtFloorU32(lengthSquared) << shift;
+}
+
+// PSX rmDiv16i path (radlib DIVIDE.C:30).
+inline s32 PsxRmDiv16i(s32 numerator, s32 denominator) {
+    s32 shift = 16;
+    bool negative = false;
+
+    u32 denominatorAbs = (u32)denominator;
+    if (denominator < 0) {
+        denominatorAbs = (u32)(0u - denominatorAbs);
+        negative = true;
+    }
+
+    u32 numeratorAbs = (u32)numerator;
+    if (numerator < 0) {
+        numeratorAbs = (u32)(0u - numeratorAbs);
+        negative = !negative;
+    }
+
+    while (numeratorAbs <= 0x1FFFFFFFu) {
+        shift -= 2;
+        if (shift == 0) {
+            break;
+        }
+        numeratorAbs *= 4u;
+    }
+
+    const u32 scaledDenominator = denominatorAbs >> shift;
+    if (scaledDenominator != 0) {
+        const s32 quotient = (s32)(numeratorAbs / scaledDenominator);
+        return negative ? -quotient : quotient;
+    }
+
+    if (numeratorAbs == 0) {
+        return 0;
+    }
+
+    return negative ? (s32)0x80000001u : 0x7FFFFFFF;
+}
+
 template <typename T>
 inline T PsxMin(T leftValue, T rightValue) {
     return (leftValue < rightValue) ? leftValue : rightValue;

@@ -12,3 +12,9 @@ inline u32 PsxAbgr1555ToRgba8888(u16 color) {
     const u32 b = ((color >> 10) & 0x1F) << 3;
     return (255u << 24) | (b << 16) | (g << 8) | r;
 }
+
+// Converts a PSX 0..128-style color channel to modern 0..255 output.
+inline u8 PsxColMod128To255(u8 value) {
+    const u32 converted = ((u32)value * 255u + 64u) / 128u;
+    return (converted > 255u) ? 255u : (u8)converted;
+}

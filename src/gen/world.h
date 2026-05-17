@@ -152,6 +152,20 @@ public:
         return nullptr;
     }
 
+    // Returns the petal/destination name for a given level index and petal index.
+    const char* GetPetalNameFromIndex(u32 levelIndex, u32 petalIndex) const {
+        if (!petalNames || levelIndex >= (u32)levelCount)
+            return nullptr;
+        if (!petalNames[levelIndex])
+            return nullptr;
+
+        const u32 petalCount = (u32)GetLevelPetalCountFromIndex(levelIndex);
+        if (petalIndex >= petalCount)
+            return nullptr;
+
+        return petalNames[levelIndex][petalIndex];
+    }
+
 private:
     BlockManager blockMgr;
     PsxVRAM vram;

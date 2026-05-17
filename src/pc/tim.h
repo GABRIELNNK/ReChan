@@ -36,10 +36,9 @@ namespace ScreenDraw {
 
     // Draw a textured quad with optional UV and color tint.
     // Default UV = full texture, default color = white (no tint).
-    // PSX GPU neutral color = 128 (tex * 128/128 = 1.0x)
     void DrawQuad(tTexture* tex, f32 x, f32 y, f32 w, f32 h,
                   f32 u0 = 0.0f, f32 v0 = 0.0f, f32 u1 = 1.0f, f32 v1 = 1.0f,
-                  u8 r = 128, u8 g = 128, u8 b = 128, u8 a = 255);
+                  u8 r = 255, u8 g = 255, u8 b = 255, u8 a = 255);
 
     // Draw a solid colored rectangle (no texture).
     void DrawColoredRect(f32 x, f32 y, f32 w, f32 h,
@@ -47,6 +46,7 @@ namespace ScreenDraw {
 
     // Draw a fullscreen colored quad (used for fade transitions).
     void DrawColoredQuad(u8 r, u8 g, u8 b, u8 a);
+
 
     // Draw a Gouraud-shaded quad with 4 per-vertex colors (PSX POLYG4).
     void DrawGouraudQuad(f32 x0, f32 y0, u8 r0, u8 g0, u8 b0, u8 a0,

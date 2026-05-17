@@ -200,7 +200,7 @@ void ScreenDraw::DrawFullscreen(tTexture* tex) {
     p3d::context->SetBlendMode(PDDI_BLEND_NONE);
 
     s_screenShader->SetTexture(0, tex->GetTexture());
-    s_screenShader->SetColour(0, pddiColour(128, 128, 128, 255));
+    s_screenShader->SetColour(0, pddiColour(255, 255, 255, 255));
     p3d::context->DrawQuad(s_screenShader, SCALE_AND_CENTER_X(0.0f), 0.0f, SCREEN_SCALE_X(DEFAULT_SCREEN_WIDTH), SCREEN_HEIGHT, 0.0f, 0.0f, 1.0f, 1.0f);
 
     EndOverlay(prev);
@@ -209,7 +209,8 @@ void ScreenDraw::DrawFullscreen(tTexture* tex) {
 void ScreenDraw::DrawQuad(tTexture* tex, f32 x, f32 y, f32 w, f32 h,
                           f32 u0, f32 v0, f32 u1, f32 v1,
                           u8 r, u8 g, u8 b, u8 a) {
-    if (!tex) return;
+    if (!tex)
+        return;
     Mat4 prev = BeginOverlay();
     p3d::context->SetBlendMode(PDDI_BLEND_ALPHA);
 
@@ -241,7 +242,7 @@ void ScreenDraw::DrawColoredRect(f32 x, f32 y, f32 w, f32 h,
     p3d::context->SetBlendMode(PDDI_BLEND_ALPHA);
 
     s_screenShader->SetTexture(0, s_colorTex->GetTexture());
-    s_screenShader->SetColour(0, pddiColour(128, 128, 128, a));
+    s_screenShader->SetColour(0, pddiColour(255, 255, 255, a));
     p3d::context->DrawQuad(s_screenShader, x, y, w, h, 0.0f, 0.0f, 1.0f, 1.0f);
 
     EndOverlay(prev);

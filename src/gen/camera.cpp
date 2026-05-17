@@ -881,25 +881,30 @@ void Camera::FollowPath() {
     const s32 dotA = (s32)dotAU;
     const s32 denom = (s32)(dotAU - dotBU);
 
-    s32 t = rmDiv16i(dotA, denom);
+    s32 t = PsxRmDiv16i(dotA, denom);
     if (t < 0) t = 0;
     if (t > FIX16_ONE) t = FIX16_ONE;
 
     s32 oneMinusT = FIX16_ONE - t;
 
+    auto psxLerp16Split = [oneMinusT, t](s32 fromValue, s32 toValue) -> s32 {
+        // PSX does per-term >>16 truncation before summing.
+        return (s32)(((s64)fromValue * oneMinusT) >> 16) + (s32)(((s64)toValue * t) >> 16);
+    };
+
     // Interpolate node attributes (16.16 lerp)
-    s32 fovInterp = (s32)(((s64)nodeA->fov * oneMinusT + (s64)nodeB->fov * t) >> 16);
-    s32 angleYInterp = (s32)(((s64)nodeA->camAngleY * oneMinusT + (s64)nodeB->camAngleY * t) >> 16);
-    s32 angleXInterp = (s32)(((s64)nodeA->camAngleX * oneMinusT + (s64)nodeB->camAngleX * t) >> 16);
-    s32 angleZInterp = (s32)(((s64)nodeA->camAngleZ * oneMinusT + (s64)nodeB->camAngleZ * t) >> 16);
-    s32 zoomInterp = (s32)(((s64)nodeA->zoom * oneMinusT + (s64)nodeB->zoom * t) >> 16);
-    s32 speedInterp = (s32)(((s64)nodeA->speed * oneMinusT + (s64)nodeB->speed * t) >> 16);
-    s32 flagsInterp = (s32)(((s64)(u8)nodeA->flags * oneMinusT + (s64)(u8)nodeB->flags * t) >> 16);
+    s32 fovInterp = psxLerp16Split(nodeA->fov, nodeB->fov);
+    s32 angleYInterp = psxLerp16Split(nodeA->camAngleY, nodeB->camAngleY);
+    s32 angleXInterp = psxLerp16Split(nodeA->camAngleX, nodeB->camAngleX);
+    s32 angleZInterp = psxLerp16Split(nodeA->camAngleZ, nodeB->camAngleZ);
+    s32 zoomInterp = psxLerp16Split(nodeA->zoom, nodeB->zoom);
+    s32 speedInterp = psxLerp16Split(nodeA->speed, nodeB->speed);
+    s32 flagsInterp = psxLerp16Split((s32)(u8)nodeA->flags, (s32)(u8)nodeB->flags);
 
     // Interpolate param offset vectors
-    s32 offsetX = (s32)(((s64)nodeA->param0 * oneMinusT + (s64)nodeB->param0 * t) >> 16);
-    s32 offsetY = (s32)(((s64)nodeA->param1 * oneMinusT + (s64)nodeB->param1 * t) >> 16);
-    s32 offsetZ = (s32)(((s64)nodeA->param2 * oneMinusT + (s64)nodeB->param2 * t) >> 16);
+    s32 offsetX = psxLerp16Split(nodeA->param0, nodeB->param0);
+    s32 offsetY = psxLerp16Split(nodeA->param1, nodeB->param1);
+    s32 offsetZ = psxLerp16Split(nodeA->param2, nodeB->param2);
 
     // PSX: desiredFOV = flagsInterp
     desiredFOV = flagsInterp;
@@ -964,14 +969,14 @@ void Camera::FollowPath() {
     curPos.z += offTgtZ;
 
     // Normalize segment direction and apply parallel offset
-    s32 normX = segX << 16;
-    s32 normY = segY << 16;
-    s32 normZ = segZ << 16;
-    s32 mag = (s32)rmMag3((f32)normX, (f32)normY, (f32)normZ);
+    s32 normX = PsxShiftLeft16Wrap(segX);
+    s32 normY = PsxShiftLeft16Wrap(segY);
+    s32 normZ = PsxShiftLeft16Wrap(segZ);
+    s32 mag = (s32)PsxRmMag3(normX, normY, normZ);
     if (mag) {
-        normX = rmDiv16i(normX, mag);
-        normY = rmDiv16i(normY, mag);
-        normZ = rmDiv16i(normZ, mag);
+        normX = PsxRmDiv16i(normX, mag);
+        normY = PsxRmDiv16i(normY, mag);
+        normZ = PsxRmDiv16i(normZ, mag);
     }
 
     // Camera eye parallel offset: segDirNorm * fovInterp + param offset

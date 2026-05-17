@@ -13,6 +13,18 @@ void CustomText::Init() {
         case LangEnglish:
             langPath = "TEXT/ENGLISH.TXT";
             break;
+        case LangGerman:
+            langPath = "TEXT/GERMAN.TXT";
+            break;
+        case LangFrench:
+            langPath = "TEXT/FRENCH.TXT";
+            break;
+        case LangItalian:
+            langPath = "TEXT/ITALIAN.TXT";
+            break;
+        case LangSpanish:
+            langPath = "TEXT/SPANISH.TXT";
+            break;
         default:
             langPath = "TEXT/ENGLISH.TXT";
             break;
@@ -31,6 +43,10 @@ void CustomText::Shutdown() {
 }
 
 void CustomText::SetLanguage(GameLanguage language) {
+    if ((s32)language < 0 || (s32)language >= (s32)NumLanguages) {
+        language = LangEnglish;
+    }
+
     if (lang == language) {
         return; // no change
     }
@@ -48,6 +64,14 @@ const char* CustomText::GetString(const char* token) const {
     return GetStringByHash(hash);
 }
 
+Utf8TextView CustomText::GetText(const char* token) const {
+    if (!token) {
+        return {};
+    }
+
+    return GetTextByHash(xcHash(token));
+}
+
 const char* CustomText::GetStringByHash(u32 hash) const {
     // Linear search like xcInventory::FindItem (no double hashing)
     for (const auto& entry : strings) {
@@ -58,6 +82,16 @@ const char* CustomText::GetStringByHash(u32 hash) const {
     }
 
     return nullptr;
+}
+
+Utf8TextView CustomText::GetTextByHash(u32 hash) const {
+    for (const auto& entry : strings) {
+        if (entry.hash == hash) {
+            return Utf8TextView(entry.text);
+        }
+    }
+
+    return {};
 }
 
 void CustomText::ClearStrings() {
@@ -78,6 +112,13 @@ bool CustomText::LoadTextFile(const char* path) {
 
     std::string fileText((const char*)rawData, (size_t)fileSize);
     delete[] rawData;
+
+    if (fileText.size() >= 3
+        && (u8)fileText[0] == 0xEF
+        && (u8)fileText[1] == 0xBB
+        && (u8)fileText[2] == 0xBF) {
+        fileText.erase(0, 3);
+    }
 
     // Parse file line by line
     size_t cursor = 0;

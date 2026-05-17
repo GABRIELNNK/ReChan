@@ -2,9 +2,6 @@
 #include "p3d/input.h"
 #include "pddi/pddidev.h"
 #include "gen/control.h"
-#include <cmath>
-#include <cstring>
-#include <cstdio>
 
 static const char* kActionTokens[ACTION_COUNT] = {
     "JUMP",
@@ -19,12 +16,7 @@ static const char* kActionTokens[ACTION_COUNT] = {
     "MOVE_DOWN",
     "MOVE_LEFT",
     "MOVE_RIGHT",
-    "LOOK_UP",
-    "LOOK_DOWN",
-    "LOOK_LEFT",
-    "LOOK_RIGHT",
     "OPEN_CLOSE_MENU",
-    "TITLE_START",
     "MENU_UP",
     "MENU_DOWN",
     "MENU_LEFT",
@@ -284,13 +276,7 @@ ActionInput::ActionInput() {
     bindings[ACTION_MOVE_LEFT] = { { KEY_A, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::NONE, GpBtn::DpadLeft, GpAxis::LeftX, -0.3f };
     bindings[ACTION_MOVE_RIGHT] = { { KEY_D, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::NONE, GpBtn::DpadRight, GpAxis::LeftX, 0.3f };
 
-    bindings[ACTION_LOOK_UP] = { { 0, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::NONE, GpBtn::NONE, GpAxis::RightY, -0.3f };
-    bindings[ACTION_LOOK_DOWN] = { { 0, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::NONE, GpBtn::NONE, GpAxis::RightY, 0.3f };
-    bindings[ACTION_LOOK_LEFT] = { { 0, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::NONE, GpBtn::NONE, GpAxis::RightX, -0.3f };
-    bindings[ACTION_LOOK_RIGHT] = { { 0, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::NONE, GpBtn::NONE, GpAxis::RightX, 0.3f };
-
     bindings[ACTION_OPEN_CLOSE_MENU] = { { KEY_ESCAPE, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::Start, GpBtn::NONE, GpAxis::NONE, 0 };
-    bindings[ACTION_TITLE_START] = { { KEY_ENTER, 0 }, { MouseBtn::NONE, MouseBtn::Left }, GpBtn::Start, GpBtn::NONE, GpAxis::NONE, 0 };
 
     bindings[ACTION_MENU_UP] = { { KEY_UP, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::DpadUp, GpBtn::NONE, GpAxis::LeftY, -0.5f };
     bindings[ACTION_MENU_DOWN] = { { KEY_DOWN, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::DpadDown, GpBtn::NONE, GpAxis::LeftY, 0.5f };
@@ -491,6 +477,16 @@ bool ActionInput::AnyJustPressed() const {
     }
     return false;
 }
+
+bool ActionInput::AnyJustPressed2() const {
+    for (s32 i = 0; i < ACTION_COUNT; i++) {
+        if (states[i].down && !states[i].prevDown && i != ACTION_MOVE_UP && i != ACTION_MOVE_DOWN && i != ACTION_MOVE_LEFT && i != ACTION_MOVE_RIGHT && i != ACTION_MENU_UP && i != ACTION_MENU_DOWN && i != ACTION_MENU_LEFT && i != ACTION_MENU_RIGHT) {
+            return true;
+        }
+    }
+    return false;
+}
+
 
 void ActionInput::SetKeyBinding(Action action, int key) {
     SetKeyBindingSlot(action, 0, key);

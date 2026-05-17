@@ -5,6 +5,7 @@
 #include "gen/display.h"
 #include "gen/time.h"
 #include "pc/inputaction.h"
+#include "extra/customtext.h"
 #include "p3d/context.h"
 #include "snd/sound.h"
 #include "snd/rsevent.h"
@@ -317,6 +318,18 @@ static s32 GetFrameRateSetting() {
     return 30;
 }
 
+static s32 GetLanguageSetting() {
+    return (s32)g_customText.GetLanguage();
+}
+
+static void SetLanguageSetting(s32 v) {
+    if (v < 0 || v >= (s32)NumLanguages) {
+        v = (s32)LangEnglish;
+    }
+
+    g_customText.SetLanguage((GameLanguage)v);
+}
+
 static void SetFrameRateSetting(s32 v) {
     if (g_time) {
         g_time->targetFPS = NormalizeFrameRateSetting(v);
@@ -324,6 +337,7 @@ static void SetFrameRateSetting(s32 v) {
 }
 
 static const SettingDef kSettingDefs[] = {
+    { "general", "language",      0, 0, (s32)NumLanguages - 1, GetLanguageSetting,    SetLanguageSetting },
     { "audio", "music_volume",   100, 0, 100, GetMusicVolume,   SetMusicVolume },
     { "audio", "effects_volume", 100, 0, 100, GetEffectsVolume, SetEffectsVolume },
     { "audio", "dialog_volume",  100, 0, 100, GetDialogVolume,  SetDialogVolume },

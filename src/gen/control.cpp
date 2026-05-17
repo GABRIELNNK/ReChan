@@ -232,7 +232,7 @@ void InputManager::ServiceHostPads(const ActionInput* actionInput, bool commitNo
 
         if (controls[0].modeMap == sTitleControlMode) {
             buttons &= ~PsxPad::Start;
-            if (actionInput->IsHeld(ACTION_TITLE_START)) {
+            if (actionInput->AnyJustPressed2()) {
                 buttons |= PsxPad::Start;
             }
         }

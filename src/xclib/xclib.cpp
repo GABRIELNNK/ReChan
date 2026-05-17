@@ -8,8 +8,8 @@
 #endif
 #include "p3d/texture.h"
 #include "pc/tim.h"
-#include <cstdio>
-#include <cstring>
+#include "xccolour.h"
+
 #include <unordered_map>
 
 // SQU LZSS Decompression (PSX: EXPAND.CPP:67, addr 0x80026D10)
@@ -557,212 +557,6 @@ void xcSection::Draw() {
     }
 }
 
-void xcSection::DrawScreenPrims(u32 screenHash, bool drawSprites, bool drawPolys, bool drawText) {
-    DrawScreenPrimsScaled(screenHash, drawSprites, drawPolys, drawText, 1.0f, 1.0f, 256, 120);
-}
-
-void xcSection::DrawScreenPrimsScaled(
-    u32 screenHash,
-    bool drawSprites,
-    bool drawPolys,
-    bool drawText,
-    f32 scaleX,
-    f32 scaleY,
-    s32 pivotX,
-    s32 pivotY) {
-    if (!rawData || !screens || !overlays) {
-        return;
-    }
-
-    xcScreenData* screen = FindScreen(screenHash);
-    if (!screen) {
-        return;
-    }
-
-    const u32* overlayRefs = screen->GetOverlayRefs();
-    for (u32 oi = 0; oi < screen->overlayCount; oi++) {
-        DrawOverlayPrimsScaled(overlayRefs[oi], drawSprites, drawPolys, drawText, scaleX, scaleY, pivotX, pivotY);
-    }
-}
-
-void xcSection::DrawOverlayPrims(u32 overlayHash, bool drawSprites, bool drawPolys, bool drawText) {
-    DrawOverlayPrimsScaled(overlayHash, drawSprites, drawPolys, drawText, 1.0f, 1.0f, 256, 120);
-}
-
-void xcSection::DrawOverlayPrimsScaled(
-    u32 overlayHash,
-    bool drawSprites,
-    bool drawPolys,
-    bool drawText,
-    f32 scaleX,
-    f32 scaleY,
-    s32 pivotX,
-    s32 pivotY) {
-    if (!rawData || !overlays) {
-        return;
-    }
-
-    xcOverlayData* ovl = FindOverlay(overlayHash);
-    if (!ovl) {
-        return;
-    }
-
-    const xcOverlayItem* primItems = ovl->GetItems();
-    for (u32 pi = 0; pi < ovl->primCount; pi++) {
-        u32 primOffset = primItems[pi].dataOffset;
-        if (primOffset + 4 > rawSize) {
-            continue;
-        }
-
-        u8* primData = rawData + primOffset;
-        xcPrimHeader* hdr = reinterpret_cast<xcPrimHeader*>(primData);
-        if (hdr->subtype == 5) {
-            continue;
-        }
-
-        if (hdr->type == XC_PRIM_TEXT) {
-            if (!drawText) {
-                continue;
-            }
-        }
-        else if (hdr->type == XC_PRIM_SPRITE) {
-            if (!drawSprites) {
-                continue;
-            }
-        }
-        else if (hdr->type == XC_PRIM_POLYF4 || hdr->type == XC_PRIM_POLYG4) {
-            if (!drawPolys) {
-                continue;
-            }
-        }
-
-        DrawPrimObjScaled(primData, scaleX, scaleY, pivotX, pivotY);
-    }
-}
-
-void xcSection::DrawPrimObjScaled(u8* primData, f32 scaleX, f32 scaleY, s32 pivotX, s32 pivotY) {
-    auto mapX = [&](s32 x) -> s32 {
-        return pivotX + (s32)((f32)(x - pivotX) * scaleX);
-    };
-    auto mapY = [&](s32 y) -> s32 {
-        return pivotY + (s32)((f32)(y - pivotY) * scaleY);
-    };
-
-    auto* hdr = reinterpret_cast<xcPrimHeader*>(primData);
-    if (hdr->subtype == 5) return;
-
-    switch (hdr->type) {
-        case XC_PRIM_POLYF4:
-        {
-            auto* prim = reinterpret_cast<xcPolyF4Prim*>(primData);
-
-            s32 tx0 = mapX(prim->x0);
-            s32 ty0 = mapY(prim->y0);
-            s32 tx3 = mapX(prim->x3);
-            s32 ty3 = mapY(prim->y3);
-
-            s16 minX = (s16)((tx0 < tx3) ? tx0 : tx3);
-            s16 maxX = (s16)((tx0 > tx3) ? tx0 : tx3);
-            s16 minY = (s16)((ty0 < ty3) ? ty0 : ty3);
-            s16 maxY = (s16)((ty0 > ty3) ? ty0 : ty3);
-
-            f32 nx = SCALE_AND_CENTER_X((f32)minX);
-            f32 ny = SCREEN_SCALE_Y((f32)minY);
-            f32 nw = SCREEN_SCALE_X((f32)(maxX - minX));
-            f32 nh = SCREEN_SCALE_Y((f32)(maxY - minY));
-
-            u8 alpha = (prim->code & 0x02) ? 128 : 255;
-            if (prim->r == 0 && prim->g == 0 && prim->b == 0 && hdr->subtype == 0) {
-                alpha = 128;
-            }
-            ScreenDraw::DrawColoredRect(nx, ny, nw, nh, prim->r, prim->g, prim->b, alpha);
-            break;
-        }
-        case XC_PRIM_POLYG4:
-        {
-            auto* prim = reinterpret_cast<xcPolyG4Prim*>(primData);
-            u8 alpha = (prim->code & 0x02) ? 128 : 255;
-            u8 ar, ag, ab;
-            prim->GetAvgColor(ar, ag, ab);
-            if (ar == 0 && ag == 0 && ab == 0 && hdr->subtype == 0) {
-                alpha = 128;
-            }
-
-            s32 x0 = mapX(prim->x0);
-            s32 y0 = mapY(prim->y0);
-            s32 x1 = mapX(prim->x1);
-            s32 y1 = mapY(prim->y1);
-            s32 x2 = mapX(prim->x2);
-            s32 y2 = mapY(prim->y2);
-            s32 x3 = mapX(prim->x3);
-            s32 y3 = mapY(prim->y3);
-
-            ScreenDraw::DrawGouraudQuad(
-                SCALE_AND_CENTER_X((f32)x0), SCREEN_SCALE_Y((f32)y0), prim->r0, prim->g0, prim->b0, alpha,
-                SCALE_AND_CENTER_X((f32)x1), SCREEN_SCALE_Y((f32)y1), prim->r1, prim->g1, prim->b1, alpha,
-                SCALE_AND_CENTER_X((f32)x2), SCREEN_SCALE_Y((f32)y2), prim->r2, prim->g2, prim->b2, alpha,
-                SCALE_AND_CENTER_X((f32)x3), SCREEN_SCALE_Y((f32)y3), prim->r3, prim->g3, prim->b3, alpha);
-            break;
-        }
-        case XC_PRIM_SPRITE:
-        {
-            auto* prim = reinterpret_cast<xcSpritePrim*>(primData);
-            if (prim->numImages == 0) break;
-
-            u32 imgHash = prim->GetImageHash();
-            xcCellImage* cell = FindCell(imgHash);
-            if (!cell) {
-                break;
-            }
-            tTexture* tex = cell->GetTexture();
-            if (!tex) break;
-
-            s32 sx = mapX(prim->mtx.GetX());
-            s32 sy = mapY(prim->mtx.GetY());
-            s32 sw = (s32)((f32)cell->width * scaleX);
-            s32 sh = (s32)((f32)cell->height * scaleY);
-
-            f32 nx = SCALE_AND_CENTER_X((f32)sx);
-            f32 ny = SCREEN_SCALE_Y((f32)sy);
-            f32 nw = SCREEN_SCALE_X((f32)sw);
-            f32 nh = SCREEN_SCALE_Y((f32)sh);
-
-            ScreenDraw::DrawQuad(tex, nx, ny, nw, nh,
-                                 0.0f, 0.0f, 1.0f, 1.0f,
-                                 prim->colorR, prim->colorG, prim->colorB, prim->colorA);
-            break;
-        }
-        case XC_PRIM_TEXT:
-        {
-            auto* prim = reinterpret_cast<xcTextPrim*>(primData);
-            if (prim->numStrings == 0) break;
-
-            u32 strKey = prim->GetStringHash();
-            const char* runtimeStr = xcResolveRuntimeString(strKey);
-            const char* str = runtimeStr;
-            if (!str) {
-                str = FindString(strKey);
-            }
-            if (!str)
-                break;
-
-            xcFont* font = nullptr;
-            if (sectionMan) font = sectionMan->FindFont(prim->fontHash);
-            if (!font) break;
-
-            f32 posX = SCALE_AND_CENTER_X((f32)mapX(prim->mtx.GetX()));
-            f32 posY = SCREEN_SCALE_Y((f32)mapY(prim->mtx.GetY()));
-
-            font->SetScale(SCREEN_SCALE_X(scaleX), SCREEN_SCALE_Y(scaleY));
-            font->DrawText(str, posX, posY, prim->GetColor(),
-                           prim->hdr.flags, (s32)prim->lineSpacing);
-            break;
-        }
-        default:
-            break;
-    }
-}
-
 // PSX: Draw__9xcPrimObj (XCDO.CPP:110, 0x800AE430)
 // PSX checks byte[2] (subtype) == 5 to skip clipping-region prims.
 void xcSection::DrawPrimObj(u8* primData) {
@@ -785,7 +579,7 @@ void xcSection::DrawPrimObj(u8* primData) {
             if (prim->r == 0 && prim->g == 0 && prim->b == 0 && hdr->subtype == 0) {
                 alpha = 128;
             }
-            ScreenDraw::DrawColoredRect(nx, ny, nw, nh, prim->r, prim->g, prim->b, alpha);
+            ScreenDraw::DrawColoredRect(nx, ny, nw, nh, PsxColMod128To255(prim->r), PsxColMod128To255(prim->g), PsxColMod128To255(prim->b), alpha);
             break;
         }
         case XC_PRIM_POLYG4:
@@ -799,10 +593,10 @@ void xcSection::DrawPrimObj(u8* primData) {
             }
 
             ScreenDraw::DrawGouraudQuad(
-                SCALE_AND_CENTER_X(prim->x0), SCREEN_SCALE_Y(prim->y0), prim->r0, prim->g0, prim->b0, alpha,
-                SCALE_AND_CENTER_X(prim->x1), SCREEN_SCALE_Y(prim->y1), prim->r1, prim->g1, prim->b1, alpha,
-                SCALE_AND_CENTER_X(prim->x2), SCREEN_SCALE_Y(prim->y2), prim->r2, prim->g2, prim->b2, alpha,
-                SCALE_AND_CENTER_X(prim->x3), SCREEN_SCALE_Y(prim->y3), prim->r3, prim->g3, prim->b3, alpha);
+                SCALE_AND_CENTER_X(prim->x0), SCREEN_SCALE_Y(prim->y0), PsxColMod128To255(prim->r0), PsxColMod128To255(prim->g0), PsxColMod128To255(prim->b0), alpha,
+                SCALE_AND_CENTER_X(prim->x1), SCREEN_SCALE_Y(prim->y1), PsxColMod128To255(prim->r1), PsxColMod128To255(prim->g1), PsxColMod128To255(prim->b1), alpha,
+                SCALE_AND_CENTER_X(prim->x2), SCREEN_SCALE_Y(prim->y2), PsxColMod128To255(prim->r2), PsxColMod128To255(prim->g2), PsxColMod128To255(prim->b2), alpha,
+                SCALE_AND_CENTER_X(prim->x3), SCREEN_SCALE_Y(prim->y3), PsxColMod128To255(prim->r3), PsxColMod128To255(prim->g3), PsxColMod128To255(prim->b3), alpha);
             break;
         }
         case XC_PRIM_SPRITE:
@@ -827,7 +621,7 @@ void xcSection::DrawPrimObj(u8* primData) {
 
             ScreenDraw::DrawQuad(tex, nx, ny, nw, nh,
                                  0.0f, 0.0f, 1.0f, 1.0f,
-                                 prim->colorR, prim->colorG, prim->colorB, prim->colorA);
+                                 PsxColMod128To255(prim->colorR), PsxColMod128To255(prim->colorG), PsxColMod128To255(prim->colorB), prim->colorA);
             break;
         }
         case XC_PRIM_TEXT:
@@ -851,8 +645,16 @@ void xcSection::DrawPrimObj(u8* primData) {
             f32 posX = SCALE_AND_CENTER_X(prim->mtx.GetX());
             f32 posY = SCREEN_SCALE_Y(prim->mtx.GetY());
 
+            const u32 rawColor = prim->GetColor();
+            xcColour1555 col;
+            col.Set8(
+                PsxColMod128To255((u8)(rawColor & 0xFFu)),
+                PsxColMod128To255((u8)((rawColor >> 8) & 0xFFu)),
+                PsxColMod128To255((u8)((rawColor >> 16) & 0xFFu)),
+                (u8)((rawColor >> 24) & 0xFFu));
+
             font->SetScale(SCREEN_SCALE_X(1.0f), SCREEN_SCALE_Y(1.0f));
-            font->DrawText(str, posX, posY, prim->GetColor(),
+            font->DrawText(str, posX, posY, col.Get8(),
                            prim->hdr.flags, (s32)prim->lineSpacing);
             break;
         }

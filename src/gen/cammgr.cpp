@@ -3,6 +3,7 @@
 #include "gen/blockmgr.h"
 #include "gen/world.h"
 #include "gen/game.h"
+#include "gen/psxmath_helpers.h"
 #include "p3d/p3dmath.h"
 
 // PSX global
@@ -158,16 +159,16 @@ s32 DBCameraPath::FindClosestNodes(LVector pos,
         }
         else if (dist == minDist && closest) {
             // Equal distance - use rmMag3 to pick closer of the two candidates
-            s32 vecA_x = (pos.x - node->targetPos.x) << 16;
-            s32 vecA_y = (pos.y - node->targetPos.y) << 16;
-            s32 vecA_z = (pos.z - node->targetPos.z) << 16;
+            s32 vecA_x = PsxShiftLeft16Wrap(pos.x - node->targetPos.x);
+            s32 vecA_y = PsxShiftLeft16Wrap(pos.y - node->targetPos.y);
+            s32 vecA_z = PsxShiftLeft16Wrap(pos.z - node->targetPos.z);
 
-            s32 vecB_x = (pos.x - closest->targetPos.x) << 16;
-            s32 vecB_y = (pos.y - closest->targetPos.y) << 16;
-            s32 vecB_z = (pos.z - closest->targetPos.z) << 16;
+            s32 vecB_x = PsxShiftLeft16Wrap(pos.x - closest->targetPos.x);
+            s32 vecB_y = PsxShiftLeft16Wrap(pos.y - closest->targetPos.y);
+            s32 vecB_z = PsxShiftLeft16Wrap(pos.z - closest->targetPos.z);
 
-            s32 magA = (s32)rmMag3((f32)vecA_x, (f32)vecA_y, (f32)vecA_z);
-            s32 magB = (s32)rmMag3((f32)vecB_x, (f32)vecB_y, (f32)vecB_z);
+            s32 magA = (s32)PsxRmMag3(vecA_x, vecA_y, vecA_z);
+            s32 magB = (s32)PsxRmMag3(vecB_x, vecB_y, vecB_z);
 
             if (magA < magB) {
                 closest = node;
@@ -206,27 +207,27 @@ s32 DBCameraPath::FindClosestNodes(LVector pos,
         if (prevNode) {
             // PSX order: segA = NEXT direction, segB = PREV direction
             // Dot product = (nextNorm - prevNorm) . toPos
-            s32 segA_x = (nextNode->targetPos.x - closest->targetPos.x) << 16;
-            s32 segA_y = (nextNode->targetPos.y - closest->targetPos.y) << 16;
-            s32 segA_z = (nextNode->targetPos.z - closest->targetPos.z) << 16;
+            s32 segA_x = PsxShiftLeft16Wrap(nextNode->targetPos.x - closest->targetPos.x);
+            s32 segA_y = PsxShiftLeft16Wrap(nextNode->targetPos.y - closest->targetPos.y);
+            s32 segA_z = PsxShiftLeft16Wrap(nextNode->targetPos.z - closest->targetPos.z);
 
-            s32 segB_x = (prevNode->targetPos.x - closest->targetPos.x) << 16;
-            s32 segB_y = (prevNode->targetPos.y - closest->targetPos.y) << 16;
-            s32 segB_z = (prevNode->targetPos.z - closest->targetPos.z) << 16;
+            s32 segB_x = PsxShiftLeft16Wrap(prevNode->targetPos.x - closest->targetPos.x);
+            s32 segB_y = PsxShiftLeft16Wrap(prevNode->targetPos.y - closest->targetPos.y);
+            s32 segB_z = PsxShiftLeft16Wrap(prevNode->targetPos.z - closest->targetPos.z);
 
-            s32 toPos_x = (pos.x - closest->targetPos.x) << 16;
-            s32 toPos_y = (pos.y - closest->targetPos.y) << 16;
-            s32 toPos_z = (pos.z - closest->targetPos.z) << 16;
+            s32 toPos_x = PsxShiftLeft16Wrap(pos.x - closest->targetPos.x);
+            s32 toPos_y = PsxShiftLeft16Wrap(pos.y - closest->targetPos.y);
+            s32 toPos_z = PsxShiftLeft16Wrap(pos.z - closest->targetPos.z);
 
-            s32 magA = (s32)rmMag3((f32)segA_x, (f32)segA_y, (f32)segA_z);
-            segA_x = rmDiv16i(segA_x, magA);
-            segA_y = rmDiv16i(segA_y, magA);
-            segA_z = rmDiv16i(segA_z, magA);
+            s32 magA = (s32)PsxRmMag3(segA_x, segA_y, segA_z);
+            segA_x = PsxRmDiv16i(segA_x, magA);
+            segA_y = PsxRmDiv16i(segA_y, magA);
+            segA_z = PsxRmDiv16i(segA_z, magA);
 
-            s32 magB = (s32)rmMag3((f32)segB_x, (f32)segB_y, (f32)segB_z);
-            segB_x = rmDiv16i(segB_x, magB);
-            segB_y = rmDiv16i(segB_y, magB);
-            segB_z = rmDiv16i(segB_z, magB);
+            s32 magB = (s32)PsxRmMag3(segB_x, segB_y, segB_z);
+            segB_x = PsxRmDiv16i(segB_x, magB);
+            segB_y = PsxRmDiv16i(segB_y, magB);
+            segB_z = PsxRmDiv16i(segB_z, magB);
 
             s64 dot =
                 (((s64)(segA_x - segB_x) * (s64)toPos_x) >> 16) +

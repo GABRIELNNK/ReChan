@@ -175,6 +175,36 @@ static u32 CompileGLShader(u32 type, const char* src) {
     return shader;
 }
 
+static void ApplyBorderlessCaptureOverscan(GLFWwindow* window, int requestedW, int requestedH) {
+    if (!window) {
+        return;
+    }
+
+    GLFWmonitor* primaryMonitor = glfwGetPrimaryMonitor();
+    if (!primaryMonitor) {
+        return;
+    }
+
+    const GLFWvidmode* videoMode = glfwGetVideoMode(primaryMonitor);
+    if (!videoMode) {
+        return;
+    }
+
+    // Keep normal borderless behavior for non-monitor-sized resolutions.
+    // For exact monitor-size windows, offset by 1px so Windows is less likely
+    // to use independent flip paths that can produce black Alt+Print captures.
+    if (requestedW != videoMode->width || requestedH != videoMode->height) {
+        return;
+    }
+
+    int monitorX = 0;
+    int monitorY = 0;
+    glfwGetMonitorPos(primaryMonitor, &monitorX, &monitorY);
+
+    glfwSetWindowPos(window, monitorX - 1, monitorY - 1);
+    glfwSetWindowSize(window, requestedW + 2, requestedH + 2);
+}
+
 // glPrimBuffer
 
 glPrimBuffer::glPrimBuffer(const pddiPrimBufferDesc& desc)
@@ -360,11 +390,9 @@ void glShader::PreRender() {
     }
     int tintLoc = glGetUniformLocation(program, "uTint");
     if (tintLoc >= 0) {
-        // PSX GPU: output = min(255, (tex * color) >> 7)
-        // Divide RGB by 128 (PSX neutral), alpha by 255
         glUniform4f(tintLoc,
-                    diffuse.r / 128.0f, diffuse.g / 128.0f,
-                    diffuse.b / 128.0f, diffuse.a / 255.0f);
+                    diffuse.r / 255.0f, diffuse.g / 255.0f,
+                    diffuse.b / 255.0f, diffuse.a / 255.0f);
     }
 }
 
@@ -695,6 +723,10 @@ void glDisplay::SetResolution(int w, int h) {
             if (centeredX < workX) centeredX = workX;
             if (centeredY < workY) centeredY = workY;
             glfwSetWindowPos(window, centeredX, centeredY);
+        }
+
+        if (borderless) {
+            ApplyBorderlessCaptureOverscan(window, w, h);
         }
     }
 

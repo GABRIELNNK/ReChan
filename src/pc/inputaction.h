@@ -44,12 +44,7 @@ enum Action : s32 {
     ACTION_MOVE_DOWN,
     ACTION_MOVE_LEFT,
     ACTION_MOVE_RIGHT,
-    ACTION_LOOK_UP,
-    ACTION_LOOK_DOWN,
-    ACTION_LOOK_LEFT,
-    ACTION_LOOK_RIGHT,
     ACTION_OPEN_CLOSE_MENU,
-    ACTION_TITLE_START,
     ACTION_MENU_UP,
     ACTION_MENU_DOWN,
     ACTION_MENU_LEFT,
@@ -150,6 +145,7 @@ public:
 
     // True if any action was just pressed this frame (for "press any button" screens)
     bool AnyJustPressed() const;
+    bool AnyJustPressed2() const;
 
     // Mouse state cached during Update()
     void GetMousePosition(double& x, double& y) const;

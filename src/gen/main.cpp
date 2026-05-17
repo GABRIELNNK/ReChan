@@ -11,6 +11,7 @@
 #include "pc/audio.h"
 #include "pc/debugui.h"
 #include "pc/inputaction.h"
+#include "pc/textmgr.h"
 #include "gen/game.h"
 #include "gen/time.h"
 #include "gen/display.h"
@@ -123,6 +124,17 @@ int main() {
     if (!g_actionInput) {
         g_actionInput = new ActionInput();
     }
+    if (!g_textManager) {
+        g_textManager = new TextManager();
+        g_textManager->Init();
+        TextFontDesc desc = {};
+        desc.name = "Menu";
+        desc.path = "pc/fonts/YIKES!__.ttf";
+        desc.pixelHeight = 48;
+        if (!g_textManager->LoadFont(desc)) {
+            LOG("[TextManager] Failed to load menu font: %s", desc.path);
+        }
+    }
 
     game.Open();
 
@@ -202,6 +214,12 @@ int main() {
 
     platform->DestroyContext(ctx);
     tPlatform::Destroy();
+
+    if (g_textManager) {
+        g_textManager->Shutdown();
+        delete g_textManager;
+        g_textManager = nullptr;
+    }
 
     delete g_actionInput;
     g_actionInput = nullptr;

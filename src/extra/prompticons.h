@@ -265,7 +265,7 @@ public:
 
         const f32 effectiveHeight = GetDrawHeight(prompt, drawHeight);
         const f32 drawWidth = GetDrawWidth(prompt, drawHeight);
-        const f32 drawY = y - ((effectiveHeight - drawHeight) * 0.5f);
+        const f32 drawY = y - ((effectiveHeight - drawHeight) * 0.5f) - (drawHeight * 0.1f);
         f32 u0 = (f32)prompt.rect.x / (f32)prompt.texW;
         f32 v0 = (f32)prompt.rect.y / (f32)prompt.texH;
         f32 u1 = (f32)(prompt.rect.x + prompt.rect.w) / (f32)prompt.texW;
@@ -289,7 +289,7 @@ public:
 
         ScreenDraw::DrawQuad(prompt.tex, x, drawY, drawWidth, effectiveHeight,
                              u0, v0, u1, v1,
-                             128, 128, 128, alpha);
+                             255, 255, 255, alpha);
     }
 
 private:

@@ -1,10 +1,15 @@
 #pragma once
 #include "core.h"
+#include "gen/utf8text.h"
 #include <string>
 #include <vector>
 
 enum GameLanguage : s32 {
     LangEnglish = 0,
+    LangGerman,
+    LangFrench,
+    LangItalian,
+    LangSpanish,
     NumLanguages,
 };
 
@@ -35,8 +40,14 @@ public:
     // Get a localized string by token name (hashed with xcHash). Returns nullptr if not found.
     const char* GetString(const char* token) const;
 
+    // Get a localized UTF-8 view by token name. Returns empty view if not found.
+    Utf8TextView GetText(const char* token) const;
+
     // Get a localized string by pre-computed hash. Returns nullptr if not found.
     const char* GetStringByHash(u32 hash) const;
+
+    // Get a localized UTF-8 view by pre-computed hash. Returns empty view if not found.
+    Utf8TextView GetTextByHash(u32 hash) const;
 
     // Get current language
     GameLanguage GetLanguage() const { return lang; }
