@@ -156,6 +156,28 @@ void main() {
 }
 )";
 
+static pddiTexture* s_defaultWhiteTexture = nullptr;
+static s32 s_defaultWhiteTextureUsers = 0;
+
+static pddiTexture* GetDefaultWhiteTexture() {
+    if (s_defaultWhiteTexture) {
+        return s_defaultWhiteTexture;
+    }
+
+    glTexture* tex = new glTexture();
+    const u8 whitePixel[4] = { 255, 255, 255, 255 };
+    tex->SetData(1, 1, 32, 8, whitePixel);
+    s_defaultWhiteTexture = tex;
+    return s_defaultWhiteTexture;
+}
+
+static void ReleaseDefaultWhiteTexture() {
+    if (s_defaultWhiteTexture) {
+        s_defaultWhiteTexture->Release();
+        s_defaultWhiteTexture = nullptr;
+    }
+}
+
 // GL helpers
 
 static u32 CompileGLShader(u32 type, const char* src) {
@@ -344,6 +366,9 @@ void glTexture::Bind(int unit) {
 // glShader
 
 glShader::glShader() {
+    for (s32 i = 0; i < kMaxTextureSlots; i++) {
+        texSlots[i] = nullptr;
+    }
     CreateDefaultProgram();
 }
 
@@ -375,7 +400,14 @@ void glShader::CreateDefaultProgram() {
     glDeleteShader(fs);
 }
 
-void glShader::SetTexture(u32 param, pddiTexture* t) { tex = t; }
+void glShader::SetTexture(u32 param, pddiTexture* t) {
+    s32 slot = 0;
+    if (param < (u32)kMaxTextureSlots) {
+        slot = (s32)param;
+    }
+
+    texSlots[slot] = t;
+}
 void glShader::SetInt(u32, int) {}
 void glShader::SetFloat(u32, float) {}
 void glShader::SetColour(u32 param, pddiColour c) {
@@ -384,10 +416,35 @@ void glShader::SetColour(u32 param, pddiColour c) {
 
 void glShader::PreRender() {
     glUseProgram(program);
-    if (tex) {
-        tex->Bind(0);
-        glUniform1i(glGetUniformLocation(program, "uTex"), 0);
+
+    pddiTexture* fallback = GetDefaultWhiteTexture();
+    for (s32 slot = 0; slot < kMaxTextureSlots; slot++) {
+        pddiTexture* boundTexture = texSlots[slot] ? texSlots[slot] : fallback;
+        if (!boundTexture) {
+            continue;
+        }
+
+        boundTexture->Bind(slot);
+
+        if (slot == 0) {
+            int baseSamplerLoc = glGetUniformLocation(program, "uTex");
+            if (baseSamplerLoc >= 0) {
+                glUniform1i(baseSamplerLoc, 0);
+            }
+        }
+
+        char samplerName[32];
+        std::snprintf(samplerName, sizeof(samplerName), "uTex%d", slot);
+        int samplerLoc = glGetUniformLocation(program, samplerName);
+        if (samplerLoc < 0) {
+            std::snprintf(samplerName, sizeof(samplerName), "uTex[%d]", slot);
+            samplerLoc = glGetUniformLocation(program, samplerName);
+        }
+        if (samplerLoc >= 0) {
+            glUniform1i(samplerLoc, slot);
+        }
     }
+
     int tintLoc = glGetUniformLocation(program, "uTint");
     if (tintLoc >= 0) {
         glUniform4f(tintLoc,
@@ -969,6 +1026,8 @@ void glDisplay::ScrollCallback(GLFWwindow* win, double xoff, double yoff) {
 
 glContext::glContext(glDisplay* disp)
     : display(disp) {
+    GetDefaultWhiteTexture();
+    s_defaultWhiteTextureUsers++;
     InitQuadMesh();
     InitGouraudMesh();
     Init3DShader();
@@ -982,6 +1041,13 @@ glContext::~glContext() {
     if (gouraudVAO) glDeleteVertexArrays(1, &gouraudVAO);
     if (gouraudProgram) glDeleteProgram(gouraudProgram);
     if (program3D) glDeleteProgram(program3D);
+
+    if (s_defaultWhiteTextureUsers > 0) {
+        s_defaultWhiteTextureUsers--;
+    }
+    if (s_defaultWhiteTextureUsers == 0) {
+        ReleaseDefaultWhiteTexture();
+    }
 }
 
 void glContext::DestroyMSAAFramebuffer() {

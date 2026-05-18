@@ -588,6 +588,7 @@ bool Game::gsIntroState(Game* game) {
 
 #if SKIP_INTRO
     game->SetState(GameState::Init);
+    return true;
 #endif
 
     // Phase 0: first entry - start 300-frame wait with LICENSE.TIM
@@ -889,7 +890,9 @@ bool Game::gsInitState(Game* game) {
 #endif
 
     // PSX: ClearImage, DisplayTIM(gp[24]), StartLogo(655360), FillMeter(100)
+#if !CUSTOM_MENU
     DisplayTIM("RUNFIRST.TIM");
+#endif
     StartLogo("RUNFIRST.TIM");
     FillMeter(100);
 

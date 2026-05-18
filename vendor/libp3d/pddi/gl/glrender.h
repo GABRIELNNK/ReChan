@@ -83,8 +83,9 @@ public:
     u32 GetProgram() const { return program; }
 
 private:
+    static constexpr s32 kMaxTextureSlots = 16;
     u32 program = 0;
-    pddiTexture* tex = nullptr;
+    pddiTexture* texSlots[kMaxTextureSlots] = {};
     pddiColour diffuse = pddiColour(255, 255, 255);
     pddiBlendMode blendMode = PDDI_BLEND_NONE;
 

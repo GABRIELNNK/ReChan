@@ -14,6 +14,7 @@
 #include "pc/textmgr.h"
 #include "gen/time.h"
 #include "xclib/xccolour.h"
+#include "xclib/xclib.h"
 #include "gen/scoremgr.h"
 #include "gen/world.h"
 #include "p3d/texture.h"
@@ -26,12 +27,14 @@ static constexpr s32 kMsaaOptionValues[] = { 0, 2, 4, 8, 16 };
 static constexpr s32 kKeyBindingActionCount = ACTION_OPEN_CLOSE_MENU;
 static constexpr u32 HASH_LEVEL_SCREEN = 0x0598ABF8;
 static constexpr u32 HASH_LEVEL_EXECUTE = 0x893DA6B2;
+static constexpr u32 HASH_LOCATION_OVERLAY = 42519405;
+static constexpr u32 HASH_TEXT_LEVELNAME = 0x39AA5899;
 
 static constexpr f32 DEF_MENU_TITLE_SCALE = 0.34f;
 static constexpr f32 DEF_MENU_TEXT_SCALE = 0.4f;
 static constexpr f32 DEF_REDEFINE_KEY_TEXT_SCALE = 0.3f;
 static constexpr f32 DEF_MENU_PROMPT_SCALE = 0.3f;
-static constexpr f32 DEF_MENU_DRAGON_COUNT_SCALE = 1.2f;
+static constexpr f32 DEF_MENU_DRAGON_COUNT_SCALE = 0.5f;
 static constexpr f32 DEF_CONTROLLER_ACTION_SCALE = 0.2f;
 
 static f32 ScrollArrowPulseScale(u32 frameCounter, s32 phaseOffset) {
@@ -43,14 +46,55 @@ static f32 ScrollArrowPulseScale(u32 frameCounter, s32 phaseOffset) {
 }
 
 struct LocationRuntimeInfo {
+    s32 levelID = 0;
     s32 levelIndex = 0;
     s32 subLevel = 0;
     s32 collectCount = 0;
     bool hasGoldDragon = false;
+    bool showDragons = true;
     u8 grade = 1;
     bool hasGrade = false;
     const char* levelName = nullptr;
 };
+
+static const char* GetSpecialLocationToken(s32 levelID) {
+    switch (levelID) {
+        case 6: return "FE_LOC_TMP";
+        case 7: return "FE_LOC_DST";
+        case 8: return "FE_LOC_FAC";
+        case 11: return "FE_LOC_CHN";
+        case 12: return "FE_LOC_WTR";
+        case 13: return "FE_LOC_SWR";
+        case 14: return "FE_LOC_ROF";
+        default: return nullptr;
+    }
+}
+
+static const char* ResolveLocationSpecialTitle(s32 levelIndex) {
+    if (!g_feMenuMgr) {
+        return nullptr;
+    }
+
+    xcSection* section = g_feMenuMgr->GetSection();
+    if (!section) {
+        return nullptr;
+    }
+
+    xcOverlayData* overlay = g_feMenuMgr->FindOverlay(HASH_LOCATION_OVERLAY);
+    if (!overlay) {
+        return nullptr;
+    }
+
+    xcTextPrim* levelNameText = (xcTextPrim*)overlay->GetTextObj(HASH_TEXT_LEVELNAME, section->rawData);
+    if (!levelNameText) {
+        return nullptr;
+    }
+
+    xcTextPrim copy = *levelNameText;
+    copy.paletteIdx = (u8)levelIndex;
+    const u32 strHash = copy.GetStringHash();
+    return section->FindString(strHash);
+}
 
 static const char* GradeToLetter(u8 grade) {
     switch (grade) {
@@ -119,7 +163,9 @@ static bool ResolveLocationRuntimeInfo(LocationRuntimeInfo* outInfo) {
 
     outInfo->levelIndex = levelIndex;
     outInfo->subLevel = subLevel;
-    outInfo->levelName = world->GetPetalNameFromIndex((u32)levelIndex, (u32)subLevel);
+    outInfo->levelID = world->GetLevelIDFromIndex((u32)levelIndex);
+    outInfo->showDragons = (outInfo->levelID >= 1 && outInfo->levelID <= 5);
+    outInfo->levelName = world->GetLevelNameFromIndex((u32)levelIndex);
 
     if (g_scoreManager) {
         const s32 statIndex = levelIndex * 3 + subLevel;
@@ -1210,6 +1256,14 @@ void feCustomMenuMgr::SetPage(MenuPage page) {
         RefreshSaveSlots();
     }
 
+    if (m_currPage != MenuPage_None) {
+        PageDef& mutablePage = m_pages[m_currPage];
+        if (mutablePage.autoFrameH) {
+            const s32 extraH = CalcPageExtraHeight(mutablePage);
+            mutablePage.frameH = CalcAutoFrameHeight(mutablePage.numEntries, extraH);
+        }
+    }
+
     // Advance cursor past any leading Info entries.
     if (m_currPage != MenuPage_None) {
         const PageDef& pg = m_pages[m_currPage];
@@ -1793,8 +1847,9 @@ PageDef& feCustomMenuMgr::AddPage(
     def.parentPage = parent;
     def.parentEntry = parentEntry;
     def.isPause = pause;
+    def.autoFrameH = (frameH == -1);
     def.frameW = (frameW == -1) ? DEF_WINDOW_W : frameW;
-    def.frameH = frameH;
+    def.frameH = def.autoFrameH ? DEF_WINDOW_H : frameH;
     def.entriesOffsetX = 0;
     def.entriesOffsetY = 0;
     def.numEntries = 0;
@@ -1814,7 +1869,7 @@ void feCustomMenuMgr::SetEntries(PageDef& page, std::initializer_list<Entry> lis
     page.numEntries = n;
     page.entriesOffsetX = entriesOffsetX;
     page.entriesOffsetY = entriesOffsetY;
-    if (page.frameH == -1) {
+    if (page.autoFrameH) {
         const s32 extraH = CalcPageExtraHeight(page);
         page.frameH = CalcAutoFrameHeight(page.numEntries, extraH);
     }
@@ -2621,21 +2676,49 @@ void feCustomMenuMgr::Render() {
     if (m_currPage == MenuPage_Location) {
         LocationRuntimeInfo info = {};
         if (ResolveLocationRuntimeInfo(&info)) {
-            s32 levelNumber = info.subLevel + 1;
-            if (info.levelName && info.levelName[0] != '\0') {
-                s32 parsedLevel = 0;
-                if (sscanf(info.levelName, "%d", &parsedLevel) == 1 && parsedLevel > 0) {
-                    levelNumber = parsedLevel;
+            if (info.levelID >= 1 && info.levelID <= 5) {
+                const char* levelFmt = Localize("FE_LVL");
+                if (!levelFmt || levelFmt[0] == '\0') {
+                    levelFmt = "Level %d";
+                }
+
+                snprintf(locationTitle, sizeof(locationTitle), levelFmt, info.subLevel + 1);
+                title = locationTitle;
+            }
+            else {
+                bool hasSpecialTitle = false;
+                const char* specialToken = GetSpecialLocationToken(info.levelID);
+                if (specialToken) {
+                    const char* localizedSpecial = Localize(specialToken);
+                    if (localizedSpecial && localizedSpecial[0] != '\0') {
+                        title = localizedSpecial;
+                        hasSpecialTitle = true;
+                    }
+                }
+
+                if (!hasSpecialTitle) {
+                    const char* specialTitle = ResolveLocationSpecialTitle(info.levelIndex);
+                    if (specialTitle && specialTitle[0] != '\0') {
+                        title = specialTitle;
+                        hasSpecialTitle = true;
+                    }
+                }
+
+                if (!hasSpecialTitle && info.levelName && info.levelName[0] != '\0') {
+                    title = info.levelName;
+                    hasSpecialTitle = true;
+                }
+
+                if (!hasSpecialTitle) {
+                    const char* levelFmt = Localize("FE_LVL");
+                    if (!levelFmt || levelFmt[0] == '\0') {
+                        levelFmt = "Level %d";
+                    }
+
+                    snprintf(locationTitle, sizeof(locationTitle), levelFmt, info.subLevel + 1);
+                    title = locationTitle;
                 }
             }
-
-            const char* levelFmt = Localize("FE_LVL");
-            if (!levelFmt || levelFmt[0] == '\0') {
-                levelFmt = "Level %d";
-            }
-
-            snprintf(locationTitle, sizeof(locationTitle), levelFmt, levelNumber);
-            title = locationTitle;
         }
     }
 
@@ -2938,7 +3021,7 @@ void feCustomMenuMgr::Render() {
         ScreenDraw::DrawQuad(m_goldDragonTex,
                              SCALE_AND_CENTER_X((f32)dragonCenterX - 24.0f), SCREEN_SCALE_Y(dragonIconY + DEF_TEXT_Y_OFF),
                              SCREEN_SCALE_Y(32), SCREEN_SCALE_Y(32),
-                             0.0f, 0.0f, 1.0f, 1.0f, 128, 128, 128, 255);
+                             0.0f, 0.0f, 1.0f, 1.0f, 255, 255, 255, 255);
 
         s32 totalGold = g_scoreManager ? g_scoreManager->GetTotalGoldDragon() : 0;
         if (totalGold > 99) totalGold = 99;
@@ -2952,7 +3035,7 @@ void feCustomMenuMgr::Render() {
         g_textManager->SetPromptsEnabled(true);
         g_textManager->SetShadow(false);
         g_textManager->SetOutline(true);
-        g_textManager->SetColor(128, 128, 128);
+        g_textManager->SetColor(200, 200, 200);
         g_textManager->PrintString(dragonCountStr, SCALE_AND_CENTER_X((f32)dragonCenterX), SCREEN_SCALE_Y((f32)(dragonCountY + DEF_TEXT_Y_OFF)));
     }
 
@@ -3130,32 +3213,34 @@ void feCustomMenuMgr::RenderLocationPage() const {
         g_textManager->PrintString(text, cx, cy);
     }
 
-    // Gold dragon icon at right of grade row, derived from collect count.
-    {
-        tTexture* iconTex = info.hasGoldDragon ? m_goldDragonTex : m_greyDragonTex;
-        if (iconTex) {
-            ScreenDraw::DrawQuad(iconTex,
-                                 SCALE_AND_CENTER_X((f32)goldIconX), SCREEN_SCALE_Y((f32)goldIconY),
-                                 SCREEN_SCALE_Y((f32)LOC_ICON_SIZE), SCREEN_SCALE_Y((f32)LOC_ICON_SIZE),
-                                 0.0f, 0.0f, 1.0f, 1.0f, 255, 255, 255, 255);
-        }
-    }
-
-    // Dragon bar icons from stored collect count.
-    {
-        const s32 rowTopY[2] = { row1TopY, row2TopY };
-        const s32 unlocked = (info.collectCount < 0) ? 0 : ((info.collectCount > 10) ? 10 : info.collectCount);
-        for (s32 row = 0; row < 2; row++) {
-            for (s32 col = 0; col < 5; col++) {
-                const s32 idx = row * 5 + col;
-                tTexture* tex = (idx < unlocked) ? m_redDragonTex : m_greyDragonTex;
-                if (!tex)
-                    continue;
-                const s32 ix = gridLeftX + col * (LOC_ICON_SIZE + LOC_ICON_GAP);
-                ScreenDraw::DrawQuad(tex,
-                                     SCALE_AND_CENTER_X((f32)ix), SCREEN_SCALE_Y((f32)rowTopY[row]),
+    if (info.showDragons) {
+        // Gold dragon icon at right of grade row, derived from collect count.
+        {
+            tTexture* iconTex = info.hasGoldDragon ? m_goldDragonTex : m_greyDragonTex;
+            if (iconTex) {
+                ScreenDraw::DrawQuad(iconTex,
+                                     SCALE_AND_CENTER_X((f32)goldIconX), SCREEN_SCALE_Y((f32)goldIconY),
                                      SCREEN_SCALE_Y((f32)LOC_ICON_SIZE), SCREEN_SCALE_Y((f32)LOC_ICON_SIZE),
                                      0.0f, 0.0f, 1.0f, 1.0f, 255, 255, 255, 255);
+            }
+        }
+
+        // Dragon bar icons from stored collect count.
+        {
+            const s32 rowTopY[2] = { row1TopY, row2TopY };
+            const s32 unlocked = (info.collectCount < 0) ? 0 : ((info.collectCount > 10) ? 10 : info.collectCount);
+            for (s32 row = 0; row < 2; row++) {
+                for (s32 col = 0; col < 5; col++) {
+                    const s32 idx = row * 5 + col;
+                    tTexture* tex = (idx < unlocked) ? m_redDragonTex : m_greyDragonTex;
+                    if (!tex)
+                        continue;
+                    const s32 ix = gridLeftX + col * (LOC_ICON_SIZE + LOC_ICON_GAP);
+                    ScreenDraw::DrawQuad(tex,
+                                         SCALE_AND_CENTER_X((f32)ix), SCREEN_SCALE_Y((f32)rowTopY[row]),
+                                         SCREEN_SCALE_Y((f32)LOC_ICON_SIZE), SCREEN_SCALE_Y((f32)LOC_ICON_SIZE),
+                                         0.0f, 0.0f, 1.0f, 1.0f, 255, 255, 255, 255);
+                }
             }
         }
     }

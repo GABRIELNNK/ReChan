@@ -10,7 +10,7 @@ class tTexture;
 
 enum MenuPage : s32 {
     MenuPage_None,
-    MenuPage_Frontend, 
+    MenuPage_Frontend,
     MenuPage_Pause,
     MenuPage_Title,
     MenuPage_StartGame,
@@ -40,7 +40,7 @@ enum EntryType : u8 {
     EntryType_List,
     EntryType_Toggle,
     EntryType_Info,
-}; 
+};
 
 enum EntryBinding : u8 {
     EntryBinding_None,
@@ -66,8 +66,8 @@ enum EntryEvent : u8 {
     EntryEvent_NewGame,
     EntryEvent_ExitToHub,
     EntryEvent_QuitGame,
-    EntryEvent_Credits, 
-    EntryEvent_Load, 
+    EntryEvent_Credits,
+    EntryEvent_Load,
     EntryEvent_Save,
     EntryEvent_Delete,
     EntryEvent_LoadConfirmYes,
@@ -250,6 +250,7 @@ struct PageDef {
     MenuPage parentPage;
     s32 parentEntry;
     bool isPause;
+    bool autoFrameH;
     s32 frameW;
     s32 frameH;
     s32 entriesOffsetX;
@@ -263,6 +264,7 @@ struct PageDef {
         parentPage = MenuPage_None;
         parentEntry = 0;
         isPause = false;
+        autoFrameH = false;
         frameW = 260;
         frameH = 150;
         entriesOffsetX = 0;
@@ -327,16 +329,24 @@ private:
     void LoadSliderTextures();
     void LoadScrollArrowTexture();
 
+    // frontend
     static constexpr const char* kControllerOverlayTexturePath = "pc/textures/frontend/controller_overlay_default.png";
-    static constexpr const char* kMenuOrnamentTexturePath      = "pc/textures/frontend/menu_ornament.png";
-    static constexpr const char* kTitleScreenTexturePath        = "pc/textures/frontend/title_screen.png";
-    static constexpr const char* kLoadingScreenTexturePath      = "pc/textures/frontend/loading_screen.png";
-    static constexpr const char* kScrollArrowTexturePath        = "pc/textures/frontend/scroll_arrow.png";
-    static constexpr const char* kRedDragonTexturePath          = "pc/textures/frontend/red_dragon.png";
-    static constexpr const char* kGoldDragonTexturePath         = "pc/textures/frontend/gold_dragon.png";
-    static constexpr const char* kGreyDragonTexturePath         = "pc/textures/frontend/grey_dragon.png";
-    static constexpr const char* kSliderOTexturePath            = "pc/textures/frontend/slider_o.png";
-    static constexpr const char* kSliderFTexturePath            = "pc/textures/frontend/slider_f.png";
+    static constexpr const char* kMenuOrnamentTexturePath = "pc/textures/frontend/menu_ornament.png";
+    static constexpr const char* kTitleScreenTexturePath = "pc/textures/frontend/title_screen.png";
+    static constexpr const char* kLoadingScreenTexturePath = "pc/textures/frontend/loading_screen.png";
+    static constexpr const char* kScrollArrowTexturePath = "pc/textures/frontend/scroll_arrow.png";
+    static constexpr const char* kSliderOTexturePath = "pc/textures/frontend/slider_o.png";
+    static constexpr const char* kSliderFTexturePath = "pc/textures/frontend/slider_f.png";
+
+    // collectibles
+    static constexpr const char* kRedDragonTexturePath = "pc/textures/collectibles/red_dragon.png";
+    static constexpr const char* kGoldDragonTexturePath = "pc/textures/collectibles/gold_dragon.png";
+    static constexpr const char* kGreyDragonTexturePath = "pc/textures/collectibles/grey_dragon.png";
+    static constexpr const char* kBowlTexturePath = "pc/textures/collectibles/bowl.png";
+    static constexpr const char* kMilkTexturePath = "pc/textures/collectibles/milk.png";
+    static constexpr const char* kNoodleBoxTexturePath = "pc/textures/collectibles/noodlebox.png";
+    static constexpr const char* kTakeTexturePath = "pc/textures/collectibles/take.png";
+
     static constexpr f32 kSplashScreenAspect = 16.0f / 9.0f;
 
     void DrawSplashTexture16x9(tTexture* texture);
@@ -362,14 +372,14 @@ private:
     mutable tTexture* m_controllerTexture = nullptr;
     tTexture* m_menuOrnamentTexture = nullptr;
     tTexture* m_scrollArrowTexture = nullptr;
-    mutable tTexture* m_redDragonTex      = nullptr;
-    mutable tTexture* m_goldDragonTex     = nullptr;
-    mutable tTexture* m_greyDragonTex     = nullptr;
+    mutable tTexture* m_redDragonTex = nullptr;
+    mutable tTexture* m_goldDragonTex = nullptr;
+    mutable tTexture* m_greyDragonTex = nullptr;
     tTexture* m_sliderOTex = nullptr;
     tTexture* m_sliderFTex = nullptr;
     bool m_titleScreenTextureTried = false;
     bool m_loadingScreenTextureTried = false;
-    mutable bool m_dragonTexTried  = false;
+    mutable bool m_dragonTexTried = false;
     MenuPage m_currPage = MenuPage_None;
     MenuPage m_prevPage = MenuPage_None;
     s32 m_cursor = 0;

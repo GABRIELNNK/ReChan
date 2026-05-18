@@ -168,7 +168,9 @@ tTexture* Tim::CreateTexture(const TimImage* img) {
 static pddiBaseShader* s_screenShader = nullptr;
 
 static void EnsureShader() {
-    if (s_screenShader) return;
+    if (s_screenShader)
+        return;
+
     s_screenShader = p3d::device->NewShader("simple");
 }
 
@@ -195,11 +197,10 @@ static void EndOverlay(const Mat4& prev) {
 }
 
 void ScreenDraw::DrawFullscreen(tTexture* tex) {
-    if (!tex) return;
     Mat4 prev = BeginOverlay();
     p3d::context->SetBlendMode(PDDI_BLEND_NONE);
 
-    s_screenShader->SetTexture(0, tex->GetTexture());
+    s_screenShader->SetTexture(0, tex ? tex->GetTexture() : nullptr);
     s_screenShader->SetColour(0, pddiColour(255, 255, 255, 255));
     p3d::context->DrawQuad(s_screenShader, SCALE_AND_CENTER_X(0.0f), 0.0f, SCREEN_SCALE_X(DEFAULT_SCREEN_WIDTH), SCREEN_HEIGHT, 0.0f, 0.0f, 1.0f, 1.0f);
 
@@ -209,12 +210,10 @@ void ScreenDraw::DrawFullscreen(tTexture* tex) {
 void ScreenDraw::DrawQuad(tTexture* tex, f32 x, f32 y, f32 w, f32 h,
                           f32 u0, f32 v0, f32 u1, f32 v1,
                           u8 r, u8 g, u8 b, u8 a) {
-    if (!tex)
-        return;
     Mat4 prev = BeginOverlay();
     p3d::context->SetBlendMode(PDDI_BLEND_ALPHA);
 
-    s_screenShader->SetTexture(0, tex->GetTexture());
+    s_screenShader->SetTexture(0, tex ? tex->GetTexture() : nullptr);
     s_screenShader->SetColour(0, pddiColour(r, g, b, a));
     p3d::context->DrawQuad(s_screenShader, x, y, w, h, u0, v0, u1, v1);
 
@@ -222,27 +221,16 @@ void ScreenDraw::DrawQuad(tTexture* tex, f32 x, f32 y, f32 w, f32 h,
 }
 
 void ScreenDraw::DrawColoredQuad(u8 r, u8 g, u8 b, u8 a) {
-    DrawColoredRect(0.0f, 0.0f, (f32)SCREEN_WIDTH, (f32)SCREEN_HEIGHT, r, g, b, a);
+    DrawColoredRect(0.0f, 0.0f, SCREEN_WIDTH, SCREEN_HEIGHT, r, g, b, a);
 }
 
 void ScreenDraw::DrawColoredRect(f32 x, f32 y, f32 w, f32 h,
                                  u8 r, u8 g, u8 b, u8 a) {
-    static tTexture* s_colorTex = nullptr;
-    static u32 s_lastColor = 0;
-
-    u32 color = (255u << 24) | ((u32)b << 16) | ((u32)g << 8) | (u32)r;
-    if (!s_colorTex || s_lastColor != color) {
-        if (s_colorTex) s_colorTex->Release();
-        s_colorTex = new tTexture();
-        s_colorTex->Create(1, 1, 32, 8, &color);
-        s_lastColor = color;
-    }
-
     Mat4 prev = BeginOverlay();
     p3d::context->SetBlendMode(PDDI_BLEND_ALPHA);
 
-    s_screenShader->SetTexture(0, s_colorTex->GetTexture());
-    s_screenShader->SetColour(0, pddiColour(255, 255, 255, a));
+    s_screenShader->SetTexture(0, nullptr);
+    s_screenShader->SetColour(0, pddiColour(r, g, b, a));
     p3d::context->DrawQuad(s_screenShader, x, y, w, h, 0.0f, 0.0f, 1.0f, 1.0f);
 
     EndOverlay(prev);

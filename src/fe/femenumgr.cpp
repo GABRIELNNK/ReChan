@@ -606,6 +606,7 @@ void feMenuMgr::InitLevelMenu() {
     }
     s32 levelID = levelCode / 10;
     s32 subLevel = levelCode % 10;
+    const bool showDragons = (levelID >= 1 && levelID <= 5);
 
     World* world = g_game ? g_game->GetWorld() : nullptr;
     s32 levelIndex = 0;
@@ -629,7 +630,7 @@ void feMenuMgr::InitLevelMenu() {
             char* dragonBarStr = (char*)sec->FindString(dragonBarStrHash);
             char* goldDragonStr = (char*)sec->FindString(goldDragonStrHash);
 
-            if (world && world->GetCurLevelID() == 6) {
+            if (levelID == 6) {
                 // Final level (level 6) - special display
                 xcFont* font = sectionMan ? sectionMan->FindFont("Gold_dr") : nullptr;
                 levelNameText->paletteIdx = 3;
@@ -643,54 +644,64 @@ void feMenuMgr::InitLevelMenu() {
                 dragonBarText->hdr.subtype = 4;
                 goldDragonText->hdr.subtype = 4;
 
-                // Set dragon bar font
-                if (sectionMan) {
-                    xcFont* dragonFont = sectionMan->FindFont("Red_dr");
-                    if (dragonFont) {
-                        dragonBarText->fontHash = xcHash("Red_dr");
+                if (showDragons) {
+                    // Set dragon bar font
+                    if (sectionMan) {
+                        xcFont* dragonFont = sectionMan->FindFont("Red_dr");
+                        if (dragonFont) {
+                            dragonBarText->fontHash = xcHash("Red_dr");
+                        }
                     }
-                }
 
-                // Fill dragon bar string: 10 dragons, '1'=collected '0'=not
-                // String layout: 5 chars, newline, 5 chars
-                u8 collectCount = 0;
-                if (g_scoreManager) {
-                    collectCount = g_scoreManager->petalStats[levelIndex * 3 + subLevel].collectCount;
-                }
-                if (dragonBarStr) {
-                    s32 v13 = 0;
-                    while (v13 < 10) {
-                        s32 v15 = 0;
-                        if (v13 == 5) {
-                            dragonBarStr[5] = '\n';
+                    // Fill dragon bar string: 10 dragons, '1'=collected '0'=not
+                    // String layout: 5 chars, newline, 5 chars
+                    u8 collectCount = 0;
+                    if (g_scoreManager) {
+                        collectCount = g_scoreManager->petalStats[levelIndex * 3 + subLevel].collectCount;
+                    }
+                    if (dragonBarStr) {
+                        s32 v13 = 0;
+                        while (v13 < 10) {
+                            s32 v15 = 0;
+                            if (v13 == 5) {
+                                dragonBarStr[5] = '\n';
+                            }
+                            if (v13 >= 5) {
+                                v15 = 1;
+                            }
+                            s32 pos = v13 + v15;
+                            if (v13 >= collectCount) {
+                                dragonBarStr[pos] = '0';
+                            }
+                            else {
+                                dragonBarStr[pos] = '1';
+                            }
+                            v13++;
                         }
-                        if (v13 >= 5) {
-                            v15 = 1;
+                    }
+
+                    // Set gold dragon font and display
+                    if (sectionMan) {
+                        xcFont* goldFont = sectionMan->FindFont("Gold_dr");
+                        if (goldFont) {
+                            goldDragonText->fontHash = xcHash("Gold_dr");
                         }
-                        s32 pos = v13 + v15;
-                        if (v13 >= collectCount) {
-                            dragonBarStr[pos] = '0';
+                    }
+                    if (goldDragonStr) {
+                        if (g_scoreManager && g_scoreManager->CalcGDrags(collectCount)) {
+                            goldDragonStr[0] = '1';
                         }
                         else {
-                            dragonBarStr[pos] = '1';
+                            goldDragonStr[0] = '0';
                         }
-                        v13++;
                     }
                 }
-
-                // Set gold dragon font and display
-                if (sectionMan) {
-                    xcFont* goldFont = sectionMan->FindFont("Gold_dr");
-                    if (goldFont) {
-                        goldDragonText->fontHash = xcHash("Gold_dr");
+                else {
+                    if (dragonBarStr) {
+                        dragonBarStr[0] = '\0';
                     }
-                }
-                if (goldDragonStr) {
-                    if (g_scoreManager && g_scoreManager->CalcGDrags(collectCount)) {
-                        goldDragonStr[0] = '1';
-                    }
-                    else {
-                        goldDragonStr[0] = '0';
+                    if (goldDragonStr) {
+                        goldDragonStr[0] = '\0';
                     }
                 }
             }
