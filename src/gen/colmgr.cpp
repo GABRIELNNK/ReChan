@@ -14,6 +14,7 @@
 #include "gen/colvol.h"
 #include "fe/hud.h"
 #include "gen/scoremgr.h"
+#include "pc/log.h"
 
 static s32 g_floorDebugCounter = 0;
 
@@ -584,6 +585,7 @@ void HandleThingFloor(DynamicThing* thing, s32 radius, s32 yMinOffset, s32 check
     }
 
     // Clear ground/slope/ceiling bits, preserve others
+    const u32 flagsBeforeGroundClear = static_cast<u32>(thing->flags);
     bool wasOnGround = (thing->flags >> 12) & 1;
     thing->flags &= ~(TF_ON_GROUND | 0x10000 | 0x20000);
 
@@ -596,7 +598,6 @@ void HandleThingFloor(DynamicThing* thing, s32 radius, s32 yMinOffset, s32 check
         s32 landingLevel = floorHNew - yMinOffset;
 
         if (thing->pos.y >= landingLevel - g_floorStandingTol && localHomePosY < landingLevel + slopeCorr2) {
-
             // PSX: falling velocity division for actionState 63 (flying back)
             if (!wasOnGround) {
                 s32 absVelY = localVelY < 0 ? -localVelY : localVelY;
@@ -751,6 +752,9 @@ void HandleThingEnvironmentCollisions(ccList& thingList) {
                     }
                 }
             }
+            else {
+                checkHeight = hum->collBboxMin.z;
+            }
 
             if (state == AS_LEDGE_LATCH || state == AS_LEDGE_PULLUP) {
                 skipWall = 1;
@@ -759,8 +763,19 @@ void HandleThingEnvironmentCollisions(ccList& thingList) {
 
         Thing* ticketIssuer = thing->GetTicketIssuer();
 
+        if (thing == Player::s_player && thing->pos.y > 20000) {
+            LOG("[HTEC] player pos=(%d,%d,%d) homePos=(%d,%d,%d) checkHeight=%d state=%d",
+                thing->pos.x, thing->pos.y, thing->pos.z,
+                thing->homePos.x, thing->homePos.y, thing->homePos.z,
+                checkHeight, thing->thingType < 29 ? ((Humanoid*)thing)->actionState : -1);
+        }
+
         if (skipWall == 0) {
             HandleThingWall(thing, radius, yMinOffset, checkHeight);
+        }
+
+        if (thing == Player::s_player && thing->pos.y > 20000) {
+            LOG("[HTEC] after wall: homePos=(%d,%d,%d)", thing->homePos.x, thing->homePos.y, thing->homePos.z);
         }
 
         if (ticketIssuer) {
@@ -768,6 +783,10 @@ void HandleThingEnvironmentCollisions(ccList& thingList) {
         }
         else {
             HandleThingFloor(thing, radius, yMinOffset, checkHeight);
+        }
+
+        if (thing == Player::s_player && thing->pos.y > 20000) {
+            LOG("[HTEC] after floor: homePos=(%d,%d,%d)", thing->homePos.x, thing->homePos.y, thing->homePos.z);
         }
 
         if (skipWall != 0 && !thing->GetTicketIssuer() && (thing->flags & TF_ON_GROUND) == 0) {

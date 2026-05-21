@@ -1,5 +1,6 @@
 #include "ai/humanoid.h"
 #include "ai/activezn.h"
+#include "ai/boss.h"
 #include "ai/humndata.h"
 #include "ai/obstacle.h"
 #include "ai/pickup.h"
@@ -392,7 +393,24 @@ struct ThrowMoveData {
 
 // PSX throw rows store full 32-bit release/attach vectors that are not preserved
 // by the generic exported fighting-move aggregate. Use exact per-row truth here.
+// Keep this table sorted by address; LookupThrowMoveData uses binary search.
 static constexpr ThrowMoveData kThrowMoveData[] = {
+    { 0x80021BE4u, { 0, 0, 14000 }, { 20, 0, 700 }, 30, 32 },
+    { 0x80021C20u, { 0, 4000, 20000 }, { 100, 0, 700 }, 30, 38 },
+    { 0x80021C5Cu, { 0, 0, 14000 }, { 20, 0, 700 }, 30, 44 },
+    { 0x80021C98u, { 0, 2000, -30000 }, { 20, 0, 525 }, 30, 33 },
+    { 0x80021CD4u, { 0, 0, 0 }, { 0, 100, 600 }, 40, 127 },
+    { 0x80021D10u, { 0, 6500, 30000 }, { 0, 0, 600 }, 40, 45 },
+    { 0x80021D4Cu, { 0, 2000, 60000 }, { 20, 0, 1000 }, 45, 29 },
+    { 0x80021D88u, { -60000, 2000, 4100 }, { 0, 0, 1000 }, 45, 34 },
+    { 0x80021DC4u, { 0, 9500, 40000 }, { 20, 0, 700 }, 0, 44 },
+    { 0x80021E00u, { 0, 6000, 8000 }, { 20, 0, 700 }, 45, 44 },
+    { 0x80021E3Cu, { 0, 0, 14000 }, { 20, 0, 525 }, 45, 33 },
+    { 0x80021E78u, { 0, 0, 60000 }, { 20, 0, 875 }, 45, 35 },
+    { 0x80021EB4u, { 0, 0, 14000 }, { 20, 0, 875 }, 45, 32 },
+    { 0x80021EF0u, { 0, 0, -13000 }, { 20, 0, 500 }, 45, 47 },
+    { 0x80021F2Cu, { 0, 0, 0 }, { 20, 0, 550 }, 45, 127 },
+    { 0x80021F68u, { 0, 0, 0 }, { 20, 0, 550 }, 45, 127 },
     { 0x800D15E4u, { 0, 2000, 10000 }, { 125, 0, 400 }, 45, 45 },
     { 0x800D1620u, { 0, 4000, -6000 }, { 125, 0, 520 }, 50, 47 },
     { 0x800D165Cu, { 0, 0, 8000 }, { 20, 0, 684 }, 45, 23 },
@@ -711,7 +729,7 @@ static FightingComboNode* ResolveFightingRootAddress(u32 rootAddress) {
     return &s_fightingNodeCache[rootIndex];
 }
 
-static const FightingComboNode* ResolveFightingNodeAddressConst(u32 nodeAddress) {
+const FightingComboNode* ResolveFightingNodeAddressConst(u32 nodeAddress) {
     return ResolveFightingRootAddress(nodeAddress);
 }
 
@@ -1510,11 +1528,71 @@ s32 Humanoid::CheckForPickup() {
     rightHandObj = heldPickup;
     combatFlag = 0;
 
+    if (thingType == AITypes::TT_BUTCH) {
+        LOG("[ChefPot] CheckForPickup success owner=%p pickup=%p name='%s' type=%u hash=0x%08X",
+            this,
+            heldPickup,
+            heldPickup->GetName(),
+            heldPickup->thingType,
+            heldPickup->GetNameCRC());
+    }
+
     if (humanoidSound) {
         humanoidSound->GrabWeapon();
     }
 
     SetActionState(AS_PICKUP, 0);
+    return 1;
+}
+
+// PSX: CheckforPickup__8HumanoidUl (HUMANOID.CPP:6138, 0x80069894)
+s32 Humanoid::CheckforPickup(u32 pickupHash) {
+    MARKFUNCTION(0x80069894);
+
+    if (rightHandObj) {
+        return 0;
+    }
+
+    if (!g_ai) {
+        return 0;
+    }
+
+    ccList* sourceList = &g_ai->inactivePickupList;
+    bool fromInactiveList = true;
+    ccNode* pickupNode = sourceList->FindNodeCRC(pickupHash, nullptr);
+    if (!pickupNode) {
+        sourceList = &g_ai->pickupList;
+        fromInactiveList = false;
+        pickupNode = sourceList->FindNodeCRC(pickupHash, nullptr);
+        if (!pickupNode) {
+            if (thingType == AITypes::TT_BUTCH) {
+                LOG("[ChefPot] CheckforPickup fail owner=%p hash=0x%08X (not found)", this, pickupHash);
+            }
+            return 0;
+        }
+    }
+
+    Pickup* pickup = static_cast<Pickup*>(sourceList->RemNode(static_cast<ccMinNode*>(pickupNode)));
+    if (!pickup) {
+        if (thingType == AITypes::TT_BUTCH) {
+            LOG("[ChefPot] CheckforPickup fail owner=%p hash=0x%08X (remove failed)", this, pickupHash);
+        }
+        return 0;
+    }
+
+    if (thingType == AITypes::TT_BUTCH) {
+        LOG("[ChefPot] CheckforPickup success owner=%p hash=0x%08X source=%s pickup=%p name='%s' type=%u",
+            this,
+            pickupHash,
+            fromInactiveList ? "inactive" : "active",
+            pickup,
+            pickup->GetName(),
+            pickup->thingType);
+    }
+
+    pickup->CreateModel(nullptr);
+    pickup->attachedOwner = this;
+    SetRightHandObj(pickup);
     return 1;
 }
 
@@ -1956,6 +2034,21 @@ void Humanoid::AnalyzeMesh(DBRoot* root) {
             case 0x11:
                 behaviourNameHash = p3dHash(attrib->GetAttribString());
                 break;
+            case 0x1C:
+            {
+                const char* pickupName = attrib->GetAttribString();
+                const u32 pickupHash = p3dHash(pickupName);
+                const s32 pickupBound = CheckforPickup(pickupHash);
+                if (thingType == AITypes::TT_BUTCH) {
+                    LOG("[ChefPot] AnalyzeMesh attrib1C name='%s' hash=0x%08X bound=%d rightHand=%p flags2=0x%08X",
+                        pickupName ? pickupName : "",
+                        pickupHash,
+                        pickupBound,
+                        rightHandObj,
+                        flags2);
+                }
+                break;
+            }
             case 0x1D:
                 if (p3dHash(attrib->GetAttribString()) == p3dHash("AS_NISMode")) {
                     field364 = 73;
@@ -2032,6 +2125,8 @@ void Humanoid::AnalyzeMesh(DBRoot* root) {
 // PSX: SubtractHitPoints__8HumanoidUs (HUMANOID.CPP:9388, 0x8006CEB4)
 s32 Humanoid::SubtractHitPoints(u16 hitPoints) {
     MARKFUNCTION(0x8006CEB4);
+
+    const u16 healthBefore = health;
 
     if (DebugUI::IsHumanoidDamageDisabled()) {
         if (g_hud) {
@@ -2375,6 +2470,13 @@ void Humanoid::SetActionState(u32 state, s32 param) {
         }
         case AS_THROW_PICKUP:
             stateDispatch = SD_THROW;
+            if (thingType == AITypes::TT_BUTCH) {
+                LOG("[ChefPot] SetActionState AS_THROW_PICKUP param=%d cmd=0x%08X right=%p left=%p",
+                    param,
+                    static_cast<u32>(commandBits),
+                    rightHandObj,
+                    leftHandObj);
+            }
             if (model && rightHandObj) {
                 Model* m = static_cast<Model*>(model);
                 m->SetAnim(static_cast<s32>(static_cast<Pickup*>(rightHandObj)->GetThrowMove()), param, 0, 0);
@@ -2604,6 +2706,18 @@ void Humanoid::SetActionState(u32 state, s32 param) {
             stateDispatch = SD_GET_UP;
             field348 = 8;
             break;
+        case AS_COLLAPSE_STUN:
+            DropPickup(1, 1);
+            combatFlag = 0;
+            if (model) {
+                Model* m = static_cast<Model*>(model);
+                m->SetAnim(17, param, 0, 0);
+            }
+            field344 = 0;
+            stateDispatch = SD_COLLAPSE_RECOVER;
+            field348 = 8;
+            flags2 &= ~0x70u;
+            break;
         case AS_FLYING_BACK_CHECK:
             field344 = 0;
             stateDispatch = SD_COLLAPSE_RECOVER;
@@ -2724,6 +2838,21 @@ void Humanoid::ProcessAction() {
         case SD_STUNNED:      _Stunned(); break;
         case SD_GET_UP:       _CrouchUp(); break;
         case SD_THROW:        _Throw(); break;
+        case SD_BUTCH_STOMP:
+            if (thingType == AITypes::TT_BUTCH) {
+                static_cast<Butch*>(this)->_Stomp();
+            }
+            break;
+        case SD_BUTCH_CHARGE:
+            if (thingType == AITypes::TT_BUTCH) {
+                static_cast<Butch*>(this)->_Charge();
+            }
+            break;
+        case SD_BUTCH_THROW_POT:
+            if (thingType == AITypes::TT_BUTCH) {
+                static_cast<Butch*>(this)->_ThrowPot();
+            }
+            break;
         case SD_FIGHTING_COMBO: ProcessFightingComboNode(); break;
         case SD_BACK_GRAB_LATCH: BackGrabCharacterLatch(); break;
         case SD_BACK_GRAB: BackGrabCharacter(); break;
@@ -2736,10 +2865,42 @@ void Humanoid::ProcessAction() {
         case SD_COUNTER_ATTACK: CounterAttack(); break;
         case SD_COUNTER_ATTACK_RECOVERY: CounterAttackRecovery(); break;
         case SD_THROW_CHARACTER_RECEIVE: ThrowCharacterReceive(); break;
-        case SD_THROW_FREE_FALL: ThrowFreeFall(); break;
-        case SD_GOT_HIT_FREEFORM: GotHitFreeForm(); break;
+        case SD_THROW_FREE_FALL:
+            if (thingType == AITypes::TT_DANTE) {
+                static_cast<Dante*>(this)->_ThrowFreeFall();
+            }
+            else {
+                ThrowFreeFall();
+            }
+            break;
+        case SD_GOT_HIT_FREEFORM:
+            if (thingType == AITypes::TT_DANTE) {
+                static_cast<Dante*>(this)->_GotHitFreeForm();
+            }
+            else {
+                GotHitFreeForm();
+            }
+            break;
+        case SD_DANTE_MISSILE_PREPARE:
+            if (thingType == AITypes::TT_DANTE) {
+                static_cast<Dante*>(this)->_MissilePrepare();
+            }
+            break;
+        case SD_DANTE_TARGET_MISSILE_ATTACK:
+            if (thingType == AITypes::TT_DANTE) {
+                static_cast<Dante*>(this)->_TargetMissileAttack();
+            }
+            break;
         case SD_LEDGE_LATCH:  _LedgeLatch(); break;
-        case SD_LEDGE_PULLUP: _LedgePullup(); break;
+        case SD_LEDGE_PULLUP:
+            // PSX dispatch slot 46 is class-specific: Dante missile attack / humanoid ledge pull-up.
+            if (thingType == AITypes::TT_DANTE) {
+                static_cast<Dante*>(this)->_MissileAttack();
+            }
+            else {
+                _LedgePullup();
+            }
+            break;
         case SD_LADDER_LATCH_TOP: _LadderLatchTop(); break;
         case SD_LADDER_LATCH: _LadderLatch(); break;
         case SD_CLIMB_LADDER: _ClimbLadder(); break;
@@ -2804,17 +2965,18 @@ s32 Humanoid::GetStraifPhase() {
         return 0;
     }
 
-    const u8* modelBytes = reinterpret_cast<const u8*>(model);
-    const void* animState = *reinterpret_cast<void* const*>(modelBytes + 0x20);
-    if (!animState) {
+    Model* m = static_cast<Model*>(model);
+    AnimStructure* anim = m ? static_cast<AnimStructure*>(m->animStructure) : nullptr;
+    if (!anim) {
         return 0;
     }
 
-    const u8* animBytes = reinterpret_cast<const u8*>(animState);
-    const s32 animWord44 = *reinterpret_cast<const s32*>(animBytes + 0x44);
-    const s16 animHalf3E = *reinterpret_cast<const s16*>(animBytes + 0x3E);
-    const s32 animWord2C = *reinterpret_cast<const s32*>(animBytes + 0x2C);
-    const s32 animWord54 = *reinterpret_cast<const s32*>(animBytes + 0x54);
+    // PSX mapping from AnimStructure offsets used by GetStraifPhase:
+    // +0x44 endFrame, +0x3E currentFrame high halfword, +0x2C loopTypeField, +0x54 loopCount.
+    const s32 animWord44 = anim->endFrame;
+    const s16 animHalf3E = static_cast<s16>(static_cast<u32>(anim->currentFrame) >> 16);
+    const s32 animWord2C = anim->loopTypeField;
+    const s32 animWord54 = anim->loopCount;
 
     const s32 animTop16 = animWord44 >> 16;
     const s32 animTop15Signed = animWord44 >> 17;
@@ -4675,8 +4837,22 @@ void Humanoid::_Throw() {
     }
 
     Pickup* pickup = static_cast<Pickup*>(rightHandObj);
-    if (pickup != nullptr && frame >= static_cast<s16>(pickup->GetThrowMoveThrowFrame())) {
+    const s16 throwFrame = pickup ? static_cast<s16>(pickup->GetThrowMoveThrowFrame()) : 0;
+    if (pickup != nullptr && frame >= throwFrame) {
         ccList* pickupList = g_ai ? &g_ai->pickupList : nullptr;
+
+        if (thingType == AITypes::TT_BUTCH) {
+            const s32 throwForce = ((flags2 & 0x0001) != 0) ? s_throwPickupReleaseForce : 0;
+            LOG("[ChefPot] _Throw release owner=%p frame=%d throwFrame=%d pickup=%p name='%s' type=%u flags2=0x%08X force=%d",
+                this,
+                frame,
+                throwFrame,
+                pickup,
+                pickup->GetName(),
+                pickup->thingType,
+                flags2,
+                throwForce);
+        }
 
         if ((flags2 & 0x0001) != 0) {
             if (this == static_cast<Humanoid*>(Player::s_player)) {
@@ -4702,11 +4878,33 @@ void Humanoid::_Throw() {
             pickup->Release(this, pickupList, nullptr, 0);
         }
 
+        if (thingType == AITypes::TT_BUTCH) {
+            LOG("[ChefPot] _Throw released pickup=%p pos=(%d,%d,%d) vel=(%d,%d,%d)",
+                pickup,
+                pickup->pos.x,
+                pickup->pos.y,
+                pickup->pos.z,
+                pickup->velocity.x,
+                pickup->velocity.y,
+                pickup->velocity.z);
+        }
+
         rightHandObj = nullptr;
     }
 
     // PSX: if animation completed (loopCount > 0)
     if (anim->loopCount > 0) {
+        if (thingType == AITypes::TT_BUTCH && rightHandObj != nullptr) {
+            Pickup* heldPickup = static_cast<Pickup*>(rightHandObj);
+            LOG("[ChefPot] _Throw looped with held pickup owner=%p frame=%d pickup=%p name='%s' type=%u throwFrame=%d",
+                this,
+                frame,
+                heldPickup,
+                heldPickup->GetName(),
+                heldPickup->thingType,
+                heldPickup->GetThrowMoveThrowFrame());
+        }
+
         ReleaseTarget();
         SetActionState(AS_STAND, 0);
     }

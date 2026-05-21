@@ -19,14 +19,14 @@ enum ActionState : u32 {
     AS_STAND = 1,
     AS_STAND_ANIM = 2,
     AS_WALL_JUMP_TAUNT = 3,   // PSX Player case 3: wall jump taunt/idle
-    AS_DIVE_ROLL = 4,
+    AS_STRAFE = 4,
     AS_TAUNT_PAUSE = 5,       // PSX Humanoid case 5: taunt/pause hold
     AS_PAUSE = 6,             // Humanoid: pause/guard. Player: running jump
     AS_JUMP = 8,              // standing jump (no tables)
     AS_WALL_JUMP = 9,         // PSX Player case 9: wall jump
     AS_RUN = 10,
     AS_BACKFLIP = 11,         // PSX Player case 11: face enemy + strafe init
-    AS_STRAFE = 12,
+    AS_DIVE_ROLL = 12,
     AS_FALL = 13,
     AS_HARDFALL = 14,
     AS_HARDLAND = 15,
@@ -66,13 +66,17 @@ enum ActionState : u32 {
     AS_BACK_GRAB_RECEIVE = 62,
     AS_THROW_FREE_FALL = 63,
     AS_GET_UP = 68,
+    AS_COLLAPSE_STUN = 69,   // PSX case 69: drop pickups + collapse recover dispatch
     AS_FLYING_BACK_CHECK = 70,
     AS_SPIN_BACK_RECOVER = 71,
     AS_DEAD = 72,
     AS_NIS_MODE = 73,
     AS_HIT_EXPLOSION = 74,
     AS_HIT_ENVIRONMENT = 75,
-    AS_COUNT = 76,
+    AS_MISSILE_ATTACK = 0x4E,
+    AS_MISSILE_PREPARE = 0x4F,
+    AS_TARGET_MISSILE_ATTACK = 0x50,
+    AS_COUNT = 0x51,
 };
 
 // State dispatch indices for Humanoid::ProcessAction
@@ -115,6 +119,9 @@ enum StateDispatch : u16 {
     SD_CLIMB_LADDER = 49,   // PSX case 27: climb ladder
     SD_LADDER_DISMOUNT = 50,   // PSX case 28: ladder dismount
     SD_NIS_MODE = 51,   // PSX case 73: NISMode
+    SD_DANTE_MISSILE_ATTACK = 0x46,
+    SD_DANTE_MISSILE_PREPARE = 0x47,
+    SD_DANTE_TARGET_MISSILE_ATTACK = 0x48,
     // Player-specific dispatch via direct function pointer (stateDispatch = -1 on PSX)
     SD_HARDFALL = 250,
     SD_HARDLAND = 251,
@@ -140,6 +147,10 @@ enum StateDispatch : u16 {
     SD_COUNTER_ATTACK_LATCH = 271,
     SD_COUNTER_ATTACK = 272,
     SD_COUNTER_ATTACK_RECOVERY = 273,
+    // PSX Butch direct-callback states from BOSS.CPP cases 74-76.
+    SD_BUTCH_STOMP = 275,
+    SD_BUTCH_CHARGE = 276,
+    SD_BUTCH_THROW_POT = 277,
 };
 
 // Humanoid - DynamicThing with combat, animation, and AI state
@@ -407,7 +418,7 @@ public:
     void FacePoint(const LVector& point, s32 immediate);
     bool FaceThingDesired(Thing* target);
     bool FacePointDesired(const LVector& point);
-    Humanoid* FindFoe(u32 range, s32 param, s32 immediate);
+    virtual Humanoid* FindFoe(u32 range, s32 param, s32 immediate);
     void SetTarget(Humanoid* target);
     void ReleaseTarget();
     void FaceAngleY(s32 angle, s32 immediate);
@@ -428,7 +439,7 @@ public:
         s32 fightingPoints,
         s32 stylePointsFlag,
         s32 weaponBreakOnEmpty);
-    s32 GetTargetingFrame(const PsxFightingMoveRaw* move) const;
+    virtual s32 GetTargetingFrame(const PsxFightingMoveRaw* move) const;
     s32 ProcessGenericFightingMove(const PsxFightingMoveRaw* move, s32 frame);
     s32 ProcessBodyThrow(const PsxFightingMoveRaw* move, s32 frame);
     s32 BodyThrowAttack(s32 radius);
@@ -451,6 +462,7 @@ public:
     bool CheckForLedges();
     bool CheckForLedges2(LVector& outNormal, LVector& outCorrectionPos, s32 clearance);
     s32 CheckForPickup();
+    s32 CheckforPickup(u32 pickupHash);
     s32 RestorePositionFromBip01();
     void SetDesiredMoveDirection(s32 angle) { faceAngle = angle; }
     virtual s32 TestAndSetBackGrab();
@@ -488,7 +500,7 @@ public:
         LVector& outHitPoint);
     s32 CheckDWOCollision(s16 angle, s32 distance);
     bool HasEnemyTauntDialog();
-    void _CrouchUp();
+    virtual void _CrouchUp();
 
     virtual void _Stand();
     virtual void _Run();

@@ -375,7 +375,11 @@ void ApplyAnimFrame0(STreeData* skeleton, const u8* rawAnimData, u32 rawAnimSize
 }
 
 void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 primGeomSize) {
-    if (original && !original->primGeom) {
+    if (original) {
+        if (original->primGeom) {
+            delete original->primGeom;
+            original->primGeom = nullptr;
+        }
         original->primGeom = CloneRawPrimGeom(primGeomData, primGeomSize);
     }
 
@@ -391,6 +395,7 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
     u32 primListOff = p3dReadU32LE(primGeomData + 0x40) << 2;
     u32 polyDataOff = p3dReadU32LE(primGeomData + 0x54) << 2;
     u32 loopCtOff = p3dReadU32LE(primGeomData + 0x60) << 2;
+    u32 loopPrimOff = p3dReadU32LE(primGeomData + 0x68) << 2;
     s16 numLoops = p3dReadS16LE(primGeomData + 0x66);
 
     if (numVerts == 0 || numPolys == 0) {
@@ -408,26 +413,53 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
     const u8* verts = primGeomData + vertListOff;
     const u8* polys = primGeomData + polyDataOff;
 
-    // Build per-loop vertex bases
-    struct LoopInfo { u16 vertCount; u16 polyCount; u16 vertBase; u16 polyBase; };
+    // Build per-loop vertex bases and primitive-class counts.
+    // PSX layout:
+    //   +0x60: loop vertex entries (lo16 = vert count)
+    //   +0x68: loop primitive counts (u16[4] = GT4,G4,GT3,G3)
+    struct LoopInfo {
+        u16 vertCount;
+        u16 vertBase;
+        u16 primCounts[4];
+    };
     std::vector<LoopInfo> loops;
     u16 vertAccum = 0;
-    u16 polyAccum = 0;
-    if (loopCtOff + numLoops * 4 <= primGeomSize) {
+    if (loopCtOff + numLoops * 4 <= primGeomSize && loopPrimOff + numLoops * 8 <= primGeomSize) {
         for (int i = 0; i < numLoops; i++) {
-            u32 val = p3dReadU32LE(primGeomData + loopCtOff + i * 4);
             LoopInfo li;
-            li.vertCount = (u16)(val & 0xFFFF);
-            li.polyCount = (u16)((val >> 16) & 0xFFFF);
+            li.vertCount = p3dReadU16LE(primGeomData + loopCtOff + i * 4);
             li.vertBase = vertAccum;
-            li.polyBase = polyAccum;
+            li.primCounts[0] = p3dReadU16LE(primGeomData + loopPrimOff + i * 8 + 0);
+            li.primCounts[1] = p3dReadU16LE(primGeomData + loopPrimOff + i * 8 + 2);
+            li.primCounts[2] = p3dReadU16LE(primGeomData + loopPrimOff + i * 8 + 4);
+            li.primCounts[3] = p3dReadU16LE(primGeomData + loopPrimOff + i * 8 + 6);
             vertAccum += li.vertCount;
-            polyAccum += li.polyCount;
             loops.push_back(li);
         }
     }
     if (loops.empty()) {
-        loops.push_back({ numVerts, numPolys, 0, 0 });
+        LOG("[Skeleton] BuildPerJointMeshes missing loop table data (numLoops=%d, loopCtOff=%u, loopPrimOff=%u, size=%u)",
+            numLoops,
+            loopCtOff,
+            loopPrimOff,
+            primGeomSize);
+        return;
+    }
+
+    if (vertAccum > numVerts) {
+        LOG("[Skeleton] BuildPerJointMeshes invalid loop vert accumulation (%u > %u)", vertAccum, numVerts);
+        return;
+    }
+
+    u32 expectedPolyCount = 0;
+    for (const LoopInfo& li : loops) {
+        expectedPolyCount += static_cast<u32>(li.primCounts[0]);
+        expectedPolyCount += static_cast<u32>(li.primCounts[1]);
+        expectedPolyCount += static_cast<u32>(li.primCounts[2]);
+        expectedPolyCount += static_cast<u32>(li.primCounts[3]);
+    }
+    if (expectedPolyCount != numPolys) {
+        LOG("[Skeleton] BuildPerJointMeshes poly-count mismatch expected=%u numPolys=%u", expectedPolyCount, numPolys);
     }
 
     // Build vertex-to-joint map: primGeomStartIdx/primGeomCount are vertex ranges
@@ -448,33 +480,103 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
     std::vector<u16> allIndices;
     std::vector<u32> primStart;
     std::vector<u8> primVertCount;
+    std::vector<u32> builtPerLoop(loops.size(), 0);
+    std::vector<u32> builtPerLoopBucket(loops.size() * 4u, 0);
     bool usesSemiTrans = false;
     bool hasSemiTransMode = false;
     u8 semiTransMode = 0;
+    u32 bucketCommandMismatchWarnBudget = 16;
+    u32 unknownCmdCount = 0;
+    u32 headerOverrunCount = 0;
+    u32 packetOverrunCount = 0;
+    u32 polyExhaustCount = 0;
+    u32 bucketCmdSizeMismatchCount = 0;
 
     u32 primCursor = primListOff;
     u32 polyIdx = 0;
 
     for (int loop = 0; loop < (int)loops.size(); loop++) {
         u16 vertBase = loops[loop].vertBase;
-        u16 loopPolyCount = loops[loop].polyCount;
 
-        for (u16 lp = 0; lp < loopPolyCount && polyIdx < numPolys; lp++, polyIdx++) {
-            if (primCursor + 8 > primGeomSize) break;
-            u32 otTag = p3dReadU32LE(primGeomData + primCursor);
-            u8 wordCount = (u8)((otTag >> 24) & 0xFF);
-            u32 pktSize = (wordCount + 1) * 4;
-            if (primCursor + pktSize > primGeomSize) break;
+        for (u32 bucket = 0; bucket < 4; bucket++) {
+            const u32 expectedPacketSize = (bucket == 0u) ? 52u : (bucket == 1u) ? 36u : (bucket == 2u) ? 40u : 28u;
 
-            const u8* pkt = primGeomData + primCursor;
-            u8 cmd = pkt[7];
-            if ((cmd & 0x2u) != 0u) {
-                usesSemiTrans = true;
-            }
-            u8 cmdBase = cmd & 0xFC;
+            for (u32 count = 0; count < loops[loop].primCounts[bucket]; count++) {
+                if (polyIdx >= numPolys) {
+                    polyExhaustCount++;
+                    break;
+                }
 
-            const u8* poly = polys + polyIdx * 4;
-            u8 vi0 = poly[0], vi1 = poly[1], vi2 = poly[2], vi3 = poly[3];
+                if (primCursor + 8u > primGeomSize) {
+                    headerOverrunCount++;
+                    LOG("[Skeleton] BuildPerJointMeshes packet header overrun: loop=%d bucket=%u polyIdx=%u rem=%u",
+                        loop,
+                        bucket,
+                        polyIdx,
+                        primGeomSize - primCursor);
+                    break;
+                }
+
+                const u8* pkt = primGeomData + primCursor;
+                u8 cmd = pkt[7];
+                u8 cmdBase = cmd & 0xFC;
+
+                u32 packetSize = 0;
+                if (cmdBase == 0x3Cu) packetSize = 52u;
+                else if (cmdBase == 0x2Cu) packetSize = 40u;
+                else if (cmdBase == 0x38u) packetSize = 36u;
+                else if (cmdBase == 0x28u) packetSize = 36u;
+                else if (cmdBase == 0x34u) packetSize = 40u;
+                else if (cmdBase == 0x24u) packetSize = 32u;
+                else if (cmdBase == 0x30u) packetSize = 28u;
+                else if (cmdBase == 0x20u) packetSize = 28u;
+                else {
+                    unknownCmdCount++;
+                    if (bucketCommandMismatchWarnBudget > 0) {
+                        LOG("[Skeleton] BuildPerJointMeshes unknown cmd base 0x%02X at loop=%d bucket=%u polyIdx=%u",
+                            cmdBase,
+                            loop,
+                            bucket,
+                            polyIdx);
+                        bucketCommandMismatchWarnBudget--;
+                    }
+                    break;
+                }
+
+                if (packetSize != expectedPacketSize && bucketCommandMismatchWarnBudget > 0) {
+                    bucketCmdSizeMismatchCount++;
+                    LOG("[Skeleton] BuildPerJointMeshes bucket/cmd size mismatch loop=%d bucket=%u cmd=0x%02X expected=%u actual=%u polyIdx=%u",
+                        loop,
+                        bucket,
+                        cmdBase,
+                        expectedPacketSize,
+                        packetSize,
+                        polyIdx);
+                    bucketCommandMismatchWarnBudget--;
+                }
+
+                if (primCursor + packetSize > primGeomSize) {
+                    packetOverrunCount++;
+                    LOG("[Skeleton] BuildPerJointMeshes packet overrun: loop=%d bucket=%u polyIdx=%u need=%u rem=%u",
+                        loop,
+                        bucket,
+                        polyIdx,
+                        packetSize,
+                        primGeomSize - primCursor);
+                    break;
+                }
+
+                if ((cmd & 0x2u) != 0u) {
+                    usesSemiTrans = true;
+                }
+
+                if (bucket == 0u) ASSERT(cmdBase == 0x3C || cmdBase == 0x2C);
+                if (bucket == 1u) ASSERT(cmdBase == 0x38 || cmdBase == 0x28);
+                if (bucket == 2u) ASSERT(cmdBase == 0x34 || cmdBase == 0x24);
+                if (bucket == 3u) ASSERT(cmdBase == 0x30 || cmdBase == 0x20);
+
+                const u8* poly = polys + polyIdx * 4;
+                u8 vi0 = poly[0], vi1 = poly[1], vi2 = poly[2], vi3 = poly[3];
 
             auto makeSkinVert = [&](u8 vi) -> SkinVertex {
                 u32 idx = vertBase + vi;
@@ -493,16 +595,16 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
                 return sv;
             };
 
-            auto readRGB = [&](int off) {
-                if (off + 3 > (int)pktSize) return std::make_tuple(0.5f, 0.5f, 0.5f);
-                f32 r = std::min(1.0f, pkt[off] / 128.0f);
-                f32 g = std::min(1.0f, pkt[off + 1] / 128.0f);
-                f32 b = std::min(1.0f, pkt[off + 2] / 128.0f);
+                auto readRGB = [&](int off) {
+                    if (off + 3 > (int)packetSize) return std::make_tuple(0.5f, 0.5f, 0.5f);
+                f32 r = pkt[off] / 128.0f;
+                f32 g = pkt[off + 1] / 128.0f;
+                f32 b = pkt[off + 2] / 128.0f;
                 return std::make_tuple(r, g, b);
             };
 
-            if (cmdBase == 0x3C) {
-                if (pktSize < 52) { primCursor += pktSize; continue; }
+                if (cmdBase == 0x3C) {
+                if (packetSize < 52) { primCursor += packetSize; polyIdx++; continue; }
                 SkinVertex v0 = makeSkinVert(vi0), v1 = makeSkinVert(vi1);
                 SkinVertex v2 = makeSkinVert(vi2), v3 = makeSkinVert(vi3);
                 const u16 tpage = p3dReadU16LE(pkt + 26);
@@ -530,9 +632,9 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
                 allIndices.push_back(base); allIndices.push_back(base + 1); allIndices.push_back(base + 2);
                 allIndices.push_back(base + 1); allIndices.push_back(base + 3); allIndices.push_back(base + 2);
 
-            }
-            else if (cmdBase == 0x2C) {
-                if (pktSize < 40) { primCursor += pktSize; continue; }
+                }
+                else if (cmdBase == 0x2C) {
+                if (packetSize < 40) { primCursor += packetSize; polyIdx++; continue; }
                 SkinVertex v0 = makeSkinVert(vi0), v1 = makeSkinVert(vi1);
                 SkinVertex v2 = makeSkinVert(vi2), v3 = makeSkinVert(vi3);
                 const u16 tpage = p3dReadU16LE(pkt + 22);
@@ -557,9 +659,9 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
                 allIndices.push_back(base); allIndices.push_back(base + 1); allIndices.push_back(base + 2);
                 allIndices.push_back(base + 1); allIndices.push_back(base + 3); allIndices.push_back(base + 2);
 
-            }
-            else if (cmdBase == 0x34) {
-                if (pktSize < 40) { primCursor += pktSize; continue; }
+                }
+                else if (cmdBase == 0x34) {
+                if (packetSize < 40) { primCursor += packetSize; polyIdx++; continue; }
                 SkinVertex v0 = makeSkinVert(vi0), v1 = makeSkinVert(vi1), v2 = makeSkinVert(vi2);
                 const u16 tpage = p3dReadU16LE(pkt + 26);
                 f32 tp = (f32)tpage;
@@ -583,9 +685,9 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
                 skinVerts.push_back(v0); skinVerts.push_back(v1); skinVerts.push_back(v2);
                 allIndices.push_back(base); allIndices.push_back(base + 1); allIndices.push_back(base + 2);
 
-            }
-            else if (cmdBase == 0x24) {
-                if (pktSize < 32) { primCursor += pktSize; continue; }
+                }
+                else if (cmdBase == 0x24) {
+                if (packetSize < 32) { primCursor += packetSize; polyIdx++; continue; }
                 SkinVertex v0 = makeSkinVert(vi0), v1 = makeSkinVert(vi1), v2 = makeSkinVert(vi2);
                 const u16 tpage = p3dReadU16LE(pkt + 22);
                 f32 tp = (f32)tpage;
@@ -607,8 +709,8 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
                 skinVerts.push_back(v0); skinVerts.push_back(v1); skinVerts.push_back(v2);
                 allIndices.push_back(base); allIndices.push_back(base + 1); allIndices.push_back(base + 2);
 
-            }
-            else if (cmdBase == 0x38 || cmdBase == 0x28) {
+                }
+                else if (cmdBase == 0x38 || cmdBase == 0x28) {
                 SkinVertex v0 = makeSkinVert(vi0), v1 = makeSkinVert(vi1);
                 SkinVertex v2 = makeSkinVert(vi2), v3 = makeSkinVert(vi3);
                 if (cmdBase == 0x38) {
@@ -632,8 +734,8 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
                 allIndices.push_back(base); allIndices.push_back(base + 1); allIndices.push_back(base + 2);
                 allIndices.push_back(base + 1); allIndices.push_back(base + 3); allIndices.push_back(base + 2);
 
-            }
-            else if (cmdBase == 0x30 || cmdBase == 0x20) {
+                }
+                else if (cmdBase == 0x30 || cmdBase == 0x20) {
                 SkinVertex v0 = makeSkinVert(vi0), v1 = makeSkinVert(vi1), v2 = makeSkinVert(vi2);
                 if (cmdBase == 0x30) {
                     auto [r0, g0, b0] = readRGB(4);
@@ -654,10 +756,44 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
                 primVertCount.push_back(3);
                 skinVerts.push_back(v0); skinVerts.push_back(v1); skinVerts.push_back(v2);
                 allIndices.push_back(base); allIndices.push_back(base + 1); allIndices.push_back(base + 2);
-            }
+                }
 
-            primCursor += pktSize;
+                primCursor += packetSize;
+                polyIdx++;
+                builtPerLoop[loop]++;
+                builtPerLoopBucket[loop * 4 + bucket]++;
+            }
         }
+    }
+
+    u32 builtPrimTotal = 0;
+    for (u32 i = 0; i < builtPerLoop.size(); i++) {
+        builtPrimTotal += builtPerLoop[i];
+    }
+
+    LOG("[Skeleton] BuildPerJointMeshes summary expected=%u numPolys=%u builtPrims=%u polyIdxEnd=%u primCursorOff=%u breaks(polyExhaust=%u headerOverrun=%u packetOverrun=%u unknownCmd=%u sizeMismatch=%u)",
+        expectedPolyCount,
+        static_cast<u32>(numPolys),
+        builtPrimTotal,
+        polyIdx,
+        primCursor - primListOff,
+        polyExhaustCount,
+        headerOverrunCount,
+        packetOverrunCount,
+        unknownCmdCount,
+        bucketCmdSizeMismatchCount);
+
+    for (u32 loop = 0; loop < builtPerLoop.size(); loop++) {
+        LOG("[Skeleton] BuildPerJointMeshes loop=%u planned=%u/%u/%u/%u built=%u/%u/%u/%u",
+            loop,
+            static_cast<u32>(loops[loop].primCounts[0]),
+            static_cast<u32>(loops[loop].primCounts[1]),
+            static_cast<u32>(loops[loop].primCounts[2]),
+            static_cast<u32>(loops[loop].primCounts[3]),
+            builtPerLoopBucket[loop * 4 + 0],
+            builtPerLoopBucket[loop * 4 + 1],
+            builtPerLoopBucket[loop * 4 + 2],
+            builtPerLoopBucket[loop * 4 + 3]);
     }
 
     if (allIndices.empty()) {

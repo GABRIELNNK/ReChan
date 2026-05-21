@@ -18,6 +18,8 @@
 // Global Thing unique ID counter (PSX: gp+3868)
 u16 Thing::s_nextUniqueID = 0;
 
+constexpr s32 COLLISION_SECTOR_MIN_HEIGHT = 0x80000001;
+
 static s32 LerpS32(s32 a, s32 b, f32 alpha) {
     f64 af = (f64)a;
     f64 bf = (f64)b;
@@ -562,8 +564,7 @@ DynamicThing::DynamicThing(const LVector* initialPos, u16 type)
     // PSX: homePos = initialPos
     homePos = *initialPos;
 
-    // PSX: groundStandHeight = 0
-    groundStandHeight = 0;
+    groundStandHeight = COLLISION_SECTOR_MIN_HEIGHT;
     ticket = nullptr;
 }
 
@@ -594,8 +595,7 @@ void DynamicThing::Reset() {
 
     maxFallDivisor = 10;
 
-    // PSX: groundStandHeight = 0
-    groundStandHeight = 0;
+    groundStandHeight = COLLISION_SECTOR_MIN_HEIGHT;
     Disembark();
 }
 

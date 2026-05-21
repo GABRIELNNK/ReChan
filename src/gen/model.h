@@ -29,7 +29,7 @@ struct TransformAnim;
 struct tPrimGeom;
 
 using STreeXformVertsCallback = u32 (*)(tPrimGeom*, STreeJoint*, u32*, u16*);
-using STreeFixUpPolysCallback = s32 (*)(tPrimGeom*, void*, u32, u32);
+using STreeFixUpPolysCallback = u8* (*)(tPrimGeom*, void*, u32, u32);
 
 struct ModelFloorHeightState {
     s32 current = (s32)0x80000001;

@@ -1,5 +1,5 @@
+#include "gen/common.h"
 #include "ai/pickup.h"
-
 #include "gen/animmat.h"
 #include "gen/colsect.h"
 #include "gen/database.h"
@@ -680,6 +680,35 @@ s32 Pickup::Release(Thing* owner, ccList* list, const SVector* forceDir, s32 for
         }
     }
     ignoreCollisionOwner = owner;
+
+    if (owner && owner->thingType == AITypes::TT_BUTCH) {
+        if (forceDir && forceMag != 0) {
+            LOG("[ChefPot] Pickup::Release owner=%p ownerName='%s' pickup=%p pickupName='%s' type=%u pos=(%d,%d,%d) forceDir=(%d,%d,%d) forceMag=%d",
+                owner,
+                owner->GetName(),
+                this,
+                GetName(),
+                thingType,
+                pos.x,
+                pos.y,
+                pos.z,
+                forceDir->x,
+                forceDir->y,
+                forceDir->z,
+                forceMag);
+        }
+        else {
+            LOG("[ChefPot] Pickup::Release owner=%p ownerName='%s' pickup=%p pickupName='%s' type=%u pos=(%d,%d,%d) forceMag=0",
+                owner,
+                owner->GetName(),
+                this,
+                GetName(),
+                thingType,
+                pos.x,
+                pos.y,
+                pos.z);
+        }
+    }
 
     if (forceDir && forceMag != 0) {
         AddForce(forceMag, forceDir);

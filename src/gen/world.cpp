@@ -1407,6 +1407,12 @@ static s32 SwitchDirectorVol(Thing* thing, u32 argc, const char** argv) {
         return 0;
     }
 
+    LOG("[DirectorVol] scriptIndex=%d scriptState=%d anim361_type0=%d anim361_type12=%d",
+        scriptIndex,
+        g_director->scriptState,
+        (g_characterManager && g_characterManager->GetAnimation(0, 361)) ? 1 : 0,
+        (g_characterManager && g_characterManager->GetAnimation(12, 361)) ? 1 : 0);
+
     g_director->SetCodeSnip(script, thing);
     return 1;
 }
@@ -1738,9 +1744,9 @@ static pddiPrimBuffer* ParseDynGeoPrims(
         }
 
         const u32 packedColour = p3dReadU32LE(colours + index * 4);
-        vertex.r = std::min(1.0f, static_cast<f32>(packedColour & 0xFFu) / 128.0f);
-        vertex.g = std::min(1.0f, static_cast<f32>((packedColour >> 8) & 0xFFu) / 128.0f);
-        vertex.b = std::min(1.0f, static_cast<f32>((packedColour >> 16) & 0xFFu) / 128.0f);
+        vertex.r = static_cast<f32>(packedColour & 0xFFu) / 128.0f;
+        vertex.g = static_cast<f32>((packedColour >> 8) & 0xFFu) / 128.0f;
+        vertex.b = static_cast<f32>((packedColour >> 16) & 0xFFu) / 128.0f;
     };
 
     for (u16 polyIndex = 0; polyIndex < numPolys; polyIndex++) {
@@ -2788,6 +2794,7 @@ void World::ProcessSwitches() {
         }
 
         sw->SetVolume(static_cast<DBVolume*>(root));
+
         if (sw->listBucket < 4) {
             switchLists[sw->listBucket].AddNode(switchLists[sw->listBucket].tail, sw);
         }
@@ -2806,8 +2813,11 @@ void World::CheckSwitchList(ccList& list, Thing* thing) {
         WDBSwitch* sw = static_cast<WDBSwitch*>(node);
         node = node->next;
 
-        if (sw->IsInside(thing->pos)) {
+        const bool inside = sw->IsInside(thing->pos);
+
+        if (inside) {
             sw->Execute(thing);
+
             if (sw->persistent != 0) {
                 list.RemNode(sw);
                 delete sw;
@@ -3412,23 +3422,66 @@ void World::Render(const LVector* playerPos) {
     p3d::context->SetVRAMHandle(0);
 }
 
-// chanp3dClipCode - PC equivalent of PSX chanp3dClipCode
-// Projects a tPort-space point into screen space and computes PSX-style clip bits.
-// bit 0: left, bit 1: right, bit 2: top, bit 3: bottom, bit 4: behind camera
+// chanp3dClipCode - PC equivalent of PSX chanp3dClipCode.
+// Projects a transformed tPort vector and computes the same clip-code bit layout
+// used by computeBlockToPointDistances in PSX GAME.CPP.
 static u32 chanp3dClipCode(const ChanProjectionState& portState, s32 vx, s32 vy, s32 vz) {
+    const s32 denom = (vz == 0) ? 1 : vz;
+    const f32 sxF = static_cast<f32>(portState.centerX)
+        + (static_cast<f32>(vx) * portState.projectionDistanceX) / static_cast<f32>(denom);
+    const f32 syF = static_cast<f32>(portState.centerY)
+        + (static_cast<f32>(vy) * portState.projectionDistanceY) / static_cast<f32>(denom);
+
+    // PSX tPort ProjectVector writes to short screen coordinates.
+    s32 sx = 0;
+    if (sxF < -32768.0f) {
+        sx = -32768;
+    }
+    else if (sxF > 32767.0f) {
+        sx = 32767;
+    }
+    else {
+        sx = static_cast<s32>(sxF);
+    }
+
+    s32 sy = 0;
+    if (syF < -32768.0f) {
+        sy = -32768;
+    }
+    else if (syF > 32767.0f) {
+        sy = 32767;
+    }
+    else {
+        sy = static_cast<s32>(syF);
+    }
+
+    const s32 clipMaxX = (portState.width > 0) ? portState.width : 0x7FFF;
+    const s32 clipMaxY = (portState.height > 0) ? portState.height : 0x7FFF;
+
     u32 code = 0;
 
+    // PSX decomp bit layout:
+    // x<0: 0x00004000, x>=clipX: 0x00008000
+    // y<0: 0x40000000, y>=clipY: 0x80000000
+    // z<0: 0x00000002
+    if (sx < 0) {
+        code |= 0x00004000u;
+    }
+    if (sx >= clipMaxX) {
+        code |= 0x00008000u;
+    }
+
+    if (sy < 0) {
+        code |= 0x40000000u;
+    }
+    if (sy >= clipMaxY) {
+        code |= 0x80000000u;
+    }
+
     // PSX chanp3dClipCode only checks z-sign (behind camera), not near/far clip planes.
-    if (vz < 0) code |= 0x10;
-
-    const s32 sx = PsxProjectScreenCoord(portState.centerX, vx, portState.projectionDistanceX, vz);
-    const s32 sy = PsxProjectScreenCoord(portState.centerY, vy, portState.projectionDistanceY, vz);
-
-    if (sx < 0) code |= 0x01;
-    else if (sx >= portState.width) code |= 0x02;
-
-    if (sy < 0) code |= 0x04;
-    else if (sy >= portState.height) code |= 0x08;
+    if (vz < 0) {
+        code |= 0x00000002u;
+    }
 
     return code;
 }
@@ -3568,13 +3621,25 @@ void World::computeBlockToPointDistances(const Block* block, const LVector* play
                                          s32* outDistSq, s32* outZDepth) {
     MARKFUNCTION(0x8002A238);
 
-    // PSX: reads bounding box from tPrimGeom virtual call: *(*(block->primGeom+8)+20)()
-    // PC: uses block half-extent fields (same bounding box data, different access path)
-    // s3 equivalent: bbox[0]=negX, [1]=negY, [2]=negZ, [3]=posX, [4]=posY, [5]=posZ
-    s32 bbox[6] = {
-        block->halfExtNegX, block->halfExtNegY, block->halfExtNegZ,
-        block->halfExtPosX, block->halfExtPosY, block->halfExtPosZ
-    };
+    // PSX reads bounds via block->primGeom virtual path. Use tPrimGeom bounds
+    // directly so culling volume matches rendered prim geometry.
+    s32 bbox[6] = {};
+    if (block->primGeom) {
+        bbox[0] = block->primGeom->bboxMinX;
+        bbox[1] = block->primGeom->bboxMinY;
+        bbox[2] = block->primGeom->bboxMinZ;
+        bbox[3] = block->primGeom->bboxMaxX;
+        bbox[4] = block->primGeom->bboxMaxY;
+        bbox[5] = block->primGeom->bboxMaxZ;
+    }
+    else {
+        bbox[0] = block->halfExtNegX;
+        bbox[1] = block->halfExtNegY;
+        bbox[2] = block->halfExtNegZ;
+        bbox[3] = block->halfExtPosX;
+        bbox[4] = block->halfExtPosY;
+        bbox[5] = block->halfExtPosZ;
+    }
 
     // s5 = &block->posX (block position at offset +4)
     const s32* pos = &block->posX; // pos[0]=X, pos[1]=Y, pos[2]=Z

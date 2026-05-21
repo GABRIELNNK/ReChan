@@ -373,12 +373,7 @@ bool BlockManager::CrossedBoundary() const {
         return false;
     }
 
-    u32 playerBlockNum = Player::s_player->blockNum;
-    const u16 resolvedBlockNum = ResolveBlockNumberFromAllBlocks(blocks, Player::s_player->pos);
-    if (resolvedBlockNum != BLOCK_UNASSIGNED) {
-        playerBlockNum = resolvedBlockNum;
-    }
-
+    const u32 playerBlockNum = Player::s_player->blockNum;
     return playerBlockNum != BLOCK_UNASSIGNED && playerBlockNum != currentBlockNum;
 }
 
@@ -389,12 +384,7 @@ s32 BlockManager::DemandLoading() {
         return 0;
     }
 
-    u32 playerBlockNum = Player::s_player->blockNum;
-    const u16 resolvedBlockNum = ResolveBlockNumberFromAllBlocks(blocks, Player::s_player->pos);
-    if (resolvedBlockNum != BLOCK_UNASSIGNED) {
-        playerBlockNum = resolvedBlockNum;
-        Player::s_player->blockNum = resolvedBlockNum;
-    }
+    const u32 playerBlockNum = Player::s_player->blockNum;
 
     if (playerBlockNum == BLOCK_UNASSIGNED) {
         return 0;
@@ -419,7 +409,20 @@ s32 BlockManager::DemandLoading() {
         g_ai->PopulateBlock();
     }
 
-    WEffect_UnPopulateWEffects(-1);
+    // Avoid global WEffect reset churn on boundary changes. Keep effects for
+    // currently active blocks and only unpopulate blocks that are no longer active.
+    for (u32 i = 0; i < GetNumBlocks(); i++) {
+        Block* block = GetBlock(i);
+        if (!block) {
+            continue;
+        }
+
+        const s32 blockNum = static_cast<s32>(block->blockNum);
+        if (!InActiveList(static_cast<u32>(blockNum))) {
+            WEffect_UnPopulateWEffects(blockNum);
+        }
+    }
+
     WEffect_PopulateWEffects();
 
     return 0;

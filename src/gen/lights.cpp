@@ -24,12 +24,14 @@ struct LightBlockRange {
 static u32 s_lightSphereCountA = 0;
 static u32 s_lightSphereCountB = 0;
 static u32 s_lightBlockIndexCapacity = 0;
+static u32 s_lightBlockRangeCount = 0;
 static u16* s_lightBlockIndices = nullptr;
 static LightBlockRange* s_lightBlockRanges = nullptr;
 static u32 s_humanoidAmbientAdd[3] = {};
-static u32 s_humanoidAmbientClamp[3] = { 255, 255, 255 };
+// PSX globals (splat_human_rclamp block) default ambient clamps to 0xF0
+static u32 s_humanoidAmbientClamp[3] = { 240, 240, 240 };
 static u32 s_worldAmbientAdd[3] = {};
-static u32 s_worldAmbientClamp[3] = { 255, 255, 255 };
+static u32 s_worldAmbientClamp[3] = { 240, 240, 240 };
 
 static bool LightPointIsInsideBounds(const LVector& bboxMin, const LVector& bboxMax, const LVector& point) {
     return point.x >= bboxMin.x && point.x <= bboxMax.x && point.y >= bboxMin.y && point.y <= bboxMax.y
@@ -367,6 +369,7 @@ void LightingClass::Reset() {
     s_lightBlockIndices = nullptr;
     delete[] s_lightBlockRanges;
     s_lightBlockRanges = nullptr;
+    s_lightBlockRangeCount = 0;
     delete lightAnchor;
     lightAnchor = nullptr;
     s_worldAmbientLightColour = worldAmbientColour;
@@ -410,7 +413,31 @@ void LightingClass::AnalyzeSphere(DBPoint* point) {
         return;
     }
 
-    const u32 blockCount = g_blockManager ? g_blockManager->GetNumBlocks() : 0;
+    u32 blockCount = g_blockManager ? g_blockManager->GetNumBlocks() : 0;
+    u32 inferredBlockCount = 0;
+    for (DBPoint* current = point; current; current = static_cast<DBPoint*>(current->next)) {
+        if (current->subType != 65534) {
+            continue;
+        }
+
+        u32 blockIndex = 0;
+        if (!current->FindAttribValue(5, &blockIndex)) {
+            continue;
+        }
+
+        const u32 candidateCount = blockIndex + 1;
+        if (candidateCount > inferredBlockCount) {
+            inferredBlockCount = candidateCount;
+        }
+    }
+    if (inferredBlockCount > blockCount) {
+        blockCount = inferredBlockCount;
+    }
+    if (blockCount == 0) {
+        return;
+    }
+
+    s_lightBlockRangeCount = blockCount;
     s_lightBlockRanges = new LightBlockRange[blockCount]();
     s_lightBlockIndices = (s_lightBlockIndexCapacity != 0) ? new u16[s_lightBlockIndexCapacity]() : nullptr;
 
@@ -452,9 +479,8 @@ s32 LightingClass::DoModelLighting(Thing* thing) {
 void LightingClass::SetupLighting() {
     MARKFUNCTION(0x800A2BFC);
 
-    Reset();
-
     lightAnchor = new LightAnchor();
+
     lightAnchor->SetupLightMemory(s_lightSphereCountA + s_lightSphereCountB);
 
     if (g_database) {
@@ -481,11 +507,8 @@ void LightingClass::SetupLighting() {
     };
 
     for (s32 i = 0; i < 3; i++) {
-        if (originalLights[i].colour == 0 && originalLights[i].directionX == 0
-            && originalLights[i].directionY == 0 && originalLights[i].directionZ == 0) {
-            const u32 fallbackColour = (i == 0) ? 0x00F0F0F0 : 0x00000000;
-            originalLights[i].SetLight(fallbackColour, &defaultLightDirs[i]);
-        }
+        const u32 fallbackColour = (i == 0) ? 0x00F0F0F0 : 0x00000000;
+        originalLights[i].SetLight(fallbackColour, &defaultLightDirs[i]);
     }
 
     if (g_database && lightAnchor) {
@@ -504,13 +527,18 @@ void LightingClass::SetupLighting() {
 void LightingClass::FindAmbientVolumes(Thing* thing) {
     MARKFUNCTION(0x800A314C);
 
-    if (!thing || !thing->model || !lightAnchor || !s_lightBlockRanges) {
+    if (!thing || !thing->model || !lightAnchor) {
         return;
     }
 
     Model* model = static_cast<Model*>(thing->model);
     AmbientLight* ambient = static_cast<AmbientLight*>(model->ambientLight);
     if (!ambient) {
+        return;
+    }
+
+    if (!s_lightBlockRanges || !s_lightBlockIndices || !lightAnchor->radialLights
+        || thing->blockNum >= s_lightBlockRangeCount) {
         return;
     }
 
@@ -536,50 +564,47 @@ void LightingClass::FindAmbientVolumes(Thing* thing) {
         break;
     }
 
-    const u32 blockCount = g_blockManager ? g_blockManager->GetNumBlocks() : 0;
-    if (thing->blockNum < blockCount && s_lightBlockIndices && lightAnchor->radialLights) {
-        const LightBlockRange& range = s_lightBlockRanges[thing->blockNum];
-        s32 accumR = 0;
-        s32 accumG = 0;
-        s32 accumB = 0;
-        s32 contributionCount = 0;
+    const LightBlockRange& range = s_lightBlockRanges[thing->blockNum];
+    s32 accumR = 0;
+    s32 accumG = 0;
+    s32 accumB = 0;
+    s32 contributionCount = 0;
 
-        for (u32 i = 0; i < range.count && contributionCount < 2; i++) {
-            const u16 lightIndex = s_lightBlockIndices[range.offset + i];
-            if (lightIndex >= lightAnchor->radialLightCount) {
-                continue;
-            }
-
-            const RadialLight& light = lightAnchor->radialLights[lightIndex];
-            if (((light.flags >> 2) & 1u) == 0) {
-                continue;
-            }
-
-            s32 distance = AbsLightDelta(light.posX - thing->pos.x) + AbsLightDelta(light.posZ - thing->pos.z);
-            if ((light.flags & 1u) != 0) {
-                distance += AbsLightDelta(light.posY - thing->pos.y);
-            }
-
-            if ((s32)light.radius < distance) {
-                continue;
-            }
-
-            accumR += light.colourR;
-            accumG += light.colourG;
-            accumB += light.colourB;
-            contributionCount++;
+    for (u32 i = 0; i < range.count && contributionCount < 2; i++) {
+        const u16 lightIndex = s_lightBlockIndices[range.offset + i];
+        if (lightIndex >= lightAnchor->radialLightCount) {
+            continue;
         }
 
-        if (contributionCount == 1) {
-            baseR = accumR;
-            baseG = accumG;
-            baseB = accumB;
+        const RadialLight& light = lightAnchor->radialLights[lightIndex];
+        if (((light.flags >> 2) & 1u) == 0) {
+            continue;
         }
-        else if (contributionCount >= 2) {
-            baseR = accumR >> 1;
-            baseG = accumG >> 1;
-            baseB = accumB >> 1;
+
+        s32 distance = AbsLightDelta(light.posX - thing->pos.x) + AbsLightDelta(light.posZ - thing->pos.z);
+        if ((light.flags & 1u) != 0) {
+            distance += AbsLightDelta(light.posY - thing->pos.y);
         }
+
+        if ((s32)light.radius < distance) {
+            continue;
+        }
+
+        accumR += light.colourR;
+        accumG += light.colourG;
+        accumB += light.colourB;
+        contributionCount++;
+    }
+
+    if (contributionCount == 1) {
+        baseR = accumR;
+        baseG = accumG;
+        baseB = accumB;
+    }
+    else if (contributionCount >= 2) {
+        baseR = accumR >> 1;
+        baseG = accumG >> 1;
+        baseB = accumB >> 1;
     }
 
     u32 finalR = 0;
@@ -605,46 +630,56 @@ void LightingClass::FindAmbientVolumes(Thing* thing) {
     ambient->SetDesired(PackRGB(finalR, finalG, finalB));
 }
 
-void LightingClass::ComputeLightDir(const Thing* thing, LVector* direction) {
+void LightingClass::ComputeLightDir(LVector* direction) {
     MARKFUNCTION(0x800A34A0);
 
     if (!direction) {
         return;
     }
 
-    direction->x = 0;
-    direction->y = -65535;
-    direction->z = 0;
-
-    if (!thing || !g_display || !g_display->GetCamera()) {
+    if (!g_display || !g_display->GetCamera()) {
         return;
     }
 
-    const LVector& cameraPos = g_display->GetCamera()->GetPosition();
-    const s32 deltaX = cameraPos.x - thing->pos.x;
-    const s32 deltaZ = cameraPos.z - thing->pos.z;
+    const Camera* camera = g_display->GetCamera();
+    const LVector& cameraPos = camera->GetPosition();
+    const LVector& cameraTarget = camera->GetTargetPos();
+    const s32 deltaX = cameraTarget.x - cameraPos.x;
+    const s32 deltaZ = cameraTarget.z - cameraPos.z;
     const s32 absX = AbsLightDelta(deltaX);
     const s32 absZ = AbsLightDelta(deltaZ);
 
     if ((absX >> 1) < absZ) {
         direction->z = (deltaZ <= 0) ? -30559 : 30559;
     }
+    else {
+        direction->z = 0;
+    }
 
     if ((absZ >> 1) < absX) {
         direction->x = (deltaX <= 0) ? -30559 : 30559;
     }
+    else {
+        direction->x = 0;
+    }
+    direction->y = -65535;
 }
 
 s32 LightingClass::FindHardwareVolumes(Thing* thing) {
     MARKFUNCTION(0x800A3550);
 
-    if (!thing || !thing->model || !lightAnchor || !s_lightBlockRanges) {
+    if (!thing || !thing->model || !lightAnchor) {
         return 240;
     }
 
     Model* model = static_cast<Model*>(thing->model);
     HardwareLight* modelLights = static_cast<HardwareLight*>(model->hwLights);
     if (!modelLights || model->hwLightCount <= 0) {
+        return 240;
+    }
+
+    if (!s_lightBlockRanges || !s_lightBlockIndices || !lightAnchor->radialLights
+        || thing->blockNum >= s_lightBlockRangeCount) {
         return 240;
     }
 
@@ -672,18 +707,13 @@ s32 LightingClass::FindHardwareVolumes(Thing* thing) {
         break;
     }
 
-    const u32 blockCount = g_blockManager ? g_blockManager->GetNumBlocks() : 0;
-    if (thing->blockNum >= blockCount || !s_lightBlockIndices || !lightAnchor->radialLights) {
-        return 240;
-    }
-
-    const LightBlockRange& range = s_lightBlockRanges[thing->blockNum];
     s32 accumR = 0;
     s32 accumG = 0;
     s32 accumB = 0;
     s32 contributionCount = 0;
-    bool haveDirection = false;
+    bool useComputedDirection = false;
 
+    const LightBlockRange& range = s_lightBlockRanges[thing->blockNum];
     for (u32 i = 0; i < range.count; i++) {
         const u16 lightIndex = s_lightBlockIndices[range.offset + i];
         if (lightIndex >= lightAnchor->radialLightCount) {
@@ -714,17 +744,18 @@ s32 LightingClass::FindHardwareVolumes(Thing* thing) {
         }
 
         contributionCount++;
-        if (!haveDirection) {
-            ComputeLightDir(thing, &direction);
-            haveDirection = true;
+        if (!useComputedDirection) {
+            useComputedDirection = true;
+            ComputeLightDir(&direction);
         }
     }
 
     if (contributionCount > 0) {
         if (contributionCount >= 3) {
-            accumR /= contributionCount;
-            accumG /= contributionCount;
-            accumB /= contributionCount;
+            const s32 reciprocal = rmDiv16i(0x10000, contributionCount);
+            accumR = (s32)(((s64)accumR * reciprocal) >> 16);
+            accumG = (s32)(((s64)accumG * reciprocal) >> 16);
+            accumB = (s32)(((s64)accumB * reciprocal) >> 16);
         }
         else {
             const s32 shift = contributionCount - 1;

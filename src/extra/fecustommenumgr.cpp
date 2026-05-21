@@ -19,6 +19,8 @@
 #include "gen/world.h"
 #include "p3d/texture.h"
 #include "pddi/pdditex.h"
+#include "p3d/context.h"
+#include "p3d/input.h"
 
 feCustomMenuMgr* g_feCustomMenuMgr = nullptr;
 
@@ -507,17 +509,22 @@ void feCustomMenuMgr::BuildPages() {
         Button("FE_KBD", EntryEvent_GoPage, MenuPage_KeyBindings),
         Button("FE_DIS", EntryEvent_GoPage, MenuPage_Display),
         Button("FE_SND", EntryEvent_GoPage, MenuPage_Sound),
+        Button("FE_CRE", EntryEvent_Credits),
         Button("FE_BCK", EntryEvent_Back),
                });
 
-    auto& feCtrl = AddPage(MenuPage_Controller, "FE_CTL", "Menu_Controller", MenuPage_Options, 0, false, DEF_KEYBIND_WINDOW_W, DEF_KEYBIND_WINDOW_H);
+    auto& feCtrl = AddPage(MenuPage_Controller, "FE_CTL", "Menu_Controller", MenuPage_Options, 0, false, DEF_CONTROLLER_WINDOW_W, DEF_CONTROLLER_WINDOW_H);
     SetEntries(feCtrl, {
         Toggle("FE_CSH", EntryBinding_Shock),
         List("FE_CCF", EntryBinding_PlayerConfig, 1, 0, 2),
-               }, 0, 28);
+        Button("FE_BCK", EntryEvent_Back),
+               }, 0, 42);
 
-    AddPage(MenuPage_KeyBindings, "FE_KBD", "Menu_Controller", MenuPage_Controller, 1, false,
+    auto& feKeyBindings = AddPage(MenuPage_KeyBindings, "FE_KBD", "Menu_Controller", MenuPage_Controller, 1, false,
             DEF_KEYBIND_WINDOW_W, DEF_KEYBIND_WINDOW_H);
+    SetEntries(feKeyBindings, {
+                Button("FE_BCK", EntryEvent_Back),
+               }, 0, 64);
 
     auto& feDisplay = AddPage(MenuPage_Display, "FE_DIS", "Menu_GameOption", MenuPage_Options, 2, false, -1, -1);
     SetEntries(feDisplay, {
@@ -697,7 +704,6 @@ void feCustomMenuMgr::Shutdown() {
 
     m_titleScreenTextureTried = false;
     m_loadingScreenTextureTried = false;
-    m_dragonTexTried = false;
     m_text = nullptr;
 }
 
@@ -1433,9 +1439,15 @@ void feCustomMenuMgr::Confirm() {
             SetPage(MenuPage_Quitting);
             break;
         case EntryEvent_Credits:
+            rsEvent(RS_STOP_MUSIC, 0, 0, 0);
+
             if (g_game)
-                g_game->SetState(GameState::PlayMovieCredits);
-            m_result = 4;
+                g_game->PlayMovie("credits.str", 1, 1);
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+            rsEvent(RS_SET_LOCATION, 22, 0, 0);
+            rsEvent(RS_LEVEL_BEGIN, 0, 0, 0);
             break;
         case EntryEvent_Load:
             if (m_currPage != MenuPage_LoadSlots) {
@@ -2049,13 +2061,22 @@ void feCustomMenuMgr::LoadControllerOverlayTexture() {
 }
 
 void feCustomMenuMgr::LoadMenuOrnamentTexture() {
-    if (m_menuOrnamentTexture) {
-        return;
-    }
-
     m_menuOrnamentTexture = tTexture::LoadFromImagePath(kMenuOrnamentTexturePath);
     if (!m_menuOrnamentTexture) {
         LOG("[CustomMenu] Failed to load %s", kMenuOrnamentTexturePath);
+    }
+
+    m_redDragonTex = tTexture::LoadFromImagePath(kRedDragonTexturePath);
+    if (!m_redDragonTex) {
+        LOG("[CustomMenu] Failed to load %s", kRedDragonTexturePath);
+    }
+    m_goldDragonTex = tTexture::LoadFromImagePath(kGoldDragonTexturePath);
+    if (!m_goldDragonTex) {
+        LOG("[CustomMenu] Failed to load %s", kGoldDragonTexturePath);
+    }
+    m_greyDragonTex = tTexture::LoadFromImagePath(kGreyDragonTexturePath);
+    if (!m_greyDragonTex) {
+        LOG("[CustomMenu] Failed to load %s", kGreyDragonTexturePath);
     }
 }
 
@@ -3145,13 +3166,6 @@ void feCustomMenuMgr::RenderLocationPage() const {
     g_textManager->SetPromptsEnabled(true);
     g_textManager->SetShadow(false);
     g_textManager->SetOutline(true);
-
-    if (!m_dragonTexTried) {
-        m_dragonTexTried = true;
-        m_redDragonTex = tTexture::LoadFromImagePath(kRedDragonTexturePath);
-        m_goldDragonTex = tTexture::LoadFromImagePath(kGoldDragonTexturePath);
-        m_greyDragonTex = tTexture::LoadFromImagePath(kGreyDragonTexturePath);
-    }
 
     static constexpr s32 LOC_ICON_SIZE = 28;
     static constexpr s32 LOC_ICON_GAP = 14;

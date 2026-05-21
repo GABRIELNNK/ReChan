@@ -30,11 +30,14 @@
 
 #include "snd/esound.h"
 #include "snd/sndfact.h"
+#include "pc/log.h"
 
 static ComEffect* g_wEffectComEffects[64] = {};
 static ComEffect* g_wEffectOwnedEffects[64] = {};
 static s32 g_wEffectComEffectCount = 0;
 static s32 g_wEffectOwnedCount = 0;
+
+static constexpr u32 kChefNisPotHash = 0x052EA764u;
 
 static ccList g_wEffectPool;
 
@@ -3398,6 +3401,23 @@ s32 WEffect::Update() {
                 continue;
             }
 
+            if (triggerFWHash == kChefNisPotHash) {
+                const char* thingName = thing->GetName() ? thing->GetName() : "null";
+                Log::Get().LogMessage(
+                    "[ChefPotNIS] WEffect trigger source=0x%08X trigger=0x%08X thing=%s thingCRC=0x%08X thingBlock=%u effectInList=%d",
+                    nameCRC,
+                    triggerFWHash,
+                    thingName,
+                    thing->nameCRC,
+                    thing->blockNum,
+                    triggerEffect->inEffectsList);
+            }
+
+            if (triggerEffect->inEffectsList) {
+                thing->flags &= ~TF_NEEDS_ACTIVATION;
+                continue;
+            }
+
             FWEffect::Create2(triggerFWHash, &triggerPos, nullptr, nullptr, 4);
             thing->flags &= ~TF_NEEDS_ACTIVATION;
         }
@@ -3900,18 +3920,28 @@ s32 FWEffect::Create(s32 blockNum) {
 
     s32 result = static_cast<s32>(0x800E0000);
 
-    for (ccMinNode* node = g_wEffectPool.head; node; node = node->next) {
+    for (ccMinNode* node = g_wEffectPool.head; node;) {
+        ccMinNode* next = node->next;
         Effects* effect = static_cast<Effects*>(static_cast<ccNode*>(node));
         if ((effect->effectType != 4 && effect->effectType != 5) || effect->blockNum != blockNum) {
+            node = next;
             continue;
         }
 
-        result = effect->Create();
+        FWEffect* fwEffect = static_cast<FWEffect*>(effect);
+        if (!fwEffect->active) {
+            node = next;
+            continue;
+        }
+
+        result = fwEffect->Create();
 
         if (result) {
             g_wEffectPool.RemNode(effect);
             Effects_AddEffect(effect, 0);
         }
+
+        node = next;
     }
 
     return result;
@@ -3919,6 +3949,10 @@ s32 FWEffect::Create(s32 blockNum) {
 
 s32 FWEffect::Create() {
     MARKFUNCTION(0x8008C024);
+
+    if (!active) {
+        return 0;
+    }
 
     frameCounter = 0;
     const s32 mentorResult = SetMentor();
@@ -3958,10 +3992,48 @@ s32 FWEffect::Create2(u32 effectHash,
             continue;
         }
 
+        const s32 beforeInList = effect->inEffectsList;
         static_cast<FWEffect*>(wEffect)->Create2(posOverride, scaleOverride, rotationOverride, flags);
         g_wEffectPool.RemNode(effect);
         Effects_AddEffect(effect, (flags & 4) ? 1 : 0);
+
+        if (effectHash == kChefNisPotHash) {
+            FWEffect* after = FWEffect::Find(effectHash);
+            Log::Get().LogMessage(
+                "[ChefPotNIS] FWEffect::Create2 pooled hash=0x%08X beforeInList=%d afterInList=%d active=%d block=%d flags=0x%X",
+                effectHash,
+                beforeInList,
+                after ? after->inEffectsList : 0,
+                after ? after->active : 0,
+                after ? after->blockNum : -1,
+                static_cast<u32>(flags));
+        }
+
         return 1;
+    }
+
+    if (effectHash == kChefNisPotHash) {
+        Effects* activeEffect = Effects_Find(4, effectHash);
+        if (!activeEffect) {
+            activeEffect = Effects_Find(5, effectHash);
+        }
+
+        if (activeEffect) {
+            FWEffect* activeFw = static_cast<FWEffect*>(activeEffect);
+            Log::Get().LogMessage(
+                "[ChefPotNIS] FWEffect::Create2 active-skip hash=0x%08X inList=%d active=%d block=%d flags=0x%X",
+                effectHash,
+                activeFw->inEffectsList,
+                activeFw->active,
+                activeFw->blockNum,
+                static_cast<u32>(flags));
+            return 0;
+        }
+
+        Log::Get().LogMessage(
+            "[ChefPotNIS] FWEffect::Create2 miss hash=0x%08X flags=0x%X",
+            effectHash,
+            static_cast<u32>(flags));
     }
 
     return 0;
@@ -3974,6 +4046,7 @@ s32 FWEffect::Create2(const LVector* posOverride,
 {
     MARKFUNCTION(0x8008C13C);
 
+    active = 1;
     frameCounter = 0;
     frame = 0;
     canDisplay = 1;
@@ -4123,6 +4196,7 @@ s32 FWEffect::Update() {
                     }
 
                     if (doneMask) {
+                        active = 0;
                         Effects_RemoveEffect(this);
                         g_wEffectPool.AddNode(g_wEffectPool.tail, this);
                         ReleaseSound();
@@ -4207,6 +4281,7 @@ s32 FWEffect::Update() {
         }
         else if (pathMode == 99) {
             if (stepFrame()) {
+                active = 0;
                 Effects_RemoveEffect(this);
                 g_wEffectPool.AddNode(g_wEffectPool.tail, this);
                 ReleaseSound();
@@ -4929,6 +5004,14 @@ void WEffect_InitWorldEffects(DBPoint* firstPoint) {
             const char* triggerName = triggerAttrib->GetAttribString();
             if (triggerName) {
                 effect->triggerFWHash = p3dHash(triggerName);
+                if (effect->triggerFWHash == kChefNisPotHash) {
+                    Log::Get().LogMessage(
+                        "[ChefPotNIS] Init trigger source=0x%08X subType=%u triggerName=%s triggerHash=0x%08X",
+                        effect->nameCRC,
+                        subType,
+                        triggerName,
+                        effect->triggerFWHash);
+                }
             }
         }
 

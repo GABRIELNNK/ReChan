@@ -389,23 +389,13 @@ void HUDWidescreenPatches::FixHubPromptBottomBar(xcSection* section, u8* rawData
     const s16 leftX = static_cast<s16>(RoundToNearestS32((leftPx - centerOffsetPx) / screenUnitsPerHudPixel));
     const s16 rightX = static_cast<s16>(RoundToNearestS32((rightPx - centerOffsetPx) / screenUnitsPerHudPixel));
 
-    bool changed = false;
     const xcInventoryItem* overlayItem = section->overlays->FindItem(kHubPromptOverlayHash);
-    if (overlayItem) {
-        xcOverlayData* overlay = reinterpret_cast<xcOverlayData*>(rawData + overlayItem->dataOffset);
-        changed = StretchHubBottomBarsInOverlay(section, overlay, rawData, leftX, rightX);
+    if (!overlayItem) {
+        return;
     }
 
-    if (!changed) {
-        const xcInventory* inv = section->overlays;
-        const xcInventoryItem* items = inv->GetItems();
-        for (u32 i = 0; i < inv->itemCount; i++) {
-            xcOverlayData* overlay = reinterpret_cast<xcOverlayData*>(rawData + items[i].dataOffset);
-            if (StretchHubBottomBarsInOverlay(section, overlay, rawData, leftX, rightX)) {
-                changed = true;
-            }
-        }
-    }
+    xcOverlayData* overlay = reinterpret_cast<xcOverlayData*>(rawData + overlayItem->dataOffset);
+    StretchHubBottomBarsInOverlay(section, overlay, rawData, leftX, rightX);
 }
 
 void HUDWidescreenPatches::BeginUpdate(xcSection* section, u8* rawData) {

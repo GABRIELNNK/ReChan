@@ -1231,7 +1231,9 @@ bool Game::gsEndLevelExitState(Game* game) {
 
 bool Game::gsPlayMovieCredits(Game* game) {
     MARKFUNCTION(0x8002CB28); // gsPlayMovieCredits
-    game->SetState(GameState::End);
+    MenuFade();
+    game->PlayMovie("credits.str", 1, 1);
+    game->SetState(GameState::QueueLevelLoad);
     return true;
 }
 
@@ -1725,7 +1727,8 @@ void Game::PlayMovie(const char* name, s32 skippable, s32 unloadLevel) {
         while (!player->IsFinished() && !p3d::display->ShouldClose()) {
             f64 now = Time::GetTimeInSeconds();
             f32 elapsed = (f32)(now - prevFrame);
-            if (elapsed < targetDt) continue;
+            if (elapsed < targetDt)
+                continue;
             prevFrame = now;
 
             p3d::display->PollEvents();

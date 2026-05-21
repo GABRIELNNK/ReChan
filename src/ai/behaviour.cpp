@@ -345,13 +345,11 @@ void Behaviour::ButchDMS(Behaviour* self) {
         return;
     }
 
-    if (g_director->scriptState != 0) {
+    if (g_directorActive != 0) {
         return;
     }
 
-    if (!self->InActiveZone()) {
-        return;
-    }
+    self->InActiveZone();
 
     Player* player = Player::s_player;
     if (!player) {
@@ -359,9 +357,9 @@ void Behaviour::ButchDMS(Behaviour* self) {
     }
 
     Humanoid* owner = self->owner;
-    owner->FaceThingDesired(player);
+    owner->SetTarget(player);
 
-    const s32 distanceToPlayer = owner->DistanceFromPointXZ(player->pos);
+    const s32 distanceToPlayer = owner->DistanceFromPoint(player->pos);
     if ((u32)(owner->actionState - 0x20) >= 5u) {
         self->comboScriptIndex = -1;
         self->comboScriptCursor = 0;
@@ -613,8 +611,8 @@ void Behaviour::ButchDMS_Charge(Behaviour* self) {
     const LVector playerPos = player->pos;
     const s32 ownerFacing = owner->orientation.y;
 
-    const s32 distanceToPlayer = owner->DistanceFromPointXZ(playerPos);
-    owner->FaceThingDesired(player);
+    const s32 distanceToPlayer = owner->DistanceFromPoint(playerPos);
+    owner->SetTarget(player);
 
     self->navDecisionCounter++;
     if (self->navDecisionCounter >= 51) {
@@ -642,11 +640,16 @@ void Behaviour::ButchDMS_Charge(Behaviour* self) {
         wallNormal,
         hitPoint,
         verticalSpan,
-        wallMaterial) == 0) {
-        if (distanceToPlayer < BUTCH_ATTACK_DIST) {
-            owner->RequestAction(7);
-        }
+        wallMaterial) != 0) {
+        self->navDecisionCounter = 0;
+        self->handlerThisOffset = 0;
+        self->handlerDispatch = -1;
+        self->handler = ButchDMS;
+        return;
+    }
 
+    if (distanceToPlayer < BUTCH_ATTACK_DIST) {
+        owner->RequestAction(7);
         self->navDecisionCounter = 0;
         self->handlerThisOffset = 0;
         self->handlerDispatch = -1;
@@ -874,7 +877,7 @@ void Behaviour::PaulDMS(Behaviour* self) {
     }
 
     s32& spotPathWasForcedOff = self->field80To176[3]; // +0x5C
-    if (g_director && g_director->scriptState != 0) {
+    if (g_directorActive != 0) {
         bossSpotLight->EnablePath(0);
         spotPathWasForcedOff = 1;
         return;
@@ -1055,7 +1058,7 @@ void Behaviour::OscarDMS(Behaviour* self) {
         return;
     }
 
-    if (g_director->scriptState != 0) {
+    if (g_directorActive != 0) {
         return;
     }
 
@@ -1292,7 +1295,7 @@ void Behaviour::OscarHenchmanDMS(Behaviour* self) {
         return;
     }
 
-    if (g_director->scriptState != 0) {
+    if (g_directorActive != 0) {
         return;
     }
 
@@ -1973,7 +1976,7 @@ void Behaviour::Idle(Behaviour* self) {
         return;
     }
 
-    if (g_director && g_director->scriptState != 0) {
+    if (g_directorActive != 0) {
         return;
     }
 

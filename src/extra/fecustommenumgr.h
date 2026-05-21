@@ -113,9 +113,13 @@ enum EntryEvent : u8 {
 // Prompt/help spacing tuning
 #define DEF_HELP_GROUP_GAP_PX 14.0f
 
+// Controller page tuning
+#define DEF_CONTROLLER_WINDOW_W 420
+#define DEF_CONTROLLER_WINDOW_H 186
+
 // Key Bindings page tuning
 #define DEF_KEYBIND_WINDOW_W 420
-#define DEF_KEYBIND_WINDOW_H 200
+#define DEF_KEYBIND_WINDOW_H 198
 #define DEF_KEYBIND_SLOT_COUNT 2
 #define DEF_KEYBIND_VISIBLE_ROWS 8
 #define DEF_KEYBIND_ROW_STEP 14
@@ -379,7 +383,6 @@ private:
     tTexture* m_sliderFTex = nullptr;
     bool m_titleScreenTextureTried = false;
     bool m_loadingScreenTextureTried = false;
-    mutable bool m_dragonTexTried = false;
     MenuPage m_currPage = MenuPage_None;
     MenuPage m_prevPage = MenuPage_None;
     s32 m_cursor = 0;

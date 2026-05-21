@@ -56,7 +56,7 @@ struct tPrimGeom : public tGeometry {
 
 // PSX STree callback hooks installed by CharDataLoadCallback / stream STree load.
 u32 RP_XformVertsLitCBF_CL(tPrimGeom* geometry, STreeJoint* joint, u32* fastCache, u16* scratch);
-s32 RP_FixUpPolysCBF_CL(tPrimGeom* geometry, void* view, u32 loopIndex, u32 polyIndex);
+u8* RP_FixUpPolysCBF_CL(tPrimGeom* geometry, void* view, u32 loopIndex, u32 polyIndex);
 
 int RP_ZCullGClip(tGeometry* geometry, const LVector* drawPos = nullptr);
 int RP_ZCullGMFog(tGeometry* geometry, const LVector* drawPos, u16 fogNear, u16 fogFar, u32 fogColour);

@@ -1332,6 +1332,7 @@ void CharacterManager::LoadAnimationBatch(u32 type, s32 animEnum, CharMgrCallbac
             animPtrs[handleIdx] = ta;
         }
         else {
+            LOG("[LoadAnimBatch] TransformAnim::Parse FAILED for type=%u animEnum=%d size=%d - stored as CameraParamAnim", type, animEnum, animSize);
             CameraParamAnim* cameraAnim = ParseCameraParamAnim(animBuf, (u32)animSize, p3dBuf, (u32)p3dSize);
             std::free(animBuf);
             if (cameraAnim && cameraAnim->nameUID == 0) {

@@ -3,10 +3,12 @@
 #include "gen/animstruct.h"
 #include "gen/charmgr.h"
 #include "gen/envmgr.h"
+#include "gen/geometry.h"
 #include "gen/lights.h"
 #include "gen/paramanim.h"
 #include "ai/player.h"
 #include "gen/skeleton.h"
+#include "p3d/byteread.h"
 #include "p3d/context.h"
 #include "p3d/p3dmath.h"
 #include "pddi/pddi.h"
@@ -27,6 +29,8 @@ static const u8 kStreeMirrorSwapPairs[] = {
 };
 
 static std::vector<const OriginalSTree*> s_liveOriginalSTrees;
+static u32 s_streePacketLitTraceBudget = 24;
+static u32 s_streeShowLightTraceBudget = 16;
 
 static void RegisterLiveOriginalSTree(const OriginalSTree* tree) {
     if (!tree) {
@@ -72,6 +76,145 @@ static void BuildMat4FromPsxPackedMatrix(const s32* packedMatrix, Mat4& out) {
     out.m[8] = (f32)rot[6] * kInvQ12;
     out.m[9] = (f32)rot[7] * kInvQ12;
     out.m[10] = (f32)rot[8] * kInvQ12;
+}
+
+static bool BuildLitPacketScratch(const OriginalSTree* renderSource, std::vector<u8>* outPackets) {
+    if (!renderSource || !outPackets || !renderSource->primGeom || !renderSource->fixUpPolysCallback) {
+        return false;
+    }
+
+    const tPrimGeom* geom = renderSource->primGeom;
+    if (!geom->ownedRawData || !geom->primList || !geom->loopPrimData || !geom->ownedRawSize) {
+        return false;
+    }
+
+    const u32 primStartOffset = static_cast<u32>(geom->primList - geom->ownedRawData);
+    if (primStartOffset >= geom->ownedRawSize) {
+        return false;
+    }
+
+    const u32 primRegionSize = geom->ownedRawSize - primStartOffset;
+    outPackets->assign(geom->primList, geom->primList + primRegionSize);
+    u8* cursor = outPackets->data();
+    u32 polyIndex = 0;
+    for (u32 loopIndex = 0; loopIndex < geom->numLoops; loopIndex++) {
+        cursor = renderSource->fixUpPolysCallback(renderSource->primGeom, cursor, loopIndex, polyIndex);
+        if (!cursor) {
+            return false;
+        }
+
+        const u8* loopPrim = geom->loopPrimData + loopIndex * 8u;
+        polyIndex += static_cast<u32>(p3dReadU16LE(loopPrim + 0));
+        polyIndex += static_cast<u32>(p3dReadU16LE(loopPrim + 2));
+        polyIndex += static_cast<u32>(p3dReadU16LE(loopPrim + 4));
+        polyIndex += static_cast<u32>(p3dReadU16LE(loopPrim + 6));
+    }
+
+    return true;
+}
+
+static void ApplyLitPacketColoursToSkin(const SkinData* skin,
+                                        const std::vector<u8>& litPackets,
+                                        std::vector<f32>* vertData) {
+    if (!skin || !vertData || litPackets.empty()) {
+        return;
+    }
+
+    const u8* cursor = litPackets.data();
+    const u8* end = litPackets.data() + litPackets.size();
+    for (u32 primIndex = 0; primIndex < skin->numPrims; primIndex++) {
+        if (cursor + 8 > end) {
+            break;
+        }
+
+        const u8 cmdBase = static_cast<u8>(cursor[7] & 0xFCu);
+        u32 primitiveSize = 0;
+        u32 colourOffsets[4] = {};
+        u32 colourCount = 0;
+
+        if (cmdBase == 0x3Cu) {
+            primitiveSize = 52u;
+            colourOffsets[0] = 4u;
+            colourOffsets[1] = 16u;
+            colourOffsets[2] = 28u;
+            colourOffsets[3] = 40u;
+            colourCount = 4u;
+        }
+        else if (cmdBase == 0x2Cu) {
+            primitiveSize = 40u;
+            colourOffsets[0] = 4u;
+            colourOffsets[1] = 4u;
+            colourOffsets[2] = 4u;
+            colourOffsets[3] = 4u;
+            colourCount = 4u;
+        }
+        else if (cmdBase == 0x38u) {
+            primitiveSize = 36u;
+            colourOffsets[0] = 4u;
+            colourOffsets[1] = 12u;
+            colourOffsets[2] = 20u;
+            colourOffsets[3] = 28u;
+            colourCount = 4u;
+        }
+        else if (cmdBase == 0x28u) {
+            primitiveSize = 36u;
+            colourOffsets[0] = 4u;
+            colourOffsets[1] = 4u;
+            colourOffsets[2] = 4u;
+            colourOffsets[3] = 4u;
+            colourCount = 4u;
+        }
+        else if (cmdBase == 0x34u) {
+            primitiveSize = 40u;
+            colourOffsets[0] = 4u;
+            colourOffsets[1] = 16u;
+            colourOffsets[2] = 28u;
+            colourCount = 3u;
+        }
+        else if (cmdBase == 0x24u) {
+            primitiveSize = 32u;
+            colourOffsets[0] = 4u;
+            colourOffsets[1] = 4u;
+            colourOffsets[2] = 4u;
+            colourCount = 3u;
+        }
+        else if (cmdBase == 0x30u) {
+            primitiveSize = 28u;
+            colourOffsets[0] = 4u;
+            colourOffsets[1] = 12u;
+            colourOffsets[2] = 20u;
+            colourCount = 3u;
+        }
+        else if (cmdBase == 0x20u) {
+            primitiveSize = 28u;
+            colourOffsets[0] = 4u;
+            colourOffsets[1] = 4u;
+            colourOffsets[2] = 4u;
+            colourCount = 3u;
+        }
+        else {
+            break;
+        }
+
+        if (cursor + primitiveSize > end) {
+            break;
+        }
+
+        const u32 base = skin->primStart[primIndex];
+        for (u32 colourIndex = 0; colourIndex < colourCount; colourIndex++) {
+            const u32 vertexIndex = base + colourIndex;
+            if (vertexIndex >= skin->numVerts) {
+                continue;
+            }
+
+            const u32 offset = colourOffsets[colourIndex];
+            (*vertData)[vertexIndex * 10u + 3u] = static_cast<f32>(cursor[offset + 0u]) / 128.0f;
+            (*vertData)[vertexIndex * 10u + 4u] = static_cast<f32>(cursor[offset + 1u]) / 128.0f;
+            (*vertData)[vertexIndex * 10u + 5u] = static_cast<f32>(cursor[offset + 2u]) / 128.0f;
+        }
+
+        cursor += primitiveSize;
+    }
 }
 
 static DrawableSTree* GetDrawableSTree(Model* model) {
@@ -144,6 +287,11 @@ OriginalSTree::OriginalSTree() {
 
 OriginalSTree::~OriginalSTree() {
     UnregisterLiveOriginalSTree(this);
+
+    if (primGeom) {
+        delete primGeom;
+        primGeom = nullptr;
+    }
 
     if (meshBuffer) {
         meshBuffer->Release();
@@ -276,6 +424,103 @@ void DrawableSTree::Display(u32 /*flags*/) {
     if (skel && skin && skin->numVerts > 0 && skel->joints && skinnedBuffer) {
         Mat4* jointMatrices = new Mat4[skel->numJoints];
         skel->ComputeWorldMatricesWithCallbacks(jointMatrices);
+        const Mat4 modelWorld = p3d::context->GetWorldMatrix();
+
+        std::vector<u16> litScratch;
+        std::vector<u8> litWritten;
+        std::vector<u8> litPackets;
+        bool hasLitScratch = false;
+        bool hasLitPackets = false;
+        u8 scratchMinR = 255;
+        u8 scratchMinG = 255;
+        u8 scratchMinB = 255;
+        u8 scratchMaxR = 0;
+        u8 scratchMaxG = 0;
+        u8 scratchMaxB = 0;
+        bool haveScratchRange = false;
+        u8 normalIndexMin = 255;
+        u8 normalIndexMax = 0;
+        bool haveNormalIndexRange = false;
+        if (renderSource->xformVertsCallback && renderSource->primGeom && renderSource->primGeom->numVerts > 0) {
+            const u32 sourceVertCount = renderSource->primGeom->numVerts;
+            const u8* sourceVertexList = renderSource->primGeom->GetVertexList();
+            litScratch.resize(sourceVertCount * 2u, 0u);
+            litWritten.resize(sourceVertCount, 0u);
+
+            for (u32 jointIndex = 0; jointIndex < skel->numJoints; jointIndex++) {
+                STreeJoint* joint = &skel->joints[jointIndex];
+                if (joint->primGeomCount == 0) {
+                    continue;
+                }
+
+                const u32 startIndex = static_cast<u32>(joint->primGeomStartIdx);
+                const u32 endIndex = startIndex + static_cast<u32>(joint->primGeomCount);
+                if (startIndex >= sourceVertCount) {
+                    continue;
+                }
+                const u32 clampedEnd = (endIndex > sourceVertCount) ? sourceVertCount : endIndex;
+                if (clampedEnd <= startIndex) {
+                    continue;
+                }
+                for (u32 sourceIndex = startIndex; sourceIndex < clampedEnd; sourceIndex++) {
+                    litWritten[sourceIndex] = 1u;
+                    if (sourceVertexList) {
+                        const u8 normalIndex = sourceVertexList[sourceIndex * 8u + 6u];
+                        if (!haveNormalIndexRange) {
+                            normalIndexMin = normalIndex;
+                            normalIndexMax = normalIndex;
+                            haveNormalIndexRange = true;
+                        }
+                        else {
+                            if (normalIndex < normalIndexMin) normalIndexMin = normalIndex;
+                            if (normalIndex > normalIndexMax) normalIndexMax = normalIndex;
+                        }
+                    }
+                }
+
+                STreeJoint clampedJoint = *joint;
+                clampedJoint.primGeomStartIdx = static_cast<u16>(startIndex);
+                clampedJoint.primGeomCount = static_cast<u16>(clampedEnd - startIndex);
+                Mat4 lightingMatrix = modelWorld * jointMatrices[jointIndex];
+                renderSource->xformVertsCallback(renderSource->primGeom,
+                                                 &clampedJoint,
+                                                 reinterpret_cast<u32*>(&lightingMatrix),
+                                                 litScratch.data());
+            }
+
+            hasLitScratch = true;
+            for (u32 sourceIndex = 0; sourceIndex < sourceVertCount; sourceIndex++) {
+                if (litWritten[sourceIndex] == 0u) {
+                    continue;
+                }
+
+                const u16 rg = litScratch[sourceIndex * 2u + 0u];
+                const u16 b = litScratch[sourceIndex * 2u + 1u];
+                const u8 litR = static_cast<u8>(rg & 0xFFu);
+                const u8 litG = static_cast<u8>((rg >> 8) & 0xFFu);
+                const u8 litB = static_cast<u8>(b & 0xFFu);
+
+                if (!haveScratchRange) {
+                    scratchMinR = litR;
+                    scratchMinG = litG;
+                    scratchMinB = litB;
+                    scratchMaxR = litR;
+                    scratchMaxG = litG;
+                    scratchMaxB = litB;
+                    haveScratchRange = true;
+                }
+                else {
+                    if (litR < scratchMinR) scratchMinR = litR;
+                    if (litG < scratchMinG) scratchMinG = litG;
+                    if (litB < scratchMinB) scratchMinB = litB;
+                    if (litR > scratchMaxR) scratchMaxR = litR;
+                    if (litG > scratchMaxG) scratchMaxG = litG;
+                    if (litB > scratchMaxB) scratchMaxB = litB;
+                }
+            }
+
+            hasLitPackets = BuildLitPacketScratch(renderSource, &litPackets);
+        }
 
         std::vector<f32> vertData(skin->numVerts * 10);
         for (u32 i = 0; i < skin->numVerts; i++) {
@@ -283,16 +528,63 @@ void DrawableSTree::Display(u32 /*flags*/) {
             const Mat4& m = jointMatrices[sv.jointIdx];
             f32 wx, wy, wz;
             Mat4TransformPoint(m, sv.lx, sv.ly, sv.lz, wx, wy, wz);
+
+            f32 litR = sv.r;
+            f32 litG = sv.g;
+            f32 litB = sv.b;
+            if (hasLitScratch && renderSource->primGeom && sv.sourceIndex < renderSource->primGeom->numVerts
+                && litWritten[sv.sourceIndex] != 0u) {
+                const u32 sourceIndex = static_cast<u32>(sv.sourceIndex);
+                const u16 rg = litScratch[sourceIndex * 2u + 0u];
+                const u16 b = litScratch[sourceIndex * 2u + 1u];
+                litR = static_cast<f32>(rg & 0xFFu) / 128.0f;
+                litG = static_cast<f32>((rg >> 8) & 0xFFu) / 128.0f;
+                litB = static_cast<f32>(b & 0xFFu) / 128.0f;
+            }
+
             vertData[i * 10 + 0] = wx;
             vertData[i * 10 + 1] = wy;
             vertData[i * 10 + 2] = wz;
-            vertData[i * 10 + 3] = sv.r;
-            vertData[i * 10 + 4] = sv.g;
-            vertData[i * 10 + 5] = sv.b;
+            vertData[i * 10 + 3] = litR;
+            vertData[i * 10 + 4] = litG;
+            vertData[i * 10 + 5] = litB;
             vertData[i * 10 + 6] = sv.u;
             vertData[i * 10 + 7] = sv.v;
             vertData[i * 10 + 8] = sv.tpage;
             vertData[i * 10 + 9] = sv.cba;
+        }
+
+        if (hasLitPackets) {
+            ApplyLitPacketColoursToSkin(skin, litPackets, &vertData);
+            if (s_streePacketLitTraceBudget > 0) {
+                LOG("[STreeLit] packet fixup applied: verts=%u prims=%u packetBytes=%u scratchRange=R[%u..%u] G[%u..%u] B[%u..%u] normalIdx[%u..%u]",
+                    skin->numVerts,
+                    skin->numPrims,
+                    static_cast<u32>(litPackets.size()),
+                    haveScratchRange ? static_cast<u32>(scratchMinR) : 0u,
+                    haveScratchRange ? static_cast<u32>(scratchMaxR) : 0u,
+                    haveScratchRange ? static_cast<u32>(scratchMinG) : 0u,
+                    haveScratchRange ? static_cast<u32>(scratchMaxG) : 0u,
+                    haveScratchRange ? static_cast<u32>(scratchMinB) : 0u,
+                    haveScratchRange ? static_cast<u32>(scratchMaxB) : 0u,
+                    haveNormalIndexRange ? static_cast<u32>(normalIndexMin) : 0u,
+                    haveNormalIndexRange ? static_cast<u32>(normalIndexMax) : 0u);
+                s_streePacketLitTraceBudget--;
+            }
+        }
+        else if (hasLitScratch && s_streePacketLitTraceBudget > 0) {
+            LOG("[STreeLit] fallback vertex scratch only: verts=%u prims=%u scratchRange=R[%u..%u] G[%u..%u] B[%u..%u] normalIdx[%u..%u]",
+                skin->numVerts,
+                skin->numPrims,
+                haveScratchRange ? static_cast<u32>(scratchMinR) : 0u,
+                haveScratchRange ? static_cast<u32>(scratchMaxR) : 0u,
+                haveScratchRange ? static_cast<u32>(scratchMinG) : 0u,
+                haveScratchRange ? static_cast<u32>(scratchMaxG) : 0u,
+                haveScratchRange ? static_cast<u32>(scratchMinB) : 0u,
+                haveScratchRange ? static_cast<u32>(scratchMaxB) : 0u,
+                haveNormalIndexRange ? static_cast<u32>(normalIndexMin) : 0u,
+                haveNormalIndexRange ? static_cast<u32>(normalIndexMax) : 0u);
+            s_streePacketLitTraceBudget--;
         }
 
         skinnedBuffer->SetVertexData(vertData.data(), skin->numVerts);
@@ -691,6 +983,24 @@ void SModel::Show(u32 flags) {
         g_environmentManager->lighting.DoModelLighting(backPtr);
     }
 
+    if (s_streeShowLightTraceBudget > 0 && drawableType == 2) {
+        const HardwareLight* modelLightsProbe = static_cast<const HardwareLight*>(hwLights);
+        const HardwareLight* portLight0 = GetCurrentPortHardwareLight(0);
+        LOG("[SModelLight] model=%p ownerModel=%p hwCount=%d m0(active=%u color=0x%06X dir=(%d,%d,%d)) port0(color=0x%06X dir=(%d,%d,%d))",
+            this,
+            backPtr ? backPtr->model : nullptr,
+            hwLightCount,
+            (modelLightsProbe && hwLightCount > 0) ? static_cast<u32>(modelLightsProbe[0].active) : 0u,
+            (modelLightsProbe && hwLightCount > 0) ? modelLightsProbe[0].colour : 0u,
+            (modelLightsProbe && hwLightCount > 0) ? modelLightsProbe[0].directionX : 0,
+            (modelLightsProbe && hwLightCount > 0) ? modelLightsProbe[0].directionY : 0,
+            (modelLightsProbe && hwLightCount > 0) ? modelLightsProbe[0].directionZ : 0,
+            portLight0 ? portLight0->colour : 0u,
+            portLight0 ? portLight0->directionX : 0,
+            portLight0 ? portLight0->directionY : 0,
+            portLight0 ? portLight0->directionZ : 0);
+    }
+
     bool addedHwLights[3] = { false, false, false };
     if (g_environmentManager && hwLights && hwLightCount > 0) {
         HardwareLight* modelLights = static_cast<HardwareLight*>(hwLights);
@@ -709,6 +1019,16 @@ void SModel::Show(u32 flags) {
             g_environmentManager->lighting.AddLightToPort(slot, &lightDir, modelLights[slot].colour);
             addedHwLights[slot] = true;
         }
+    }
+
+    if (s_streeShowLightTraceBudget > 0 && drawableType == 2) {
+        const HardwareLight* portLight0 = GetCurrentPortHardwareLight(0);
+        LOG("[SModelLight] after AddLightToPort: port0(color=0x%06X dir=(%d,%d,%d))",
+            portLight0 ? portLight0->colour : 0u,
+            portLight0 ? portLight0->directionX : 0,
+            portLight0 ? portLight0->directionY : 0,
+            portLight0 ? portLight0->directionZ : 0);
+        s_streeShowLightTraceBudget--;
     }
 
     if (ambientLight) {
@@ -853,7 +1173,6 @@ AnimStructure* SModel::ApplyBlending(TransformAnim* animation, s32 blendFrames, 
     return anim;
 }
 
-// PSX: ApplyAnimToModel__6SModellllll (MODEL.CPP:1098, 0x8006EEAC)
 // PSX: IsAnimationLoaded__6SModell (MODEL.CPP:1062, 0x8006EE4C)
 s32 SModel::IsAnimationLoaded(s32 animEnum) {
     MARKFUNCTION(0x8006EE4C);
@@ -870,6 +1189,7 @@ s32 SModel::IsAnimationLoaded(s32 animEnum) {
     return g_characterManager->GetAnimation(0, animEnum) ? 1 : 0;
 }
 
+// PSX: ApplyAnimToModel__6SModellllll (MODEL.CPP:1098, 0x8006EEAC)
 void SModel::ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 p4, s32 p5) {
     MARKFUNCTION(0x8006EEAC);
     if (!g_characterManager) {
@@ -880,6 +1200,7 @@ void SModel::ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 p4,
     if (!rawAnimation) {
         rawAnimation = g_characterManager->GetAnimation(0, animEnum);
         if (!rawAnimation) {
+            LOG("[ApplyAnim] FALLBACK animEnum=%d not found, using idle(22)", animEnum);
             rawAnimation = g_characterManager->GetAnimation(0, 22);
             animEnum = 22;
         }
@@ -887,6 +1208,7 @@ void SModel::ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 p4,
 
     TransformAnim* animation = GetTransformAnimForModel(rawAnimation);
     if (!animation) {
+        LOG("[ApplyAnimToModel] GetTransformAnimForModel NULL for type=%d animEnum=%d (CameraParamAnim or null)", thingType, animEnum);
         return;
     }
 
@@ -958,6 +1280,11 @@ void SModel::ApplyAnimToModelBasic(TransformAnim* animation) {
     anim->prevFrame = 0;
     anim->loopCount = 0;
     anim->speed = FIX16_ONE;
+
+    if (anim->animEnum == 361 || animation->numFrames <= 1) {
+        LOG("[ApplyAnimBasic] animEnum=%d numFrames=%d endFrame=0x%X loopCount=%d",
+            anim->animEnum, animation->numFrames, anim->endFrame, anim->loopCount);
+    }
 }
 
 // PSX: SetOriginalSTree__6SModelP13OriginalSTreeP10tAnimation (MODEL.CPP:1026, 0x8006EDD4)
@@ -1272,6 +1599,9 @@ void HumanoidModel::SetAnim(s32 animEnum, s32 a3, s32 force, s32 extra) {
 // PSX: _13HumanoidModel (MHUMAN.CPP:45, 0x8006E020)
 HumanoidModel::HumanoidModel() {
     MARKFUNCTION(0x8006E020);
+    AllocateHardwareLights(3);
+    AllocateAmbientLight();
+
     // PSX allocates AnimationMatrices (660 bytes on PSX layout).
     animMatrices = new AnimationMatrices();
     attackHandRadius = 100;

@@ -322,6 +322,14 @@ static const RPStreeNormal s_rpStreeNormals[256] = {
     {   2802,   -959,  -2830 },
 };
 
+static const tPrimGeom* s_rpStreeLitScratchOwner = nullptr;
+static const u16* s_rpStreeLitScratch = nullptr;
+static u32 s_rpStreeFixupTraceBudget = 32;
+static u32 s_rpStreeFixupWarnBudget = 16;
+static u32 s_rpStreeLightStateTraceBudget = 16;
+static u32 s_rpStreeFixupColourProbeBudget = 24;
+static u32 s_rpStreeFixupIndexProbeBudget = 24;
+
 static u8 ClampLitChannelToByte(s32 value) {
     if (value <= 0) {
         return 0;
@@ -334,14 +342,25 @@ static u8 ClampLitChannelToByte(s32 value) {
     return static_cast<u8>(value);
 }
 
+static u8 ModulatePsxColourChannel(u8 base, u8 light) {
+    // Keep 128 as neutral multiplier and saturate to 255.
+    u32 value = (static_cast<u32>(base) * static_cast<u32>(light) + 64u) >> 7;
+    if (value > 255u) {
+        value = 255u;
+    }
+    return static_cast<u8>(value);
+}
+
 static s32 ComputeLightIntensity12(s32 normalX, s32 normalY, s32 normalZ, const HardwareLight* light) {
     if (!light) {
         return 0;
     }
 
-    const s32 lightX = light->directionX >> 4;
-    const s32 lightY = light->directionY >> 4;
-    const s32 lightZ = light->directionZ >> 4;
+    // Port light vectors are incidence/ray directions (where light travels).
+    // For Lambert N.L we need the opposite vector (surface -> light).
+    const s32 lightX = -(light->directionX >> 4);
+    const s32 lightY = -(light->directionY >> 4);
+    const s32 lightZ = -(light->directionZ >> 4);
     s64 dot = static_cast<s64>(normalX) * lightX;
     dot += static_cast<s64>(normalY) * lightY;
     dot += static_cast<s64>(normalZ) * lightZ;
@@ -356,9 +375,32 @@ static s32 ComputeLightIntensity12(s32 normalX, s32 normalY, s32 normalZ, const 
     return static_cast<s32>(dot);
 }
 
-static void ComputeRPStreeLitColour(u8 normalIndex, u8* outR, u8* outG, u8* outB) {
+static void ComputeRPStreeLitColour(u8 normalIndex,
+                                    const Mat4* jointRotation,
+                                    u8* outR,
+                                    u8* outG,
+                                    u8* outB) {
     const u32 ambient = GetCurrentPortAmbientLightColour();
     const RPStreeNormal& normal = s_rpStreeNormals[normalIndex];
+
+    s32 normalX = normal.x;
+    s32 normalY = normal.y;
+    s32 normalZ = normal.z;
+    if (jointRotation) {
+        f32 rotatedX = 0.0f;
+        f32 rotatedY = 0.0f;
+        f32 rotatedZ = 0.0f;
+        Mat4TransformDir(*jointRotation,
+                         static_cast<f32>(normalX),
+                         static_cast<f32>(normalY),
+                         static_cast<f32>(normalZ),
+                         rotatedX,
+                         rotatedY,
+                         rotatedZ);
+        normalX = static_cast<s32>(rotatedX);
+        normalY = static_cast<s32>(rotatedY);
+        normalZ = static_cast<s32>(rotatedZ);
+    }
 
     s32 accumR = static_cast<s32>(ambient & 0xFFu) << 4;
     s32 accumG = static_cast<s32>((ambient >> 8) & 0xFFu) << 4;
@@ -366,7 +408,7 @@ static void ComputeRPStreeLitColour(u8 normalIndex, u8* outR, u8* outG, u8* outB
 
     for (s32 slot = 0; slot < 3; slot++) {
         const HardwareLight* light = GetCurrentPortHardwareLight(slot);
-        const s32 intensity = ComputeLightIntensity12(normal.x, normal.y, normal.z, light);
+        const s32 intensity = ComputeLightIntensity12(normalX, normalY, normalZ, light);
         if (intensity <= 0 || !light) {
             continue;
         }
@@ -875,9 +917,9 @@ static pddiPrimBuffer* BuildPrimBufferFromPrimGeom(const tPrimGeom* geom,
             if (byteOff + 3 > (int)pktSize)
                 return std::make_tuple(0.5f, 0.5f, 0.5f);
 
-            f32 r = std::min(1.0f, pkt[byteOff] / 128.0f);
-            f32 g = std::min(1.0f, pkt[byteOff + 1] / 128.0f);
-            f32 b = std::min(1.0f, pkt[byteOff + 2] / 128.0f);
+            f32 r = pkt[byteOff] / 128.0f;
+            f32 g = pkt[byteOff + 1] / 128.0f;
+            f32 b = pkt[byteOff + 2] / 128.0f;
             return std::make_tuple(r, g, b);
         };
 
@@ -1264,37 +1306,278 @@ u32 RP_XformVertsLitCBF_CL(tPrimGeom* geometry, STreeJoint* joint, u32* fastCach
     }
 
     const u8* vertexList = geometry->GetVertexList();
+    const Mat4* jointRotation = reinterpret_cast<const Mat4*>(fastCache);
+
+    if (s_rpStreeLightStateTraceBudget > 0) {
+        const u32 ambient = GetCurrentPortAmbientLightColour();
+        const HardwareLight* light0 = GetCurrentPortHardwareLight(0);
+        const HardwareLight* light1 = GetCurrentPortHardwareLight(1);
+        const HardwareLight* light2 = GetCurrentPortHardwareLight(2);
+        const s32 upIntensity = ComputeLightIntensity12(0, 4096, 0, light0);
+        const s32 downIntensity = ComputeLightIntensity12(0, -4096, 0, light0);
+        LOG("[STreeLightState] amb=0x%06X l0=0x%06X d0=(%d,%d,%d) l1=0x%06X l2=0x%06X upI=%d downI=%d",
+            ambient,
+            light0 ? light0->colour : 0u,
+            light0 ? light0->directionX : 0,
+            light0 ? light0->directionY : 0,
+            light0 ? light0->directionZ : 0,
+            light1 ? light1->colour : 0u,
+            light2 ? light2->colour : 0u,
+            upIntensity,
+            downIntensity);
+        s_rpStreeLightStateTraceBudget--;
+    }
+
     const u32 startIndex = joint->primGeomStartIdx;
     const u32 endIndex = startIndex + joint->primGeomCount;
     for (u32 vertexIndex = startIndex; vertexIndex < endIndex; vertexIndex++) {
         const u8* vertex = vertexList + vertexIndex * 8;
         if (scratch) {
+            // PSX RPSTREECOL uses vertex byte +6 as the normal-table index.
+            // In decomp this appears as (word1 >> 13) & 0x7F8 byte-offset math,
+            // which is equivalent to ((word1 >> 16) & 0xFF) entry index.
+            const u32 packedWord1 = p3dReadU32LE(vertex + 4);
+            const u8 normalIndex = static_cast<u8>((packedWord1 >> 16) & 0xFFu);
             u8 litR = 0;
             u8 litG = 0;
             u8 litB = 0;
-            ComputeRPStreeLitColour(vertex[6], &litR, &litG, &litB);
+            ComputeRPStreeLitColour(normalIndex, jointRotation, &litR, &litG, &litB);
             scratch[vertexIndex * 2 + 0] = static_cast<u16>((litG << 8) | litR);
             scratch[vertexIndex * 2 + 1] = static_cast<u16>(litB);
         }
     }
 
+    s_rpStreeLitScratchOwner = geometry;
+    s_rpStreeLitScratch = scratch;
+
     (void)fastCache;
     return 0;
 }
 
-s32 RP_FixUpPolysCBF_CL(tPrimGeom* geometry, void* view, u32 loopIndex, u32 polyIndex) {
+u8* RP_FixUpPolysCBF_CL(tPrimGeom* geometry, void* view, u32 loopIndex, u32 polyIndex) {
     MARKFUNCTION(0x8008500C);
 
-    static bool warned = false;
-    if (!warned) {
-        LOG("[STree] RP_FixUpPolysCBF_CL ownership restored but implementation is still pending RPSTREECOL reversal");
-        warned = true;
+    u8* outCursor = static_cast<u8*>(view);
+    if (!geometry || !outCursor || !geometry->primList || !geometry->polyData
+        || !geometry->loopPrimData) {
+        if (s_rpStreeFixupWarnBudget > 0) {
+            LOG("[STreeFixUp] skipped: invalid input geom=%p out=%p prim=%p poly=%p loopPrims=%p",
+                geometry,
+                outCursor,
+                geometry ? geometry->primList : nullptr,
+                geometry ? geometry->polyData : nullptr,
+                geometry ? geometry->loopPrimData : nullptr);
+            s_rpStreeFixupWarnBudget--;
+        }
+        return outCursor;
     }
 
-    (void)geometry;
-    (void)view;
-    (void)loopIndex;
-    return static_cast<s32>(polyIndex);
+    if (geometry != s_rpStreeLitScratchOwner || !s_rpStreeLitScratch) {
+        if (s_rpStreeFixupWarnBudget > 0) {
+            LOG("[STreeFixUp] skipped: missing lit scratch geom=%p owner=%p scratch=%p", geometry, s_rpStreeLitScratchOwner, s_rpStreeLitScratch);
+            s_rpStreeFixupWarnBudget--;
+        }
+        return outCursor;
+    }
+
+    if (loopIndex >= geometry->numLoops) {
+        return outCursor;
+    }
+
+    u32 primOffset = 0;
+    for (u32 i = 0; i < loopIndex; i++) {
+        const u8* loopPrim = geometry->loopPrimData + i * 8u;
+        const u32 gt4 = p3dReadU16LE(loopPrim + 0);
+        const u32 g4 = p3dReadU16LE(loopPrim + 2);
+        const u32 gt3 = p3dReadU16LE(loopPrim + 4);
+        const u32 g3 = p3dReadU16LE(loopPrim + 6);
+        primOffset += gt4 * 52u + g4 * 36u + gt3 * 40u + g3 * 28u;
+    }
+
+    if (!geometry->ownedRawData || !geometry->ownedRawSize || geometry->primList < geometry->ownedRawData) {
+        if (s_rpStreeFixupWarnBudget > 0) {
+            LOG("[STreeFixUp] skipped: missing raw ownership geom=%p owned=%p size=%u prim=%p",
+                geometry,
+                geometry->ownedRawData,
+                geometry->ownedRawSize,
+                geometry->primList);
+            s_rpStreeFixupWarnBudget--;
+        }
+        return outCursor;
+    }
+
+    const u32 primStartOffset = static_cast<u32>(geometry->primList - geometry->ownedRawData);
+    if (primStartOffset >= geometry->ownedRawSize) {
+        if (s_rpStreeFixupWarnBudget > 0) {
+            LOG("[STreeFixUp] skipped: prim start out of range off=%u size=%u", primStartOffset, geometry->ownedRawSize);
+            s_rpStreeFixupWarnBudget--;
+        }
+        return outCursor;
+    }
+
+    const u32 primRegionSize = geometry->ownedRawSize - primStartOffset;
+    if (primOffset > primRegionSize) {
+        if (s_rpStreeFixupWarnBudget > 0) {
+            LOG("[STreeFixUp] skipped: loop prim offset out of range loop=%u primOffset=%u primRegion=%u",
+                loopIndex,
+                primOffset,
+                primRegionSize);
+            s_rpStreeFixupWarnBudget--;
+        }
+        return outCursor;
+    }
+
+    const u8* loopPrim = geometry->loopPrimData + loopIndex * 8u;
+    const u16 bucketCounts[4] = {
+        p3dReadU16LE(loopPrim + 0),
+        p3dReadU16LE(loopPrim + 2),
+        p3dReadU16LE(loopPrim + 4),
+        p3dReadU16LE(loopPrim + 6),
+    };
+
+    u32 loopVertBase = 0;
+    for (u32 i = 0; i < loopIndex; i++) {
+        loopVertBase += static_cast<u32>(p3dReadU16LE(geometry->loopVertData + i * 4u));
+    }
+
+    const u8* srcCursor = geometry->primList + primOffset;
+    const u8* srcEnd = geometry->primList + primRegionSize;
+    u32 localPoly = polyIndex;
+
+    if (s_rpStreeFixupTraceBudget > 0) {
+        LOG("[STreeFixUp] loop=%u polyStart=%u counts=%u/%u/%u/%u primOffset=%u",
+            loopIndex,
+            polyIndex,
+            static_cast<u32>(bucketCounts[0]),
+            static_cast<u32>(bucketCounts[1]),
+            static_cast<u32>(bucketCounts[2]),
+            static_cast<u32>(bucketCounts[3]),
+            primOffset);
+        s_rpStreeFixupTraceBudget--;
+    }
+
+    auto writeLitColour = [&](u8* packet,
+                             u32 colourOffset,
+                             u32 sourceIndex,
+                             const u8* polyColour) {
+        const u16 rg = s_rpStreeLitScratch[sourceIndex * 2u + 0u];
+        const u16 b = s_rpStreeLitScratch[sourceIndex * 2u + 1u];
+        const u8 litR = static_cast<u8>(rg & 0xFFu);
+        const u8 litG = static_cast<u8>((rg >> 8) & 0xFFu);
+        const u8 litB = static_cast<u8>(b & 0xFFu);
+
+        const u8 baseR = polyColour ? polyColour[0] : packet[colourOffset + 0u];
+        const u8 baseG = polyColour ? polyColour[1] : packet[colourOffset + 1u];
+        const u8 baseB = polyColour ? polyColour[2] : packet[colourOffset + 2u];
+
+        packet[colourOffset + 0u] = ModulatePsxColourChannel(baseR, litR);
+        packet[colourOffset + 1u] = ModulatePsxColourChannel(baseG, litG);
+        packet[colourOffset + 2u] = ModulatePsxColourChannel(baseB, litB);
+    };
+
+    for (u32 bucket = 0; bucket < 4u; bucket++) {
+        const u32 primitiveSize = (bucket == 0u) ? 52u : (bucket == 1u) ? 36u : (bucket == 2u) ? 40u : 28u;
+        const u32 colourOffsets[4] = {
+            (bucket == 0u) ? 4u : (bucket == 1u) ? 4u : (bucket == 2u) ? 4u : 4u,
+            (bucket == 0u) ? 16u : (bucket == 1u) ? 12u : (bucket == 2u) ? 16u : 12u,
+            (bucket == 0u) ? 28u : (bucket == 1u) ? 20u : (bucket == 2u) ? 28u : 20u,
+            (bucket == 0u) ? 40u : (bucket == 1u) ? 28u : 0u,
+        };
+        const u32 vertCount = (bucket <= 1u) ? 4u : 3u;
+
+        for (u32 i = 0; i < bucketCounts[bucket]; i++) {
+            if (srcCursor + primitiveSize > srcEnd) {
+                if (s_rpStreeFixupWarnBudget > 0) {
+                    LOG("[STreeFixUp] packet overrun loop=%u bucket=%u local=%u need=%u rem=%u",
+                        loopIndex,
+                        bucket,
+                        i,
+                        primitiveSize,
+                        static_cast<u32>(srcEnd - srcCursor));
+                    s_rpStreeFixupWarnBudget--;
+                }
+                return outCursor;
+            }
+
+            memcpy(outCursor, srcCursor, primitiveSize);
+
+            if (localPoly < geometry->numPolys) {
+                const u8* poly = geometry->polyData + localPoly * 4u;
+                const u8* polyColour = geometry->gmFogColourList
+                    ? (geometry->gmFogColourList + localPoly * 4u)
+                    : nullptr;
+
+                if (s_rpStreeFixupIndexProbeBudget > 0 && i == 0u) {
+                    LOG("[STreeFixupIndex] loop=%u bucket=%u poly=%u loopVertBase=%u idx=%u/%u/%u/%u",
+                        loopIndex,
+                        bucket,
+                        localPoly,
+                        loopVertBase,
+                        static_cast<u32>(poly[0]),
+                        static_cast<u32>(poly[1]),
+                        static_cast<u32>(poly[2]),
+                        static_cast<u32>(poly[3]));
+                    s_rpStreeFixupIndexProbeBudget--;
+                }
+
+                if (s_rpStreeFixupColourProbeBudget > 0 && vertCount > 0) {
+                    const u32 sourceIndex0 = loopVertBase + static_cast<u32>(poly[0]);
+                    if (sourceIndex0 < geometry->numVerts) {
+                        const u16 rg0 = s_rpStreeLitScratch[sourceIndex0 * 2u + 0u];
+                        const u16 b0 = s_rpStreeLitScratch[sourceIndex0 * 2u + 1u];
+                        const u8 litR0 = static_cast<u8>(rg0 & 0xFFu);
+                        const u8 litG0 = static_cast<u8>((rg0 >> 8) & 0xFFu);
+                        const u8 litB0 = static_cast<u8>(b0 & 0xFFu);
+
+                        const u32 firstOffset = colourOffsets[0];
+                        const u8 packetR0 = outCursor[firstOffset + 0u];
+                        const u8 packetG0 = outCursor[firstOffset + 1u];
+                        const u8 packetB0 = outCursor[firstOffset + 2u];
+                        const u8 tableR0 = polyColour ? polyColour[0] : 0u;
+                        const u8 tableG0 = polyColour ? polyColour[1] : 0u;
+                        const u8 tableB0 = polyColour ? polyColour[2] : 0u;
+
+                        LOG("[STreeFixupProbe] loop=%u bucket=%u poly=%u src0=%u tableRGB=%u/%u/%u pktRGB=%u/%u/%u litRGB=%u/%u/%u",
+                            loopIndex,
+                            bucket,
+                            localPoly,
+                            sourceIndex0,
+                            static_cast<u32>(tableR0),
+                            static_cast<u32>(tableG0),
+                            static_cast<u32>(tableB0),
+                            static_cast<u32>(packetR0),
+                            static_cast<u32>(packetG0),
+                            static_cast<u32>(packetB0),
+                            static_cast<u32>(litR0),
+                            static_cast<u32>(litG0),
+                            static_cast<u32>(litB0));
+                        s_rpStreeFixupColourProbeBudget--;
+                    }
+                }
+
+                for (u32 v = 0; v < vertCount; v++) {
+                    const u32 sourceIndex = loopVertBase + static_cast<u32>(poly[v]);
+                    if (sourceIndex < geometry->numVerts) {
+                        writeLitColour(outCursor, colourOffsets[v], sourceIndex, polyColour);
+                    }
+                }
+            }
+            else if (s_rpStreeFixupWarnBudget > 0) {
+                LOG("[STreeFixUp] localPoly out of range local=%u numPolys=%u loop=%u bucket=%u",
+                    localPoly,
+                    static_cast<u32>(geometry->numPolys),
+                    loopIndex,
+                    bucket);
+                s_rpStreeFixupWarnBudget--;
+            }
+
+            srcCursor += primitiveSize;
+            outCursor += primitiveSize;
+            localPoly++;
+        }
+    }
+
+    return outCursor;
 }
 
 int RP_ZCullGClip(tGeometry* geometry, const LVector* drawPos) {

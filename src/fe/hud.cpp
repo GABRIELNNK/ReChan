@@ -15,6 +15,8 @@
 #include "p3d/context.h"
 #include "pddi/pddidev.h"
 
+#include <cctype>
+
 HUD* g_hud = nullptr;
 char HUD::szBossStatic[32] = {};
 
@@ -38,6 +40,43 @@ static s32 ScoreHubPromptTextPrim(const xcTextPrim* text) {
     }
 
     return ((s32)text->colorA << 16) + ((s32)text->colorR << 8) + (s32)text->colorG + (s32)text->colorB;
+}
+
+static bool IsValidHudAsciiName(const char* text) {
+    if (!text || text[0] == '\0') {
+        return false;
+    }
+
+    for (u32 i = 0; i < sizeof(HUD::szBossStatic) - 1; i++) {
+        const unsigned char ch = static_cast<unsigned char>(text[i]);
+        if (ch == 0) {
+            return true;
+        }
+        if (ch < 32 || ch > 126) {
+            return false;
+        }
+    }
+
+    return false;
+}
+
+static void CopyUpperHudName(char* dst, u32 dstSize, const char* src) {
+    if (!dst || dstSize == 0) {
+        return;
+    }
+
+    dst[0] = 0;
+    if (!src) {
+        return;
+    }
+
+    const u32 maxCopy = dstSize - 1;
+    u32 i = 0;
+    for (; i < maxCopy && src[i] != 0; i++) {
+        const unsigned char ch = static_cast<unsigned char>(src[i]);
+        dst[i] = static_cast<char>(std::toupper(ch));
+    }
+    dst[i] = 0;
 }
 
 // PSX: _3HUD (HUD.CPP:318, 0x8003F44C)
@@ -176,6 +215,22 @@ void HUD::SelfInit() {
     bossHealth.rawData = raw;
     bossHealth.Init(bossHealthOvl);
     bossHealth.SetVisible(0);
+    if (bossHealth.textObj) {
+        LOG("[HUD] bossHealth init: ovl=%p bar=%p width=%d text=%p numStrings=%u paletteIdx=%u font=0x%08X",
+            bossHealthOvl,
+            bossHealth.healthBar,
+            (s32)bossHealth.barWidth,
+            bossHealth.textObj,
+            (u32)bossHealth.textObj->numStrings,
+            (u32)bossHealth.textObj->paletteIdx,
+            bossHealth.textObj->fontHash);
+    }
+    else {
+        LOG("[HUD] bossHealth init: ovl=%p bar=%p width=%d text=null",
+            bossHealthOvl,
+            bossHealth.healthBar,
+            (s32)bossHealth.barWidth);
+    }
 
     // foeHealth (+192)
     foeHealth.rawData = raw;
@@ -443,32 +498,43 @@ void HUD::UpdateFoe(Humanoid* foe) {
     }
 }
 
-// PSX: ShowBossHealth__3HUDPCc (HUD.CPP:820, 0x80040094)
+// PSX: ShowBossHealth__3HUDPCc (HUD.CPP:820, 0x80040184)
 void HUD::ShowBossHealth(const char* name) {
-    MARKFUNCTION(0x80040094);
+    MARKFUNCTION(0x80040184);
     if (bossHealth.IsVisible()) {
         return;
     }
-    if (!g_ai) {
+    if (!g_ai || !name) {
         return;
     }
+
     u32 hash = p3dHash(name);
     Thing* boss = (Thing*)g_ai->humanoidList.FindNodeCRC(hash);
     if (!boss) {
+        LOG("[HUD] ShowBossHealth: lookup failed for '%s' hash=0x%08X", name ? name : "(null)", hash);
         return;
     }
-    bossHealth.SetText(name);
+
     bossHealth.SetVisible(1);
     bossHealth.SetMax(boss->maxHealth);
     bossHealth.SetValue(boss->health);
+
+    // PSX overwrites the scripted label with Thing::GetName() if present.
+    // In host builds some runtime names may not be clean text; fall back to
+    // scripted name to avoid rendering garbage glyphs.
+    const char* displayName = name;
     const char* bossName = boss->GetName();
-    if (bossName) {
-        strncpy(szBossStatic, bossName, sizeof(szBossStatic) - 1);
-        szBossStatic[sizeof(szBossStatic) - 1] = 0;
-    } else {
-        szBossStatic[0] = 0;
+    if (IsValidHudAsciiName(bossName)) {
+        displayName = bossName;
     }
-    bossHealth.SetText(szBossStatic);
+    if (IsValidHudAsciiName(displayName)) {
+        CopyUpperHudName(szBossStatic, static_cast<u32>(sizeof(szBossStatic)), displayName);
+        bossHealth.SetText(szBossStatic);
+    }
+    else {
+        bossHealth.SetText(nullptr);
+    }
+
     bossHandle = boss->GetThingHandle();
     bossHandle->refCount++;
 }

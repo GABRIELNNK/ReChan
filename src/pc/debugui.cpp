@@ -283,6 +283,9 @@ static const char* ActionStateName(s32 s) {
         case AS_DEAD: return "Dead";
         case AS_HIT_EXPLOSION: return "HitExplosion";
         case AS_HIT_ENVIRONMENT: return "HitEnvironment";
+        case AS_MISSILE_ATTACK: return "MissileAttack";
+        case AS_MISSILE_PREPARE: return "MissilePrepare";
+        case AS_TARGET_MISSILE_ATTACK: return "TargetMissileAttack";
         default: return "Unknown";
     }
 }

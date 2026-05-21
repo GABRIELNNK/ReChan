@@ -96,6 +96,9 @@ public:
     TitleScreen* GetTitleScreen() const { return titleScreen; }
     void QueueTitleNewGameStart() { titleAutoStart = true; }
 
+    // PSX: PlayMovie__4GamePcii (GAME.CPP:3309, 0x8002BBF0)
+    void PlayMovie(const char* name, s32 skippable, s32 unloadLevel);
+
     // PSX handler callbacks (registered in Game constructor)
     // On PSX these are free functions; public so MenuRender/MenuDraw can call them.
     static void BeginFrameHandler(Handler* h);
@@ -131,9 +134,6 @@ private:
     // PC: per-frame fade state (PSX uses blocking inline loops)
     s32 titleFadeType = 0;
     s32 gameOverFadeType = 0;
-
-    // PSX: PlayMovie__4GamePcii (GAME.CPP:3309, 0x8002BBF0)
-    void PlayMovie(const char* name, s32 skippable, s32 unloadLevel);
 
 #if CUSTOM_MENU
     void RenderTitleWithCustomBackground(bool drawPressStartOverlay);

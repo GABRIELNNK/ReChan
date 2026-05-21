@@ -75,6 +75,19 @@ void hdHealth::SelfInit() {
             barWidth = healthBar->x2 - healthBar->x0;
         }
         textObj = (xcTextPrim*)overlay->GetTextObj(0x002C70A1, rawData);
+        if (!textObj) {
+            const xcOverlayItem* items = overlay->GetItems();
+            for (u32 i = 0; i < overlay->primCount; i++) {
+                u8* primData = rawData + items[i].dataOffset;
+                xcPrimHeader* hdr = reinterpret_cast<xcPrimHeader*>(primData);
+                if (hdr->subtype == 5 || hdr->type != XC_PRIM_TEXT) {
+                    continue;
+                }
+
+                textObj = reinterpret_cast<xcTextPrim*>(primData);
+                break;
+            }
+        }
     }
 }
 
@@ -108,11 +121,12 @@ void hdHealth::SetText(const char* text) {
     MARKFUNCTION(0x8008EE50);
     if (textObj) {
         u32* hashes = textObj->StringHashes();
+        const u8 idx = (textObj->paletteIdx < textObj->numStrings) ? textObj->paletteIdx : 0;
         if (text) {
-            hashes[textObj->paletteIdx] = xcRegisterRuntimeString(text);
+            hashes[idx] = xcRegisterRuntimeString(text);
         }
         else {
-            hashes[textObj->paletteIdx] = 0;
+            hashes[idx] = 0;
         }
     }
 }

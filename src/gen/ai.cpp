@@ -21,6 +21,7 @@
 #include "p3d/p3dmath.h"
 #include "p3d/hash.h"
 #include "ai/obstacle.h"
+#include "ai/boss.h"
 #include "ai/player.h"
 #include "ai/humanoid.h"
 #include "ai/fevolume.h"
@@ -302,8 +303,29 @@ Thing* AI::AddThingNoTagList(const char* name, u16 type,
 
     // PSX: types 1-28 = Humanoid enemies (Thug1-8, bosses, etc.)
     if ((u16)(type - 1) < 28u) {
-        Humanoid* h = new Humanoid(pos, type);
-        thing = h;
+        switch (type) {
+            case AITypes::TT_BUTCH:
+                thing = new Butch(pos);
+                break;
+            case AITypes::TT_GRONTAR:
+                thing = new Grontar(pos);
+                break;
+            case AITypes::TT_DANTE:
+                thing = new Dante(pos);
+                break;
+            case AITypes::TT_PAUL:
+                thing = new Paul(pos);
+                break;
+            case AITypes::TT_OSCAR:
+                thing = new Oscar(pos);
+                break;
+            default:
+            {
+                Humanoid* h = new Humanoid(pos, type);
+                thing = h;
+                break;
+            }
+        }
     }
     // PSX: types 301-328 = Pickups. Type 101 also routes through Pickup.
     // The separate Collectible class is type 436 and stays on the obstacle/moveList path.
@@ -749,17 +771,24 @@ void AI::MoveThings() {
     // 3. Humanoid vs humanoid collision
     HandleHumanoidHumanoidCollision();
 
+    // Debug: phase logging only when player is in upstairs area (y > 20000)
+    const bool dbgPhase = Player::s_player && Player::s_player->pos.y > 20000;
+    if (dbgPhase) LOG("[AI::MoveThings] step=obstacle_col");
+
     // 4. Obstacle collisions
     MoveThingsObstacleCollisions();
     HandleHumanoidObstacleCollisions(humanoidList);
+    if (dbgPhase) LOG("[AI::MoveThings] step=pickup_col");
 
     // 5. Pickup collisions
     MoveThingsPickupCollisions();
     HandleHumanoidPickupCollisions(humanoidList, inactivePickupList);
+    if (dbgPhase) LOG("[AI::MoveThings] step=env_col");
 
     // 6. Environment collisions
     HandleThingEnvironmentCollisions(humanoidList);
     HandleThingEnvironmentCollisions(pickupList);
+    if (dbgPhase) LOG("[AI::MoveThings] step=update_pos");
 
     // 7. Clear humanoid command bits
     for (ccMinNode* n = humanoidList.head; n; n = n->next) {
@@ -781,11 +810,13 @@ void AI::MoveThings() {
     // 9. Update positions
     UpdatePositions(humanoidList);
     UpdatePositions(pickupList);
+    if (dbgPhase) LOG("[AI::MoveThings] step=think");
 
     // 10. Think pass (privMoveList handles Think + death transfer)
     privMoveList(moveList);
     privMoveList(humanoidList);
     privMoveList(pickupList);
+    if (dbgPhase) LOG("[AI::MoveThings] step=camera");
 
     // 11. Camera
     MoveCamera();
