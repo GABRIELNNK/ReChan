@@ -6,6 +6,7 @@
 #include "fe/hud.h"
 
 ScoreManager* g_scoreManager = nullptr;
+static Handler* s_scoreMgrHandler = nullptr;
 
 // PSX: CheckpointInfo::IsValid (SCOREMGR.CPP:910, 0x8004D72C)
 bool CheckpointInfo::IsValid() const {
@@ -74,15 +75,23 @@ ScoreManager::~ScoreManager() {
 // PSX: InternalOpen__12ScoreManager (SCOREMGR.CPP:268, 0x8004CCD8)
 void ScoreManager::InternalOpen() {
     MARKFUNCTION(0x8004CCD8);
-    // PSX: creates a 36-byte handler node, sets callback to scoreMgrPrivHandler,
-    // adds it to handlerSet slot 0x50 (think queue).
-    // Handler registration is done in Game::InternalOpen instead on PC.
+
+    if (!s_scoreMgrHandler && g_game) {
+        s_scoreMgrHandler = g_game->GetHandlerSet1().AddHandler(scoreMgrPrivHandler, 0x50);
+    }
+
     InternalReset();
 }
 
 // PSX: InternalClose__12ScoreManager (SCOREMGR.CPP:284, 0x8004CD64)
 void ScoreManager::InternalClose() {
     MARKFUNCTION(0x8004CD64);
+
+    if (s_scoreMgrHandler) {
+        s_scoreMgrHandler->RemoveFromList();
+        delete s_scoreMgrHandler;
+        s_scoreMgrHandler = nullptr;
+    }
 }
 
 // PSX: InternalReset__12ScoreManager (SCOREMGR.CPP:294, 0x8004CD84)

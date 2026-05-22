@@ -1,4 +1,6 @@
 #include "common.h"
+#include "ai/activezn.h"
+#include "ai/generator.h"
 #include "ai/obstacle.h"
 #include "ai/player.h"
 #include "gen/world.h"
@@ -1436,6 +1438,33 @@ static bool IsLevelCompleteHumanoidType(u16 thingType) {
         thingType == 15 || thingType == 17;
 }
 
+static bool IsLevelCompleteMoveNodeReady(Thing* moveThing) {
+    if (!moveThing) {
+        return false;
+    }
+
+    const u16 thingType = moveThing->thingType;
+    if (thingType != AITypes::TT_GENERATOR
+        && thingType != AITypes::TT_ENEMYGENERATOR
+        && thingType != AITypes::TT_THROWGENERATOR) {
+        return false;
+    }
+
+    Generator* generator = static_cast<Generator*>(moveThing);
+    if (generator->generateCount < generator->field200) {
+        return false;
+    }
+
+    if (thingType == AITypes::TT_ENEMYGENERATOR) {
+        EnemyGenerator* enemyGenerator = static_cast<EnemyGenerator*>(moveThing);
+        if (enemyGenerator->activeZone && enemyGenerator->activeZone->memberCount != 0) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 // PSX: gfLevelComplete__FP5ThingUlPPCc (SWITCH.CPP:1096, 0x80094964)
 static s32 SwitchLevelComplete(Thing* thing, u32 argc, const char** argv) {
     MARKFUNCTION(0x80094964);
@@ -1472,24 +1501,9 @@ static s32 SwitchLevelComplete(Thing* thing, u32 argc, const char** argv) {
 
         ccNode* moveNode = g_ai->moveList.FindNodeCRC(crc);
         if (moveNode) {
-            const u8* base = reinterpret_cast<const u8*>(moveNode);
-
-            s32 lhs = 0;
-            s32 rhs = 0;
-            std::memcpy(&lhs, base + 192, sizeof(lhs));
-            std::memcpy(&rhs, base + 200, sizeof(rhs));
-            if (lhs < rhs) {
+            Thing* moveThing = static_cast<Thing*>(moveNode);
+            if (!IsLevelCompleteMoveNodeReady(moveThing)) {
                 return 0;
-            }
-
-            const void* ptr284 = nullptr;
-            std::memcpy(&ptr284, base + 284, sizeof(ptr284));
-            if (ptr284) {
-                u8 loopCount = 0;
-                std::memcpy(&loopCount, reinterpret_cast<const u8*>(ptr284) + 84, sizeof(loopCount));
-                if (loopCount != 0) {
-                    return 0;
-                }
             }
         }
     }

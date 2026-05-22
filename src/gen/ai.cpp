@@ -58,6 +58,7 @@ AI* g_ai = nullptr;
 // PSX: WorldPointLists global at gp+FF0 (theWorldPoints).
 // Populated from DBPoints with type 110 during AI::Populate.
 static ccList g_worldPointList;
+static const char s_worldPointParName[] = "PAR";
 
 // PSX: gp+0x5E0 (0x800DCF2C)
 static s32 humanoidVolumeRadius = 0xC0;
@@ -160,8 +161,8 @@ void WorldPoints_AddPoint(DBPoint* pt) {
         if (a4) {
             node->parValue = (s32)a4->value;
         }
-        // PSX: sets name from dword_800DD2E8 (likely "par" or similar)
-        node->SetName(pt->GetName(), 0);
+        // PSX uses a fixed "PAR" node name (dword_800DD2E8) for par lookup.
+        node->SetName(s_worldPointParName, 0);
         g_worldPointList.AddNode(g_worldPointList.tail, node);
     }
 }
@@ -171,14 +172,13 @@ WorldPointNode* WorldPoints_GetNISPoint(u32 crc) {
 }
 
 s32 WorldPoints_GetParValue() {
-    // PSX: searches by name for the "par" point
-    for (ccNode* n = static_cast<ccNode*>(g_worldPointList.head); n; n = static_cast<ccNode*>(n->next)) {
-        WorldPointNode* wp = static_cast<WorldPointNode*>(n);
-        if (wp->parValue != 9999) {
-            return wp->parValue;
-        }
+    // PSX GetParPointValue__11WorldPoints finds the fixed "PAR" node directly.
+    WorldPointNode* parNode = static_cast<WorldPointNode*>(g_worldPointList.FindNode(s_worldPointParName, nullptr));
+    if (!parNode) {
+        return 0;
     }
-    return 0;
+
+    return parNode->parValue;
 }
 
 // PSX Populate__2AI: mesh loop (lst TEXT:80056698) then volume loop (80056748); same nameCRC yields two moveList

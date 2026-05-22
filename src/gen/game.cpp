@@ -342,6 +342,25 @@ static void AnimateLoop(ccList& list) {
     }
 }
 
+// PSX: animLoopDSTACK__Fv (GAME.CPP:2634, 0x8002B368)
+// Updates camera anim, animates active AI model lists, and advances effects.
+static void animLoopDSTACK() {
+    MARKFUNCTION(0x8002B368);
+
+    if (g_display && g_display->GetCamera()) {
+        g_display->GetCamera()->UpdateAnim();
+    }
+
+    if (g_ai) {
+        AnimateLoop(g_ai->humanoidList);
+        AnimateLoop(g_ai->pickupList);
+        AnimateLoop(g_ai->inactivePickupList);
+        AnimateLoop(g_ai->moveList);
+    }
+
+    Effects_UpdateAll();
+}
+
 void Game::AnimateEverythingHandler(Handler*) {
     MARKFUNCTION(0x8002B2F0);
 #if HIGH_FPS_PLAY_PRESENTATION
@@ -349,12 +368,7 @@ void Game::AnimateEverythingHandler(Handler*) {
         return;
     }
 #endif
-    if (!g_ai) return;
-    AnimateLoop(g_ai->humanoidList);
-    AnimateLoop(g_ai->pickupList);
-    AnimateLoop(g_ai->inactivePickupList);
-    AnimateLoop(g_ai->moveList);
-    Effects_UpdateAll();
+    animLoopDSTACK();
 }
 
 // PSX: DrawEverythingHandler__FP7Handler (GAME.CPP:2211, 0x8002A98C)
@@ -1190,6 +1204,8 @@ bool Game::gsEndLevelState(Game* game) {
 
 bool Game::gsEndLevelLoopState(Game* game) {
     MARKFUNCTION(0x8002B6B0); // gsEndLevelLoopState
+
+    animLoopDSTACK();
 
     MenuDraw(nullptr);
 
