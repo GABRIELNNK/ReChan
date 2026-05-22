@@ -1295,6 +1295,11 @@ void feCustomMenuMgr::Activate(MenuPage startPage) {
         rsEvent(RS_MUTE, 0, 0, 0);
     }
 
+    if (startPage == MenuPage_Pause && g_game && g_game->GetState() == GameState::Play) {
+        s32 track = 23;
+        rsEvent(RS_LOAD_AND_PLAY_DIALOG, 0, track, 0x1C);
+    }
+
     SetPage(startPage);
 
     PlaySound(FE_SND_MENU_MOVE);
