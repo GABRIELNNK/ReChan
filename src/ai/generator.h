@@ -3,6 +3,9 @@
 #include "gen/database.h"
 #include "p3d/lvector.h"
 
+class ActiveZone;
+class SubZoneVolume;
+
 class Generator : public Obstacle {
 public:
     // PSX +116: embedded DBRoot for attribute storage (60 bytes)
@@ -26,10 +29,10 @@ public:
     s32 field200 = 0;
     // PSX +204 (s32): permanent attribute count (a1[51])
     s32 attribArrayCount = 0;
-    // PSX +208 (ptr): permanent attribute array (a1[52])
-    void* attribArray = nullptr;
+    // PSX +208 (ptr): generated object handle slots (a1[52])
+    ThingHandle** attribArray = nullptr;
     // PSX +212 (ptr): model name buffer (a1[53])
-    void* modelNameBuffer = nullptr;
+    char* modelNameBuffer = nullptr;
 
     Generator(const LVector* pos, u16 type);
     ~Generator() override;
@@ -53,12 +56,20 @@ public:
     LVector spawnPoints[3] = {};
     // PSX +252..+263: spawn zone hashes (3 u32s)
     u32 zoneHashes[3] = { 0, 0, 0 };
-    // PSX +264..+275: unknown (3 dwords)
-    s32 field264 = 0;
-    s32 field268 = 0;
-    s32 field272 = 0;
+    // PSX +264..+275: resolved SubZoneVolume pointers for each target point
+    SubZoneVolume* subZoneVolumes[3] = { nullptr, nullptr, nullptr };
     // PSX +276 (u32): number of active spawn points (max 3)
     u32 targetCount = 0;
+    // PSX +280 (u32): active-zone hash from attrib 10
+    u32 activeZoneHash = 0;
+    // PSX +284 (ptr): cached ActiveZone* resolved by activeZoneHash
+    ActiveZone* activeZone = nullptr;
+    // PSX +288 (s32): active-zone member threshold
+    s32 field288 = 0;
+    // PSX +292 (s32): spawn burst count
+    s32 field292 = 0;
+    // PSX +296 (s32): pending spawn trigger flag
+    s32 field296 = 0;
 
     EnemyGenerator(const LVector* pos, u16 type);
     ~EnemyGenerator() override;
