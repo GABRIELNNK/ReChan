@@ -1,5 +1,6 @@
 #include "gen/ai.h"
 #include "gen/game.h"
+#include "gen/director.h"
 #include "gen/world.h"
 #include "gen/database.h"
 #include "gen/envmgr.h"
@@ -546,14 +547,24 @@ Thing* AI::AddThingNoTagList(const char* name, u16 type,
         thing->AnalyzeMesh(const_cast<DBRoot*>(root));
     }
 
-    // PSX: for humanoids (type 1-28), OpenCharacter + LoadCharacter + LoadAnimation(0..123)
+    // PSX: for humanoids (type 1-28), OpenCharacter always, then load only when
+    // character is not already loaded and loaded-count is below 4.
     if ((u16)(type - 1) < 28u) {
         if (g_characterManager) {
             g_characterManager->OpenCharacter(type);
-            g_characterManager->LoadCharacter(type);
-            // PSX: LoadAnimation(type, 0, 124, callback) - loads anims 0-123 synchronously
-            // AnimCallback chains through all 124 anims via LoadAnimationBatch
-            g_characterManager->LoadAnimation(type, 0, 124, nullptr);
+
+            bool shouldLoadCharacter = false;
+            if (!g_characterManager->IsCharacterLoaded(type)) {
+                shouldLoadCharacter = g_characterManager->GetNumberCharactersLoaded() < 4;
+            }
+
+            if (shouldLoadCharacter) {
+                g_characterManager->EnableCache(type, 1);
+                g_characterManager->LoadCharacter(type, nullptr);
+                // PSX: LoadAnimation(type, 0, 124, callback) - loads anims 0-123.
+                g_characterManager->LoadAnimation(type, 0, 124, nullptr);
+                g_characterManager->EnableCache(type, 0);
+            }
         }
     }
 

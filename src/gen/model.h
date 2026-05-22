@@ -21,6 +21,7 @@ class Model;
 class AmbientLight;
 class HardwareLight;
 struct MiscAnimNode;
+struct ClutAnimData;
 struct AnimationMatrices;
 struct BlendPoseState;
 struct STreeJoint;
@@ -56,6 +57,8 @@ struct SkinData {
     u16* indices = nullptr;
     u32* primStart = nullptr;
     u8* primVertCount = nullptr;
+    u32* primPacketOffset = nullptr;
+    u8* primPacketSize = nullptr;
     u32 numVerts = 0;
     u32 numIndices = 0;
     u32 numPrims = 0;
@@ -67,6 +70,8 @@ struct SkinData {
         delete[] indices;
         delete[] primStart;
         delete[] primVertCount;
+        delete[] primPacketOffset;
+        delete[] primPacketSize;
     }
 };
 
@@ -84,13 +89,18 @@ struct GeoRenderVertex {
 };
 
 // PSX tCompositeAnim data loaded from character P3D chunk 0x4007.
-// The runtime suit object derived from this data (OriginalSTree +56 on PSX)
-// is still unreversed on PC, so only the composite definition is preserved.
+// We preserve the composite definition and character-local clut lists used
+// by ChangeSuit runtime updates.
+struct CompositeAnimData;
+
 struct CompositeAnimPartData {
     u16 field0 = 0;
     u16 field1 = 0;
     u32 animNameUID = 0;
     MiscAnimNode* animNode = nullptr;
+    CompositeAnimData* compositeAnim = nullptr;
+    ClutAnimData* clutAnim = nullptr;
+    const tPrimGeom* targetPrimGeom = nullptr;
 };
 
 struct CompositeAnimData {
@@ -98,8 +108,12 @@ struct CompositeAnimData {
     u16 field12 = 0;
     u16 numParts = 0;
     CompositeAnimPartData* parts = nullptr;
+    u32 numCompositeAnims = 0;
+    CompositeAnimData** compositeAnims = nullptr;
+    u32 numClutAnims = 0;
+    ClutAnimData** clutAnims = nullptr;
 
-    ~CompositeAnimData() { delete[] parts; }
+    ~CompositeAnimData();
 };
 
 // OriginalBasic - base for model data stored in LevelManager lists.
@@ -156,6 +170,9 @@ struct OriginalSTree : public OriginalBasic {
 
     OriginalSTree();
     ~OriginalSTree() override;
+
+    // PSX: ChangeSuit__13OriginalSTreeP13DrawableSTrees (MODEL.CPP:3588)
+    s32 ChangeSuit(class DrawableSTree* drawable, s16 suitIndex);
 };
 
 // OriginalGeo - static/dynamic geometry model data (40 bytes on PSX)
@@ -229,6 +246,7 @@ struct DrawableSTree : public DrawableBasic {
     OriginalSTree* alternate = nullptr;  // +28 on PSX
     u32 mirrorFlags = 0;                 // +32 on PSX, bit 0 = mirrored tree
     u32* mirroredJointOrderMap = nullptr;
+    s16 suitIndex = 0;
 
     DrawableSTree(OriginalSTree* orig);
     ~DrawableSTree() override;
@@ -237,6 +255,8 @@ struct DrawableSTree : public DrawableBasic {
     // PC: draws the pddiPrimBuffer
     void Display(u32 flags) override;
     s32 MirrorTree(SModel* model);
+    // PSX: ChangeSuit__13DrawableSTrees (MODEL.CPP:3630)
+    s32 ChangeSuit(s16 suitIndexValue);
     OriginalSTree* GetOriginalSTree() const override { return original; }
     OriginalSTree* GetAlternateSTree() const override { return alternate; }
 };

@@ -78,6 +78,7 @@ static constexpr s32 BACK_GRAB_ATTACH_Z = 0x1C2;
 // PSX gp+0x738 (0x800DD084), passed as Pickup::Release forceMag in _Throw directional release.
 // Symbol dump labels this as THROW_PROJECTILE_VELOCITY with default value 0x59D8.
 static s32 s_throwPickupReleaseForce = 0x59D8;
+static u32 s_humanoidSuitTraceBudget = 64;
 static constexpr s32 DROP_PICKUP_DAMAGE_THRESHOLD = 14;
 static constexpr s32 BACK_GRAB_MIN_RELATIVE_ANGLE = 5461;
 static constexpr u32 BACK_GRAB_RELATIVE_ANGLE_RANGE = 0xD8E3;
@@ -1641,7 +1642,6 @@ void Humanoid::CreateModel(const char* name) {
         m->ApplyAnimToModel(thingType, 0, 2, 0, 0);
         sm->SetupModelCallbacks();
         m->SetAnim(22, 0, 1, 0);
-        sm->scale = GetCharSubTypeScale(characterSubType);
         sm->InitSemiTransMode();
     }
 
@@ -1657,6 +1657,26 @@ void Humanoid::CreateModel(const char* name) {
     // initial animation/state setup.
     orientation = spawnOrientation;
     faceAngle = spawnOrientation.y;
+
+    if (m) {
+        SModel* sm = static_cast<SModel*>(m);
+        sm->scale = GetCharSubTypeScale(characterSubType);
+
+        if (m->drawableType == 2 && m->drawable) {
+            DrawableSTree* streeDrawable = static_cast<DrawableSTree*>(m->drawable);
+            const s16 suitIndex = static_cast<s16>(GetCharSubTypeClut(characterSubType));
+            if (s_humanoidSuitTraceBudget > 0) {
+                LOG("[HumanoidSuit] thingType=%u name=%s charSubType=%d suit=%d drawableType=%d",
+                    thingType,
+                    GetName() ? GetName() : "null",
+                    characterSubType,
+                    static_cast<s32>(suitIndex),
+                    m->drawableType);
+                s_humanoidSuitTraceBudget--;
+            }
+            streeDrawable->ChangeSuit(suitIndex);
+        }
+    }
 
     // PSX: vtable+212 call -> CreateSound
     CreateSound();
@@ -2013,8 +2033,21 @@ void Humanoid::AnalyzeMesh(DBRoot* root) {
 
         switch (attrib->id) {
             case 0x0C:
-                characterSubType = GetCharSubTypeEnumFromHashID((s32)p3dHash(attrib->GetAttribString()));
+            {
+                const char* subtypeName = attrib->GetAttribString();
+                const u32 subtypeHash = p3dHash(subtypeName);
+                characterSubType = GetCharSubTypeEnumFromHashID((s32)subtypeHash);
+                if (s_humanoidSuitTraceBudget > 0) {
+                    LOG("[HumanoidSubtype] thingType=%u name=%s subtypeStr=%s hash=0x%08X enum=%d",
+                        thingType,
+                        root->GetName() ? root->GetName() : "null",
+                        subtypeName ? subtypeName : "null",
+                        subtypeHash,
+                        characterSubType);
+                    s_humanoidSuitTraceBudget--;
+                }
                 break;
+            }
             case 0x0D:
             {
                 const u16 hitPoints = (u16)attrib->value;

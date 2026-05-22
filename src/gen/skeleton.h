@@ -7,7 +7,10 @@ struct CompositeAnimData;
 // and skeleton data (returned). Textures are uploaded via World::UploadToVRAM.
 // When requested, also preserves the raw character composite animation
 // definition from chunk 0x4007.
-STreeData* ParseP3DStreamFull(const u8* data, u32 size, CompositeAnimData** outCompositeAnim = nullptr);
+STreeData* ParseP3DStreamFull(const u8* data,
+                              u32 size,
+                              CompositeAnimData** outCompositeAnim = nullptr,
+                              u32 expectedCompositeNameUID = 0);
 
 // Parse the raw tTransformAnim binary blob and apply frame-0 values to skeleton joints.
 // PSX: tTranAnimLoader2::Load relocates the blob, then UpdateJoints writes to joints.

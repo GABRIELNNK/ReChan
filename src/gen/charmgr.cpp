@@ -200,13 +200,14 @@ static void ClearCharacterOriginalData(OriginalSTree* original) {
 
 static bool PopulateCharacterOriginal(OriginalSTree* original, CharFile* cf, u32 type,
                                       const u8* extraData, u32 extraSize,
-                                      const u8* dataBuf, u32 dataSize) {
+                                      const u8* dataBuf, u32 dataSize,
+                                      u32 expectedCompositeNameUID) {
     if (!original || !cf || !dataBuf || dataSize == 0) {
         return false;
     }
 
     CompositeAnimData* compositeAnim = nullptr;
-    STreeData* skeleton = ParseP3DStreamFull(dataBuf, dataSize, &compositeAnim);
+    STreeData* skeleton = ParseP3DStreamFull(dataBuf, dataSize, &compositeAnim, expectedCompositeNameUID);
 
     u32 primGeomSize = 0;
     u32 primGeomOffset = 0;
@@ -423,8 +424,8 @@ static u32 GetLoadedAnimationNameUID(const void* animation) {
 // PSX: GetCompositeAnimationNameHash (CHARMGR.CPP:267, 0x80039624)
 u32 GetCompositeAnimationNameHash(const char* name) {
     MARKFUNCTION(0x80039624);
-    char buf[96] = {};
-    snprintf(buf, sizeof(buf), "RCHARS\\%s.P3D", name);
+    char buf[32] = {};
+    snprintf(buf, sizeof(buf), "COMP_ANM%sREF", name);
     return p3dHash(buf);
 }
 
@@ -915,8 +916,9 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
     //      tSTreeLoader, tTexLoader, tClutAnimLoader, tTexAnimLoader, tCompAnimLoader)
     // PC: ParseP3DStreamFull extracts textures + skeleton and preserves the
     // character's 0x4007 composite animation definition for future suit work.
+    const u32 compositeNameUID = GetCompositeAnimationNameHash(g_charNameTable[type]);
     CompositeAnimData* compositeAnim = nullptr;
-    STreeData* skeleton = ParseP3DStreamFull(dataBuf, dataSize, &compositeAnim);
+    STreeData* skeleton = ParseP3DStreamFull(dataBuf, dataSize, &compositeAnim, compositeNameUID);
     std::free(dataBuf);
 
     // PSX: CharDataLoadCallback post-processing:
@@ -1106,9 +1108,11 @@ void CharacterManager::ReloadCharacter(u32 type, s32 meshType, CharMgrCallback* 
             addOriginal = true;
         }
 
+        const u32 compositeNameUID = GetCompositeAnimationNameHash(g_charNameTable[type]);
         if (original && PopulateCharacterOriginal(original, cf, type,
                                                   static_cast<const u8*>(slot.dataBuffer), (u32)extraSize,
-                                                  dataBuf, (u32)dataSize)) {
+                                                  dataBuf, (u32)dataSize,
+                                                  compositeNameUID)) {
             if (addOriginal) {
                 g_levelManager->AddOriginal(original, 0);
             }

@@ -1,4 +1,5 @@
 #include "gen/model.h"
+#include "gen/animmgr.h"
 #include "gen/animmat.h"
 #include "gen/animstruct.h"
 #include "gen/charmgr.h"
@@ -31,6 +32,7 @@ static const u8 kStreeMirrorSwapPairs[] = {
 static std::vector<const OriginalSTree*> s_liveOriginalSTrees;
 static u32 s_streePacketLitTraceBudget = 24;
 static u32 s_streeShowLightTraceBudget = 16;
+static u32 s_streeSuitTraceBudget = 96;
 
 static void RegisterLiveOriginalSTree(const OriginalSTree* tree) {
     if (!tree) {
@@ -279,6 +281,285 @@ static OriginalSTree* CloneActiveSTree(const OriginalSTree* source) {
     return clone;
 }
 
+static constexpr u32 kSuitEntityTypeCompositeAnim = 0x00010001u;
+static constexpr u32 kSuitEntityTypeTexList = 0x00010007u;
+static constexpr u32 kSuitEntityTypeClutList = 0x00010008u;
+
+static CompositeAnimData* ResolveCompositeAnimRootForSuit(CompositeAnimData* compositeAnim) {
+    CompositeAnimData* resolved = compositeAnim;
+    for (u32 depth = 0; depth < 8; depth++) {
+        if (!resolved || resolved->numParts != 0 || !g_animMgr) {
+            break;
+        }
+
+        MiscAnimNode* node = g_animMgr->GetMiscAnim(resolved->nameUID);
+        if (!node || !node->compositeAnim || node->compositeAnim == resolved) {
+            break;
+        }
+
+        resolved = node->compositeAnim;
+    }
+
+    return resolved;
+}
+
+static u32 ResolveCompositePartEntityTypeForSuit(CompositeAnimPartData* part) {
+    if (!part) {
+        return 0;
+    }
+
+    if (part->compositeAnim) {
+        return kSuitEntityTypeCompositeAnim;
+    }
+
+    if (part->clutAnim) {
+        return kSuitEntityTypeClutList;
+    }
+
+    if (part->animNameUID == 0 || !g_animMgr) {
+        return 0;
+    }
+
+    MiscAnimNode* liveNode = g_animMgr->GetMiscAnim(part->animNameUID);
+    if (liveNode && liveNode != part->animNode) {
+        part->animNode = liveNode;
+    }
+
+    if (!part->animNode) {
+        return 0;
+    }
+
+    if (part->animNode->compositeAnim) {
+        part->compositeAnim = part->animNode->compositeAnim;
+        return kSuitEntityTypeCompositeAnim;
+    }
+
+    if (part->animNode->clutAnim) {
+        part->clutAnim = part->animNode->clutAnim;
+        return kSuitEntityTypeClutList;
+    }
+
+    return 0;
+}
+
+// PSX: RedirectCompositeSuitAnimation__FP14tCompositeAnimPC9tPrimGeom (MODEL.CPP:3521)
+static s32 RedirectCompositeSuitAnimation(CompositeAnimData* compositeAnim, const tPrimGeom* primGeom) {
+    MARKFUNCTION(0x800721B0);
+
+    compositeAnim = ResolveCompositeAnimRootForSuit(compositeAnim);
+
+    if (!compositeAnim || !compositeAnim->parts) {
+        return 0;
+    }
+
+    for (u32 partIndex = 0; partIndex < compositeAnim->numParts; partIndex++) {
+        CompositeAnimPartData& part = compositeAnim->parts[partIndex];
+        const u32 entityType = ResolveCompositePartEntityTypeForSuit(&part);
+        if (entityType == kSuitEntityTypeCompositeAnim && part.compositeAnim) {
+            RedirectCompositeSuitAnimation(part.compositeAnim, primGeom);
+        }
+        else if (entityType == kSuitEntityTypeTexList || entityType == kSuitEntityTypeClutList) {
+            // PSX writes prim geom targets into tex/clut list objects at redirect time.
+            part.targetPrimGeom = primGeom;
+        }
+    }
+
+    return 0;
+}
+
+static s32 ResolveSuitPartFrame(const CompositeAnimPartData* part, s32 frame, s32 frameCount) {
+    if (!part || frameCount <= 0) {
+        return 0;
+    }
+
+    const u32 shift = static_cast<u32>(part->field1) & 31u;
+    s32 partFrame = frame >> shift;
+    if (partFrame >= frameCount) {
+        if (part->field0 != 0) {
+            partFrame %= frameCount;
+        }
+        else {
+            partFrame = frameCount - 1;
+        }
+    }
+
+    return partFrame;
+}
+
+static void ApplyClutListSuitFrameToVerts(const ClutAnimData* clutAnim,
+                                          s32 frame,
+                                          const SkinData* skin,
+                                          std::vector<f32>* vertData) {
+    if (!clutAnim || !skin || !vertData || !clutAnim->frames || clutAnim->numFrames <= 0) {
+        return;
+    }
+
+    const f32 clutWord = static_cast<f32>(clutAnim->GetFrameValue(frame));
+
+    if (clutAnim->mode != 0
+        && clutAnim->offsets
+        && clutAnim->numOffsets > 0
+        && skin->primPacketOffset
+        && skin->primPacketSize
+        && skin->primStart
+        && skin->primVertCount) {
+        u32 matchedOffsets = 0;
+        for (s32 offsetIndex = 0; offsetIndex < clutAnim->numOffsets; offsetIndex++) {
+            const u32 packetOffset = static_cast<u32>(clutAnim->offsets[offsetIndex]);
+            for (u32 primIndex = 0; primIndex < skin->numPrims; primIndex++) {
+                const u32 packetBase = skin->primPacketOffset[primIndex];
+                const u32 packetSize = static_cast<u32>(skin->primPacketSize[primIndex]);
+                if (packetSize == 0 || packetOffset < packetBase || packetOffset >= (packetBase + packetSize)) {
+                    continue;
+                }
+
+                const u32 start = skin->primStart[primIndex];
+                const u32 count = static_cast<u32>(skin->primVertCount[primIndex]);
+                for (u32 corner = 0; corner < count; corner++) {
+                    const u32 vertexIndex = start + corner;
+                    if (vertexIndex >= skin->numVerts) {
+                        break;
+                    }
+
+                    (*vertData)[vertexIndex * 10u + 9u] = clutWord;
+                }
+
+                matchedOffsets++;
+                break;
+            }
+        }
+
+        if (s_streeSuitTraceBudget > 0 && (frame > 0 || matchedOffsets == 0)) {
+            LOG("[SuitClut] mode=%u frame=%d clut=0x%X offsets=%d matched=%u prims=%u verts=%u",
+                static_cast<u32>(clutAnim->mode),
+                frame,
+                static_cast<u32>(clutAnim->GetFrameValue(frame)),
+                clutAnim->numOffsets,
+                matchedOffsets,
+                skin->numPrims,
+                skin->numVerts);
+            s_streeSuitTraceBudget--;
+        }
+
+        return;
+    }
+
+    if (s_streeSuitTraceBudget > 0 && frame > 0) {
+        LOG("[SuitClut] mode=%u frame=%d clut=0x%X fallback=full-mesh verts=%u",
+            static_cast<u32>(clutAnim->mode),
+            frame,
+            static_cast<u32>(clutAnim->GetFrameValue(frame)),
+            skin->numVerts);
+        s_streeSuitTraceBudget--;
+    }
+
+    for (u32 vertexIndex = 0; vertexIndex < skin->numVerts; vertexIndex++) {
+        (*vertData)[vertexIndex * 10u + 9u] = clutWord;
+    }
+}
+
+static void ApplyCompositeSuitFrameToVerts(CompositeAnimData* compositeAnim,
+                                           s32 frame,
+                                           const SkinData* skin,
+                                           std::vector<f32>* vertData) {
+    compositeAnim = ResolveCompositeAnimRootForSuit(compositeAnim);
+
+    if (!compositeAnim || !compositeAnim->parts || !skin || !vertData) {
+        return;
+    }
+
+    u32 resolvedCompositeParts = 0;
+    u32 resolvedClutParts = 0;
+    u32 unresolvedParts = 0;
+
+    for (u32 partIndex = 0; partIndex < compositeAnim->numParts; partIndex++) {
+        CompositeAnimPartData& part = compositeAnim->parts[partIndex];
+        const u32 entityType = ResolveCompositePartEntityTypeForSuit(&part);
+
+        if (entityType == kSuitEntityTypeCompositeAnim && part.compositeAnim) {
+            resolvedCompositeParts++;
+            const s32 partFrame = ResolveSuitPartFrame(&part, frame, static_cast<s32>(part.compositeAnim->field12));
+            ApplyCompositeSuitFrameToVerts(part.compositeAnim, partFrame, skin, vertData);
+        }
+        else if (entityType == kSuitEntityTypeClutList && part.clutAnim) {
+            resolvedClutParts++;
+            const s32 partFrame = ResolveSuitPartFrame(&part, frame, part.clutAnim->numFrames);
+            ApplyClutListSuitFrameToVerts(part.clutAnim, partFrame, skin, vertData);
+        }
+        else {
+            unresolvedParts++;
+        }
+    }
+
+    if (s_streeSuitTraceBudget > 0 && (frame > 0 || unresolvedParts != 0 || resolvedClutParts == 0)) {
+        LOG("[SuitComposite] frame=%d root=0x%08X parts=%u clut=%u comp=%u unresolved=%u field12=%u",
+            frame,
+            compositeAnim->nameUID,
+            compositeAnim->numParts,
+            resolvedClutParts,
+            resolvedCompositeParts,
+            unresolvedParts,
+            compositeAnim->field12);
+        s_streeSuitTraceBudget--;
+    }
+}
+
+
+static const Mat4* FindJointWorldMatrixByHash(const STreeData* skeleton,
+                                              const Mat4* jointMatrices,
+                                              u32 jointHash) {
+    if (!skeleton || !jointMatrices || !skeleton->joints || jointHash == 0) {
+        return nullptr;
+    }
+
+    for (u32 jointIndex = 0; jointIndex < skeleton->numJoints; jointIndex++) {
+        if (skeleton->joints[jointIndex].nameUID == jointHash) {
+            return &jointMatrices[jointIndex];
+        }
+    }
+
+    return nullptr;
+}
+
+static void DrawGeoPartMesh(OriginalGeo* geo) {
+    if (!geo || !geo->meshBuffer) {
+        return;
+    }
+
+    if (geo->usesSemiTrans) {
+        pddiBlendMode blendMode = PDDI_BLEND_ALPHA;
+        switch (geo->semiTransMode & 3u) {
+            case 1: blendMode = PDDI_BLEND_ADD; break;
+            case 2: blendMode = PDDI_BLEND_SUBTRACT; break;
+            case 3: blendMode = PDDI_BLEND_PSX_QUARTER; break;
+            default: break;
+        }
+        p3d::context->SetBlendMode(blendMode);
+    }
+
+    p3d::context->DrawPrimBuffer(geo->meshBuffer);
+
+    if (geo->usesSemiTrans) {
+        p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+    }
+}
+
+CompositeAnimData::~CompositeAnimData() {
+    delete[] parts;
+    if (compositeAnims) {
+        for (u32 i = 0; i < numCompositeAnims; i++) {
+            delete compositeAnims[i];
+        }
+        delete[] compositeAnims;
+    }
+    if (clutAnims) {
+        for (u32 i = 0; i < numClutAnims; i++) {
+            delete clutAnims[i];
+        }
+        delete[] clutAnims;
+    }
+}
+
 // OriginalSTree
 OriginalSTree::OriginalSTree() {
     SetType(1); // STree type
@@ -388,6 +669,7 @@ DrawableSTree::DrawableSTree(OriginalSTree* orig) {
 
     mirrorFlags = 0;
     mirroredJointOrderMap = nullptr;
+    suitIndex = 0;
 }
 
 DrawableSTree::~DrawableSTree() {
@@ -419,6 +701,24 @@ void DrawableSTree::Display(u32 /*flags*/) {
     pddiPrimBuffer* skinnedBuffer = (renderSkeleton && renderSkeleton->joints && renderSkeleton->numJoints > 0)
         ? renderSkeleton->joints[0].meshBuffer
         : nullptr;
+
+    auto resolveSemiTransBlendMode = [](u8 semiTransMode) -> pddiBlendMode {
+        switch (semiTransMode & 3u) {
+            case 1: return PDDI_BLEND_ADD;
+            case 2: return PDDI_BLEND_SUBTRACT;
+            case 3: return PDDI_BLEND_PSX_QUARTER;
+            default: return PDDI_BLEND_ALPHA;
+        }
+    };
+
+    auto applySkinBlendState = [&](const SkinData* skinData) -> bool {
+        if (!skinData || !skinData->usesSemiTrans) {
+            return false;
+        }
+
+        p3d::context->SetBlendMode(resolveSemiTransBlendMode(skinData->semiTransMode));
+        return true;
+    };
 
     // Per-frame CPU skinning
     if (skel && skin && skin->numVerts > 0 && skel->joints && skinnedBuffer) {
@@ -554,6 +854,11 @@ void DrawableSTree::Display(u32 /*flags*/) {
             vertData[i * 10 + 9] = sv.cba;
         }
 
+        ApplyCompositeSuitFrameToVerts(renderSource ? renderSource->compositeAnim : nullptr,
+                           static_cast<s32>(suitIndex),
+                           skin,
+                           &vertData);
+
         if (hasLitPackets) {
             ApplyLitPacketColoursToSkin(skin, litPackets, &vertData);
             if (s_streePacketLitTraceBudget > 0) {
@@ -588,7 +893,11 @@ void DrawableSTree::Display(u32 /*flags*/) {
         }
 
         skinnedBuffer->SetVertexData(vertData.data(), skin->numVerts);
+        const bool skinBlendApplied = applySkinBlendState(skin);
         p3d::context->DrawPrimBuffer(skinnedBuffer);
+        if (skinBlendApplied) {
+            p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+        }
         delete[] jointMatrices;
         return;
     }
@@ -596,11 +905,62 @@ void DrawableSTree::Display(u32 /*flags*/) {
     // Fallback to flat mesh
     STreeData* fallbackSkel = renderSource->skeleton;
     if (fallbackSkel && fallbackSkel->joints && fallbackSkel->joints[0].meshBuffer) {
+        const bool skinBlendApplied = applySkinBlendState(renderSource->skinData);
         p3d::context->DrawPrimBuffer(fallbackSkel->joints[0].meshBuffer);
+        if (skinBlendApplied) {
+            p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+        }
     }
     else if (renderSource->meshBuffer) {
+        const bool skinBlendApplied = applySkinBlendState(renderSource->skinData);
         p3d::context->DrawPrimBuffer(renderSource->meshBuffer);
+        if (skinBlendApplied) {
+            p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+        }
     }
+}
+
+// PSX: ChangeSuit__13OriginalSTreeP13DrawableSTrees (MODEL.CPP:3588)
+s32 OriginalSTree::ChangeSuit(DrawableSTree* drawable, s16 suitIndexValue) {
+    MARKFUNCTION(0x800722A8);
+
+    if (!drawable || !compositeAnim) {
+        return 0;
+    }
+
+    OriginalSTree* target = drawable->GetAlternateSTree();
+    if (!target) {
+        target = drawable->GetOriginalSTree();
+    }
+    RedirectCompositeSuitAnimation(compositeAnim, target ? target->primGeom : nullptr);
+
+    // PSX calls tCompositeFlip::SetFrame(suit) then Update().
+    // Host stores suit frame on drawable and applies during skinning.
+    drawable->suitIndex = suitIndexValue;
+
+    if (s_streeSuitTraceBudget > 0) {
+        LOG("[SuitChange] drawable=%p suit=%d comp=0x%08X parts=%u field12=%u skin=%p",
+            drawable,
+            static_cast<s32>(suitIndexValue),
+            compositeAnim->nameUID,
+            compositeAnim->numParts,
+            compositeAnim->field12,
+            skinData);
+        s_streeSuitTraceBudget--;
+    }
+
+    return RedirectCompositeSuitAnimation(compositeAnim, primGeom);
+}
+
+// PSX: ChangeSuit__13DrawableSTrees (MODEL.CPP:3630)
+s32 DrawableSTree::ChangeSuit(s16 suitIndexValue) {
+    MARKFUNCTION(0x80072350);
+
+    if (!original) {
+        return 0;
+    }
+
+    return original->ChangeSuit(this, suitIndexValue);
 }
 
 s32 DrawableSTree::MirrorTree(SModel* model) {
@@ -652,9 +1012,11 @@ DrawableGeo::~DrawableGeo() {
 }
 
 void DrawableGeo::Display(u32 /*flags*/) {
-    if (original && original->meshBuffer) {
-        p3d::context->DrawPrimBuffer(original->meshBuffer);
+    if (!original || !original->meshBuffer) {
+        return;
     }
+
+    DrawGeoPartMesh(original);
 }
 
 DrawableETree::DrawableETree(OriginalETree* orig) {
@@ -675,45 +1037,6 @@ DrawableETree::~DrawableETree() {
     geoPartVisible = nullptr;
     ownerModel = nullptr;
     original = nullptr;
-}
-
-static const Mat4* FindJointWorldMatrixByHash(const STreeData* skeleton,
-                                              const Mat4* jointMatrices,
-                                              u32 jointHash) {
-    if (!skeleton || !jointMatrices || !skeleton->joints || jointHash == 0) {
-        return nullptr;
-    }
-
-    for (u32 jointIndex = 0; jointIndex < skeleton->numJoints; jointIndex++) {
-        if (skeleton->joints[jointIndex].nameUID == jointHash) {
-            return &jointMatrices[jointIndex];
-        }
-    }
-
-    return nullptr;
-}
-
-static void DrawGeoPartMesh(OriginalGeo* geo) {
-    if (!geo || !geo->meshBuffer) {
-        return;
-    }
-
-    if (geo->usesSemiTrans) {
-        pddiBlendMode blendMode = PDDI_BLEND_ALPHA;
-        switch (geo->semiTransMode & 3u) {
-            case 1: blendMode = PDDI_BLEND_ADD; break;
-            case 2: blendMode = PDDI_BLEND_SUBTRACT; break;
-            case 3: blendMode = PDDI_BLEND_PSX_QUARTER; break;
-            default: break;
-        }
-        p3d::context->SetBlendMode(blendMode);
-    }
-
-    p3d::context->DrawPrimBuffer(geo->meshBuffer);
-
-    if (geo->usesSemiTrans) {
-        p3d::context->SetBlendMode(PDDI_BLEND_NONE);
-    }
 }
 
 void DrawableETree::Display(u32 /*flags*/) {
@@ -783,7 +1106,22 @@ void DrawableETree::Display(u32 /*flags*/) {
     }
 
     if (original->meshBuffer) {
+        if (original->usesSemiTrans) {
+            pddiBlendMode blendMode = PDDI_BLEND_ALPHA;
+            switch (original->semiTransMode & 3u) {
+                case 1: blendMode = PDDI_BLEND_ADD; break;
+                case 2: blendMode = PDDI_BLEND_SUBTRACT; break;
+                case 3: blendMode = PDDI_BLEND_PSX_QUARTER; break;
+                default: break;
+            }
+            p3d::context->SetBlendMode(blendMode);
+        }
+
         p3d::context->DrawPrimBuffer(original->meshBuffer);
+
+        if (original->usesSemiTrans) {
+            p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+        }
     }
 }
 

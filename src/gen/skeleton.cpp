@@ -1,4 +1,5 @@
 #include "common.h"
+#include "gen/animmgr.h"
 #include "gen/geometry.h"
 #include "gen/skeleton.h"
 #include "gen/model.h"
@@ -15,6 +16,7 @@
 // P3D chunk IDs
 static constexpr u16 CHUNK_P3D_CONTAINER = 0xFF04;
 static constexpr u16 CHUNK_COMP_ANIM = 0x4007;
+static constexpr u16 CHUNK_CLUT_ANIM = 0x6006;
 static constexpr u16 CHUNK_P3D_TEXTURE = 0x6008;
 static constexpr u16 CHUNK_STREE = 0x6120;
 static constexpr u16 CHUNK_MAPPED_STREE = 0x6122;
@@ -77,7 +79,81 @@ static CompositeAnimData* ParseCompositeAnimChunk(const u8* data, u32 size) {
     return compositeAnim;
 }
 
-STreeData* ParseP3DStreamFull(const u8* data, u32 size, CompositeAnimData** outCompositeAnim) {
+static ClutAnimData* ParseClutAnimChunk(const u8* data, u32 size) {
+    if (!data || size < 5) {
+        return nullptr;
+    }
+
+    u32 pos = 0;
+    u32 nameUID = 0;
+    u32 materialUID = 0;
+    u32 primUID = 0;
+    if (!ReadPStringUID(data, size, &pos, &nameUID)
+        || !ReadPStringUID(data, size, &pos, &materialUID)
+        || !ReadPStringUID(data, size, &pos, &primUID)
+        || pos + 2 > size) {
+        return nullptr;
+    }
+
+    const u16 mode = p3dReadU16LE(data + pos);
+    pos += 2;
+
+    std::vector<u16> frames;
+    std::vector<u16> offsets;
+
+    while (pos + 6 <= size) {
+        const u16 subChunkId = p3dReadU16LE(data + pos);
+        const u32 subChunkSize = p3dReadU32LE(data + pos + 2);
+        if (subChunkSize < 6 || pos + subChunkSize > size) {
+            break;
+        }
+
+        const u8* subBody = data + pos + 6;
+        const u32 subBodySize = subChunkSize - 6;
+        if ((subChunkId == 0x600C || subChunkId == 0x600D) && subBodySize >= 2) {
+            const u32 count = p3dReadU16LE(subBody + 0);
+            if (count > 0 && 2u + count * 2u <= subBodySize) {
+                std::vector<u16>& out = (subChunkId == 0x600C) ? frames : offsets;
+                out.resize(count);
+                for (u32 i = 0; i < count; i++) {
+                    out[i] = p3dReadU16LE(subBody + 2u + i * 2u);
+                }
+            }
+        }
+
+        pos += subChunkSize;
+    }
+
+    if (nameUID == 0 || frames.empty()) {
+        return nullptr;
+    }
+
+    ClutAnimData* clutAnim = new ClutAnimData();
+    clutAnim->nameUID = nameUID;
+    clutAnim->materialUID = materialUID;
+    clutAnim->primUID = primUID;
+    clutAnim->mode = mode;
+    clutAnim->numFrames = static_cast<s32>(frames.size());
+    clutAnim->frames = new u16[frames.size()];
+    for (u32 i = 0; i < frames.size(); i++) {
+        clutAnim->frames[i] = frames[i];
+    }
+
+    if (!offsets.empty()) {
+        clutAnim->numOffsets = static_cast<s32>(offsets.size());
+        clutAnim->offsets = new u16[offsets.size()];
+        for (u32 i = 0; i < offsets.size(); i++) {
+            clutAnim->offsets[i] = offsets[i];
+        }
+    }
+
+    return clutAnim;
+}
+
+STreeData* ParseP3DStreamFull(const u8* data,
+                              u32 size,
+                              CompositeAnimData** outCompositeAnim,
+                              u32 expectedCompositeNameUID) {
     if (!data || size < 6) {
         if (outCompositeAnim) {
             *outCompositeAnim = nullptr;
@@ -88,6 +164,8 @@ STreeData* ParseP3DStreamFull(const u8* data, u32 size, CompositeAnimData** outC
     World* world = g_game ? g_game->GetWorld() : nullptr;
     STreeData* skeleton = nullptr;
     CompositeAnimData* compositeAnim = nullptr;
+    std::vector<CompositeAnimData*> compositeAnims;
+    std::vector<ClutAnimData*> clutAnims;
 
     u16 rootId = p3dReadU16LE(data);
     u32 rootSize = p3dReadU32LE(data + 2);
@@ -128,12 +206,15 @@ STreeData* ParseP3DStreamFull(const u8* data, u32 size, CompositeAnimData** outC
             }
         }
         else if (chunkId == CHUNK_COMP_ANIM) {
-            if (!compositeAnim) {
-                compositeAnim = ParseCompositeAnimChunk(data + cpos + 6, chunkSize - 6);
-                if (compositeAnim) {
-                    LOG("[Skeleton] Parsed composite anim 0x%08X with %u parts",
-                        compositeAnim->nameUID, compositeAnim->numParts);
-                }
+            CompositeAnimData* parsedComposite = ParseCompositeAnimChunk(data + cpos + 6, chunkSize - 6);
+            if (parsedComposite) {
+                compositeAnims.push_back(parsedComposite);
+            }
+        }
+        else if (chunkId == CHUNK_CLUT_ANIM) {
+            ClutAnimData* clutAnim = ParseClutAnimChunk(data + cpos + 6, chunkSize - 6);
+            if (clutAnim) {
+                clutAnims.push_back(clutAnim);
             }
         }
         else if (chunkId == CHUNK_MAPPED_STREE) {
@@ -157,6 +238,108 @@ STreeData* ParseP3DStreamFull(const u8* data, u32 size, CompositeAnimData** outC
     if (skeleton) {
         LOG("[Skeleton] Parsed STree: %u joints, %u map entries",
             skeleton->numJoints, skeleton->numMapEntries);
+    }
+
+    CompositeAnimData* selectedComposite = nullptr;
+    if (!compositeAnims.empty()) {
+        if (expectedCompositeNameUID != 0) {
+            for (CompositeAnimData* candidate : compositeAnims) {
+                if (candidate && candidate->nameUID == expectedCompositeNameUID) {
+                    selectedComposite = candidate;
+                    break;
+                }
+            }
+
+            if (!selectedComposite) {
+                LOG("[Skeleton] Missing expected composite anim 0x%08X (parsed %u)",
+                    expectedCompositeNameUID,
+                    static_cast<u32>(compositeAnims.size()));
+            }
+        }
+        else {
+            selectedComposite = compositeAnims[0];
+        }
+    }
+
+    if (selectedComposite) {
+        u32 ownedCompositeCount = 0;
+        for (CompositeAnimData* candidate : compositeAnims) {
+            if (candidate && candidate != selectedComposite) {
+                ownedCompositeCount++;
+            }
+        }
+
+        if (ownedCompositeCount > 0) {
+            selectedComposite->numCompositeAnims = ownedCompositeCount;
+            selectedComposite->compositeAnims = new CompositeAnimData*[ownedCompositeCount]();
+
+            u32 writeIndex = 0;
+            for (CompositeAnimData* candidate : compositeAnims) {
+                if (candidate && candidate != selectedComposite) {
+                    selectedComposite->compositeAnims[writeIndex++] = candidate;
+                }
+            }
+        }
+
+        if (!clutAnims.empty()) {
+            selectedComposite->numClutAnims = static_cast<u32>(clutAnims.size());
+            selectedComposite->clutAnims = new ClutAnimData*[selectedComposite->numClutAnims]();
+            for (u32 i = 0; i < selectedComposite->numClutAnims; i++) {
+                selectedComposite->clutAnims[i] = clutAnims[i];
+            }
+        }
+
+        for (CompositeAnimData* ownerComposite : compositeAnims) {
+            if (!ownerComposite || ownerComposite->numParts == 0 || !ownerComposite->parts) {
+                continue;
+            }
+
+            for (u32 partIndex = 0; partIndex < ownerComposite->numParts; partIndex++) {
+                CompositeAnimPartData& part = ownerComposite->parts[partIndex];
+
+                for (CompositeAnimData* targetComposite : compositeAnims) {
+                    if (!targetComposite || targetComposite == ownerComposite) {
+                        continue;
+                    }
+
+                    if (targetComposite->nameUID == part.animNameUID) {
+                        part.compositeAnim = targetComposite;
+                        break;
+                    }
+                }
+
+                if (!part.compositeAnim && selectedComposite->clutAnims) {
+                    for (u32 clutIndex = 0; clutIndex < selectedComposite->numClutAnims; clutIndex++) {
+                        ClutAnimData* clutAnim = selectedComposite->clutAnims[clutIndex];
+                        if (clutAnim && clutAnim->nameUID == part.animNameUID) {
+                            part.clutAnim = clutAnim;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        compositeAnim = selectedComposite;
+        LOG("[Skeleton] Selected composite anim 0x%08X with %u parts (linked composites=%u, clut=%u)",
+            compositeAnim->nameUID,
+            compositeAnim->numParts,
+            compositeAnim->numCompositeAnims,
+            compositeAnim->numClutAnims);
+
+        compositeAnims.clear();
+        clutAnims.clear();
+    }
+    else {
+        for (CompositeAnimData* parsedComposite : compositeAnims) {
+            delete parsedComposite;
+        }
+        compositeAnims.clear();
+
+        for (ClutAnimData* parsedClut : clutAnims) {
+            delete parsedClut;
+        }
+        clutAnims.clear();
     }
 
     if (outCompositeAnim) {
@@ -480,6 +663,8 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
     std::vector<u16> allIndices;
     std::vector<u32> primStart;
     std::vector<u8> primVertCount;
+    std::vector<u32> primPacketOffset;
+    std::vector<u8> primPacketSize;
     std::vector<u32> builtPerLoop(loops.size(), 0);
     std::vector<u32> builtPerLoopBucket(loops.size() * 4u, 0);
     bool usesSemiTrans = false;
@@ -570,6 +755,9 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
                     usesSemiTrans = true;
                 }
 
+                const u32 packetOffset = primCursor - primListOff;
+                const u8 packetSizeByte = static_cast<u8>(packetSize);
+
                 if (bucket == 0u) ASSERT(cmdBase == 0x3C || cmdBase == 0x2C);
                 if (bucket == 1u) ASSERT(cmdBase == 0x38 || cmdBase == 0x28);
                 if (bucket == 2u) ASSERT(cmdBase == 0x34 || cmdBase == 0x24);
@@ -627,6 +815,8 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
                 u16 base = (u16)skinVerts.size();
                 primStart.push_back(base);
                 primVertCount.push_back(4);
+                primPacketOffset.push_back(packetOffset);
+                primPacketSize.push_back(packetSizeByte);
                 skinVerts.push_back(v0); skinVerts.push_back(v1);
                 skinVerts.push_back(v2); skinVerts.push_back(v3);
                 allIndices.push_back(base); allIndices.push_back(base + 1); allIndices.push_back(base + 2);
@@ -654,6 +844,8 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
                 u16 base = (u16)skinVerts.size();
                 primStart.push_back(base);
                 primVertCount.push_back(4);
+                primPacketOffset.push_back(packetOffset);
+                primPacketSize.push_back(packetSizeByte);
                 skinVerts.push_back(v0); skinVerts.push_back(v1);
                 skinVerts.push_back(v2); skinVerts.push_back(v3);
                 allIndices.push_back(base); allIndices.push_back(base + 1); allIndices.push_back(base + 2);
@@ -682,6 +874,8 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
                 u16 base = (u16)skinVerts.size();
                 primStart.push_back(base);
                 primVertCount.push_back(3);
+                primPacketOffset.push_back(packetOffset);
+                primPacketSize.push_back(packetSizeByte);
                 skinVerts.push_back(v0); skinVerts.push_back(v1); skinVerts.push_back(v2);
                 allIndices.push_back(base); allIndices.push_back(base + 1); allIndices.push_back(base + 2);
 
@@ -706,6 +900,8 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
                 u16 base = (u16)skinVerts.size();
                 primStart.push_back(base);
                 primVertCount.push_back(3);
+                primPacketOffset.push_back(packetOffset);
+                primPacketSize.push_back(packetSizeByte);
                 skinVerts.push_back(v0); skinVerts.push_back(v1); skinVerts.push_back(v2);
                 allIndices.push_back(base); allIndices.push_back(base + 1); allIndices.push_back(base + 2);
 
@@ -729,6 +925,8 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
                 u16 base = (u16)skinVerts.size();
                 primStart.push_back(base);
                 primVertCount.push_back(4);
+                primPacketOffset.push_back(packetOffset);
+                primPacketSize.push_back(packetSizeByte);
                 skinVerts.push_back(v0); skinVerts.push_back(v1);
                 skinVerts.push_back(v2); skinVerts.push_back(v3);
                 allIndices.push_back(base); allIndices.push_back(base + 1); allIndices.push_back(base + 2);
@@ -754,6 +952,8 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
                 u16 base = (u16)skinVerts.size();
                 primStart.push_back(base);
                 primVertCount.push_back(3);
+                primPacketOffset.push_back(packetOffset);
+                primPacketSize.push_back(packetSizeByte);
                 skinVerts.push_back(v0); skinVerts.push_back(v1); skinVerts.push_back(v2);
                 allIndices.push_back(base); allIndices.push_back(base + 1); allIndices.push_back(base + 2);
                 }
@@ -811,11 +1011,15 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
     sd->indices = new u16[sd->numIndices];
     sd->primStart = new u32[sd->numPrims];
     sd->primVertCount = new u8[sd->numPrims];
+    sd->primPacketOffset = new u32[sd->numPrims];
+    sd->primPacketSize = new u8[sd->numPrims];
     memcpy(sd->verts, skinVerts.data(), sd->numVerts * sizeof(SkinVertex));
     memcpy(sd->indices, allIndices.data(), sd->numIndices * sizeof(u16));
     if (sd->numPrims > 0) {
         memcpy(sd->primStart, primStart.data(), sd->numPrims * sizeof(u32));
         memcpy(sd->primVertCount, primVertCount.data(), sd->numPrims * sizeof(u8));
+        memcpy(sd->primPacketOffset, primPacketOffset.data(), sd->numPrims * sizeof(u32));
+        memcpy(sd->primPacketSize, primPacketSize.data(), sd->numPrims * sizeof(u8));
     }
     original->skinData = sd;
 
