@@ -174,16 +174,18 @@ static s32 victory_perfect[28] = {
     -2146647188, 3, -2146598624, 117, 21, kHashJackie, 350, 3, -2146598496, 106,
     -2146603264, 118, 73, 76, 1, 3, -2146598436, 4
 };
-
-static s32 death[19] = {
+static s32 death[35] = {
     9, 43, 45, 73, 74, 6, -1, 6, 30,
     120, 6, 60, 98, 102, 120, 103, 256, 100,
-    0
+    0, 99, 255, 101, 9, 5, 107, 109, 6,
+    90, 98, 101, 10, 5, 25, -1, 2
 };
-static s32 death_vol[19] = {
+
+static s32 death_vol[35] = {
     9, 43, 45, 6, -1, 121, 120, 127, 6,
     -1, 73, 74, 98, 102, 120, 103, 256, 100,
-    0
+    0, 99, 255, 101, 10, 5, 107, 109, 6,
+    30, 98, 101, 10, 5, 25, -1, 2
 };
 static s32 death_fall_pavement[31] = {
     115, 0, 52, 6, 30, 43, 53, 1, 110, 10, 107, 108, 14, 6, 31, 107,
@@ -2576,7 +2578,6 @@ void Director::ProcessHumanoidFunc() {
 
             case DirectorHumanoidCmd::StandFacingZero:
                 if (humanoid) {
-                    humanoid->flags2 &= ~0x70u;
                     humanoid->SetActionState(AS_NIS_MODE, 0);
                     humanoid->flags &= ~0x800u;
                     humanoid->orientation.y = 0;
@@ -3403,6 +3404,18 @@ void DrawDirectorOverlays(Handler* h) {
     if (g_director) {
         g_director->HandleWideScreen();
         g_director->DrawWideScreenPolys();
+
+        // Overlay effects still sample PSX-style world VRAM pages. Ensure
+        // overlay rendering starts from deterministic world texture state.
+        if (p3d::context) {
+            if (g_game && g_game->GetWorld()) {
+                p3d::context->SetVRAMHandle(g_game->GetWorld()->GetVRAMHandle());
+            }
+            p3d::context->SetTexInfoOverride(false, 0);
+            p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+            p3d::context->SetCullMode(PDDI_CULL_NONE);
+        }
+
         Effects_DrawEffects(4096);
     }
 }
