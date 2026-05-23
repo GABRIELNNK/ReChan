@@ -14,6 +14,24 @@
 
 static constexpr s32 COLLECT_FLOAT_STEP = 1092;
 static constexpr s32 COLLECT_MISC_ANIM_MAX_DEPTH = 16;
+static constexpr u32 COLLECT_ENTITY_TYPE_COMPOSITE_ANIM = 0x00010001u;
+static constexpr u32 COLLECT_ENTITY_TYPE_TREE_FLIP = 0x00020003u;
+
+static u32 Collectible_GetMiscEntityType(const MiscAnimNode* node) {
+    if (!node) {
+        return 0;
+    }
+
+    if (node->compositeAnim) {
+        return COLLECT_ENTITY_TYPE_COMPOSITE_ANIM;
+    }
+
+    if (node->anim) {
+        return COLLECT_ENTITY_TYPE_TREE_FLIP;
+    }
+
+    return 0;
+}
 
 static s32 Collectible_GetMiscAnimFrameCount(MiscAnimNode* node) {
     if (!node) {
@@ -313,6 +331,51 @@ static bool Collectible_ApplyMiscAnimFrame(Collectible* collectible, MiscAnimNod
     return Collectible_ApplyMiscAnimFrameRecursive(collectible, node, frame, updateJoints, 0);
 }
 
+static bool Collectible_ShouldDriveMiscAnim(const MiscAnimNode* node) {
+    if (!node) {
+        return false;
+    }
+
+    // PSX collectible special handling branch is composite-root specific.
+    return node->compositeAnim != nullptr;
+}
+
+// PSX CreateModel branch (0x80012B18..0x80012BCC): if current collectible
+// animation root is composite, scan parts for the first tTreeFlip (0x20003)
+// and attach it to the model tree.
+static void Collectible_AttachCompositeTreeFlipPart(Collectible* collectible, MiscAnimNode* rootNode) {
+    if (!collectible || !rootNode) {
+        return;
+    }
+
+    if (Collectible_GetMiscEntityType(rootNode) != COLLECT_ENTITY_TYPE_COMPOSITE_ANIM) {
+        return;
+    }
+
+    AnimStructure* animStructure = collectible->mAnim;
+    if (!animStructure || !animStructure->flip || !animStructure->flip->tree) {
+        return;
+    }
+
+    CompositeAnimData* composite = rootNode->compositeAnim;
+    if (!composite || !composite->parts) {
+        return;
+    }
+
+    for (u32 partIndex = 0; partIndex < composite->numParts; partIndex++) {
+        CompositeAnimPartData& part = composite->parts[partIndex];
+        MiscAnimNode* partNode = Collectible_ResolveCompositePartNode(part);
+        if (!partNode || Collectible_GetMiscEntityType(partNode) != COLLECT_ENTITY_TYPE_TREE_FLIP || !partNode->anim) {
+            continue;
+        }
+
+        animStructure->animation = partNode->anim;
+        animStructure->flip->Attach(animStructure->flip->tree, partNode->anim);
+        collectible->mBoundTransformAnim = partNode->anim;
+        break;
+    }
+}
+
 Collectible::Collectible(const LVector* pos, u16 type)
     : Obstacle(pos, type) {
     MARKFUNCTION(0x80012744);
@@ -428,7 +491,9 @@ void Collectible::CreateModel(const char* name) {
                 mAnim = static_cast<AnimStructure*>(mdl->animStructure);
             }
 
-            if (mAnimB->compositeAnim) {
+            Collectible_AttachCompositeTreeFlipPart(this, mAnimB);
+
+            if (Collectible_ShouldDriveMiscAnim(mAnimB)) {
                 mCurrentFrame = 0;
                 Collectible_ApplyMiscAnimFrame(this, mAnimB, 0, true);
             }
@@ -443,6 +508,11 @@ void Collectible::CreateModel(const char* name) {
         }
 
         Thing::CreateModel(name);
+
+        Model* mdl = static_cast<Model*>(model);
+        if (mdl) {
+            mdl->modelFlags |= 5u;
+        }
     }
 
     mInitialPos = pos;
@@ -466,7 +536,7 @@ void Collectible::Think() {
         mTimer--;
     }
 
-    if (mAnimB && mAnimB->compositeAnim) {
+    if (Collectible_ShouldDriveMiscAnim(mAnimB)) {
         const s32 frameCount = Collectible_GetMiscAnimFrameCount(mAnimB);
         if (frameCount > 0 && mCurrentFrame < frameCount) {
             s32 oldFrame = mCurrentFrame;

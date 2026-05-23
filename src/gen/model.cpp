@@ -3,6 +3,8 @@
 #include "gen/animmat.h"
 #include "gen/animstruct.h"
 #include "gen/charmgr.h"
+#include "gen/camera.h"
+#include "gen/display.h"
 #include "gen/envmgr.h"
 #include "gen/geometry.h"
 #include "gen/lights.h"
@@ -78,6 +80,50 @@ static void BuildMat4FromPsxPackedMatrix(const s32* packedMatrix, Mat4& out) {
     out.m[8] = (f32)rot[6] * kInvQ12;
     out.m[9] = (f32)rot[7] * kInvQ12;
     out.m[10] = (f32)rot[8] * kInvQ12;
+}
+
+// PSX: MakeBillboardMatrix (MODEL.CPP:3199, 0x80071AF4)
+static void MakeBillboardMatrix(const LVector& pos, Mat4& out, s32 lockY) {
+    MARKFUNCTION(0x80071AF4);
+
+    if (!g_display || !g_display->GetCamera()) {
+        out = Mat4();
+        p3dFillTransMatrix(pos, out);
+        return;
+    }
+
+    const LVector& cameraPos = g_display->GetCamera()->GetPosition();
+    const Vec3 heading(
+        static_cast<f32>(cameraPos.x - pos.x),
+        (lockY == 1) ? 0.0f : static_cast<f32>(cameraPos.y - pos.y),
+        static_cast<f32>(cameraPos.z - pos.z));
+
+    const Vec3 up(0.0f, 1.0f, 0.0f);
+    out = Mat4();
+    p3dFillHeadingMatrix(heading, up, out);
+    p3dFillTransMatrix(pos, out);
+}
+
+// PSX: MakeBillboardMatrixFlip (MODEL.CPP:3230, 0x80071BCC)
+static void MakeBillboardMatrixFlip(const LVector& pos, Mat4& out, s32 lockY) {
+    MARKFUNCTION(0x80071BCC);
+
+    if (!g_display || !g_display->GetCamera()) {
+        out = Mat4();
+        p3dFillTransMatrix(pos, out);
+        return;
+    }
+
+    const LVector& cameraPos = g_display->GetCamera()->GetPosition();
+    const Vec3 heading(
+        static_cast<f32>(pos.x - cameraPos.x),
+        (lockY == 1) ? 0.0f : static_cast<f32>(pos.y - cameraPos.y),
+        static_cast<f32>(pos.z - cameraPos.z));
+
+    const Vec3 up(0.0f, 1.0f, 0.0f);
+    out = Mat4();
+    p3dFillHeadingMatrix(heading, up, out);
+    p3dFillTransMatrix(pos, out);
 }
 
 static bool BuildLitPacketScratch(const OriginalSTree* renderSource, std::vector<u8>* outPackets) {
@@ -1725,9 +1771,29 @@ void GModel::Show(u32 flags) {
 
     modelFlags |= 0x50;
 
+    const LVector modelPos = { posX, posY, posZ };
+    Mat4 billboardMatrix;
+    bool hasBillboardMatrix = false;
+    if ((modelFlags & 2u) != 0u) {
+        MakeBillboardMatrix(modelPos, billboardMatrix, 1);
+        hasBillboardMatrix = true;
+    }
+    if ((modelFlags & 4u) != 0u) {
+        MakeBillboardMatrixFlip(modelPos, billboardMatrix, 0);
+        hasBillboardMatrix = true;
+    }
+
     Mat4 world;
-    if ((modelFlags & 1u) != 0 && attachedMatrixActive != 0) {
-        BuildMat4FromPsxPackedMatrix(attachedMatrix, world);
+    if ((modelFlags & 1u) != 0u) {
+        if (hasBillboardMatrix) {
+            world = billboardMatrix;
+        }
+        else if (attachedMatrixActive != 0) {
+            BuildMat4FromPsxPackedMatrix(attachedMatrix, world);
+        }
+        else {
+            p3dBuildRotMatrixZYX(rotX, rotY, rotZ, world);
+        }
     }
     else {
         p3dBuildRotMatrixZYX(rotX, rotY, rotZ, world);
