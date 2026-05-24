@@ -14,9 +14,9 @@ public:
     s32 effectPosZ = 0;
     // PSX +132 (s32): pending particle creation flag
     s32 pendingCreate = 0;
-    // PSX +136 (s32): damage type (default 2, from attrib 6)
+    // PSX +136 (s32): hit-point damage amount (default 2, from attrib 6)
     s32 damageType = 2;
-    // PSX +140 (s32): damage value (default 3, from attrib 7)
+    // PSX +140 (s32): cooldown/reset timer value (default 3, from attrib 7)
     s32 damageValue = 3;
     // PSX +144 (s32): countdown timer (init = damageValue in Reset)
     s32 countdownTimer = 0;
@@ -34,9 +34,12 @@ public:
     void Reset() override;
     void Think() override;
     void Draw() override;
+    void UpdatePosition() override;
+    void HandlePickupCollision(Thing* pickup) override;
     void HandleHumanoidCollision(Humanoid* hum) override;
 
 private:
     s32 CreateSound();
+    s32 UpdateSound();
     s32 ReleaseSound();
 };

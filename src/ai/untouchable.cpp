@@ -2,6 +2,7 @@
 #include "gen/common.h"
 #include "gen/colvol.h"
 #include "gen/database.h"
+#include "gen/geffect.h"
 #include "gen/particle.h"
 #include "ai/humanoid.h"
 #include "ai/obstacle_shared.h"
@@ -10,6 +11,12 @@
 #include "p3d/p3dmath.h"
 #include "snd/esound.h"
 #include "snd/sndfact.h"
+
+static constexpr u32 UNTOUCHABLE_EFFECT_HASH = 0x039DD3FDu;
+
+static const LVector s_untouchableLedgeEffectScale = { 0x8000, 0x8000, 0x10000 };
+static const LVector s_untouchableLedgeEffectDirection = { 0x4000, 0, 0 };
+static const LVector s_untouchableParticleDirection = { 0x4000, 0, 0 };
 
 Untouchable::Untouchable(const LVector* pos, u16 type)
     : Obstacle(pos, type) {
@@ -21,9 +28,10 @@ Untouchable::Untouchable(const LVector* pos, u16 type)
 Untouchable::~Untouchable() {
     MARKFUNCTION(0x800A6380);
 
-    ReleaseSound();
     delete particleMgr;
     particleMgr = nullptr;
+
+    ReleaseSound();
 }
 
 void Untouchable::AnalyzeMesh(DBRoot* root) {
@@ -40,10 +48,10 @@ void Untouchable::AnalyzeMesh(DBRoot* root) {
     SetCollisionBox(localBox);
 
     const DBAttrib* attrib = root->FindAttrib(6);
-    damageType = (attrib && attrib->type == 1) ? static_cast<s32>(attrib->value) : 2;
+    damageType = attrib ? static_cast<s32>(attrib->value) : 2;
 
     attrib = root->FindAttrib(7);
-    damageValue = (attrib && attrib->type == 1) ? static_cast<s32>(attrib->value) : 3;
+    damageValue = attrib ? static_cast<s32>(attrib->value) : 3;
 
 }
 
@@ -65,9 +73,7 @@ void Untouchable::Reset() {
     countdownTimer = damageValue;
 
     if (particleMgr) {
-        particleMgr->InitMgr(ParticleSystem_Find(60675069));
-        particleMgr->PurgeParticles();
-        particleMgr->ResetParticleDirection();
+        particleMgr->InitMgr(ParticleSystem_Find(UNTOUCHABLE_EFFECT_HASH));
     }
 
     ReleaseSound();
@@ -85,63 +91,87 @@ void Untouchable::Think() {
         return;
     }
 
-    if (particleMgr) {
-        if (pendingCreate) {
-            const LVector origin = { 0, 0, 0 };
-            particleMgr->CreateParticles(origin, nullptr);
-            pendingCreate = 0;
-        }
+    if (pendingCreate) {
+        const LVector origin = { 0, 0, 0 };
+        particleMgr->CreateParticles(origin, nullptr);
+        pendingCreate = 0;
+    }
 
-        particleMgr->Update();
-        if (soundPtr) {
-            soundPtr->StartAnimating();
-        }
+    particleMgr->Update();
+    UpdateSound();
 
-        if (!particleMgr->ActiveParticles()) {
-            field148 = 0;
-            particleMgr->PurgeParticles();
-            particleMgr->ResetParticleDirection();
-            ReleaseSound();
-        }
+    if (!particleMgr->ActiveParticles()) {
+        field148 = 0;
+        particleMgr->PurgeParticles();
+        particleMgr->ResetParticleDirection();
+        ReleaseSound();
     }
 }
 
 void Untouchable::Draw() {
     MARKFUNCTION(0x800A6604);
 
-    if (!field148 || !particleMgr || !p3d::context) {
+    if (!field148) {
         return;
     }
 
     const Mat4 savedWorld = p3d::context->GetWorldMatrix();
-    Mat4 world;
+    Mat4 effectWorld;
     LVector effectPos = { effectPosX, effectPosY, effectPosZ };
-    p3dBuildTransMatrix(effectPos.x, effectPos.y, effectPos.z, world);
-    p3d::context->SetWorldMatrix(world);
+    p3dBuildTransMatrix(effectPos.x, effectPos.y, effectPos.z, effectWorld);
+    p3d::context->SetWorldMatrix(savedWorld * effectWorld);
     particleMgr->Display();
     p3d::context->SetWorldMatrix(savedWorld);
+}
+
+void Untouchable::UpdatePosition() {
+    MARKFUNCTION(0x800A6684);
+}
+
+void Untouchable::HandlePickupCollision(Thing* pickup) {
+    MARKFUNCTION(0x800A668C);
+    (void)pickup;
 }
 
 void Untouchable::HandleHumanoidCollision(Humanoid* hum) {
     MARKFUNCTION(0x800A6694);
 
-    if (!hum || !particleMgr) {
+    if (!hum) {
         return;
     }
 
     switch (hum->actionState) {
+        case AS_LEDGE_LATCH:
+            hum->field368 |= 8u;
+            GEffect_Create(
+                UNTOUCHABLE_EFFECT_HASH,
+                &hum->pos,
+                &s_untouchableLedgeEffectScale,
+                &s_untouchableLedgeEffectDirection,
+                0,
+                5,
+                0);
+            hum->HandleCollisionSound(18);
+            hum->SubtractHitPoints(static_cast<u16>(damageType));
+            if (hum->health == 0) {
+                hum->SetActionState(AS_DEAD, 0);
+            }
+            hum->LetGoOfLedge();
+            break;
         case 24:
         case 65:
         case 68:
-        case 72:
+        case AS_DEAD:
             return;
-        case 30:
-            hum->combatFlag |= 8u;
-            if (countdownTimer <= 0) {
-                hum->SubtractHitPoints(static_cast<u16>(damageValue));
-                if (!hum->field344) {
-                    hum->LoadDialog(0x39, 0x40000100);
-                    hum->SetActionState(72, 0);
+        case AS_HOTFOOT:
+            hum->field368 |= 8u;
+            if (countdownTimer == 0) {
+                hum->SubtractHitPoints(static_cast<u16>(damageType));
+                if (hum->health == 0) {
+                    if (hum->thingType == 0) {
+                        hum->LoadDialog(0x39, 0x40000100);
+                    }
+                    hum->SetActionState(AS_DEAD, 0);
                 }
             }
 
@@ -149,26 +179,20 @@ void Untouchable::HandleHumanoidCollision(Humanoid* hum) {
             effectPosX = hum->pos.x;
             effectPosY = hum->pos.y;
             effectPosZ = hum->pos.z;
-            pos = hum->pos;
             break;
         default:
-            if (((hum->field368 >> 12) & 1) != 0) {
-                if (countdownTimer <= 0) {
-                    hum->SubtractHitPoints(static_cast<u16>(damageValue));
+            if ((hum->flags & TF_ON_GROUND) != 0) {
+                if (countdownTimer == 0) {
+                    hum->SubtractHitPoints(static_cast<u16>(damageType));
                 }
 
-                hum->SetActionState(30, 0);
-                hum->combatFlag |= 8u;
+                hum->SetActionState(AS_HOTFOOT, 0);
+                hum->field368 |= 8u;
 
                 effectPosX = hum->pos.x;
                 effectPosY = hum->pos.y;
                 effectPosZ = hum->pos.z;
-                pos = hum->pos;
-
-                LVector direction = { 0x4000, 0, 0 };
-                particleMgr->SetParticleDirection(&direction);
-
-                pendingCreate = 1;
+                particleMgr->SetParticleDirection(&s_untouchableParticleDirection);
                 field148 = 1;
 
                 CreateSound();
@@ -180,26 +204,42 @@ void Untouchable::HandleHumanoidCollision(Humanoid* hum) {
 s32 Untouchable::CreateSound() {
     MARKFUNCTION(0x800A68FC);
 
-    if (soundPtr || !particleMgr) {
-        return 0;
+    if (soundPtr) {
+        return static_cast<s32>(reinterpret_cast<uintptr_t>(soundPtr));
+    }
+
+    u32 soundHash = 0;
+    if (particleMgr) {
+        soundHash = particleMgr->GetSystemHash();
     }
 
     CSound* created = nullptr;
-    const s32 result = CSoundFactory::CreateObject(10000, &created, 60675069);
+    const s32 result = CSoundFactory::CreateObject(10000, &created, soundHash);
     if (result < 0 || !created) {
         return result;
     }
 
     soundPtr = static_cast<CParticleEffectSound*>(created);
-    return soundPtr->Initialize(&pos);
+    return soundPtr->Initialize(reinterpret_cast<const LVector*>(&effectPosX));
+}
+
+s32 Untouchable::UpdateSound() {
+    MARKFUNCTION(0x800A695C);
+
+    if (soundPtr) {
+        return soundPtr->StartAnimating();
+    }
+
+    return 0;
 }
 
 s32 Untouchable::ReleaseSound() {
+    MARKFUNCTION(0x800A698C);
+
     if (!soundPtr) {
         return 0;
     }
 
-    soundPtr->StopAnimating();
     soundPtr->Release();
     soundPtr = nullptr;
     return 0;

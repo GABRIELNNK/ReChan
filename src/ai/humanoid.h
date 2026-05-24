@@ -43,6 +43,7 @@ enum ActionState : u32 {
     AS_LADDER_CLIMB_UP = 26,   // PSX 0x1A: climbing up on ladder (entered from bottom)
     AS_LADDER_CLIMBING = 27,   // PSX 0x1B: active ladder climbing / position adjustment
     AS_LADDER_DISMOUNT = 28,  // PSX: exit ladder (jump off)
+    AS_HOTFOOT = 30,          // PSX case 30: feet-on-fire movement state
     AS_PUNCH_ATTACK = 32,
     AS_KICK_ATTACK = 34,
     AS_COMBAT_IDLE = 36,
@@ -98,6 +99,7 @@ enum StateDispatch : u16 {
     SD_GOT_HIT_MED = 31,
     SD_GOT_HIT_LOW = 32,
     SD_WALLJUMP = 33,
+    // PSX vtable slot 34 dispatches to _Hotfoot__8Humanoid.
     SD_COLLAPSE = 34,
     SD_DEAD = 35,
     SD_SPIN_BACK = 36,

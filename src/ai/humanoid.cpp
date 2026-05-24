@@ -2413,6 +2413,20 @@ void Humanoid::SetActionState(u32 state, s32 param) {
                 m->SetAnim(0x126, 0, 0, 0);
             }
             break;
+        case AS_HOTFOOT:
+            // PSX case 30: player-only hotfoot VO, anim 43, dispatch slot 34 (_Hotfoot).
+            if (thingType == AITypes::TT_PLAYER) {
+                LoadDialog(0x5B, 0x3C);
+                PlayDialog(0x5B, 0x1E);
+            }
+            field344 = 0;
+            stateDispatch = SD_COLLAPSE;
+            field348 = 8;
+            if (model) {
+                Model* m = static_cast<Model*>(model);
+                m->SetAnim(43, param, 0, 0);
+            }
+            break;
         case AS_SLOPE_SLIDE:       
             stateDispatch = SD_SLOPE_SLIDE; 
             break;
@@ -2878,7 +2892,7 @@ void Humanoid::ProcessAction() {
         case SD_GOT_HIT_HIGH: _GotHitHigh(); break;
         case SD_GOT_HIT_MED:  _GotHitMed(); break;
         case SD_GOT_HIT_LOW:  _GotHitLow(); break;
-        case SD_COLLAPSE:     _Collapse(); break;
+        case SD_COLLAPSE:     _Hotfoot(); break;
         case SD_COLLAPSE_RECOVER: _Collapse(); break;
         case SD_DEAD:         _Dead(); break;
         case SD_KILLED:       Killed(); break;
