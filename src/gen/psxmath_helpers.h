@@ -136,7 +136,13 @@ inline s32 PsxAbsDiffS32(s32 a, s32 b) {
 }
 
 inline s32 PsxClipAngle360(s32 angle) {
-    return angle & 0xFFFF;
+    while (angle > 0xFFFF) {
+        angle -= 0xFFFF;
+    }
+    while (angle < 0) {
+        angle += 0xFFFF;
+    }
+    return angle;
 }
 
 inline s32 PsxAngleDelta16(s32 current, s32 previous) {

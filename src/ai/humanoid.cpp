@@ -4164,8 +4164,8 @@ void Humanoid::_Straif() {
         // PSX: movement force uses captured faceAngle direction
         AddForce(moveSpeed, &dir);
 
-        // PSX: ClipAngle360 = mask to 16-bit unsigned [0, 65535]
-        s32 angleDiff = (s32)((u32)(savedOrientY - savedFaceAngle) & 0xFFFFu);
+        // PSX: ClipAngle360 wraps by +/-0xFFFF (not a 0x10000 bitmask).
+        s32 angleDiff = GetRelativeAngle(savedOrientY, savedFaceAngle);
 
         // PSX: select strafe animation based on clipped angle ranges
         s32 animIndex;

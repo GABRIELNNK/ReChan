@@ -2711,7 +2711,7 @@ void Behaviour::NDMS(Behaviour* b) {
 
     s32 decision = b->ndmsDecision;
     const s32 distanceToPlayer = owner->DistanceFromPoint(player->pos);
-    const s32 facingDelta = (s32)((u32)(owner->orientation.y - player->orientation.y) & 0xFFFFu);
+    const s32 facingDelta = PsxClipAngle360(owner->orientation.y - player->orientation.y);
     const bool facingAway = (u32)(facingDelta - 0x2AAA) > 0xAAABu;
 
     if (distanceToPlayer > NDMS_FAR_DIST_THRESHOLD) {
@@ -3433,7 +3433,7 @@ void Behaviour::SubwayDodgeRight(Behaviour* b) {
         return;
     }
 
-    const s32 facingCheck = (s32)((u32)(issuer->orientation.y + 0x8000 - b->owner->orientation.y) & 0xFFFFu);
+    const s32 facingCheck = PsxClipAngle360(issuer->orientation.y + 0x8000 - b->owner->orientation.y);
     if ((u32)(facingCheck - 0x4000) <= 0x8000u) {
         b->handlerThisOffset = 0;
         b->handlerDispatch = -1;
@@ -3495,7 +3495,7 @@ void Behaviour::SubwayDodgeLeft(Behaviour* b) {
         return;
     }
 
-    const s32 facingCheck = (s32)((u32)(issuer->orientation.y + 0x8000 - b->owner->orientation.y) & 0xFFFFu);
+    const s32 facingCheck = PsxClipAngle360(issuer->orientation.y + 0x8000 - b->owner->orientation.y);
     if ((u32)(facingCheck - 0x4000) <= 0x8000u) {
         b->handlerThisOffset = 0;
         b->handlerDispatch = -1;
@@ -3557,7 +3557,7 @@ void Behaviour::SubwayDodgeJump(Behaviour* b) {
         return;
     }
 
-    const s32 facingCheck = (s32)((u32)(issuer->orientation.y + 0x8000 - b->owner->orientation.y) & 0xFFFFu);
+    const s32 facingCheck = PsxClipAngle360(issuer->orientation.y + 0x8000 - b->owner->orientation.y);
     if ((u32)(facingCheck - 9102) <= 0xB8E3u) {
         b->handlerThisOffset = 0;
         b->handlerDispatch = -1;
