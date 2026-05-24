@@ -100,13 +100,22 @@ static const char* ResolveLocationSpecialTitle(s32 levelIndex) {
 
 static const char* GradeToLetter(u8 grade) {
     switch (grade) {
-        case 5: return "A";
-        case 4: return "B";
-        case 3: return "C";
-        case 2: return "D";
-        case 1: return "E";
-        default: return " ";
+        case 1:
+            return "D";
+        case 2: 
+            return "C";
+        case 3:
+            return "B";
+        case 4: 
+            return "A";
+        default: 
+            if (grade >= 5) {
+                return "A+";
+            }      
+            break;
     }
+
+    return " ";
 }
 
 static bool ResolveLocationRuntimeInfo(LocationRuntimeInfo* outInfo) {
@@ -3201,7 +3210,7 @@ void feCustomMenuMgr::RenderLocationPage() const {
     const s32 gradeBoxX = labelX + 12;
     const s32 gradeBoxW = 64;
     const s32 gradeBoxH = 18;
-    const s32 goldIconX = gradeBoxX + gradeBoxW + 4;
+    const s32 goldIconX = gradeBoxX + gradeBoxW + 12;
     const s32 goldIconY = gradeTopY;
 
     // Red separator lines
@@ -3228,7 +3237,7 @@ void feCustomMenuMgr::RenderLocationPage() const {
         const f32 cx = SCALE_AND_CENTER_X((f32)(gradeBoxX + gradeBoxW / 2));
         const f32 cy = SCREEN_SCALE_Y((f32)(gradeTopY + 8));
         g_textManager->SetAlignment(TextAlign_Center);
-        g_textManager->SetColor(DEF_TEXT_NORM_R, DEF_TEXT_NORM_G, DEF_TEXT_NORM_B);
+        g_textManager->SetColor(DEF_TITLE_TEXT_R, DEF_TITLE_TEXT_G, DEF_TITLE_TEXT_B);
         g_textManager->PrintString(text, cx, cy);
     }
 
