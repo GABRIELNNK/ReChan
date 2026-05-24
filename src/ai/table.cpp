@@ -6,8 +6,27 @@
 #include "gen/levelmgr.h"
 #include "gen/colsect.h"
 #include "gen/colvol.h"
+#include "gen/fxp.h"
+#include "gen/geffect.h"
+#include "gen/scoremgr.h"
 #include "p3d/p3dmath.h"
 #include "p3d/hash.h"
+#include "snd/snddrct.h"
+
+static constexpr s32 COLLISION_TAG_IMPACT_REGION = static_cast<s32>(0x80000002u);
+static constexpr s32 COLLISION_TAG_HIT_TYPE = static_cast<s32>(0x80000003u);
+static constexpr s32 COLLISION_TAG_FORCE = static_cast<s32>(0x80000005u);
+static constexpr s32 COLLISION_TAG_DAMAGE = static_cast<s32>(0x80000007u);
+static constexpr s32 COLLISION_TAG_END = 0;
+
+static constexpr s32 DYNAMIC_OBSTACLE_INTERACTION_FIELD = 5461;
+static constexpr s32 DYNAMIC_OBSTACLE_INTERACTION_VEL_Y_MIN = 21;
+static constexpr s32 DYNAMIC_OBSTACLE_INTERACTION_FORCE = 10000;
+static constexpr s32 DYNAMIC_OBSTACLE_INTERACTION_HIT_TYPE = 17;
+static constexpr s32 DYNAMIC_OBSTACLE_INTERACTION_DAMAGE = 50;
+static constexpr s32 DYNAMIC_OBSTACLE_INTERACTION_FORCE_SCALE = 1000;
+static constexpr s32 DYNAMIC_OBSTACLE_INTERACTION_IMPACT_REGION = 4;
+static constexpr s32 DYNAMIC_OBSTACLE_INTERACTION_TOP_Y_BIAS = 100;
 
 static s32 Fixed16HighToS32(s32 value) {
     return (s32)(s16)((u32)value >> 16);
@@ -16,6 +35,7 @@ static s32 Fixed16HighToS32(s32 value) {
 DynamicObstacle::DynamicObstacle(const LVector* pos, u16 type)
     : Obstacle(pos, type) {
     MARKFUNCTION(0x80013F24);
+    field168 = -10;
     effectHash = 0;
     aliveFlag = 1;
 }
@@ -66,6 +86,8 @@ void DynamicObstacle::DeleteModel() {
 
 void DynamicObstacle::Reset() {
     MARKFUNCTION(0x80014148);
+    aliveFlag = 1;
+    kickFlag = 0;
 }
 
 void DynamicObstacle::Think() {
@@ -139,10 +161,51 @@ void DynamicObstacle::Draw() {
 
 void DynamicObstacle::AddForce(s32 damage, const LVector* matrix) {
     MARKFUNCTION(0x800144B4);
+
+    if (!matrix) {
+        return;
+    }
+
+    Mat4 rotMatrix;
+    // PSX reads these as s16 lanes from a packed RMVECT16 pointer
+    // (a3[0], a3[2], a3[4]), i.e. low 16 bits of x/y/z.
+    const u16 rotX = static_cast<u16>(matrix->x & 0xFFFF);
+    const u16 rotY = static_cast<u16>(matrix->y & 0xFFFF);
+    const u16 rotZ = static_cast<u16>(matrix->z & 0xFFFF);
+    p3dBuildRotMatrixZYX(rotX, rotY, rotZ, rotMatrix);
+
+    const Vec3 rotated = p3dVecTimesRotMatrix(Vec3(0.0f, 0.0f, (f32)damage), rotMatrix);
+    forceX += (s32)rotated.x;
+    forceY += (s32)rotated.y;
+    forceZ += (s32)rotated.z;
 }
 
 void DynamicObstacle::AddMomentVector(const LVector& matrix, const LVector& contactPos) {
     MARKFUNCTION(0x8001456C);
+
+    LVector relative = {};
+    relative.x = contactPos.x - pos.x;
+    relative.y = contactPos.y - pos.y;
+    relative.z = contactPos.z - pos.z;
+
+    const s32 absX = (relative.x < 0) ? -relative.x : relative.x;
+    const s32 absZ = (relative.z < 0) ? -relative.z : relative.z;
+
+    LVector projected = {};
+    if (absX >= absZ) {
+        projected.x = (s32)((u32)relative.x << 16);
+    }
+    else {
+        projected.z = (s32)((u32)relative.z << 16);
+    }
+
+    momentX = (s32)(((s64)projected.y * (s64)matrix.z - (s64)projected.z * (s64)matrix.y) >> 16);
+    momentY = (s32)(((s64)projected.z * (s64)matrix.x - (s64)projected.x * (s64)matrix.z) >> 16);
+    momentZ = (s32)(((s64)projected.x * (s64)matrix.y - (s64)projected.y * (s64)matrix.x) >> 16);
+
+    angVelX = (s32)((6553LL * (s64)momentX) >> 16);
+    angVelY = (s32)((6553LL * (s64)momentY) >> 16);
+    angVelZ = (s32)((6553LL * (s64)momentZ) >> 16);
 }
 
 void DynamicObstacle::MovePassengers() {
@@ -152,6 +215,17 @@ void DynamicObstacle::MovePassengers() {
 
 void DynamicObstacle::Throw(s32 a, s32 b, const LVector& matrix, const LVector& contactPos) {
     MARKFUNCTION(0x80014758);
+
+    LVector impulse = {};
+    impulse.y += b;
+
+    AddForce(a, &matrix);
+
+    forceX += impulse.x;
+    forceY += impulse.y;
+    forceZ += impulse.z;
+
+    AddMomentVector(impulse, contactPos);
 }
 
 void DynamicObstacle::UpdatePosition() {
@@ -164,14 +238,111 @@ void DynamicObstacle::HandlePickupCollision(Thing* pickup) {
 
 void DynamicObstacle::HandleHumanoidCollision(Humanoid* hum) {
     MARKFUNCTION(0x80014828);
+
+    LVector correctedPos = {};
+    LVector correctionNormal = {};
+    LVector correctionPushedPos = {};
+
+    const bool corrected = CorrectThingPositionObstacle(
+        pos,
+        pos,
+        orientation.y,
+        orientation.y,
+        collBox,
+        hum->pos,
+        hum->homePos,
+        hum->collBboxMin.x,
+        hum->collBboxMin.y,
+        hum->collBboxMin.z,
+        correctedPos,
+        correctionNormal,
+        correctionPushedPos);
+
+    if (corrected && hum->velocity.y <= 0) {
+        hum->SetFloorHeight(pos.y + static_cast<s32>(collBox.maxY));
+        HandleObjectInterAction(hum);
+    }
+
+    hum->homePos = correctedPos;
 }
 
 void DynamicObstacle::HandleObjectInterAction(Humanoid* hum) {
     MARKFUNCTION(0x80014934);
+
+    const s32 inField = IsPointInFieldOf(
+        pos,
+        hum->pos,
+        hum->orientation.y,
+        DYNAMIC_OBSTACLE_INTERACTION_FIELD,
+        DYNAMIC_OBSTACLE_INTERACTION_FIELD);
+
+    s32 absVelY = linVelY;
+    if (absVelY < 0) {
+        absVelY = -absVelY;
+    }
+
+    if (absVelY >= DYNAMIC_OBSTACLE_INTERACTION_VEL_Y_MIN) {
+        if (lastHumanoid != hum) {
+            hum->HandleCollision(
+                this,
+                1,
+                COLLISION_TAG_IMPACT_REGION,
+                DYNAMIC_OBSTACLE_INTERACTION_IMPACT_REGION,
+                COLLISION_TAG_FORCE,
+                DYNAMIC_OBSTACLE_INTERACTION_FORCE,
+                COLLISION_TAG_HIT_TYPE,
+                DYNAMIC_OBSTACLE_INTERACTION_HIT_TYPE,
+                COLLISION_TAG_DAMAGE,
+                DYNAMIC_OBSTACLE_INTERACTION_DAMAGE,
+                COLLISION_TAG_END);
+
+            if (hum->thingType != 0 && g_scoreManager) {
+                g_scoreManager->AddStylePoints(100);
+            }
+
+            hum->contactForce.x += static_cast<s32>((static_cast<s64>(DYNAMIC_OBSTACLE_INTERACTION_FORCE_SCALE) * linVelX) >> 16);
+            hum->contactForce.y += static_cast<s32>((static_cast<s64>(DYNAMIC_OBSTACLE_INTERACTION_FORCE_SCALE) * linVelY) >> 16);
+            hum->contactForce.z += static_cast<s32>((static_cast<s64>(DYNAMIC_OBSTACLE_INTERACTION_FORCE_SCALE) * linVelZ) >> 16);
+
+            if (kickFlag) {
+                Destroy();
+                return;
+            }
+        }
+        return;
+    }
+
+    s32 canEnterPush = 0;
+    if ((((hum->commandBits >> 7) & 1) != 0 || ((hum->commandBits >> 15) & 1) != 0)
+        && hum->actionState != AS_PUSH
+        && hum->pos.y < pos.y + static_cast<s32>(collBox.maxY) - DYNAMIC_OBSTACLE_INTERACTION_TOP_Y_BIAS) {
+        canEnterPush = 1;
+    }
+
+    if (canEnterPush != 0 && inField != 0) {
+        lastHumanoid = hum;
+        hum->field496 = this;
+        hum->SetActionState(AS_PUSH, 0);
+        kickFlag = 1;
+    }
 }
 
 void DynamicObstacle::Destroy() {
     MARKFUNCTION(0x80014BF8);
+
+    if (!aliveFlag) {
+        return;
+    }
+
+    if (effectHash) {
+        GEffect_Create(effectHash, &pos, nullptr, nullptr, 0, 0, effectParam);
+    }
+
+    CSoundDirect::PlayTransient(177, &pos, 0, 0);
+
+    SetCollisionBox(INVALID_COLLISION_BOX);
+    aliveFlag = 0;
+    health = 0;
 }
 
 void DynamicObstacle::HandleAttack(Humanoid* attacker, s32 damageType, s32 damage) {

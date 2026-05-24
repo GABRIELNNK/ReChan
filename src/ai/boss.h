@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ai/humanoid.h"
+#include "gen/path.h"
 
 class Boss : public Humanoid {
 public:
@@ -45,7 +46,6 @@ public:
     s32 GetTargetingFrame(const PsxFightingMoveRaw* move) const override;
 };
 
-struct LinearPath;
 class Trails;
 
 class Dante : public Boss {

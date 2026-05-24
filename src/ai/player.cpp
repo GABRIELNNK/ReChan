@@ -787,8 +787,11 @@ void Player::SetActionState(u32 state, s32 param) {
             u32 f2 = (u32)flags2;
             if (((f2 >> 4) & 1) == 0 || (((f2 >> 5) & 1) != 0 && ((f2 >> 6) & 1) != 0)) {
                 flags2 = (flags2 & ~0x70) | 0x10;
+                field516 = 0;
+                field520 = 0;
+                field524 = 0;
             }
-            // PSX: model->SetAnim(86, ...) - start table roll animation
+            // PSX: model->SetAnim(PLAYER_ANIM_TABLE_ROLL, ...) - start table roll animation
             if (model) {
                 Model* m = static_cast<Model*>(model);
                 m->SetAnim(PLAYER_ANIM_TABLE_ROLL, 0, 0, 0);
@@ -803,11 +806,9 @@ void Player::SetActionState(u32 state, s32 param) {
         }
         case AS_PUSH:
         {
-            // PSX case 22: direct Push handler. This is a lightweight state swap
-            // that preserves the current push presentation while switching logic.
-            field344 = 0;
-            stateDispatch = SD_PUSH;
-            actionState = (s32)state;
+            // PSX: Player state 22 is configured by Humanoid::SetActionState
+            // and routes to Humanoid::_TableThrow.
+            Humanoid::SetActionState(state, param);
             return;
         }
         case AS_LEDGE_LATCH:
@@ -992,7 +993,7 @@ void Player::ProcessAction() {
         case SD_HARDLAND:      _HardLand(); return;
         case SD_FLIP:          _Flip(); return;
         case SD_INACTIVE_IDLE: _InactiveIdle(); return;
-        case SD_PUSH:          _Push(); return;
+        case SD_PUSH:          Humanoid::_TableThrow(); return;
         case SD_PUSH_OBJECT:   _PushObject(); return;
         case SD_TABLE_ROLL:    _TableRoll(); return;
         case SD_DO_STAND:      _DoStand(); return;
@@ -2875,7 +2876,7 @@ void Player::_ClimbLadder() {
     Humanoid::_ClimbLadder();
 }
 
-// PSX: _TableRoll__6Player (PLAYER.CPP:4700, 0x80033DF8)
+// PSX: _TableRoll__6Player (PLAYER.CPP:4509, 0x80033DF8)
 // Handles rolling across a table surface. Applies small forward force
 // during early frames, checks for end of surface, transitions to stand.
 void Player::_TableRoll() {
@@ -2894,11 +2895,10 @@ void Player::_TableRoll() {
 
     if (anim->animEnum == PLAYER_ANIM_TABLE_ROLL) {
         if (frame < 5) {
-            SVector dir;
+            SVector dir = {};
             dir.x = (s16)(orientation.x & 0xFFFF);
-            dir.y = (s16)((orientation.x >> 16) & 0xFFFF);
             dir.z = (s16)(orientation.y & 0xFFFF);
-            dir.pad = (s16)((orientation.y >> 16) & 0xFFFF);
+            dir.pad = (s16)(orientation.z & 0xFFFF);
             AddForce(20, &dir);
             maxFallDivisor = 0;
         }
@@ -2919,7 +2919,7 @@ void Player::_TableRoll() {
                     floorDiff = -floorDiff;
                 }
                 if (floorDiff < 151) {
-                    m->ApplyAnimToModel(0, PLAYER_ANIM_TABLE_ROLL_END, ANIM_LOOP, 0, 0);
+                    m->SetAnim(PLAYER_ANIM_TABLE_ROLL_END, 0, 0, 0);
                 }
             }
         }

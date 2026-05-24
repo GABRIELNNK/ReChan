@@ -32,7 +32,6 @@
 #include "snd/sndfact.h"
 #include "pc/log.h"
 
-
 static ComEffect* g_wEffectComEffects[64] = {};
 static ComEffect* g_wEffectOwnedEffects[64] = {};
 static s32 g_wEffectComEffectCount = 0;
@@ -3224,12 +3223,15 @@ void ComEffect::FastZSortDisplayGCT3(u32 primCount) {
         return;
     }
 
-    std::sort(
-        sortedTris.begin(),
-        sortedTris.begin() + sortedTriCount,
-        [](const FastSortedTri& lhs, const FastSortedTri& rhs) {
-            return lhs.depth > rhs.depth;
-        });
+    for (u32 i = 1u; i < sortedTriCount; i++) {
+        const FastSortedTri key = sortedTris[i];
+        u32 j = i;
+        while (j > 0u && sortedTris[j - 1u].depth < key.depth) {
+            sortedTris[j] = sortedTris[j - 1u];
+            j--;
+        }
+        sortedTris[j] = key;
+    }
 
     static const u16 kTriIndices[3] = { 1, 2, 0 };
     const u32 format = PDDI_V_POSITION | PDDI_V_COLOUR | PDDI_V_UV | PDDI_V_TEXINFO;
@@ -3385,12 +3387,15 @@ void ComEffect::FastZSortDisplayGCT4(u32 primCount) {
         return;
     }
 
-    std::sort(
-        sortedQuads.begin(),
-        sortedQuads.begin() + sortedQuadCount,
-        [](const FastSortedQuad& lhs, const FastSortedQuad& rhs) {
-            return lhs.depth > rhs.depth;
-        });
+    for (u32 i = 1u; i < sortedQuadCount; i++) {
+        const FastSortedQuad key = sortedQuads[i];
+        u32 j = i;
+        while (j > 0u && sortedQuads[j - 1u].depth < key.depth) {
+            sortedQuads[j] = sortedQuads[j - 1u];
+            j--;
+        }
+        sortedQuads[j] = key;
+    }
 
     static const u16 kQuadIndices[6] = { 3, 2, 1, 2, 0, 1 };
     const u32 format = PDDI_V_POSITION | PDDI_V_COLOUR | PDDI_V_UV | PDDI_V_TEXINFO;

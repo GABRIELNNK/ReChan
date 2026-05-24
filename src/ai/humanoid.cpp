@@ -5,6 +5,7 @@
 #include "ai/obstacle.h"
 #include "ai/pickup.h"
 #include "ai/player.h"
+#include "ai/table.h"
 #include "ai/colfight.h"
 #include "gen/common.h"
 #include "gen/database.h"
@@ -78,6 +79,8 @@ static constexpr s32 BACK_GRAB_ATTACH_Z = 0x1C2;
 // PSX gp+0x738 (0x800DD084), passed as Pickup::Release forceMag in _Throw directional release.
 // Symbol dump labels this as THROW_PROJECTILE_VELOCITY with default value 0x59D8.
 static s32 s_throwPickupReleaseForce = 0x59D8;
+// PSX gp+0x73C (0x800DD088), release-frame threshold for _TableThrow.
+static s32 s_tableThrowReleaseFrame = 0xD;
 static u32 s_humanoidSuitTraceBudget = 64;
 static constexpr s32 DROP_PICKUP_DAMAGE_THRESHOLD = 14;
 static constexpr s32 BACK_GRAB_MIN_RELATIVE_ANGLE = 5461;
@@ -2328,6 +2331,20 @@ void Humanoid::SetActionState(u32 state, s32 param) {
             }
             field488 = 0;
             break;
+        case AS_PUSH:
+            // PSX case 22: direct callback TableThrow__8Humanoid.
+            if (this == static_cast<Humanoid*>(Player::s_player)) {
+                LoadDialog(83, 0x33);
+            }
+            flags2 |= 0x0001u;
+            field344 = 0;
+            stateDispatch = SD_PUSH;
+            field348 = 8;
+            if (model) {
+                Model* m = static_cast<Model*>(model);
+                m->SetAnim(0x58, param, 0, 0);
+            }
+            break;
         case AS_LEDGE_LATCH:
             field344 = 0;
             stateDispatch = SD_LEDGE_LATCH;
@@ -2869,6 +2886,7 @@ void Humanoid::ProcessAction() {
         case SD_FLYING_BACK:  _FlyingBack(); break;
         case SD_FLOATING:     _Floating(); break;
         case SD_STUNNED:      _Stunned(); break;
+        case SD_PUSH:         _TableThrow(); break;
         case SD_GET_UP:       _CrouchUp(); break;
         case SD_THROW:        _Throw(); break;
         case SD_BUTCH_STOMP:
@@ -4843,6 +4861,57 @@ void Humanoid::_NISMode() {
     if (model) {
         HumanoidModel* humanoidModel = static_cast<HumanoidModel*>(model);
         humanoidModel->field116 = 0;
+    }
+}
+
+// PSX: _TableThrow__8Humanoid (HUMANOID.CPP:5061, 0x80068718)
+// Faces target during startup frames, releases table/chair at frame threshold,
+// then returns to stand when the throw animation loops.
+void Humanoid::_TableThrow() {
+    MARKFUNCTION(0x80068718);
+
+    if (!model) {
+        return;
+    }
+    Model* m = static_cast<Model*>(model);
+    AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
+    if (!anim) {
+        return;
+    }
+
+    s16 frame = (s16)((u32)anim->currentFrame >> 16);
+
+    // PSX: face target during first 6 frames.
+    if (frame < 6 && field256 != 0) {
+        Thing* target = reinterpret_cast<Thing*>(field256);
+        FaceThing(target, 1);
+    }
+
+    if (frame >= static_cast<s16>(s_tableThrowReleaseFrame) && (flags2 & 0x0001u) != 0) {
+        if (field496) {
+            LVector throwOrientation = {};
+            throwOrientation.y = orientation.y;
+
+            switch (field496->thingType) {
+                case AITypes::TT_TABLE:
+                    static_cast<Table*>(field496)->Throw(60, 140, throwOrientation, pos);
+                    break;
+                case AITypes::TT_CHAIR:
+                    static_cast<Chair*>(field496)->Throw(60, 140, throwOrientation, pos);
+                    break;
+                default:
+                    break;
+            }
+            field496 = nullptr;
+        }
+
+        if (this == static_cast<Humanoid*>(Player::s_player)) {
+            PlayDialog(83, 10);
+        }
+    }
+
+    if (anim->loopCount > 0) {
+        SetActionState(AS_STAND, 0);
     }
 }
 

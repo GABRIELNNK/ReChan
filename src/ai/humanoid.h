@@ -519,6 +519,7 @@ public:
     virtual void _FlyingBack();
     virtual void _Floating();
     virtual void _Stunned();
+    virtual void _TableThrow();
     virtual void _Throw();
     virtual void _Pickup();
     virtual void _LedgeLatch();
