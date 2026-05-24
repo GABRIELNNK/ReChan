@@ -32,9 +32,6 @@ static const u8 kStreeMirrorSwapPairs[] = {
 };
 
 static std::vector<const OriginalSTree*> s_liveOriginalSTrees;
-static u32 s_streePacketLitTraceBudget = 24;
-static u32 s_streeShowLightTraceBudget = 16;
-static u32 s_streeSuitTraceBudget = 96;
 
 static void RegisterLiveOriginalSTree(const OriginalSTree* tree) {
     if (!tree) {
@@ -61,6 +58,70 @@ static bool IsLiveOriginalSTree(const OriginalSTree* tree) {
     }
 
     return std::find(s_liveOriginalSTrees.begin(), s_liveOriginalSTrees.end(), tree) != s_liveOriginalSTrees.end();
+}
+
+// PSX: SetSemiMode__13OriginalSTreei (MODEL.CPP:3459, 0x8007205C)
+static s32 SetSemiMode__13OriginalSTreei(OriginalSTree* original, s32 mode) {
+    MARKFUNCTION(0x8007205C);
+
+    if (!original) {
+        return 0;
+    }
+
+    if (original->skinData) {
+        original->skinData->usesSemiTrans = (mode != 0);
+    }
+
+    tPrimGeom* primGeom = original->primGeom;
+    if (!primGeom
+        || !primGeom->ownedRawData
+        || !primGeom->ownedRawSize
+        || !primGeom->primList
+        || !primGeom->loopPrimData
+        || primGeom->numLoops == 0) {
+        return 0;
+    }
+
+    if (primGeom->primList < primGeom->ownedRawData
+        || primGeom->loopPrimData < primGeom->ownedRawData) {
+        return 0;
+    }
+
+    const u32 primStartOffset = static_cast<u32>(primGeom->primList - primGeom->ownedRawData);
+    const u32 loopPrimOffset = static_cast<u32>(primGeom->loopPrimData - primGeom->ownedRawData);
+    if (primStartOffset >= primGeom->ownedRawSize
+        || loopPrimOffset >= primGeom->ownedRawSize
+        || (loopPrimOffset + static_cast<u32>(primGeom->numLoops) * 8u) > primGeom->ownedRawSize) {
+        return 0;
+    }
+
+    u8* packetCursor = primGeom->ownedRawData + primStartOffset;
+    u8* packetEnd = primGeom->ownedRawData + primGeom->ownedRawSize;
+
+    for (u32 loopIndex = 0; loopIndex < primGeom->numLoops; loopIndex++) {
+        const u8* loopPrim = primGeom->loopPrimData + loopIndex * 8u;
+        for (u32 bucket = 0; bucket < 4u; bucket++) {
+            const u32 primCount = static_cast<u32>(p3dReadU16LE(loopPrim + bucket * 2u));
+            const u32 packetSize = (bucket == 0u) ? 52u : (bucket == 1u) ? 36u : (bucket == 2u) ? 40u : 28u;
+
+            for (u32 i = 0; i < primCount; i++) {
+                if (packetCursor + packetSize > packetEnd) {
+                    return 0;
+                }
+
+                if (mode != 0) {
+                    packetCursor[7] = static_cast<u8>(packetCursor[7] | 0x2u);
+                }
+                else {
+                    packetCursor[7] = static_cast<u8>(packetCursor[7] & 0xFDu);
+                }
+
+                packetCursor += packetSize;
+            }
+        }
+    }
+
+    return 1;
 }
 
 static void BuildMat4FromPsxPackedMatrix(const s32* packedMatrix, Mat4& out) {
@@ -94,9 +155,9 @@ static void MakeBillboardMatrix(const LVector& pos, Mat4& out, s32 lockY) {
 
     const LVector& cameraPos = g_display->GetCamera()->GetPosition();
     const Vec3 heading(
-        static_cast<f32>(cameraPos.x - pos.x),
-        (lockY == 1) ? 0.0f : static_cast<f32>(cameraPos.y - pos.y),
-        static_cast<f32>(cameraPos.z - pos.z));
+        FIX16_TO_FLOAT(cameraPos.x - pos.x),
+        (lockY == 1) ? 0.0f : FIX16_TO_FLOAT(cameraPos.y - pos.y),
+        FIX16_TO_FLOAT(cameraPos.z - pos.z));
 
     const Vec3 up(0.0f, 1.0f, 0.0f);
     out = Mat4();
@@ -116,9 +177,9 @@ static void MakeBillboardMatrixFlip(const LVector& pos, Mat4& out, s32 lockY) {
 
     const LVector& cameraPos = g_display->GetCamera()->GetPosition();
     const Vec3 heading(
-        static_cast<f32>(pos.x - cameraPos.x),
-        (lockY == 1) ? 0.0f : static_cast<f32>(pos.y - cameraPos.y),
-        static_cast<f32>(pos.z - cameraPos.z));
+        FIX16_TO_FLOAT(pos.x - cameraPos.x),
+        (lockY == 1) ? 0.0f : FIX16_TO_FLOAT(pos.y - cameraPos.y),
+        FIX16_TO_FLOAT(pos.z - cameraPos.z));
 
     const Vec3 up(0.0f, 1.0f, 0.0f);
     out = Mat4();
@@ -475,28 +536,7 @@ static void ApplyClutListSuitFrameToVerts(const ClutAnimData* clutAnim,
             }
         }
 
-        if (s_streeSuitTraceBudget > 0 && (frame > 0 || matchedOffsets == 0)) {
-            LOG("[SuitClut] mode=%u frame=%d clut=0x%X offsets=%d matched=%u prims=%u verts=%u",
-                static_cast<u32>(clutAnim->mode),
-                frame,
-                static_cast<u32>(clutAnim->GetFrameValue(frame)),
-                clutAnim->numOffsets,
-                matchedOffsets,
-                skin->numPrims,
-                skin->numVerts);
-            s_streeSuitTraceBudget--;
-        }
-
         return;
-    }
-
-    if (s_streeSuitTraceBudget > 0 && frame > 0) {
-        LOG("[SuitClut] mode=%u frame=%d clut=0x%X fallback=full-mesh verts=%u",
-            static_cast<u32>(clutAnim->mode),
-            frame,
-            static_cast<u32>(clutAnim->GetFrameValue(frame)),
-            skin->numVerts);
-        s_streeSuitTraceBudget--;
     }
 
     for (u32 vertexIndex = 0; vertexIndex < skin->numVerts; vertexIndex++) {
@@ -535,18 +575,6 @@ static void ApplyCompositeSuitFrameToVerts(CompositeAnimData* compositeAnim,
         else {
             unresolvedParts++;
         }
-    }
-
-    if (s_streeSuitTraceBudget > 0 && (frame > 0 || unresolvedParts != 0 || resolvedClutParts == 0)) {
-        LOG("[SuitComposite] frame=%d root=0x%08X parts=%u clut=%u comp=%u unresolved=%u field12=%u",
-            frame,
-            compositeAnim->nameUID,
-            compositeAnim->numParts,
-            resolvedClutParts,
-            resolvedCompositeParts,
-            unresolvedParts,
-            compositeAnim->field12);
-        s_streeSuitTraceBudget--;
     }
 }
 
@@ -643,6 +671,11 @@ OriginalGeo::OriginalGeo() {
 }
 
 OriginalGeo::~OriginalGeo() {
+    if (primGeom) {
+        delete primGeom;
+        primGeom = nullptr;
+    }
+
     if (meshBuffer) {
         meshBuffer->Release();
         meshBuffer = nullptr;
@@ -651,6 +684,13 @@ OriginalGeo::~OriginalGeo() {
     delete[] dynamicVerts;
     dynamicVerts = nullptr;
     dynamicVertCount = 0;
+
+    delete[] dynamicVertSourceIndex;
+    dynamicVertSourceIndex = nullptr;
+
+    delete[] dynamicColorList;
+    dynamicColorList = nullptr;
+    dynamicColorCount = 0;
 
     delete[] dynamicPrimStart;
     dynamicPrimStart = nullptr;
@@ -663,6 +703,9 @@ OriginalGeo::~OriginalGeo() {
 
     delete[] dynamicPrimCmd;
     dynamicPrimCmd = nullptr;
+
+    delete[] dynamicPrimUVWords;
+    dynamicPrimUVWords = nullptr;
 
     delete[] dynamicPrimPacketOffset;
     dynamicPrimPacketOffset = nullptr;
@@ -907,35 +950,6 @@ void DrawableSTree::Display(u32 /*flags*/) {
 
         if (hasLitPackets) {
             ApplyLitPacketColoursToSkin(skin, litPackets, &vertData);
-            if (s_streePacketLitTraceBudget > 0) {
-                LOG("[STreeLit] packet fixup applied: verts=%u prims=%u packetBytes=%u scratchRange=R[%u..%u] G[%u..%u] B[%u..%u] normalIdx[%u..%u]",
-                    skin->numVerts,
-                    skin->numPrims,
-                    static_cast<u32>(litPackets.size()),
-                    haveScratchRange ? static_cast<u32>(scratchMinR) : 0u,
-                    haveScratchRange ? static_cast<u32>(scratchMaxR) : 0u,
-                    haveScratchRange ? static_cast<u32>(scratchMinG) : 0u,
-                    haveScratchRange ? static_cast<u32>(scratchMaxG) : 0u,
-                    haveScratchRange ? static_cast<u32>(scratchMinB) : 0u,
-                    haveScratchRange ? static_cast<u32>(scratchMaxB) : 0u,
-                    haveNormalIndexRange ? static_cast<u32>(normalIndexMin) : 0u,
-                    haveNormalIndexRange ? static_cast<u32>(normalIndexMax) : 0u);
-                s_streePacketLitTraceBudget--;
-            }
-        }
-        else if (hasLitScratch && s_streePacketLitTraceBudget > 0) {
-            LOG("[STreeLit] fallback vertex scratch only: verts=%u prims=%u scratchRange=R[%u..%u] G[%u..%u] B[%u..%u] normalIdx[%u..%u]",
-                skin->numVerts,
-                skin->numPrims,
-                haveScratchRange ? static_cast<u32>(scratchMinR) : 0u,
-                haveScratchRange ? static_cast<u32>(scratchMaxR) : 0u,
-                haveScratchRange ? static_cast<u32>(scratchMinG) : 0u,
-                haveScratchRange ? static_cast<u32>(scratchMaxG) : 0u,
-                haveScratchRange ? static_cast<u32>(scratchMinB) : 0u,
-                haveScratchRange ? static_cast<u32>(scratchMaxB) : 0u,
-                haveNormalIndexRange ? static_cast<u32>(normalIndexMin) : 0u,
-                haveNormalIndexRange ? static_cast<u32>(normalIndexMax) : 0u);
-            s_streePacketLitTraceBudget--;
         }
 
         skinnedBuffer->SetVertexData(vertData.data(), skin->numVerts);
@@ -983,17 +997,6 @@ s32 OriginalSTree::ChangeSuit(DrawableSTree* drawable, s16 suitIndexValue) {
     // PSX calls tCompositeFlip::SetFrame(suit) then Update().
     // Host stores suit frame on drawable and applies during skinning.
     drawable->suitIndex = suitIndexValue;
-
-    if (s_streeSuitTraceBudget > 0) {
-        LOG("[SuitChange] drawable=%p suit=%d comp=0x%08X parts=%u field12=%u skin=%p",
-            drawable,
-            static_cast<s32>(suitIndexValue),
-            compositeAnim->nameUID,
-            compositeAnim->numParts,
-            compositeAnim->field12,
-            skinData);
-        s_streeSuitTraceBudget--;
-    }
 
     return RedirectCompositeSuitAnimation(compositeAnim, primGeom);
 }
@@ -1367,24 +1370,6 @@ void SModel::Show(u32 flags) {
         g_environmentManager->lighting.DoModelLighting(backPtr);
     }
 
-    if (s_streeShowLightTraceBudget > 0 && drawableType == 2) {
-        const HardwareLight* modelLightsProbe = static_cast<const HardwareLight*>(hwLights);
-        const HardwareLight* portLight0 = GetCurrentPortHardwareLight(0);
-        LOG("[SModelLight] model=%p ownerModel=%p hwCount=%d m0(active=%u color=0x%06X dir=(%d,%d,%d)) port0(color=0x%06X dir=(%d,%d,%d))",
-            this,
-            backPtr ? backPtr->model : nullptr,
-            hwLightCount,
-            (modelLightsProbe && hwLightCount > 0) ? static_cast<u32>(modelLightsProbe[0].active) : 0u,
-            (modelLightsProbe && hwLightCount > 0) ? modelLightsProbe[0].colour : 0u,
-            (modelLightsProbe && hwLightCount > 0) ? modelLightsProbe[0].directionX : 0,
-            (modelLightsProbe && hwLightCount > 0) ? modelLightsProbe[0].directionY : 0,
-            (modelLightsProbe && hwLightCount > 0) ? modelLightsProbe[0].directionZ : 0,
-            portLight0 ? portLight0->colour : 0u,
-            portLight0 ? portLight0->directionX : 0,
-            portLight0 ? portLight0->directionY : 0,
-            portLight0 ? portLight0->directionZ : 0);
-    }
-
     bool addedHwLights[3] = { false, false, false };
     if (g_environmentManager && hwLights && hwLightCount > 0) {
         HardwareLight* modelLights = static_cast<HardwareLight*>(hwLights);
@@ -1405,16 +1390,6 @@ void SModel::Show(u32 flags) {
         }
     }
 
-    if (s_streeShowLightTraceBudget > 0 && drawableType == 2) {
-        const HardwareLight* portLight0 = GetCurrentPortHardwareLight(0);
-        LOG("[SModelLight] after AddLightToPort: port0(color=0x%06X dir=(%d,%d,%d))",
-            portLight0 ? portLight0->colour : 0u,
-            portLight0 ? portLight0->directionX : 0,
-            portLight0 ? portLight0->directionY : 0,
-            portLight0 ? portLight0->directionZ : 0);
-        s_streeShowLightTraceBudget--;
-    }
-
     if (ambientLight) {
         static_cast<AmbientLight*>(ambientLight)->SetPortToLight();
     }
@@ -1422,10 +1397,23 @@ void SModel::Show(u32 flags) {
     const u32 ownerFlags = backPtr->flags;
     const bool ownerDeadWindow = (ownerFlags & 0x80u) != 0;
     const bool ownerSemiFlag = (ownerFlags & 0x100u) != 0;
-    const bool useSemiTrans = ownerDeadWindow && ownerSemiFlag;
 
-    // PSX: if owner is no longer in death draw state, clear the transient semi bit.
-    if (!ownerDeadWindow && ownerSemiFlag) {
+    DrawableSTree* drawableStree = GetDrawableSTree(this);
+    if (drawableStree) {
+        OriginalSTree* semiTarget = drawableStree->GetAlternateSTree();
+        if (!semiTarget) {
+            semiTarget = drawableStree->GetOriginalSTree();
+        }
+
+        if (ownerDeadWindow) {
+            SetSemiMode__13OriginalSTreei(semiTarget, ownerSemiFlag ? 1 : 0);
+        }
+        else if (ownerSemiFlag) {
+            SetSemiMode__13OriginalSTreei(semiTarget, 0);
+            backPtr->flags &= ~0x100u;
+        }
+    }
+    else if (!ownerDeadWindow && ownerSemiFlag) {
         backPtr->flags &= ~0x100u;
     }
 
@@ -1447,16 +1435,8 @@ void SModel::Show(u32 flags) {
     const Mat4 savedWorld = p3d::context->GetWorldMatrix();
     p3d::context->SetWorldMatrix(world);
 
-    if (useSemiTrans) {
-        p3d::context->SetBlendMode(PDDI_BLEND_ALPHA);
-    }
-
     // PSX: calls drawable->Display(flags) through vtable
     drawable->Display(flags);
-
-    if (useSemiTrans) {
-        p3d::context->SetBlendMode(PDDI_BLEND_NONE);
-    }
 
     if (ambientLight) {
         RestoreWorldAmbientLightToPort();
@@ -1584,9 +1564,8 @@ void SModel::ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 p4,
     if (!rawAnimation) {
         rawAnimation = g_characterManager->GetAnimation(0, animEnum);
         if (!rawAnimation) {
-            LOG("[ApplyAnim] FALLBACK animEnum=%d not found, using idle(22)", animEnum);
-            rawAnimation = g_characterManager->GetAnimation(0, 22);
-            animEnum = 22;
+            LOG("[ApplyAnim] missing anim type=%d animEnum=%d", thingType, animEnum);
+            return;
         }
     }
 
@@ -1699,7 +1678,18 @@ s32 SModel::MirrorTree() {
 // PSX: InitSemiTransMode__6SModel (MODEL.CPP:1045, 0x8006EE20)
 void SModel::InitSemiTransMode() {
     MARKFUNCTION(0x8006EE20);
-    // PSX: calls SetSemiMode on the OriginalSTree - no-op on PC for now
+
+    DrawableSTree* drawableStree = GetDrawableSTree(this);
+    if (!drawableStree) {
+        return;
+    }
+
+    OriginalSTree* semiTarget = drawableStree->GetAlternateSTree();
+    if (!semiTarget) {
+        semiTarget = drawableStree->GetOriginalSTree();
+    }
+
+    SetSemiMode__13OriginalSTreei(semiTarget, 0);
 }
 
 // PSX: PlayDynamicAnim__6SModeli (MODEL.CPP:1710, 0x8006FAFC)

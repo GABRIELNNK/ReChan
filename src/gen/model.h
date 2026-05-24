@@ -172,7 +172,7 @@ struct OriginalSTree : public OriginalBasic {
     ~OriginalSTree() override;
 
     // PSX: ChangeSuit__13OriginalSTreeP13DrawableSTrees (MODEL.CPP:3588)
-    s32 ChangeSuit(class DrawableSTree* drawable, s16 suitIndex);
+    s32 ChangeSuit(struct DrawableSTree* drawable, s16 suitIndex);
 };
 
 // OriginalGeo - static/dynamic geometry model data (40 bytes on PSX)
@@ -180,16 +180,22 @@ struct OriginalSTree : public OriginalBasic {
 // PC: stores a PC-ready prim buffer built from tDynGeom polygon data.
 struct OriginalGeo : public OriginalBasic {
     pddiPrimBuffer* meshBuffer = nullptr;
+    tPrimGeom* primGeom = nullptr;
     s32 bboxMin[3] = {};
     s32 bboxMax[3] = {};
     bool usesSemiTrans = false;
     u8 semiTransMode = 0;
+    u32 fastRenderWord1 = 0xFFFFFFFFu;
     GeoRenderVertex* dynamicVerts = nullptr;
     u32 dynamicVertCount = 0;
+    u16* dynamicVertSourceIndex = nullptr;
+    u32* dynamicColorList = nullptr;
+    u32 dynamicColorCount = 0;
     u32* dynamicPrimStart = nullptr;
     u8* dynamicPrimVertCount = nullptr;
     u32* dynamicPrimMaterialUID = nullptr;
     u8* dynamicPrimCmd = nullptr;
+    u16* dynamicPrimUVWords = nullptr;
     u32* dynamicPrimPacketOffset = nullptr;
     u32 dynamicPrimCount = 0;
 

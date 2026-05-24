@@ -52,8 +52,9 @@ void LevelManager::InternalReset() {
 void LevelManager::PurgeLevel() {
     MARKFUNCTION(0x80058CC8);
 
-    // PSX: DeleteListID(p3d_inventory, INVMAT, 1/2)
-    // TODO: list-ID based P3D inventory purge is not implemented in the PC inventory.
+    // PSX: DeleteListID(p3d_inventory, INVMAT, 1/2).
+    // Host inventory has no list-ID API, so level/petal ownership cleanup is
+    // driven by DeleteInventoryByID + manager purge routines below.
     if (g_characterManager) {
         g_characterManager->PurgeLevel();
     }
@@ -84,8 +85,8 @@ void LevelManager::PurgeLevel() {
 void LevelManager::PurgePetal() {
     MARKFUNCTION(0x80058DB4);
 
-    // PSX: DeleteListID(p3d_inventory, INVMAT, 2)
-    // TODO: list-ID based P3D inventory purge is not implemented in the PC inventory.
+    // PSX: DeleteListID(p3d_inventory, INVMAT, 2).
+    // Host inventory has no list-ID API; purge by store ID instead.
     if (g_characterManager) {
         g_characterManager->PurgeLevel();
     }
@@ -151,8 +152,9 @@ void LevelManager::DeleteOriginalModelsByID(s32 id) {
 void LevelManager::DeleteInventoryByID(s32 id) {
     MARKFUNCTION(0x80058F30);
 
-    // PSX: DeleteAllListsID(p3d_inventory, id)
-    // TODO: list-ID based P3D inventory purge is not implemented in the PC inventory.
+    // PSX: DeleteAllListsID(p3d_inventory, id).
+    // Host inventory lacks list-ID bookkeeping, so this path removes
+    // level-owned originals and permanent memory entries by store ID.
     DeleteOriginalModelsByID(id);
     DeletePermMemID(id);
 }

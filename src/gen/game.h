@@ -123,6 +123,7 @@ private:
     s32 introTimer = 0;                         // frame counter for intro screens
     s32 introPhase = 0;                         // sub-phase within intro state
     tTexture* introTexture = nullptr;           // current intro screen texture (PSX: gp+24)
+    World* worldManager = nullptr;
     TitleScreen* titleScreen = nullptr;         // PSX: gp+60
     GameOverScreen* gameOverScreen = nullptr;    // PSX: gp+64
     s32 titleIdleTimer = 0;                     // PSX: gp+128

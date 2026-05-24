@@ -45,7 +45,7 @@ public:
     s32 GetTargetingFrame(const PsxFightingMoveRaw* move) const override;
 };
 
-class LinearPath;
+struct LinearPath;
 class Trails;
 
 class Dante : public Boss {

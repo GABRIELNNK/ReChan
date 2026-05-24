@@ -6,12 +6,14 @@
 #include "gen/world.h"
 #include "gen/ai.h"
 #include "gen/camera.h"
+#include "gen/backg.h"
 #include "gen/charmgr.h"
 #include "gen/database.h"
 #include "gen/display.h"
 #include "gen/director.h"
 #include "gen/envmgr.h"
 #include "gen/game.h"
+#include "gen/cammgr.h"
 #include "gen/blockmgr.h"
 #include "gen/deadpool.h"
 #include "gen/geometry.h"
@@ -1677,10 +1679,13 @@ static pddiPrimBuffer* ParseDynGeoPrims(
     bool* outUsesSemiTrans,
     u8* outSemiTransMode,
     std::vector<GeoRenderVertex>* outVerts,
+    std::vector<u16>* outVertSourceIndex,
+    std::vector<u32>* outColorList,
     std::vector<u32>* outPrimStart,
     std::vector<u8>* outPrimVertCount,
     std::vector<u32>* outPrimMaterialUID,
     std::vector<u8>* outPrimCmd,
+    std::vector<u16>* outPrimUVWords,
     std::vector<u32>* outPrimPacketOffset)
 {
     if (outUsesSemiTrans) {
@@ -1718,16 +1723,26 @@ static pddiPrimBuffer* ParseDynGeoPrims(
     }
 
     std::vector<GeoRenderVertex> vertBuf;
+    std::vector<u16> vertSourceIndexBuf;
+    std::vector<u32> colorListBuf;
     std::vector<u16> idxBuf;
     std::vector<u32> primStart;
     std::vector<u8> primVertCount;
     std::vector<u32> primMaterialUID;
     std::vector<u8> primCmdList;
+    std::vector<u16> primUVWords;
     std::vector<u32> primPacketOffset;
     bool usesSemiTrans = false;
     bool hasSemiTransMode = false;
     u8 semiTransMode = 0;
     u32 primListPacketOffset = 0;
+
+    if (colours) {
+        colorListBuf.resize(numVerts);
+        for (u32 colourIndex = 0; colourIndex < numVerts; colourIndex++) {
+            colorListBuf[colourIndex] = p3dReadU32LE(colours + colourIndex * 4) & 0x00FFFFFFu;
+        }
+    }
 
     auto makeVertex = [&](u16 index) -> GeoRenderVertex {
         GeoRenderVertex vertex = {};
@@ -1788,26 +1803,35 @@ static pddiPrimBuffer* ParseDynGeoPrims(
         const u32 packetOffset = primListPacketOffset;
         primListPacketOffset += packetSize;
 
-        GeoRenderVertex v0 = makeVertex(p3dReadU16LE(poly + 8));
-        GeoRenderVertex v1 = makeVertex(p3dReadU16LE(poly + 10));
-        GeoRenderVertex v2 = makeVertex(p3dReadU16LE(poly + 12));
-        GeoRenderVertex v3 = makeVertex(p3dReadU16LE(poly + 14));
+        const u16 index0 = p3dReadU16LE(poly + 8);
+        const u16 index1 = p3dReadU16LE(poly + 10);
+        const u16 index2 = p3dReadU16LE(poly + 12);
+        const u16 index3 = p3dReadU16LE(poly + 14);
+
+        GeoRenderVertex v0 = makeVertex(index0);
+        GeoRenderVertex v1 = makeVertex(index1);
+        GeoRenderVertex v2 = makeVertex(index2);
+        GeoRenderVertex v3 = makeVertex(index3);
 
         // PSX colour-table modulation is for gouraud primitive commands only.
         // Flat commands carry colour through a separate packet lane.
         if ((primCmd & 0x10u) != 0u) {
-            applyVertexColour(p3dReadU16LE(poly + 8), v0);
-            applyVertexColour(p3dReadU16LE(poly + 10), v1);
-            applyVertexColour(p3dReadU16LE(poly + 12), v2);
-            applyVertexColour(p3dReadU16LE(poly + 14), v3);
+            applyVertexColour(index0, v0);
+            applyVertexColour(index1, v1);
+            applyVertexColour(index2, v2);
+            applyVertexColour(index3, v3);
         }
 
+        u16 primUVWord0 = p3dReadU16LE(poly + 16);
+        u16 primUVWord1 = p3dReadU16LE(poly + 18);
+        u16 primUVWord2 = p3dReadU16LE(poly + 20);
+        u16 primUVWord3 = p3dReadU16LE(poly + 22);
         if (primCmd == 0x34 || primCmd == 0x24 || primCmd == 0x3C || primCmd == 0x2C) {
-            DecodePackedUV(p3dReadU16LE(poly + 16), v0, material);
-            DecodePackedUV(p3dReadU16LE(poly + 18), v1, material);
-            DecodePackedUV(p3dReadU16LE(poly + 20), v2, material);
+            DecodePackedUV(primUVWord0, v0, material);
+            DecodePackedUV(primUVWord1, v1, material);
+            DecodePackedUV(primUVWord2, v2, material);
             if (primCmd == 0x3C || primCmd == 0x2C) {
-                DecodePackedUV(p3dReadU16LE(poly + 22), v3, material);
+                DecodePackedUV(primUVWord3, v3, material);
             }
         }
 
@@ -1818,8 +1842,11 @@ static pddiPrimBuffer* ParseDynGeoPrims(
             case 0x34:
             case 0x24:
                 vertBuf.push_back(v2);
+                vertSourceIndexBuf.push_back(index2);
                 vertBuf.push_back(v1);
+                vertSourceIndexBuf.push_back(index1);
                 vertBuf.push_back(v0);
+                vertSourceIndexBuf.push_back(index0);
 
                 // Keep rendered winding identical to (v0,v1,v2) while dynamic
                 // vertex lanes follow PSX packet order (v2,v1,v0).
@@ -1830,6 +1857,10 @@ static pddiPrimBuffer* ParseDynGeoPrims(
                 primVertCount.push_back(3);
                 primMaterialUID.push_back(materialHash);
                 primCmdList.push_back(primCmd);
+                primUVWords.push_back(primUVWord0);
+                primUVWords.push_back(primUVWord1);
+                primUVWords.push_back(primUVWord2);
+                primUVWords.push_back(primUVWord3);
                 primPacketOffset.push_back(packetOffset);
                 break;
 
@@ -1838,9 +1869,13 @@ static pddiPrimBuffer* ParseDynGeoPrims(
             case 0x3C:
             case 0x2C:
                 vertBuf.push_back(v3);
+                vertSourceIndexBuf.push_back(index3);
                 vertBuf.push_back(v2);
+                vertSourceIndexBuf.push_back(index2);
                 vertBuf.push_back(v1);
+                vertSourceIndexBuf.push_back(index1);
                 vertBuf.push_back(v0);
+                vertSourceIndexBuf.push_back(index0);
 
                 // Render as original (v0,v1,v2) + (v1,v3,v2) while packing
                 // dynamic lanes in PSX packet order (v3,v2,v1,v0).
@@ -1854,6 +1889,10 @@ static pddiPrimBuffer* ParseDynGeoPrims(
                 primVertCount.push_back(4);
                 primMaterialUID.push_back(materialHash);
                 primCmdList.push_back(primCmd);
+                primUVWords.push_back(primUVWord0);
+                primUVWords.push_back(primUVWord1);
+                primUVWords.push_back(primUVWord2);
+                primUVWords.push_back(primUVWord3);
                 primPacketOffset.push_back(packetOffset);
                 break;
 
@@ -1902,6 +1941,12 @@ static pddiPrimBuffer* ParseDynGeoPrims(
     if (outVerts) {
         *outVerts = vertBuf;
     }
+    if (outVertSourceIndex) {
+        *outVertSourceIndex = vertSourceIndexBuf;
+    }
+    if (outColorList) {
+        *outColorList = colorListBuf;
+    }
     if (outPrimStart) {
         *outPrimStart = primStart;
     }
@@ -1913,6 +1958,9 @@ static pddiPrimBuffer* ParseDynGeoPrims(
     }
     if (outPrimCmd) {
         *outPrimCmd = primCmdList;
+    }
+    if (outPrimUVWords) {
+        *outPrimUVWords = primUVWords;
     }
     if (outPrimPacketOffset) {
         *outPrimPacketOffset = primPacketOffset;
@@ -2021,10 +2069,13 @@ static void LoadGeoPair(
                             bool usesSemiTrans = false;
                             u8 semiTransMode = 0;
                             std::vector<GeoRenderVertex> dynamicVerts;
+                            std::vector<u16> dynamicVertSourceIndex;
+                            std::vector<u32> dynamicColorList;
                             std::vector<u32> dynamicPrimStart;
                             std::vector<u8> dynamicPrimVertCount;
                             std::vector<u32> dynamicPrimMaterialUID;
                             std::vector<u8> dynamicPrimCmd;
+                            std::vector<u16> dynamicPrimUVWords;
                             std::vector<u32> dynamicPrimPacketOffset;
                             pddiPrimBuffer* buffer = ParseDynGeoPrims(
                                 permData + permCursor,
@@ -2033,16 +2084,20 @@ static void LoadGeoPair(
                                 &usesSemiTrans,
                                 &semiTransMode,
                                 &dynamicVerts,
+                                &dynamicVertSourceIndex,
+                                &dynamicColorList,
                                 &dynamicPrimStart,
                                 &dynamicPrimVertCount,
                                 &dynamicPrimMaterialUID,
                                 &dynamicPrimCmd,
+                                &dynamicPrimUVWords,
                                 &dynamicPrimPacketOffset);
                             if (buffer) {
                                 OriginalGeo* original = new OriginalGeo();
                                 original->nameCRC = modelHash ? modelHash : p3dHash(names[0].c_str());
                                 original->SetStoreID(static_cast<s8>(storeId));
                                 original->meshBuffer = buffer;
+                                original->primGeom = CloneRawPrimGeom(permData + permCursor, chunkPermSize);
                                 original->usesSemiTrans = usesSemiTrans;
                                 original->semiTransMode = semiTransMode;
                                 original->bboxMin[0] = p3dReadS32LE(permData + permCursor + 0x18);
@@ -2060,24 +2115,49 @@ static void LoadGeoPair(
                                                dynamicVerts.data(),
                                                sizeof(GeoRenderVertex) * original->dynamicVertCount);
                                     }
+
+                                    if (dynamicVertSourceIndex.size() == original->dynamicVertCount) {
+                                        original->dynamicVertSourceIndex = new u16[original->dynamicVertCount];
+                                        if (original->dynamicVertSourceIndex) {
+                                            memcpy(original->dynamicVertSourceIndex,
+                                                   dynamicVertSourceIndex.data(),
+                                                   sizeof(u16) * original->dynamicVertCount);
+                                        }
+                                    }
+                                }
+
+                                if (!dynamicColorList.empty()) {
+                                    original->dynamicColorCount = static_cast<u32>(dynamicColorList.size());
+                                    original->dynamicColorList = new u32[original->dynamicColorCount];
+                                    if (original->dynamicColorList) {
+                                        memcpy(original->dynamicColorList,
+                                               dynamicColorList.data(),
+                                               sizeof(u32) * original->dynamicColorCount);
+                                    }
+                                    else {
+                                        original->dynamicColorCount = 0;
+                                    }
                                 }
 
                                 if (!dynamicPrimStart.empty()
                                     && dynamicPrimStart.size() == dynamicPrimVertCount.size()
                                      && dynamicPrimStart.size() == dynamicPrimMaterialUID.size()
                                      && dynamicPrimStart.size() == dynamicPrimCmd.size()
+                                     && dynamicPrimUVWords.size() == dynamicPrimStart.size() * 4u
                                      && dynamicPrimStart.size() == dynamicPrimPacketOffset.size()) {
                                     original->dynamicPrimCount = static_cast<u32>(dynamicPrimStart.size());
                                     original->dynamicPrimStart = new u32[original->dynamicPrimCount];
                                     original->dynamicPrimVertCount = new u8[original->dynamicPrimCount];
                                     original->dynamicPrimMaterialUID = new u32[original->dynamicPrimCount];
-                                     original->dynamicPrimCmd = new u8[original->dynamicPrimCount];
-                                     original->dynamicPrimPacketOffset = new u32[original->dynamicPrimCount];
+                                    original->dynamicPrimCmd = new u8[original->dynamicPrimCount];
+                                    original->dynamicPrimUVWords = new u16[original->dynamicPrimCount * 4u];
+                                    original->dynamicPrimPacketOffset = new u32[original->dynamicPrimCount];
                                     if (original->dynamicPrimStart
                                         && original->dynamicPrimVertCount
-                                         && original->dynamicPrimMaterialUID
-                                         && original->dynamicPrimCmd
-                                         && original->dynamicPrimPacketOffset) {
+                                        && original->dynamicPrimMaterialUID
+                                        && original->dynamicPrimCmd
+                                        && original->dynamicPrimUVWords
+                                        && original->dynamicPrimPacketOffset) {
                                         memcpy(original->dynamicPrimStart,
                                                dynamicPrimStart.data(),
                                                sizeof(u32) * original->dynamicPrimCount);
@@ -2087,10 +2167,13 @@ static void LoadGeoPair(
                                         memcpy(original->dynamicPrimMaterialUID,
                                                dynamicPrimMaterialUID.data(),
                                                sizeof(u32) * original->dynamicPrimCount);
-                                         memcpy(original->dynamicPrimCmd,
+                                        memcpy(original->dynamicPrimCmd,
                                              dynamicPrimCmd.data(),
                                              sizeof(u8) * original->dynamicPrimCount);
-                                         memcpy(original->dynamicPrimPacketOffset,
+                                        memcpy(original->dynamicPrimUVWords,
+                                             dynamicPrimUVWords.data(),
+                                             sizeof(u16) * original->dynamicPrimCount * 4u);
+                                        memcpy(original->dynamicPrimPacketOffset,
                                              dynamicPrimPacketOffset.data(),
                                              sizeof(u32) * original->dynamicPrimCount);
                                     }
@@ -3083,13 +3166,22 @@ bool World::LoadLevelIndex(u32 levelIndex) {
     }
 
     // PSX: ExecuteLoadCallbacks -> cameraLoadFunc -> SetupPaths
-    // (handled by gsQueueLevelLoad on PC)
+    if (g_cameraManager) {
+        g_cameraManager->SetupPaths();
+    }
 
     // PSX: Construct__5World (WORLD.CPP:1399, 0x80046E80)
     // On PSX this is a separate function called after LoadLevel.
     // It initializes fighting collision, effects, populates AI entities,
     // loads backgrounds, resets Director, and sets up the level script.
     // We inline the steps we can handle here.
+
+    if (!g_blockManager) {
+        ASSERT(false);
+        StopLogo();
+        return false;
+    }
+    BlockManager& blockMgr = *g_blockManager;
 
     blockMgr.SetDeathVolumeFlag(1);
 
@@ -3134,8 +3226,9 @@ bool World::LoadLevelIndex(u32 levelIndex) {
         startBlockNum = playerBlockNum;
     }
 
-    // PSX: LoadBG, InitBG - background rendering
-    // TODO: BackG not yet reversed
+    // PSX: LoadBG, InitBG - background rendering setup
+    BackG::LoadBG();
+    BackG::InitBG();
 
     // PSX: ScoreManager::SetPar
     if (g_scoreManager) {
@@ -3156,8 +3249,9 @@ bool World::LoadLevelIndex(u32 levelIndex) {
     ProcessSwitches();
 
     // PSX: Close__8Database(0)
-    // PC: deferred until Game::gsQueueLevelLoad after CameraManager::SetupPaths,
-    // because we still run the camera load callback after Construct returns.
+    if (g_database) {
+        g_database->Close();
+    }
 
     // PSX: AllocBlockPool__12BlockManager(0) - allocate block node pool
     // PC: blocks already allocated by LoadBlocksFunc
@@ -3291,6 +3385,12 @@ bool World::LoadLevelIndex(u32 levelIndex) {
 
 bool World::Load(const std::string& lcfPath) {
     Unload();
+
+    if (!g_blockManager) {
+        ASSERT(false);
+        return false;
+    }
+    BlockManager& blockMgr = *g_blockManager;
 
     g_wEffectChunkCount = 0;
     g_particleSystemChunkCount = 0;
@@ -3520,6 +3620,12 @@ static void DrawEntityList(ccList& list, u16 blockNum, u32 vramHandle) {
 // checks InDrawList, renders entities + block geometry.
 void World::DrawEverythingHandler(const LVector* playerPos) {
     MARKFUNCTION(0x8002A98C);
+
+    if (!g_blockManager) {
+        ASSERT(false);
+        return;
+    }
+    BlockManager& blockMgr = *g_blockManager;
 
     u32 numBlocks = blockMgr.GetNumBlocks();
     if (numBlocks == 0) return;
@@ -3864,7 +3970,9 @@ void World::Unload() {
 
     const bool hadLoadedLevel = !streamData.empty() || (vramHandle != 0);
     if (hadLoadedLevel) {
-        blockMgr.InternalClose();
+        if (g_blockManager) {
+            g_blockManager->InternalClose();
+        }
         if (g_ai) {
             g_ai->UnPopulate(0);
         }
@@ -3910,6 +4018,8 @@ void World::Unload() {
     g_wEffectChunkCount = 0;
     g_particleSystemChunkCount = 0;
 
+    BackG::DeleteBG();
+
     streamData.clear();
     if (vramHandle && p3d::context) {
         p3d::context->DestroyVRAMTexture(vramHandle);
@@ -3945,9 +4055,12 @@ void World::UnloadPetal() {
     UnloadUVPrimData();
     UnloadCBVPrimData();
     PurgeSwitches();
+    BackG::DeleteBG();
 
     // Unload current blocks (collision sectors, geometry)
-    blockMgr.InternalClose();
+    if (g_blockManager) {
+        g_blockManager->InternalClose();
+    }
 
     // Clear all AI entities from previous petal
     if (g_ai) {
@@ -3993,6 +4106,13 @@ void World::LoadPetal(u32 petalIndex) {
 
     targetPetalIndex = petalIndex;
     currentPetalIndex = petalIndex;
+
+    if (!g_blockManager) {
+        ASSERT(false);
+        StopLogo();
+        return;
+    }
+    BlockManager& blockMgr = *g_blockManager;
 
     blockMgr.SetDeathVolumeFlag(1);
     g_wEffectChunkCount = 0;
@@ -4088,6 +4208,11 @@ void World::LoadPetal(u32 petalIndex) {
     if (g_director) {
         g_director->Reset();
         g_director->SetScript();
+    }
+
+    // PSX: ExecuteLoadCallbacks -> cameraLoadFunc -> SetupPaths after petal load.
+    if (g_cameraManager) {
+        g_cameraManager->SetupPaths();
     }
 
     rsEvent(RS_LEVEL_BEGIN, 0, 0, 0);

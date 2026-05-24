@@ -117,8 +117,8 @@ struct ParticleStats {
     u16 animDelay = 0;
 
     ComEffect* comEffect = nullptr;
-    void* fastRenderInfo = nullptr;
-    u32 fastRenderValue = 0;
+    void* fastRenderWord1Slot = nullptr;
+    u32 fastRenderWord1Value = 0;
 };
 
 struct ParticleMeshEntry {
@@ -255,9 +255,9 @@ static void BuildBillboardMatrixPSX(const LVector& pos, Mat4& out, bool lockY) {
 
     const LVector& cameraPos = g_display->GetCamera()->GetPosition();
     Vec3 heading(
-        static_cast<f32>(cameraPos.x - pos.x),
-        lockY ? 0.0f : static_cast<f32>(cameraPos.y - pos.y),
-        static_cast<f32>(cameraPos.z - pos.z));
+        FIX16_TO_FLOAT(cameraPos.x - pos.x),
+        lockY ? 0.0f : FIX16_TO_FLOAT(cameraPos.y - pos.y),
+        FIX16_TO_FLOAT(cameraPos.z - pos.z));
 
     const Vec3 up(0.0f, 1.0f, 0.0f);
     out = Mat4();
@@ -467,7 +467,7 @@ s32 ParticleSystem::ParseData(const u8* body, u32 bodySize) {
             }
         }
         else if (tag == 0x0900) {
-            stats->fastRenderValue = static_cast<u32>(readLongAt(0));
+            stats->fastRenderWord1Value = static_cast<u32>(readLongAt(0));
         }
         else if (tag == 0x1000) {
             const s32 resourceHash = readLongAt(0);
@@ -988,11 +988,14 @@ void ParticleSystem::Display() {
     }
 
     const bool billboard = (stats->flags & 8u) != 0u;
-    const bool billboardLockY = (stats->flags & 0x20u) != 0u;
-    const Mat4& parentWorld = p3d::context->GetWorldMatrix();
-    Mat4 parentInverse = Mat4();
-    if (billboard) {
-        PsxInverseOrthMatrix(parentWorld, parentInverse);
+    Mat4 billboardMatrix = Mat4();
+    if (billboard && particleList->head) {
+        const Mat4& parentWorld = p3d::context->GetWorldMatrix();
+        LVector billboardPos = averagePos;
+        billboardPos.x += static_cast<s32>(parentWorld.m[12]);
+        billboardPos.y += static_cast<s32>(parentWorld.m[13]);
+        billboardPos.z += static_cast<s32>(parentWorld.m[14]);
+        BuildBillboardMatrixPSX(billboardPos, billboardMatrix, false);
     }
 
     for (ccMinNode* node = particleList->head; node; node = node->next) {
@@ -1014,62 +1017,29 @@ void ParticleSystem::Display() {
         }
 
         Mat4 world;
+        BuildParticleScaleMatrix(info->scale, world);
+
         const s32 angle16 = QuantizeParticleAngle(info->rotation);
-
         if (billboard) {
-            f32 worldX = 0.0f;
-            f32 worldY = 0.0f;
-            f32 worldZ = 0.0f;
-            Mat4TransformPoint(parentWorld,
-                               static_cast<f32>(renderPos.x),
-                               static_cast<f32>(renderPos.y),
-                               static_cast<f32>(renderPos.z),
-                               worldX,
-                               worldY,
-                               worldZ);
-
-            const LVector billboardWorldPos = {
-                static_cast<s32>(worldX),
-                static_cast<s32>(worldY),
-                static_cast<s32>(worldZ),
-            };
-
-            Mat4 billboardWorld = Mat4();
-            BuildBillboardMatrixPSX(billboardWorldPos, billboardWorld, billboardLockY);
-            world = parentInverse * billboardWorld;
-
             if (angle16 != 0) {
-                Mat4 rotZ;
-                p3dBuildRotMatrixZ(ANGLE2RAD(angle16), rotZ);
-                world = world * rotZ;
+                PreMultiplyRotZ(world, angle16);
             }
 
-            const f32 s = FIX16_TO_FLOAT(info->scale);
-            world.m[0] *= s;
-            world.m[1] *= s;
-            world.m[2] *= s;
-            world.m[4] *= s;
-            world.m[5] *= s;
-            world.m[6] *= s;
-            world.m[8] *= s;
-            world.m[9] *= s;
-            world.m[10] *= s;
+            // PSX composes particle local scale/rotation matrix with the shared
+            // billboard basis before translation is filled per particle.
+            world = world * billboardMatrix;
         }
-        else {
-            BuildParticleScaleMatrix(info->scale, world);
+        else if (angle16 != 0) {
+            if ((info->axisMask & 1u) != 0u) {
+                PreMultiplyRotZ(world, angle16);
+            }
 
-            if (angle16 != 0) {
-                if ((info->axisMask & 1u) != 0u) {
-                    PreMultiplyRotZ(world, angle16);
-                }
+            if ((info->axisMask & 2u) != 0u) {
+                PreMultiplyRotY(world, angle16);
+            }
 
-                if ((info->axisMask & 2u) != 0u) {
-                    PreMultiplyRotY(world, angle16);
-                }
-
-                if ((info->axisMask & 4u) != 0u) {
-                    PreMultiplyRotX(world, angle16);
-                }
+            if ((info->axisMask & 4u) != 0u) {
+                PreMultiplyRotX(world, angle16);
             }
         }
 
@@ -1087,23 +1057,15 @@ void ParticleSystem::Display() {
         }
 
         if ((stats->flags & 0x4000u) != 0u && stats->comEffect) {
-
-            if (!stats->fastRenderInfo) {
-                stats->fastRenderInfo = static_cast<void*>(stats->comEffect->GetGeoSwapWordSlot(0));
-            }
-
-            if (stats->fastRenderInfo) {
-                u32* swapWord = static_cast<u32*>(stats->fastRenderInfo);
-                const bool queuedFast = ((renderFlags & 0x800000u) != 0u) && stats->comEffect->FastRenderReady();
-                if (!queuedFast) {
-                    stats->comEffect->SetFrame(info->animFrame);
-                }
-                const u32 previousWord = *swapWord;
-                *swapWord = stats->fastRenderValue;
+            if (stats->fastRenderWord1Slot) {
+                u32* word1 = static_cast<u32*>(stats->fastRenderWord1Slot);
+                stats->comEffect->SetFrame(info->animFrame);
+                const u32 previousWord = *word1;
+                *word1 = stats->fastRenderWord1Value;
 
                 stats->comEffect->Render(particleWorld, renderFlags);
 
-                *swapWord = previousWord;
+                *word1 = previousWord;
                 continue;
             }
         }
@@ -1146,30 +1108,8 @@ s32 ParticleSystem_LoadChunk(const u8* body, u32 bodySize) {
     system->activeFlag = 1;
     system->ParseData(body, bodySize);
 
-    if (system->stats) {
-        const char* particleName = system->GetName();
-        const u32 effectHash = system->stats->comEffect ? system->stats->comEffect->resourceHash : 0;
-        const u32 animHash = system->stats->comEffect ? system->stats->comEffect->miscAnimHash : 0;
-        LOG("[Particle] load hash=0x%08X name=%s flags=0x%08X effect=0x%08X anim=0x%08X life=(%u,%u) spawn=%u maxActive=%u maxParticles=%u scale=(%d,%d) dir=(%d,%d) fast=0x%08X",
-            system->nameCRC,
-            particleName ? particleName : "",
-            system->stats->flags,
-            effectHash,
-            animHash,
-            system->stats->lifeBase,
-            system->stats->lifeRange,
-            system->stats->spawnPerBurst,
-            system->stats->maxActive,
-            system->stats->maxParticles,
-            system->stats->scaleBase,
-            system->stats->scaleRange,
-            system->stats->dirX,
-            system->stats->dirY,
-            system->stats->fastRenderValue);
-    }
-
     if (system->stats && (system->stats->flags & 0x4000u) != 0u && system->stats->comEffect) {
-        system->stats->fastRenderInfo = static_cast<void*>(system->stats->comEffect->GetGeoSwapWordSlot(0));
+        system->stats->fastRenderWord1Slot = static_cast<void*>(system->stats->comEffect->GetGeoFastWord1Slot(0));
     }
 
     if (system->stats && (system->stats->flags & 0x10u) != 0u) {

@@ -8,6 +8,7 @@
 #include "gen/model.h"
 #include "gen/effects.h"
 #include "gen/particle.h"
+#include "gen/weffect.h"
 #include "gen/pweffect.h"
 #include "gen/charmgr.h"
 #include "gen/scoremgr.h"
@@ -87,6 +88,7 @@ static s32 sDebugParticleLastSpawnResult = -1;
 static bool sDebugShowHumanoidNames3D = false;
 static bool sDebugShowAllAIThingNames3D = false;
 static bool sDebugShowEffectNames3D = false;
+static bool sDebugShowDetailedEffectNames3D = true;
 static bool sDebugShowThingLabelHoverTooltip = true;
 static u16 sDebugSelectedThingUniqueID = INVALID_HANDLE;
 static bool sDisableHumanoidDamage = false;
@@ -522,6 +524,221 @@ static const char* DebugEffectTypeName(s32 effectType) {
         case 7: return "SpotLight";
         default: return "Effect";
     }
+}
+
+static void BuildDebugEffectLabel(char* outLabel, s32 outSize, const Effects* effect, bool detailed) {
+    if (!outLabel || outSize <= 0 || !effect) {
+        return;
+    }
+
+    outLabel[0] = '\0';
+
+    const char* effectTypeName = DebugEffectTypeName(effect->effectType);
+    const char* effectName = effect->GetName();
+    const char* particleName = DebugParticleNameByHash(effect->nameCRC);
+
+    u32 sourceHash = 0;
+    u32 geoHash = 0;
+
+    if (effect->effectType == 1 || effect->effectType == 4 || effect->effectType == 5 || effect->effectType == 7) {
+        sourceHash = WEffect_DebugGetComEffectResourceHash(effect);
+        geoHash = WEffect_DebugGetComEffectGeoHash(effect);
+    }
+    else if (effect->effectType == 2 || effect->effectType == 3) {
+        sourceHash = PWEffect_DebugGetParticleSystemHash(effect);
+    }
+
+    if (!detailed) {
+        if (particleName && particleName[0] != '\0') {
+            std::snprintf(outLabel,
+                          static_cast<size_t>(outSize),
+                          "%s [%s type=%d]",
+                          particleName,
+                          effectTypeName,
+                          effect->effectType);
+            return;
+        }
+
+        if (effectName && effectName[0] != '\0') {
+            std::snprintf(outLabel,
+                          static_cast<size_t>(outSize),
+                          "%s [%s type=%d]",
+                          effectName,
+                          effectTypeName,
+                          effect->effectType);
+            return;
+        }
+
+        if (effect->nameCRC != 0) {
+            std::snprintf(outLabel,
+                          static_cast<size_t>(outSize),
+                          "0x%08X [%s type=%d]",
+                          effect->nameCRC,
+                          effectTypeName,
+                          effect->effectType);
+            return;
+        }
+
+        std::snprintf(outLabel,
+                      static_cast<size_t>(outSize),
+                      "%s type=%d",
+                      effectTypeName,
+                      effect->effectType);
+        return;
+    }
+
+    if (particleName && particleName[0] != '\0' && effectName && effectName[0] != '\0') {
+        if ((effect->effectType == 1 || effect->effectType == 4 || effect->effectType == 5 || effect->effectType == 7) && sourceHash != 0) {
+            std::snprintf(outLabel,
+                          static_cast<size_t>(outSize),
+                          "%s | %s | %s(%d) crc=0x%08X blk=%d res=0x%08X geo=0x%08X",
+                          particleName,
+                          effectName,
+                          effectTypeName,
+                          effect->effectType,
+                          effect->nameCRC,
+                          effect->blockNum,
+                          sourceHash,
+                          geoHash);
+            return;
+        }
+
+        if ((effect->effectType == 2 || effect->effectType == 3) && sourceHash != 0) {
+            std::snprintf(outLabel,
+                          static_cast<size_t>(outSize),
+                          "%s | %s | %s(%d) crc=0x%08X blk=%d psys=0x%08X",
+                          particleName,
+                          effectName,
+                          effectTypeName,
+                          effect->effectType,
+                          effect->nameCRC,
+                          effect->blockNum,
+                          sourceHash);
+            return;
+        }
+
+        std::snprintf(outLabel,
+                      static_cast<size_t>(outSize),
+                      "%s | %s | %s(%d) crc=0x%08X blk=%d",
+                      particleName,
+                      effectName,
+                      effectTypeName,
+                      effect->effectType,
+                      effect->nameCRC,
+                      effect->blockNum);
+        return;
+    }
+
+    if (particleName && particleName[0] != '\0') {
+        if ((effect->effectType == 1 || effect->effectType == 4 || effect->effectType == 5 || effect->effectType == 7) && sourceHash != 0) {
+            std::snprintf(outLabel,
+                          static_cast<size_t>(outSize),
+                          "%s | %s(%d) crc=0x%08X blk=%d res=0x%08X geo=0x%08X",
+                          particleName,
+                          effectTypeName,
+                          effect->effectType,
+                          effect->nameCRC,
+                          effect->blockNum,
+                          sourceHash,
+                          geoHash);
+            return;
+        }
+
+        if ((effect->effectType == 2 || effect->effectType == 3) && sourceHash != 0) {
+            std::snprintf(outLabel,
+                          static_cast<size_t>(outSize),
+                          "%s | %s(%d) crc=0x%08X blk=%d psys=0x%08X",
+                          particleName,
+                          effectTypeName,
+                          effect->effectType,
+                          effect->nameCRC,
+                          effect->blockNum,
+                          sourceHash);
+            return;
+        }
+
+        std::snprintf(outLabel,
+                      static_cast<size_t>(outSize),
+                      "%s | %s(%d) crc=0x%08X blk=%d",
+                      particleName,
+                      effectTypeName,
+                      effect->effectType,
+                      effect->nameCRC,
+                      effect->blockNum);
+        return;
+    }
+
+    if (effectName && effectName[0] != '\0') {
+        if ((effect->effectType == 1 || effect->effectType == 4 || effect->effectType == 5 || effect->effectType == 7) && sourceHash != 0) {
+            std::snprintf(outLabel,
+                          static_cast<size_t>(outSize),
+                          "%s | %s(%d) crc=0x%08X blk=%d res=0x%08X geo=0x%08X",
+                          effectName,
+                          effectTypeName,
+                          effect->effectType,
+                          effect->nameCRC,
+                          effect->blockNum,
+                          sourceHash,
+                          geoHash);
+            return;
+        }
+
+        if ((effect->effectType == 2 || effect->effectType == 3) && sourceHash != 0) {
+            std::snprintf(outLabel,
+                          static_cast<size_t>(outSize),
+                          "%s | %s(%d) crc=0x%08X blk=%d psys=0x%08X",
+                          effectName,
+                          effectTypeName,
+                          effect->effectType,
+                          effect->nameCRC,
+                          effect->blockNum,
+                          sourceHash);
+            return;
+        }
+
+        std::snprintf(outLabel,
+                      static_cast<size_t>(outSize),
+                      "%s | %s(%d) crc=0x%08X blk=%d",
+                      effectName,
+                      effectTypeName,
+                      effect->effectType,
+                      effect->nameCRC,
+                      effect->blockNum);
+        return;
+    }
+
+    if ((effect->effectType == 1 || effect->effectType == 4 || effect->effectType == 5 || effect->effectType == 7) && sourceHash != 0) {
+        std::snprintf(outLabel,
+                      static_cast<size_t>(outSize),
+                      "crc=0x%08X | %s(%d) blk=%d res=0x%08X geo=0x%08X",
+                      effect->nameCRC,
+                      effectTypeName,
+                      effect->effectType,
+                      effect->blockNum,
+                      sourceHash,
+                      geoHash);
+        return;
+    }
+
+    if ((effect->effectType == 2 || effect->effectType == 3) && sourceHash != 0) {
+        std::snprintf(outLabel,
+                      static_cast<size_t>(outSize),
+                      "crc=0x%08X | %s(%d) blk=%d psys=0x%08X",
+                      effect->nameCRC,
+                      effectTypeName,
+                      effect->effectType,
+                      effect->blockNum,
+                      sourceHash);
+        return;
+    }
+
+    std::snprintf(outLabel,
+                  static_cast<size_t>(outSize),
+                  "crc=0x%08X | %s(%d) blk=%d",
+                  effect->nameCRC,
+                  effectTypeName,
+                  effect->effectType,
+                  effect->blockNum);
 }
 
 static const char* DebugParticleSpawnResultText(s32 result) {
@@ -1040,22 +1257,11 @@ static void DrawDebug3DLabels() {
                 continue;
             }
 
-            char label[128] = {};
-            const char* effectTypeName = DebugEffectTypeName(effect->effectType);
-            const char* effectName = effect->GetName();
-            const char* particleName = DebugParticleNameByHash(effect->nameCRC);
-            if (particleName && particleName[0] != '\0') {
-                std::snprintf(label, sizeof(label), "%s (%s:%d)", particleName, effectTypeName, effect->effectType);
-            }
-            else if (effectName && effectName[0] != '\0') {
-                std::snprintf(label, sizeof(label), "%s (%s:%d)", effectName, effectTypeName, effect->effectType);
-            }
-            else if (effect->nameCRC != 0) {
-                std::snprintf(label, sizeof(label), "0x%08X (%s:%d)", effect->nameCRC, effectTypeName, effect->effectType);
-            }
-            else {
-                std::snprintf(label, sizeof(label), "%s:%d", effectTypeName, effect->effectType);
-            }
+            char label[256] = {};
+            BuildDebugEffectLabel(label,
+                                  static_cast<s32>(sizeof(label)),
+                                  effect,
+                                  sDebugShowDetailedEffectNames3D);
 
             drawLabel(screenX, screenY - labelYOffset, label, DebugUIColor(120, 220, 255, 255));
         }
@@ -1492,6 +1698,10 @@ void DebugUI::Draw() {
             ImGui::Checkbox("Humanoid names", &sDebugShowHumanoidNames3D);
             ImGui::Checkbox("All AI Thing names", &sDebugShowAllAIThingNames3D);
             ImGui::Checkbox("Effects/Particles names", &sDebugShowEffectNames3D);
+            if (sDebugShowEffectNames3D) {
+                ImGui::Checkbox("Detailed effect labels", &sDebugShowDetailedEffectNames3D);
+                ImGui::TextDisabled("Shown type value is effectType enum, not effect instance index.");
+            }
 
             DrawDebugThingLabelInspectorPanel();
         }

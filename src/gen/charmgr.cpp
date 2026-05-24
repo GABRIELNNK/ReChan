@@ -801,6 +801,7 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
     CharSlot& slot = slots[slotIdx];
     slot.thingType = type;
     slot.charFile = cf;
+    slot.model = nullptr;
     cf->AddRef();
 
     auto abortLoad = [&]() {
@@ -934,6 +935,10 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
         }
 
         OriginalBasic* existing = g_levelManager->FindModel((s32)nameHash);
+        if (existing && existing->GetType() == 1) {
+            slot.model = existing;
+        }
+
         if (!existing) {
             OriginalSTree* original = new OriginalSTree();
             original->nameCRC = nameHash;
@@ -986,6 +991,7 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
             }
 
             g_levelManager->AddOriginal(original, 0);
+            slot.model = original;
         }
     }
 
@@ -1013,16 +1019,27 @@ void CharacterManager::UnloadCharacter(u32 type) {
 
     CharSlot& slot = slots[idx];
     slot.loadCount--;
-    if (slot.loadCount > 0) return;
+    // PSX branches on non-zero after decrement, so only an exact zero unloads.
+    if (slot.loadCount != 0) return;
 
-    // TODO: delete model from P3D inventory (drawable + skeleton sections)
-    // TODO: find/delete composite anim via GetCompositeAnimationNameHash
-    // TODO: find/delete OriginalSTree from LevelManager
+    u32 modelHash = 0;
+    if (slot.charFile && slot.charFile->dataBuffer && slot.charFile->dataSize > 1) {
+        modelHash = ReadRRU32((const u8*)slot.charFile->dataBuffer + 4);
+    }
 
-    // Clear slot
-    slot.loadCount = 0;
+    // Host inventory does not expose the PSX list-handle delete API; removing
+    // the registered OriginalSTree mirrors resource teardown on this path.
+    if (g_levelManager && modelHash != 0) {
+        OriginalBasic* original = g_levelManager->FindSTree((s32)modelHash);
+        if (!original) {
+            original = g_levelManager->FindModel(modelHash);
+        }
+        if (original) {
+            g_levelManager->DeleteOriginal(original);
+        }
+    }
+
     slot.thingType = CharSlot::EMPTY_SENTINEL;
-    memset(slot.animIndexTable, 0xFF, CharSlot::ANIM_TABLE_SIZE);
 
     // Release CharFile
     if (slot.charFile) {
@@ -1037,6 +1054,8 @@ void CharacterManager::UnloadCharacter(u32 type) {
     }
 
     slot.model = nullptr;
+    slot.loadCount = 0;
+    memset(slot.animIndexTable, 0xFF, CharSlot::ANIM_TABLE_SIZE);
 }
 
 // PSX: ReloadCharacter__16CharacterManagerUslP14CharMgrCallback (CHARMGR.CPP:792, 0x80039DC4)
@@ -1116,6 +1135,7 @@ void CharacterManager::ReloadCharacter(u32 type, s32 meshType, CharMgrCallback* 
             if (addOriginal) {
                 g_levelManager->AddOriginal(original, 0);
             }
+            slot.model = original;
         }
         else if (addOriginal) {
             delete original;
@@ -1327,7 +1347,8 @@ void CharacterManager::LoadAnimationBatch(u32 type, s32 animEnum, CharMgrCallbac
         P3DLoadTextures(p3dBuf, p3dSize);
     }
 
-    // TODO: parse the raw animation data (animBuf) into tCompositeAnim/tSequenceAnim
+    // PSX decodes additional animation classes here; on the current host path,
+    // character animation payloads resolve to TransformAnim or CameraParamAnim.
 
     if (animBuf && animSize > 0) {
         TransformAnim* ta = TransformAnim::Parse(animBuf, (u32)animSize);
@@ -1430,8 +1451,8 @@ void CharacterManager::UnloadAnimationBatch(u32 type, s32 animEnum) {
         return;
     }
 
-    // TODO: full P3D inventory cleanup for composite (0x1000B) vs non-composite
-    // For now: free memory and return handle to free list
+    // Host animation loads do not retain PSX inventory handles for these objects.
+    // Release local memory and return the slot to the free list.
     bool isCached = (animRefCounts[handleIdx] & 0x80) != 0;
     if (!isCached) {
         FreeAnimMemory(animPtrs[handleIdx]);

@@ -4,6 +4,7 @@
 #include "gen/display.h"
 #include "gen/envmgr.h"
 #include "gen/camera.h"
+#include "gen/backg.h"
 #include "gen/world.h"
 #include "gen/block.h"
 #include "gen/charmgr.h"
@@ -31,13 +32,12 @@
 #include "gen/animmgr.h"
 #include "fe/hud.h"
 #include "radmovie/movieplayer.h"
+#include "pc/inputaction.h"
 #include "pc/tim.h"
-#include "p3d/keycode.h"
 #include "p3d/input.h"
 #include "p3d/context.h"
 #include "fe/loadanim.h"
 #include "config.h"
-#include "p3d/context.h"
 #include "p3d/input.h"
 #include "p3d/texture.h"
 #include "pddi/pddi.h"
@@ -157,7 +157,7 @@ void Game::InternalOpen() {
 
     // PSX creates managers in this order:
     // 1. tCellAlligator (8204) - memory allocator (not needed on PC)
-    // 2. oxScreenManager (48) + FontInit - screen/font (TODO)
+    // 2. oxScreenManager (48) + FontInit - screen/font (handled in FE init paths)
 
     // 3. Time (PSX: 40 bytes)
     g_time = new Time();
@@ -173,7 +173,7 @@ void Game::InternalOpen() {
     World* world = new World();
     world->SetName("World", 0);
     managerList.AddNodePri(world);
-    g_blockManager = world->GetBlockManager();
+    worldManager = world;
 
     // 6. EnvironmentManager (140) - environment effects
     EnvironmentManager* environmentMgr = new EnvironmentManager();
@@ -222,8 +222,9 @@ void Game::InternalOpen() {
     managerList.AddNodePri(camMgr);
 
     // 14. BlockManager (PSX: 168 bytes)
-    // BlockManager is currently owned by World, so we don't create a separate instance.
-    // TODO: extract from World when block loading is decoupled
+    g_blockManager = new BlockManager();
+    g_blockManager->SetName("BlockManager", 0);
+    managerList.AddNodePri(g_blockManager);
 
     // 15. AnimationManager (40)
     AnimationManager* animMgr = new AnimationManager();
@@ -272,6 +273,9 @@ void Game::InternalClose() {
         mgr->Close();
         n = prev;
     }
+
+    g_blockManager = nullptr;
+    worldManager = nullptr;
 }
 
 // PSX: InternalReset__4Game
@@ -313,14 +317,9 @@ tView& Game::GetView() {
     return g_display->GetView();
 }
 
-// Helper: get World from manager list
+// World manager accessor
 World* Game::GetWorld() const {
-    // World is the first manager in the list (for now)
-    for (ccMinNode* n = managerList.head; n; n = n->next) {
-        World* w = dynamic_cast<World*>(static_cast<Manager*>(n));
-        if (w) return w;
-    }
-    return nullptr;
+    return worldManager;
 }
 
 // Handler callbacks
@@ -396,6 +395,9 @@ void Game::DrawEverythingHandlerCB(Handler*) {
 #endif
         g_director->updateVramAnims();
     }
+
+    // PSX: DrawBG__5BackG is called before block/world geometry draw.
+    BackG::DrawBG();
 
     // PSX: passes player position (MEMORY[0x1C] = thePlayer->pos) to DrawEverythingHandler,
     // NOT the camera position. Used for block distance sorting and seam offsets.
@@ -491,7 +493,7 @@ void Game::RenderTitleWithCustomBackground(bool drawPressStartOverlay) {
     }
 
     if (drawPressStartOverlay) {
-        s32 promptX = DEFAULT_SCREEN_WIDTH / 2;
+        s32 promptX = (s32)DEFAULT_SCREEN_WIDTH / 2;
         s32 promptY = 192;
         if (titleScreen->pressStartText) {
             promptX = titleScreen->pressStartText->mtx.GetX();
@@ -571,10 +573,7 @@ void Game::SetState(GameState s) {
 
     prevState = state;
     s32 idx = static_cast<s32>(s);
-    if (idx >= 0 && idx < static_cast<s32>(GameState::COUNT))
-        stateFunc = sStateTable[idx];
-    else
-        stateFunc = nullptr;
+    stateFunc = sStateTable[idx];
     state = s;
 
 #if HIGH_FPS_PLAY_PRESENTATION
@@ -585,9 +584,15 @@ void Game::SetState(GameState s) {
     }
 #endif
 
-    // PSX: for states that require input (TitleLoop=3, Play=8, EndGameLoop=26),
-    // check if a pad is connected. If not, redirect to Error state.
-    // PC: keyboard always available, no check needed.
+    // PSX: for TitleLoop(3), Play(8), EndGameLoop(26), require pad0 connected bit.
+    if (state == GameState::TitleLoop
+        || state == GameState::Play
+        || state == GameState::EndGameLoop) {
+        const bool pad0Connected = (g_inputManager && ((g_inputManager->controls[0].flags & 0x01) != 0));
+        if (!pad0Connected) {
+            SetState(GameState::Error);
+        }
+    }
 
     LOG("[Game] State: %d -> %d", static_cast<int>(prevState), static_cast<int>(state));
 }
@@ -785,8 +790,7 @@ bool Game::gsTitleLoopState(Game* game) {
         buttons = g_inputManager->GetControlVal(0);
     }
     game->controlVal[0] = (s32)buttons;
-    const bool escDown = (p3d::display && p3d::display->IsKeyDown(KEY_ESCAPE));
-    const bool startDown = ((buttons & PsxPad::Start) != 0) && !escDown;
+    const bool startDown = ((buttons & PsxPad::Start) != 0);
 
     if (game->titleAutoStart) {
         rsEvent(RS_STOP_MUSIC, 0, 0, 0);
@@ -1424,16 +1428,11 @@ bool Game::gsQueueLevelLoad(Game* game) {
         return true;
     }
 
-    // PSX: Camera setup through ExecuteLoadCallbacks chain
-    // which fires cameraLoadFunc -> CameraManager::SetupPaths.
+    // PSX: Camera setup data is prepared during World::LoadLevelIndex
+    // via ExecuteLoadCallbacks -> cameraLoadFunc -> SetupPaths.
     g_display->GetCamera()->Reset();
     if (g_cameraManager) {
-        g_cameraManager->SetupPaths();
         g_display->GetCamera()->SetCameraAnchor(g_cameraManager->GetAnchor());
-    }
-
-    if (g_database) {
-        g_database->Close();
     }
 
     tMatrixCamera* cam = g_display->GetCamera()->GetP3DCamera();
@@ -1508,10 +1507,10 @@ bool Game::gsQueuePetalLoad(Game* game) {
     // PSX: LoadPetal(world, targetPetalIndex)
     world->LoadPetal(world->GetTargetPetalIndex());
 
-    // PSX: Camera setup via ExecuteLoadCallbacks after petal load
+    // PSX: Camera setup data is prepared during World::LoadPetal
+    // via ExecuteLoadCallbacks -> cameraLoadFunc -> SetupPaths.
     g_display->GetCamera()->Reset();
     if (g_cameraManager) {
-        g_cameraManager->SetupPaths();
         g_display->GetCamera()->SetCameraAnchor(g_cameraManager->GetAnchor());
     }
     if (Player::s_player) {
@@ -1711,7 +1710,13 @@ void Game::PlayMovie(const char* name, s32 skippable, s32 unloadLevel) {
     // PC: not needed
 
     // PSX: if (unloadLevel) { world->UnloadLevel(); LoadOverlay(1); }
-    // PC: overlay system not used, but world unload may be relevant later
+    // PC: overlay system is not used; keep the world unload side-effect.
+    if (unloadLevel) {
+        World* world = GetWorld();
+        if (world) {
+            world->Unload();
+        }
+    }
 
     // PSX: rsEvent(4, 24, 0, 0) -- SetSFXVol(24)
     rsEvent(4, 24, 0, 0);
@@ -1749,21 +1754,19 @@ void Game::PlayMovie(const char* name, s32 skippable, s32 unloadLevel) {
 
             p3d::display->PollEvents();
 
-            // PSX: skip callback checks Start button
+            // PSX: skip callback checks Start button.
             if (skippable) {
-                // Keyboard: Enter/Escape/Space
-                if (p3d::display->IsKeyDown(KEY_ENTER) ||
-                    p3d::display->IsKeyDown(KEY_ESCAPE) ||
-                    p3d::display->IsKeyDown(KEY_SPACE)) {
-                    LOG("[Game] PlayMovie: skipped by user");
-                    break;
-                }
-                // Gamepad: poll and check Start/A
                 if (p3d::input) {
                     p3d::input->ServiceInput();
-                    if (p3d::input->IsGamepadButtonDown(GpBtn::Start) ||
-                        p3d::input->IsGamepadButtonDown(GpBtn::A)) {
-                        LOG("[Game] PlayMovie: skipped by gamepad");
+                }
+                if (g_actionInput) {
+                    g_actionInput->Update(p3d::input);
+                }
+                if (g_inputManager) {
+                    g_inputManager->ServiceHostPads(g_actionInput, true);
+                    g_inputManager->Step();
+                    if ((g_inputManager->GetControlVal(0) & PsxPad::Start) != 0) {
+                        LOG("[Game] PlayMovie: skipped by Start");
                         break;
                     }
                 }

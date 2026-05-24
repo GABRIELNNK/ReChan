@@ -84,8 +84,8 @@ public:
         targetPetalIndex = petalIndex;
     }
 
-    u32 GetBlockCount() const { return blockMgr.GetNumBlocks(); }
-    BlockManager* GetBlockManager() { return &blockMgr; }
+    u32 GetBlockCount() const { return g_blockManager ? g_blockManager->GetNumBlocks() : 0; }
+    BlockManager* GetBlockManager() { return g_blockManager; }
     const LVector& GetLevelMin() const { return levelMin; }
     const LVector& GetLevelMax() const { return levelMax; }
 
@@ -93,6 +93,7 @@ public:
     void UploadToVRAM(s16 x, s16 y, s16 w, s16 h, const u8* raw);
     void RefreshVRAMTexture();
     u32 GetVRAMHandle() const { return vramHandle; }
+    const PsxVRAM& GetVRAM() const { return vram; }
 
     // PSX: PackLevelName (WORLD.CPP:757, 0x8004521C)
     static u32 PackLevelName(u32 levelIndex, u32 petalIndex) {
@@ -167,7 +168,6 @@ public:
     }
 
 private:
-    BlockManager blockMgr;
     PsxVRAM vram;
     u32 vramHandle = 0;
     std::vector<u8> streamData; // LCF file data (kept alive for block pointers)

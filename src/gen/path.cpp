@@ -162,7 +162,7 @@ void Path::Flip() {
 // PSX: Draw__4Path (PATH.CPP:198)
 // Debug draw of the path. Needs line drawing functions.
 void Path::Draw() {
-    // TODO: Requires MyDrawLine rendering function
+    // PSX uses MyDrawLine for debug path rendering; host keeps this inert until that renderer is reversed.
 }
 
 // LinearPath

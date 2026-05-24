@@ -67,9 +67,10 @@ public:
 
     u32 GetGeoCount() const;
     OriginalGeo* GetGeo() const;
+    OriginalGeo* GetGeo(s32 geoIndex) const;
     bool ResolveGeoByIndex(u32 geoIndex, OriginalGeo** outGeo, Mat4* outLocalMatrix);
     bool RenderGeoByIndex(u32 geoIndex, const Mat4& worldMatrix, u32 flags);
-    u32* GetGeoSwapWordSlot(s32 geoIndex);
+    u32* GetGeoFastWord1Slot(s32 geoIndex);
     bool FastRenderReady() const;
 
     u32 GetClut(s32 mode);
@@ -91,6 +92,8 @@ private:
     bool ApplyCBVParamAnimFrame(CBVParamAnimData* cbvParamAnimData, s32 frame);
     bool ApplyClutAnimFrame(ClutAnimData* clutAnimData, s32 frame);
     bool ApplyMiscAnimFrame(MiscAnimNode* node, s32 frame, bool updateJoints);
+    void FastZSortDisplayGCT3(u32 primCount);
+    void FastZSortDisplayGCT4(u32 primCount);
 
     Model* model = nullptr;
     EModel* eModel = nullptr;
@@ -124,18 +127,23 @@ private:
     bool warnedVertexUnsupported = false;
     bool warnedSequenceUnsupported = false;
 
-    static constexpr u32 kGeoSwapWordInactive = 0xFFFFFFFFu;
+    static constexpr u32 kFastWordInactive = 0xFFFFFFFFu;
     static constexpr u32 kMaxFastDrawEntries = 32;
     struct FastDrawEntry {
         Mat4 worldMatrix = Mat4();
-        u32 swapWord = kGeoSwapWordInactive;
+        // PSX fast queue entry[0]: tex lane (CBA lo16, TPAGE hi16).
+        u32 word0 = 0;
+        // PSX fast queue entry[1]: +68 colour lane slot0 override.
+        u32 word1 = kFastWordInactive;
     };
 
     FastDrawEntry fastDrawEntries[kMaxFastDrawEntries];
     u32 fastDrawCount = 0;
     s32 fastDrawGeoIndex = -1;
+    OriginalGeo* fastDrawGeo = nullptr;
+    OriginalGeo* currentGeo = nullptr;
     s32 currentGeoIndex = -1;
-    u32 geoSwapWordSlot = kGeoSwapWordInactive;
+    u32 geoWord0Slot = kFastWordInactive;
 };
 
 class WEffect : public Effects {
@@ -356,3 +364,7 @@ void WEffect_PurgePool();
 // PSX world wrappers (WORLD.CPP:1471/1520)
 void WEffect_PopulateWEffects();
 void WEffect_UnPopulateWEffects(s32 blockNum);
+
+// Debug helpers: expose resolved ComEffect identity for active world effects.
+u32 WEffect_DebugGetComEffectResourceHash(const Effects* effect);
+u32 WEffect_DebugGetComEffectGeoHash(const Effects* effect);

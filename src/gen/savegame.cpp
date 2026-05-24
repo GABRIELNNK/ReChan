@@ -13,7 +13,7 @@
 static constexpr u32 kSaveMagic = 0x53415645u;    // SAVE
 static constexpr u32 kSaveVersion = 1;
 static constexpr const char* kSaveDir = "userfiles";
-static constexpr const char* kSavePathFmt = "userfiles/CHANsf%d.sav";
+static constexpr const char* kSavePathFmt = "userfiles/jcsSAVE%d.sav";
 
 struct SaveGameBlob {
     u32 magic = kSaveMagic;

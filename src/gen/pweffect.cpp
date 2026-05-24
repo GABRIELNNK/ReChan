@@ -281,6 +281,7 @@ public:
     s32 Update() override;
     void Display(s32 inBlockNum) override;
     s32 PutBackEffect() override;
+    bool IsDirectorOverlay() const override;
     bool GetDebugWorldPos(LVector* outPos) const override;
 
     s32 IsDone(s32& inDoneMask);
@@ -425,6 +426,10 @@ s32 PWEffect::PutBackEffect() {
     }
 
     return ReleaseSound();
+}
+
+bool PWEffect::IsDirectorOverlay() const {
+    return (createFlags & 0x800u) != 0u;
 }
 
 s32 PWEffect::Create() {
@@ -1240,6 +1245,7 @@ s32 FPWEffect_DebugSpawnParticle(u32 particleHash,
     }
 
     const s32 collisionBlockNum = CollisionSector::GetBlockNumber(*pos);
+
     if (collisionBlockNum == -1) {
         return -3;
     }
@@ -1285,4 +1291,22 @@ s32 FPWEffect_DebugSpawnParticle(u32 particleHash,
 
     AddEffect(effect, 0);
     return 1;
+}
+
+u32 PWEffect_DebugGetParticleSystemHash(const Effects* effect) {
+    if (!effect) {
+        return 0;
+    }
+
+    const s32 effectType = effect->effectType;
+    if (effectType != 2 && effectType != 3) {
+        return 0;
+    }
+
+    const PWEffect* pwEffect = static_cast<const PWEffect*>(effect);
+    if (!pwEffect->particleMgr) {
+        return 0;
+    }
+
+    return pwEffect->particleMgr->GetSystemHash();
 }

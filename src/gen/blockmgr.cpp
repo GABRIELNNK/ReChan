@@ -186,6 +186,9 @@ BlockManager::BlockManager() {
 BlockManager::~BlockManager() {
     MARKFUNCTION(0x8004FF1C);
     InternalClose();
+    if (g_blockManager == this) {
+        g_blockManager = nullptr;
+    }
 }
 
 // _LoadBlocksFunc__12BlockManagerP8Callback (BLKMGR.CPP:207)

@@ -4,6 +4,7 @@
 
 struct DBPoint;
 struct LVector;
+class Effects;
 
 // PSX: InitPWorldEffects__8PWEffectP7DBPoint (PWEFFECT.CPP:80, 0x8009AC58)
 void PWEffect_InitWorldEffects(DBPoint* firstPoint);
@@ -29,3 +30,6 @@ s32 FPWEffect_DebugSpawnParticle(u32 particleHash,
                                  const LVector* pos,
                                  const LVector* direction,
                                  s32 lifeFrames);
+
+// Debug helper: returns bound particle-system hash for active PW/FPW effects.
+u32 PWEffect_DebugGetParticleSystemHash(const Effects* effect);

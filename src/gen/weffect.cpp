@@ -32,12 +32,610 @@
 #include "snd/sndfact.h"
 #include "pc/log.h"
 
+
 static ComEffect* g_wEffectComEffects[64] = {};
 static ComEffect* g_wEffectOwnedEffects[64] = {};
 static s32 g_wEffectComEffectCount = 0;
 static s32 g_wEffectOwnedCount = 0;
 
 static constexpr u32 kChefNisPotHash = 0x052EA764u;
+
+static bool ShouldLogFastReplayDiag(u32 effectHash, u8 fastPrimCmd) {
+    static u32 sEffectHashes[128] = {};
+    static u8 sFastPrimCmds[128] = {};
+    static u32 sEntryCount = 0;
+
+    for (u32 i = 0; i < sEntryCount; i++) {
+        if (sEffectHashes[i] == effectHash && sFastPrimCmds[i] == fastPrimCmd) {
+            return false;
+        }
+    }
+
+    if (sEntryCount < (sizeof(sEffectHashes) / sizeof(sEffectHashes[0]))) {
+        sEffectHashes[sEntryCount] = effectHash;
+        sFastPrimCmds[sEntryCount] = fastPrimCmd;
+        sEntryCount++;
+    }
+
+    return true;
+}
+
+static bool IsTexturedDynPrimCmd(u8 primCmd) {
+    switch (primCmd & 0xFCu) {
+        case 0x24:
+        case 0x34:
+        case 0x2C:
+        case 0x3C:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static u8 ResolveFastRenderPrimCmd(const OriginalGeo* geo) {
+    if (!geo || !geo->dynamicPrimCmd || geo->dynamicPrimCount == 0) {
+        return 0;
+    }
+
+    // PSX FastRender path select uses geo counters at +92/+94 (GT3/GT4).
+    // Mirror that by selecting only 0x34 first, otherwise 0x3C.
+    bool hasGCT3 = false;
+    bool hasGCT4 = false;
+    for (u32 primIndex = 0; primIndex < geo->dynamicPrimCount; primIndex++) {
+        const u8 cmd = static_cast<u8>(geo->dynamicPrimCmd[primIndex] & 0xFCu);
+        if (cmd == 0x34u) {
+            hasGCT3 = true;
+        }
+        else if (cmd == 0x3Cu) {
+            hasGCT4 = true;
+        }
+    }
+
+    if (hasGCT3) {
+        return 0x34u;
+    }
+
+    if (hasGCT4) {
+        return 0x3Cu;
+    }
+
+    return 0;
+}
+
+static bool PrimMatchesFastRenderClass(u8 fastPrimCmd, u8 primCmd) {
+    const u8 cmd = static_cast<u8>(primCmd & 0xFCu);
+
+    if (fastPrimCmd == 0x34u) {
+        return cmd == 0x34u;
+    }
+
+    if (fastPrimCmd == 0x3Cu) {
+        return cmd == 0x3Cu;
+    }
+
+    if (fastPrimCmd != 0u) {
+        return cmd == fastPrimCmd;
+    }
+
+    return IsTexturedDynPrimCmd(cmd);
+}
+
+static bool CanApplyPerPrimTexSwap(const OriginalGeo* geo) {
+    return geo
+        && geo->meshBuffer
+        && geo->dynamicVerts
+        && geo->dynamicVertCount > 0
+        && geo->dynamicPrimStart
+        && geo->dynamicPrimVertCount
+        && geo->dynamicPrimCmd
+        && geo->dynamicPrimCount > 0;
+}
+
+static u32 GetDynGeoPrimPacketSizeFast(u8 primCmd) {
+    switch (primCmd & 0xFCu) {
+        case 0x3C:
+        case 0x2C:
+            return 52;
+        case 0x38:
+        case 0x28:
+            return 36;
+        case 0x34:
+        case 0x24:
+            return 40;
+        case 0x30:
+        case 0x20:
+            return 28;
+        default:
+            return 0;
+    }
+}
+
+static bool ResolveWord0LaneVertexByPacketHalfOffset(const OriginalGeo* geo,
+                                                      u32 primIndex,
+                                                      u32 packetHalfOffset,
+                                                      bool* outIsCbaLane,
+                                                      u32* outVertexIndex)
+{
+    if (!geo || !outIsCbaLane || !outVertexIndex) {
+        return false;
+    }
+
+    if (!geo->dynamicPrimStart
+        || !geo->dynamicPrimVertCount
+        || !geo->dynamicPrimCmd
+        || !geo->dynamicPrimPacketOffset
+        || primIndex >= geo->dynamicPrimCount) {
+        return false;
+    }
+
+    const u32 start = geo->dynamicPrimStart[primIndex];
+    const u32 count = static_cast<u32>(geo->dynamicPrimVertCount[primIndex]);
+    if (count == 0 || start >= geo->dynamicVertCount) {
+        return false;
+    }
+
+    const u8 primCmd = static_cast<u8>(geo->dynamicPrimCmd[primIndex] & 0xFCu);
+    if (!IsTexturedDynPrimCmd(primCmd)) {
+        return false;
+    }
+
+    const u32 packetBase = geo->dynamicPrimPacketOffset[primIndex];
+    const u32 packetSize = GetDynGeoPrimPacketSizeFast(primCmd);
+    if (packetSize == 0) {
+        return false;
+    }
+
+    if (packetHalfOffset < packetBase || (packetHalfOffset + 2u) > (packetBase + packetSize)) {
+        return false;
+    }
+
+    const u32 localOffset = packetHalfOffset - packetBase;
+    u32 corner = 0;
+    bool isCbaLane = false;
+    if (localOffset == 14u) {
+        corner = count - 1u;
+        isCbaLane = true;
+    }
+    else if (localOffset == 26u) {
+        corner = (count > 1u) ? (count - 2u) : (count - 1u);
+        isCbaLane = false;
+    }
+    else {
+        return false;
+    }
+
+    const u32 vertexIndex = start + corner;
+    if (vertexIndex >= geo->dynamicVertCount) {
+        return false;
+    }
+
+    *outIsCbaLane = isCbaLane;
+    *outVertexIndex = vertexIndex;
+    return true;
+}
+
+static bool ResolveFirstGeoFastWord0(const OriginalGeo* geo, u32* outWord0) {
+    if (outWord0) {
+        *outWord0 = 0;
+    }
+
+    if (!geo
+        || !geo->dynamicVerts
+        || geo->dynamicVertCount == 0
+        || !geo->dynamicPrimStart
+        || !geo->dynamicPrimVertCount
+        || !geo->dynamicPrimCmd
+        || geo->dynamicPrimCount == 0) {
+        return false;
+    }
+
+    auto packWord0FromLanes = [](const GeoRenderVertex& cbaVertex,
+                                 const GeoRenderVertex& tpageVertex,
+                                 u32* outWord) -> bool {
+        if (tpageVertex.tpage < 0.0f || tpageVertex.tpage > 65535.0f
+            || cbaVertex.cba < 0.0f || cbaVertex.cba > 65535.0f) {
+            return false;
+        }
+
+        // PSX FastZSort splits queued word0 into packet halfwords at +14/+26,
+        // matching CBA (lo16) and TPAGE (hi16) lanes.
+        if (outWord) {
+            const u16 tpage = static_cast<u16>(tpageVertex.tpage);
+            const u16 cba = static_cast<u16>(cbaVertex.cba);
+            *outWord = (static_cast<u32>(tpage) << 16) | static_cast<u32>(cba);
+        }
+        return true;
+    };
+
+    auto resolveFromPrimLanes = [&](u32 primIndex, u32* outWord) -> bool {
+        const u32 start = geo->dynamicPrimStart[primIndex];
+        const u32 count = static_cast<u32>(geo->dynamicPrimVertCount[primIndex]);
+        if (count == 0 || start >= geo->dynamicVertCount) {
+            return false;
+        }
+
+        if (geo->dynamicPrimPacketOffset) {
+            const u32 packetBase = geo->dynamicPrimPacketOffset[primIndex];
+
+            bool isCbaLane = false;
+            u32 cbaVertexIndex = 0;
+            if (ResolveWord0LaneVertexByPacketHalfOffset(
+                    geo,
+                    primIndex,
+                    packetBase + 14u,
+                    &isCbaLane,
+                    &cbaVertexIndex)
+                && isCbaLane)
+            {
+                bool isTpageCbaLane = false;
+                u32 tpageVertexIndex = 0;
+                if (ResolveWord0LaneVertexByPacketHalfOffset(
+                        geo,
+                        primIndex,
+                        packetBase + 26u,
+                        &isTpageCbaLane,
+                        &tpageVertexIndex)
+                    && !isTpageCbaLane)
+                {
+                    return packWord0FromLanes(
+                        geo->dynamicVerts[cbaVertexIndex],
+                        geo->dynamicVerts[tpageVertexIndex],
+                        outWord);
+                }
+            }
+        }
+
+        // dynamicVerts are packed in reverse primitive order (see ParseDynGeoPrims).
+        // CBA lane maps to uv0 (last packed corner), TPAGE lane maps to uv1.
+        const u32 cbaCorner = count - 1u;
+        const u32 tpageCorner = (count > 1u) ? (count - 2u) : cbaCorner;
+        const u32 cbaVertexIndex = start + cbaCorner;
+        const u32 tpageVertexIndex = start + tpageCorner;
+        if (cbaVertexIndex >= geo->dynamicVertCount || tpageVertexIndex >= geo->dynamicVertCount) {
+            return false;
+        }
+
+        return packWord0FromLanes(
+            geo->dynamicVerts[cbaVertexIndex],
+            geo->dynamicVerts[tpageVertexIndex],
+            outWord);
+    };
+
+    const u8 fastPrimCmd = ResolveFastRenderPrimCmd(geo);
+    s32 firstPrimIndex = -1;
+    u32 firstPacketOffset = 0xFFFFFFFFu;
+
+    for (u32 primIndex = 0; primIndex < geo->dynamicPrimCount; primIndex++) {
+        const u8 primCmd = static_cast<u8>(geo->dynamicPrimCmd[primIndex] & 0xFCu);
+        if (!PrimMatchesFastRenderClass(fastPrimCmd, primCmd)) {
+            continue;
+        }
+
+        if (firstPrimIndex < 0) {
+            firstPrimIndex = static_cast<s32>(primIndex);
+            if (geo->dynamicPrimPacketOffset) {
+                firstPacketOffset = geo->dynamicPrimPacketOffset[primIndex];
+            }
+            continue;
+        }
+
+        if (geo->dynamicPrimPacketOffset) {
+            const u32 packetOffset = geo->dynamicPrimPacketOffset[primIndex];
+            if (packetOffset < firstPacketOffset) {
+                firstPacketOffset = packetOffset;
+                firstPrimIndex = static_cast<s32>(primIndex);
+            }
+        }
+    }
+
+    if (firstPrimIndex >= 0 && resolveFromPrimLanes(static_cast<u32>(firstPrimIndex), outWord0)) {
+        return true;
+    }
+
+    for (u32 primIndex = 0; primIndex < geo->dynamicPrimCount; primIndex++) {
+        if (firstPrimIndex >= 0 && primIndex == static_cast<u32>(firstPrimIndex)) {
+            continue;
+        }
+
+        const u8 primCmd = static_cast<u8>(geo->dynamicPrimCmd[primIndex] & 0xFCu);
+        if (!PrimMatchesFastRenderClass(fastPrimCmd, primCmd)) {
+            continue;
+        }
+
+        if (resolveFromPrimLanes(primIndex, outWord0)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool ResolveFirstGeoFastWord1(const OriginalGeo* geo, u32* outColorWord) {
+    if (outColorWord) {
+        *outColorWord = 0;
+    }
+
+    if (geo && geo->dynamicColorList && geo->dynamicColorCount > 0) {
+        if (outColorWord) {
+            *outColorWord = geo->dynamicColorList[0] & 0x00FFFFFFu;
+        }
+        return true;
+    }
+
+    return false;
+}
+
+static void DecodePackedColour24Fast(u32 packedColour, f32* outR, f32* outG, f32* outB) {
+    const f32 decodedR = static_cast<f32>(packedColour & 0xFFu) / 128.0f;
+    const f32 decodedG = static_cast<f32>((packedColour >> 8) & 0xFFu) / 128.0f;
+    const f32 decodedB = static_cast<f32>((packedColour >> 16) & 0xFFu) / 128.0f;
+    if (outR) {
+        *outR = decodedR;
+    }
+    if (outG) {
+        *outG = decodedG;
+    }
+    if (outB) {
+        *outB = decodedB;
+    }
+}
+
+static void ApplyPerPrimWord1(OriginalGeo* geo, const GeoRenderVertex* baseVerts, u32 colorWord) {
+    (void)baseVerts;
+
+    if (!CanApplyPerPrimTexSwap(geo)
+        || !geo->dynamicVertSourceIndex
+        || !geo->dynamicColorList
+        || geo->dynamicColorCount == 0u) {
+        return;
+    }
+
+    const u8 fastPrimCmd = ResolveFastRenderPrimCmd(geo);
+    auto primMatchesFastPath = [&](u32 primIndex) -> bool {
+        const u8 primCmd = static_cast<u8>(geo->dynamicPrimCmd[primIndex] & 0xFCu);
+        return PrimMatchesFastRenderClass(fastPrimCmd, primCmd);
+    };
+
+    std::vector<u32> colorList(geo->dynamicColorCount, 0u);
+    for (u32 i = 0; i < geo->dynamicColorCount; i++) {
+        colorList[i] = geo->dynamicColorList[i] & 0x00FFFFFFu;
+    }
+    colorList[0] = colorWord & 0x00FFFFFFu;
+
+    bool wroteAny = false;
+    for (u32 primIndex = 0; primIndex < geo->dynamicPrimCount; primIndex++) {
+        if (!primMatchesFastPath(primIndex)) {
+            continue;
+        }
+
+        const u32 start = geo->dynamicPrimStart[primIndex];
+        const u32 count = static_cast<u32>(geo->dynamicPrimVertCount[primIndex]);
+        if (count == 0 || start >= geo->dynamicVertCount) {
+            continue;
+        }
+
+        for (u32 corner = 0; corner < count; corner++) {
+            const u32 vertexIndex = start + corner;
+            if (vertexIndex >= geo->dynamicVertCount) {
+                break;
+            }
+
+            const u32 sourceIndex = static_cast<u32>(geo->dynamicVertSourceIndex[vertexIndex]);
+            if (sourceIndex >= colorList.size()) {
+                continue;
+            }
+
+            DecodePackedColour24Fast(
+                colorList[sourceIndex],
+                &geo->dynamicVerts[vertexIndex].r,
+                &geo->dynamicVerts[vertexIndex].g,
+                &geo->dynamicVerts[vertexIndex].b);
+            wroteAny = true;
+        }
+    }
+
+    if (wroteAny) {
+        geo->meshBuffer->SetVertexData(geo->dynamicVerts, geo->dynamicVertCount);
+    }
+}
+
+static void ApplyPerPrimWord0(OriginalGeo* geo, u32 word0) {
+    if (!CanApplyPerPrimTexSwap(geo)) {
+        return;
+    }
+
+    const u8 fastPrimCmd = ResolveFastRenderPrimCmd(geo);
+    auto primMatchesFastPath = [&](u32 primIndex) -> bool {
+        const u8 primCmd = static_cast<u8>(geo->dynamicPrimCmd[primIndex] & 0xFCu);
+        return PrimMatchesFastRenderClass(fastPrimCmd, primCmd);
+    };
+
+    const f32 tpage = static_cast<f32>((word0 >> 16) & 0xFFFFu);
+    const f32 cba = static_cast<f32>(word0 & 0xFFFFu);
+
+    bool wroteAny = false;
+
+    for (u32 primIndex = 0; primIndex < geo->dynamicPrimCount; primIndex++) {
+        if (!primMatchesFastPath(primIndex)) {
+            continue;
+        }
+
+        const u32 start = geo->dynamicPrimStart[primIndex];
+        const u32 count = static_cast<u32>(geo->dynamicPrimVertCount[primIndex]);
+        if (count == 0 || start >= geo->dynamicVertCount) {
+            continue;
+        }
+
+        bool wrotePrim = false;
+        if (geo->dynamicPrimPacketOffset) {
+            const u32 packetBase = geo->dynamicPrimPacketOffset[primIndex];
+
+            bool isCbaLane = false;
+            u32 cbaVertexIndex = 0;
+            if (ResolveWord0LaneVertexByPacketHalfOffset(
+                    geo,
+                    primIndex,
+                    packetBase + 14u,
+                    &isCbaLane,
+                    &cbaVertexIndex)
+                && isCbaLane)
+            {
+                geo->dynamicVerts[cbaVertexIndex].cba = cba;
+                wrotePrim = true;
+            }
+
+            bool isTpageCbaLane = false;
+            u32 tpageVertexIndex = 0;
+            if (ResolveWord0LaneVertexByPacketHalfOffset(
+                    geo,
+                    primIndex,
+                    packetBase + 26u,
+                    &isTpageCbaLane,
+                    &tpageVertexIndex)
+                && !isTpageCbaLane)
+            {
+                geo->dynamicVerts[tpageVertexIndex].tpage = tpage;
+                wrotePrim = true;
+            }
+
+            if (wrotePrim) {
+                wroteAny = true;
+                continue;
+            }
+        }
+
+        // dynamicVerts are packed in reverse primitive order. CBA lane is uv0,
+        // TPAGE lane is uv1, which correspond to the last and second-last corners.
+        const u32 cbaCorner = count - 1u;
+        const u32 tpageCorner = (count > 1u) ? (count - 2u) : cbaCorner;
+
+        const u32 cbaVertexIndex = start + cbaCorner;
+        if (cbaVertexIndex < geo->dynamicVertCount) {
+            geo->dynamicVerts[cbaVertexIndex].cba = cba;
+            wroteAny = true;
+        }
+
+        const u32 tpageVertexIndex = start + tpageCorner;
+        if (tpageVertexIndex < geo->dynamicVertCount) {
+            geo->dynamicVerts[tpageVertexIndex].tpage = tpage;
+            wroteAny = true;
+        }
+    }
+
+    if (wroteAny) {
+        geo->meshBuffer->SetVertexData(geo->dynamicVerts, geo->dynamicVertCount);
+    }
+}
+
+static bool ApplyGeoPackedColourByOffset(OriginalGeo* geo, u32 colourWordOffset, u32 packedColour) {
+    if (!geo || !geo->dynamicVerts || geo->dynamicVertCount == 0) {
+        return false;
+    }
+
+    const f32 decodedR = std::min(1.0f, static_cast<f32>(packedColour & 0xFFu) / 128.0f);
+    const f32 decodedG = std::min(1.0f, static_cast<f32>((packedColour >> 8) & 0xFFu) / 128.0f);
+    const f32 decodedB = std::min(1.0f, static_cast<f32>((packedColour >> 16) & 0xFFu) / 128.0f);
+
+    auto applyVertex = [&](u32 vertexIndex) -> bool {
+        if (vertexIndex >= geo->dynamicVertCount) {
+            return false;
+        }
+
+        geo->dynamicVerts[vertexIndex].r = decodedR;
+        geo->dynamicVerts[vertexIndex].g = decodedG;
+        geo->dynamicVerts[vertexIndex].b = decodedB;
+        return true;
+    };
+
+    if ((colourWordOffset & 3u) == 0u
+        && geo->dynamicPrimStart
+        && geo->dynamicPrimVertCount
+        && geo->dynamicPrimCmd
+        && geo->dynamicPrimPacketOffset
+        && geo->dynamicPrimCount > 0)
+    {
+        for (u32 primIndex = 0; primIndex < geo->dynamicPrimCount; primIndex++) {
+            const u32 packetBase = geo->dynamicPrimPacketOffset[primIndex];
+            const u32 packetSize = GetDynGeoPrimPacketSizeFast(geo->dynamicPrimCmd[primIndex]);
+            if (packetSize == 0) {
+                continue;
+            }
+
+            if (colourWordOffset < packetBase || (colourWordOffset + 4u) > (packetBase + packetSize)) {
+                continue;
+            }
+
+            const u32 start = geo->dynamicPrimStart[primIndex];
+            const u32 count = static_cast<u32>(geo->dynamicPrimVertCount[primIndex]);
+            if (count == 0 || start >= geo->dynamicVertCount) {
+                continue;
+            }
+
+            const u8 primCmd = static_cast<u8>(geo->dynamicPrimCmd[primIndex] & 0xFCu);
+            const u32 localOffset = colourWordOffset - packetBase;
+
+            auto applyPacketCorner = [&](u32 packetCorner) -> bool {
+                if (packetCorner >= count) {
+                    return false;
+                }
+
+                const u32 dynCorner = (count - 1u) - packetCorner;
+                const u32 vertexIndex = start + dynCorner;
+                return applyVertex(vertexIndex);
+            };
+
+            bool wrotePrim = false;
+            switch (primCmd) {
+                case 0x34:
+                case 0x3C: {
+                    if (localOffset >= 4u && localOffset <= 40u
+                        && ((localOffset - 4u) % 12u) == 0u) {
+                        const u32 packetCorner = (localOffset - 4u) / 12u;
+                        wrotePrim = applyPacketCorner(packetCorner);
+                    }
+                    break;
+                }
+
+                case 0x30:
+                case 0x38: {
+                    if (localOffset >= 4u && localOffset <= 28u
+                        && ((localOffset - 4u) % 8u) == 0u) {
+                        const u32 packetCorner = (localOffset - 4u) / 8u;
+                        wrotePrim = applyPacketCorner(packetCorner);
+                    }
+                    break;
+                }
+
+                case 0x24:
+                case 0x2C:
+                case 0x20:
+                case 0x28: {
+                    if (localOffset == 4u) {
+                        for (u32 corner = 0; corner < count; corner++) {
+                            if (applyPacketCorner(corner)) {
+                                wrotePrim = true;
+                            }
+                        }
+                    }
+                    break;
+                }
+
+                default:
+                    break;
+            }
+
+            if (wrotePrim) {
+                return true;
+            }
+        }
+    }
+
+    if ((colourWordOffset & 3u) != 0u) {
+        return false;
+    }
+
+    return applyVertex(colourWordOffset >> 2);
+}
 
 static ccList g_wEffectPool;
 
@@ -115,11 +713,18 @@ static ccList g_wEffectPool;
             const u32 _count = static_cast<u32>(__geo->dynamicPrimVertCount[_primIndex]);           \
             for (u32 _corner = 0; _corner < 4u; _corner++) {                                        \
                 u16 _packed = 0;                                                                     \
-                if (_corner < _count && (_start + _corner) < __geo->dynamicVertCount) {            \
-                    const GeoRenderVertex& _vertex = __geo->dynamicVerts[_start + _corner];         \
-                    _packed = static_cast<u16>(static_cast<u8>(_vertex.u)                           \
-                                               | (static_cast<u16>(static_cast<u8>(_vertex.v))       \
-                                                  << 8));                                            \
+                if (__geo->dynamicPrimUVWords) {                                                    \
+                    _packed = __geo->dynamicPrimUVWords[_primIndex * 4u + _corner];                \
+                }                                                                                    \
+                else if (_corner < _count) {                                                        \
+                    /* dynamicVerts are packed in reverse packet corner order. */                  \
+                    const u32 _dynCorner = (_count - 1u) - _corner;                                 \
+                    if ((_start + _dynCorner) < __geo->dynamicVertCount) {                          \
+                        const GeoRenderVertex& _vertex = __geo->dynamicVerts[_start + _dynCorner];  \
+                        _packed = static_cast<u16>(static_cast<u8>(_vertex.u)                       \
+                                                   | (static_cast<u16>(static_cast<u8>(_vertex.v))   \
+                                                      << 8));                                        \
+                    }                                                                                \
                 }                                                                                   \
                 __outBaseWords[_primIndex * 4u + _corner] = _packed;                                \
             }                                                                                       \
@@ -134,13 +739,20 @@ static ccList g_wEffectPool;
         for (u32 _primIndex = 0; _primIndex < __geo->dynamicPrimCount; _primIndex++) {             \
             const u32 _start = __geo->dynamicPrimStart[_primIndex];                                 \
             const u32 _count = static_cast<u32>(__geo->dynamicPrimVertCount[_primIndex]);           \
-            for (u32 _corner = 0; _corner < _count && _corner < 4u; _corner++) {                    \
+            for (u32 _corner = 0; _corner < 4u; _corner++) {                                         \
                 const u16 _baseWord = __baseWords[_primIndex * 4u + _corner];                       \
                 const u16 _finalWord = static_cast<u16>(_baseWord + __addWords[_corner]);           \
-                if ((_start + _corner) < __geo->dynamicVertCount) {                                 \
-                    __geo->dynamicVerts[_start + _corner].u = static_cast<f32>(_finalWord & 0xFFu); \
-                    __geo->dynamicVerts[_start + _corner].v = static_cast<f32>((_finalWord >> 8)    \
-                                                                             & 0xFFu);              \
+                if (__geo->dynamicPrimUVWords) {                                                    \
+                    __geo->dynamicPrimUVWords[_primIndex * 4u + _corner] = _finalWord;             \
+                }                                                                                    \
+                if (_corner < _count) {                                                             \
+                    /* dynamicVerts are packed in reverse packet corner order. */                  \
+                    const u32 _dynCorner = (_count - 1u) - _corner;                                 \
+                    if ((_start + _dynCorner) < __geo->dynamicVertCount) {                          \
+                        __geo->dynamicVerts[_start + _dynCorner].u = static_cast<f32>(_finalWord & 0xFFu); \
+                        __geo->dynamicVerts[_start + _dynCorner].v = static_cast<f32>((_finalWord >> 8) \
+                                                                                     & 0xFFu);       \
+                    }                                                                                \
                 }                                                                                   \
             }                                                                                       \
         }                                                                                           \
@@ -191,18 +803,7 @@ static ccList g_wEffectPool;
         if (!GeoSupportsDynamicUV(__geo) || (__colourWordOffset & 3u) != 0u) {                      \
             return false;                                                                            \
         }                                                                                           \
-        const u32 _vertexIndex = __colourWordOffset >> 2;                                           \
-        if (_vertexIndex >= __geo->dynamicVertCount) {                                              \
-            return false;                                                                            \
-        }                                                                                           \
-        f32 _decodedR = 0.0f;                                                                        \
-        f32 _decodedG = 0.0f;                                                                        \
-        f32 _decodedB = 0.0f;                                                                        \
-        DecodePackedColour24(__packedColour, &_decodedR, &_decodedG, &_decodedB);                   \
-        __geo->dynamicVerts[_vertexIndex].r = _decodedR;                                            \
-        __geo->dynamicVerts[_vertexIndex].g = _decodedG;                                            \
-        __geo->dynamicVerts[_vertexIndex].b = _decodedB;                                            \
-        return true;                                                                                 \
+        return ApplyGeoPackedColourByOffset(__geo, __colourWordOffset, __packedColour);             \
     }((geoPtr), (colourWordOffsetValue), (packedColourValue)))
 
 #define GetMiscAnimFrameCount(nodePtr)                                                               \
@@ -740,8 +1341,10 @@ PaletteData* WEffect::SetupPaletteData(u32 paletteHash, u32 clutMode, u32 flags)
         _self->frameCount = 0;                                                                       \
         _self->currentFrame = 0;                                                                     \
         _self->fastDrawCount = 0;                                                                    \
+        _self->fastDrawGeo = nullptr;                                                                \
+        _self->currentGeo = nullptr;                                                                 \
         _self->currentGeoIndex = -1;                                                                 \
-        _self->geoSwapWordSlot = ComEffect::kGeoSwapWordInactive;                                   \
+        _self->geoWord0Slot = ComEffect::kFastWordInactive;                                   \
     } while (0)
 
 #define ComEffect_ClearUVCache(selfPtr)                                                             \
@@ -778,8 +1381,9 @@ PaletteData* WEffect::SetupPaletteData(u32 paletteHash, u32 clutMode, u32 flags)
         const s32 _inMiscAnimHash = (inMiscAnimHashArg);                                            \
         _self->resourceHash = static_cast<u32>(_inResourceHash);                                    \
         _self->miscAnimHash = static_cast<u32>(_inMiscAnimHash);                                    \
+        _self->currentGeo = nullptr;                                                                 \
         _self->currentGeoIndex = -1;                                                                 \
-        _self->geoSwapWordSlot = ComEffect::kGeoSwapWordInactive;                                   \
+        _self->geoWord0Slot = ComEffect::kFastWordInactive;                                   \
                                                                                                      \
         _self->miscAnimNode = nullptr;                                                               \
         _self->miscAnim = nullptr;                                                                   \
@@ -1124,6 +1728,7 @@ ComEffect::~ComEffect() {
 OriginalGeo* ComEffect::SetUpFirstGeo() {
     MARKFUNCTION(0x8004DB38);
 
+    currentGeo = nullptr;
     currentGeoIndex = -1;
 
     if (!model || !model->drawable) {
@@ -1137,6 +1742,7 @@ OriginalGeo* ComEffect::SetUpFirstGeo() {
         for (u32 i = 0; i < geoCount; i++) {
             OriginalGeo* geo = GetRenderableETreeGeoByIndex(original, i, nullptr);
             if (geo) {
+                currentGeo = geo;
                 currentGeoIndex = static_cast<s32>(i);
                 return geo;
             }
@@ -1149,6 +1755,7 @@ OriginalGeo* ComEffect::SetUpFirstGeo() {
         DrawableGeo* drawable = static_cast<DrawableGeo*>(model->drawable);
         OriginalGeo* geo = drawable ? drawable->original : nullptr;
         if (geo && geo->meshBuffer) {
+            currentGeo = geo;
             currentGeoIndex = 0;
             return geo;
         }
@@ -1194,17 +1801,15 @@ bool ComEffect::ApplyVizAnimFrame(VizAnim* vizAnimData, s32 frame) {
 }
 
 bool ComEffect::ApplyCBVParamAnimFrame(CBVParamAnimData* cbvParamAnimData, s32 frame) {
+    (void)frame;
+
     if (!cbvParamAnimData || !cbvParamAnimData->values || !cbvParamAnimData->primOffsets
         || cbvParamAnimData->numEntries == 0 || cbvParamAnimData->valueCols == 0
         || cbvParamAnimData->valueRows == 0) {
         return false;
     }
 
-    // PSX tCBVParamFlip::Update supports modes 0/1/2.
-    // Mode 1 writes both +64 and +68 lanes; host currently mirrors only
-    // the +68-equivalent dynamic-vertex lane used by mode 0.
-    const s32 cbvMode = cbvParamAnimData->mode;
-    if (cbvMode != 0 && cbvMode != 1 && cbvMode != 2) {
+    if (cbvParamAnimData->mode < 0 || cbvParamAnimData->mode > 2) {
         return false;
     }
 
@@ -1242,135 +1847,7 @@ bool ComEffect::ApplyCBVParamAnimFrame(CBVParamAnimData* cbvParamAnimData, s32 f
     const u32 entryCount = cbvParamAnimData->numEntries;
     const u32 row1 = (cbvParamAnimData->valueRows > 1) ? 1u : 0u;
     static bool s_loggedCBVTableBounds = false;
-    static bool s_loggedCBVMode2MissingPacketData = false;
-
-    auto getDynGeoPrimPacketSize = [](u8 primCmd) -> u32 {
-        switch (primCmd & 0xFCu) {
-            case 0x3C:
-            case 0x2C:
-                return 52;
-            case 0x38:
-            case 0x28:
-                return 36;
-            case 0x34:
-            case 0x24:
-                return 40;
-            case 0x30:
-            case 0x20:
-                return 28;
-            default:
-                return 0;
-        }
-    };
-
-    auto applyPacketColourWordByOffset = [&](OriginalGeo* geo, u32 packetWordOffset, u32 packedColour) -> bool {
-        if (!GeoSupportsDynamicUV(geo)
-            || !geo->dynamicPrimStart
-            || !geo->dynamicPrimVertCount
-            || !geo->dynamicPrimCmd
-            || !geo->dynamicPrimPacketOffset
-            || geo->dynamicPrimCount == 0) {
-            if (cbvMode == 2 && !s_loggedCBVMode2MissingPacketData) {
-                LOG("[WEffect] WARN: CBV mode2 packet lane unavailable for geo 0x%08X (target 0x%08X)",
-                    geo ? geo->nameCRC : 0,
-                    cbvParamAnimData->targetUID);
-                s_loggedCBVMode2MissingPacketData = true;
-            }
-            return false;
-        }
-
-        f32 decodedR = 0.0f;
-        f32 decodedG = 0.0f;
-        f32 decodedB = 0.0f;
-        DecodePackedColour24(packedColour, &decodedR, &decodedG, &decodedB);
-
-        auto writeCorner = [&](u32 primIndex, u32 corner) -> bool {
-            const u32 count = static_cast<u32>(geo->dynamicPrimVertCount[primIndex]);
-            if (corner >= count) {
-                return false;
-            }
-
-            const u32 vertexIndex = geo->dynamicPrimStart[primIndex] + corner;
-            if (vertexIndex >= geo->dynamicVertCount) {
-                return false;
-            }
-
-            geo->dynamicVerts[vertexIndex].r = decodedR;
-            geo->dynamicVerts[vertexIndex].g = decodedG;
-            geo->dynamicVerts[vertexIndex].b = decodedB;
-            return true;
-        };
-
-        auto writeAllCorners = [&](u32 primIndex) -> bool {
-            bool wroteAny = false;
-            const u32 count = static_cast<u32>(geo->dynamicPrimVertCount[primIndex]);
-            for (u32 corner = 0; corner < count && corner < 4u; corner++) {
-                if (writeCorner(primIndex, corner)) {
-                    wroteAny = true;
-                }
-            }
-
-            return wroteAny;
-        };
-
-        for (u32 primIndex = 0; primIndex < geo->dynamicPrimCount; primIndex++) {
-            const u32 packetBase = geo->dynamicPrimPacketOffset[primIndex];
-            const u32 packetSize = getDynGeoPrimPacketSize(geo->dynamicPrimCmd[primIndex]);
-            if (packetSize == 0) {
-                continue;
-            }
-
-            if (packetWordOffset < packetBase || (packetWordOffset + 4u) > (packetBase + packetSize)) {
-                continue;
-            }
-
-            const u32 localOffset = packetWordOffset - packetBase;
-            switch (geo->dynamicPrimCmd[primIndex] & 0xFCu) {
-                case 0x3C:
-                    if (localOffset == 4u) return writeCorner(primIndex, 3u);
-                    if (localOffset == 16u) return writeCorner(primIndex, 2u);
-                    if (localOffset == 28u) return writeCorner(primIndex, 1u);
-                    if (localOffset == 40u) return writeCorner(primIndex, 0u);
-                    return false;
-
-                case 0x2C:
-                    return (localOffset == 4u) ? writeAllCorners(primIndex) : false;
-
-                case 0x38:
-                    if (localOffset == 4u) return writeCorner(primIndex, 3u);
-                    if (localOffset == 12u) return writeCorner(primIndex, 2u);
-                    if (localOffset == 20u) return writeCorner(primIndex, 1u);
-                    if (localOffset == 28u) return writeCorner(primIndex, 0u);
-                    return false;
-
-                case 0x28:
-                    return (localOffset == 4u) ? writeAllCorners(primIndex) : false;
-
-                case 0x34:
-                    if (localOffset == 4u) return writeCorner(primIndex, 2u);
-                    if (localOffset == 16u) return writeCorner(primIndex, 1u);
-                    if (localOffset == 28u) return writeCorner(primIndex, 0u);
-                    return false;
-
-                case 0x24:
-                    return (localOffset == 4u) ? writeAllCorners(primIndex) : false;
-
-                case 0x30:
-                    if (localOffset == 4u) return writeCorner(primIndex, 2u);
-                    if (localOffset == 12u) return writeCorner(primIndex, 1u);
-                    if (localOffset == 20u) return writeCorner(primIndex, 0u);
-                    return false;
-
-                case 0x20:
-                    return (localOffset == 4u) ? writeAllCorners(primIndex) : false;
-
-                default:
-                    return false;
-            }
-        }
-
-        return false;
-    };
+    static bool s_loggedCBVMode2Unsupported = false;
 
     auto applyToGeo = [&](OriginalGeo* geo) -> bool {
         if (!GeoSupportsDynamicUV(geo)) {
@@ -1378,8 +1855,7 @@ bool ComEffect::ApplyCBVParamAnimFrame(CBVParamAnimData* cbvParamAnimData, s32 f
         }
 
         bool wrote = false;
-        u32 wroteCount = 0;
-        u32 zeroColourCount = 0;
+        bool wroteColorTable = false;
         for (u32 i = 0; i < entryCount; i++) {
             const u32 tableIndex0 = i;
             const u32 tableIndex1 = row1 * rowStride + i;
@@ -1387,7 +1863,7 @@ bool ComEffect::ApplyCBVParamAnimFrame(CBVParamAnimData* cbvParamAnimData, s32 f
                 if (!s_loggedCBVTableBounds) {
                     LOG("[WEffect] WARN: CBV table bounds stop: target=0x%08X mode=%d entries=%u rows=%u cols=%u valueCount=%u at i=%u",
                         cbvParamAnimData->targetUID,
-                        cbvMode,
+                        cbvParamAnimData->mode,
                         entryCount,
                         cbvParamAnimData->valueRows,
                         cbvParamAnimData->valueCols,
@@ -1401,17 +1877,62 @@ bool ComEffect::ApplyCBVParamAnimFrame(CBVParamAnimData* cbvParamAnimData, s32 f
             const u32 fromColour = cbvParamAnimData->values[tableIndex0];
             const u32 toColour = cbvParamAnimData->values[tableIndex1];
             const u32 mixedColour = LerpPackedColour24(fromColour, toColour, blend16);
-            if ((mixedColour & 0x00FFFFFFu) == 0) {
-                zeroColourCount++;
-            }
 
             const u32 colourWordOffset = cbvParamAnimData->primOffsets[i];
-            const bool wroteEntry = (cbvMode == 2)
-                ? applyPacketColourWordByOffset(geo, colourWordOffset, mixedColour)
-                : ApplyGeoColourWordByOffset(geo, colourWordOffset, mixedColour);
-            if (wroteEntry) {
-                wrote = true;
-                wroteCount++;
+            if (cbvParamAnimData->mode == 0) {
+                if (geo->dynamicColorList && geo->dynamicColorCount > 0 && (colourWordOffset & 3u) == 0u) {
+                    const u32 colourIndex = colourWordOffset >> 2;
+                    if (colourIndex < geo->dynamicColorCount) {
+                        geo->dynamicColorList[colourIndex] = mixedColour & 0x00FFFFFFu;
+                        wroteColorTable = true;
+                    }
+                }
+            }
+            else if (cbvParamAnimData->mode == 1) {
+                if (ApplyGeoColourWordByOffset(geo, colourWordOffset, mixedColour)) {
+                    wrote = true;
+                }
+            }
+            else {
+                if (!s_loggedCBVMode2Unsupported) {
+                    LOG("[WEffect] WARN: CBV param mode 2 unsupported: target=0x%08X", cbvParamAnimData->targetUID);
+                    s_loggedCBVMode2Unsupported = true;
+                }
+            }
+        }
+
+        if (wroteColorTable) {
+            if (geo->dynamicVertSourceIndex) {
+                for (u32 vertexIndex = 0; vertexIndex < geo->dynamicVertCount; vertexIndex++) {
+                    const u32 sourceIndex = static_cast<u32>(geo->dynamicVertSourceIndex[vertexIndex]);
+                    if (sourceIndex >= geo->dynamicColorCount) {
+                        continue;
+                    }
+
+                    const u32 packedColour = geo->dynamicColorList[sourceIndex] & 0x00FFFFFFu;
+                    f32 decodedR = 0.0f;
+                    f32 decodedG = 0.0f;
+                    f32 decodedB = 0.0f;
+                    DecodePackedColour24(packedColour, &decodedR, &decodedG, &decodedB);
+                    geo->dynamicVerts[vertexIndex].r = decodedR;
+                    geo->dynamicVerts[vertexIndex].g = decodedG;
+                    geo->dynamicVerts[vertexIndex].b = decodedB;
+                    wrote = true;
+                }
+            }
+            else {
+                const u32 copyCount = std::min(geo->dynamicVertCount, geo->dynamicColorCount);
+                for (u32 vertexIndex = 0; vertexIndex < copyCount; vertexIndex++) {
+                    const u32 packedColour = geo->dynamicColorList[vertexIndex] & 0x00FFFFFFu;
+                    f32 decodedR = 0.0f;
+                    f32 decodedG = 0.0f;
+                    f32 decodedB = 0.0f;
+                    DecodePackedColour24(packedColour, &decodedR, &decodedG, &decodedB);
+                    geo->dynamicVerts[vertexIndex].r = decodedR;
+                    geo->dynamicVerts[vertexIndex].g = decodedG;
+                    geo->dynamicVerts[vertexIndex].b = decodedB;
+                    wrote = true;
+                }
             }
         }
 
@@ -1657,7 +2178,7 @@ bool ComEffect::ApplyClutAnimFrame(ClutAnimData* clutAnimData, s32 frame) {
         }
 
         if (appliedMaterial) {
-            geoSwapWordSlot = kGeoSwapWordInactive;
+            geoWord0Slot = kFastWordInactive;
             return true;
         }
     }
@@ -1760,8 +2281,8 @@ bool ComEffect::ApplyClutAnimFrame(ClutAnimData* clutAnimData, s32 frame) {
     };
 
     u16 tpage = 0;
-    if (geoSwapWordSlot != kGeoSwapWordInactive) {
-        tpage = static_cast<u16>((geoSwapWordSlot >> 16) & 0xFFFFu);
+    if (geoWord0Slot != kFastWordInactive) {
+        tpage = static_cast<u16>((geoWord0Slot >> 16) & 0xFFFFu);
     }
     else {
         u16 unusedCba = 0;
@@ -1770,7 +2291,7 @@ bool ComEffect::ApplyClutAnimFrame(ClutAnimData* clutAnimData, s32 frame) {
         }
     }
 
-    geoSwapWordSlot = (static_cast<u32>(tpage) << 16) | static_cast<u32>(clut);
+    geoWord0Slot = (static_cast<u32>(tpage) << 16) | static_cast<u32>(clut);
     return true;
 }
 
@@ -2079,35 +2600,66 @@ bool ComEffect::PointInView(const LVector& pos, s32 radius) const {
 
     const ChanProjectionState port = g_display->GetChanProjectionState();
 
-    if (vz + radius < static_cast<s32>(port.nearClip)) {
-        return false;
+    // PSX PointInView path: TransMatrix(pos) + P3DClipCodeSphere(0,0,0,radius).
+    // Mirror that sphere acceptance behavior using screen clip bits plus
+    // overlap tests instead of early hard rejects.
+    const s32 safeVz = (vz == 0) ? 1 : vz;
+    const s32 sx = PsxProjectScreenCoord(port.centerX, vx, port.projectionDistanceX, safeVz);
+    const s32 sy = PsxProjectScreenCoord(port.centerY, vy, port.projectionDistanceY, safeVz);
+
+    const s32 clipMaxX = (port.width > 0) ? port.width : 0x7FFF;
+    const s32 clipMaxY = (port.height > 0) ? port.height : 0x7FFF;
+
+    u32 clipCode = 0;
+    if (vz < static_cast<s32>(port.nearClip)) {
+        clipCode |= 0x00000002u;
+    }
+    if (vz > static_cast<s32>(port.farClip)) {
+        clipCode |= 0x00000001u;
+    }
+    if (sx < 0) {
+        clipCode |= 0x00004000u;
+    }
+    if (sx >= clipMaxX) {
+        clipCode |= 0x00008000u;
+    }
+    if (sy < 0) {
+        clipCode |= 0x40000000u;
+    }
+    if (sy >= clipMaxY) {
+        clipCode |= 0x80000000u;
     }
 
-    if (vz - radius > static_cast<s32>(port.farClip)) {
-        return false;
+    if (clipCode == 0) {
+        return true;
     }
-
-    if (vz <= 0) {
-        return false;
-    }
-
-    const s32 sx = PsxProjectScreenCoord(port.centerX, vx, port.projectionDistanceX, vz);
-    const s32 sy = PsxProjectScreenCoord(port.centerY, vy, port.projectionDistanceY, vz);
 
     s32 marginX = 0;
     s32 marginY = 0;
-    if (radius > 0) {
+    if (radius > 0 && safeVz != 0) {
         marginX = static_cast<s32>((static_cast<f32>(radius) * port.projectionDistanceX)
-            / static_cast<f32>(vz));
+            / static_cast<f32>(safeVz));
         marginY = static_cast<s32>((static_cast<f32>(radius) * port.projectionDistanceY)
-            / static_cast<f32>(vz));
+            / static_cast<f32>(safeVz));
     }
 
-    if (sx < (0 - marginX) || sx >= (port.width + marginX)) {
+    if (sx + marginX < 0) {
+        return false;
+    }
+    if (sx - marginX >= clipMaxX) {
+        return false;
+    }
+    if (sy + marginY < 0) {
+        return false;
+    }
+    if (sy - marginY >= clipMaxY) {
         return false;
     }
 
-    if (sy < (0 - marginY) || sy >= (port.height + marginY)) {
+    if (vz + radius < static_cast<s32>(port.nearClip)) {
+        return false;
+    }
+    if (vz - radius > static_cast<s32>(port.farClip)) {
         return false;
     }
 
@@ -2142,9 +2694,9 @@ void ComEffect::Render(const LVector& pos, const LVector* scale, const u16* rota
         else {
             const LVector& cameraPos = g_display->GetCamera()->GetPosition();
             const Vec3 heading(
-                static_cast<f32>(cameraPos.x - pos.x),
-                ((flags & 0x200u) != 0u) ? 0.0f : static_cast<f32>(cameraPos.y - pos.y),
-                static_cast<f32>(cameraPos.z - pos.z));
+                FIX16_TO_FLOAT(cameraPos.x - pos.x),
+                ((flags & 0x200u) != 0u) ? 0.0f : FIX16_TO_FLOAT(cameraPos.y - pos.y),
+                FIX16_TO_FLOAT(cameraPos.z - pos.z));
 
             const Vec3 up(0.0f, 1.0f, 0.0f);
             world = Mat4();
@@ -2230,17 +2782,17 @@ void ComEffect::Render(const LVector& pos, const LVector* scale, const u16* rota
     }
 
     const Mat4 savedWorld = p3d::context->GetWorldMatrix();
-    const bool useSwapWord = (geoSwapWordSlot != kGeoSwapWordInactive);
+    const bool useWord0 = (geoWord0Slot != kFastWordInactive);
 
-    if (useSwapWord) {
-        p3d::context->SetTexInfoOverride(true, geoSwapWordSlot);
+    if (useWord0) {
+        p3d::context->SetTexInfoOverride(true, geoWord0Slot);
     }
 
     p3d::context->SetWorldMatrix(world);
     model->drawable->Display(flags);
     p3d::context->SetWorldMatrix(savedWorld);
 
-    if (useSwapWord) {
+    if (useWord0) {
         p3d::context->SetTexInfoOverride(false, 0);
     }
 }
@@ -2268,14 +2820,24 @@ void ComEffect::Render(const Mat4& worldMatrix, u32 flags) {
     if ((flags & 0x800000u) != 0u && fastDrawGeoIndex >= 0 && fastDrawCount < kMaxFastDrawEntries) {
         FastDrawEntry& entry = fastDrawEntries[fastDrawCount++];
         entry.worldMatrix = worldMatrix;
-        entry.swapWord = geoSwapWordSlot;
+
+        u32 entryWord0 = kFastWordInactive;
+        if (!ResolveFirstGeoFastWord0(fastDrawGeo, &entryWord0)) {
+            entryWord0 = kFastWordInactive;
+        }
+        entry.word0 = entryWord0;
+
+        u32 entryWord1 = 0;
+        (void)ResolveFirstGeoFastWord1(fastDrawGeo, &entryWord1);
+
+        entry.word1 = entryWord1;
         return;
     }
 
-    const bool useSwapWord = (geoSwapWordSlot != kGeoSwapWordInactive);
+    const bool useWord0 = (geoWord0Slot != kFastWordInactive);
 
-    if (useSwapWord) {
-        p3d::context->SetTexInfoOverride(true, geoSwapWordSlot);
+    if (useWord0) {
+        p3d::context->SetTexInfoOverride(true, geoWord0Slot);
     }
 
     const Mat4 composedWorld = savedWorld * worldMatrix;
@@ -2283,7 +2845,7 @@ void ComEffect::Render(const Mat4& worldMatrix, u32 flags) {
     model->drawable->Display(flags);
     p3d::context->SetWorldMatrix(savedWorld);
 
-    if (useSwapWord) {
+    if (useWord0) {
         p3d::context->SetTexInfoOverride(false, 0);
     }
 }
@@ -2313,35 +2875,25 @@ u32 ComEffect::GetGeoCount() const {
 }
 
 OriginalGeo* ComEffect::GetGeo() const {
-    if (!model || !model->drawable) {
+    MARKFUNCTION(0x8004F040);
+
+    return currentGeo;
+}
+
+OriginalGeo* ComEffect::GetGeo(s32 geoIndex) const {
+    MARKFUNCTION(0x8004F04C);
+
+    if (geoIndex < 0) {
         return nullptr;
     }
 
-    if (model->drawableType == 3) {
-        DrawableETree* drawable = static_cast<DrawableETree*>(model->drawable);
-        OriginalETree* original = drawable ? drawable->original : nullptr;
-        if (currentGeoIndex >= 0) {
-            OriginalGeo* geo = GetRenderableETreeGeoByIndex(original, static_cast<u32>(currentGeoIndex), nullptr);
-            if (geo) {
-                return geo;
-            }
-        }
-
-        u16 partIndex = 0xFFFFu;
-        return GetRenderableETreeGeoByIndex(original, 0u, &partIndex);
+    OriginalGeo* geo = nullptr;
+    ComEffect* self = const_cast<ComEffect*>(this);
+    if (!self->ResolveGeoByIndex(static_cast<u32>(geoIndex), &geo, nullptr)) {
+        return nullptr;
     }
 
-    if (model->drawableType == 1) {
-        DrawableGeo* drawable = static_cast<DrawableGeo*>(model->drawable);
-        OriginalGeo* geo = drawable ? drawable->original : nullptr;
-        if (currentGeoIndex > 0) {
-            return nullptr;
-        }
-
-        return (geo && geo->meshBuffer) ? geo : nullptr;
-    }
-
-    return nullptr;
+    return geo;
 }
 
 bool ComEffect::ResolveGeoByIndex(u32 geoIndex, OriginalGeo** outGeo, Mat4* outLocalMatrix) {
@@ -2439,9 +2991,10 @@ bool ComEffect::RenderGeoByIndex(u32 geoIndex, const Mat4& worldMatrix, u32 flag
 
     OriginalGeo* geo = nullptr;
     Mat4 localMatrix = Mat4();
-    const bool resolvedGeo = ResolveGeoByIndex(geoIndex, &geo, &localMatrix);
-    const bool allowOriginalFallback = (geoIndex == 0u && original->meshBuffer != nullptr);
-    if (!resolvedGeo && !allowOriginalFallback) {
+    const bool applyPartLocalMatrix = (flags & 0x80000u) == 0u;
+    Mat4* resolvedLocalMatrix = applyPartLocalMatrix ? &localMatrix : nullptr;
+    const bool resolvedGeo = ResolveGeoByIndex(geoIndex, &geo, resolvedLocalMatrix);
+    if (!resolvedGeo) {
         return false;
     }
 
@@ -2459,14 +3012,14 @@ bool ComEffect::RenderGeoByIndex(u32 geoIndex, const Mat4& worldMatrix, u32 flag
     const Mat4 savedWorld = p3d::context->GetWorldMatrix();
 
     bool rendered = false;
-    const bool useSwapWord = (geoSwapWordSlot != kGeoSwapWordInactive);
+    const bool useWord0 = (geoWord0Slot != kFastWordInactive);
 
-    if (useSwapWord) {
-        p3d::context->SetTexInfoOverride(true, geoSwapWordSlot);
+    if (useWord0) {
+        p3d::context->SetTexInfoOverride(true, geoWord0Slot);
     }
 
     Mat4 drawWorld = savedWorld * worldMatrix;
-    if (resolvedGeo) {
+    if (resolvedGeo && applyPartLocalMatrix) {
         drawWorld = drawWorld * localMatrix;
     }
     p3d::context->SetWorldMatrix(drawWorld);
@@ -2475,8 +3028,8 @@ bool ComEffect::RenderGeoByIndex(u32 geoIndex, const Mat4& worldMatrix, u32 flag
         if (geo->meshBuffer) {
             if (geo->usesSemiTrans) {
                 u8 semiTransMode = geo->semiTransMode;
-                if (useSwapWord) {
-                    const u16 tpage = static_cast<u16>((geoSwapWordSlot >> 16) & 0xFFFFu);
+                if (useWord0) {
+                    const u16 tpage = static_cast<u16>((geoWord0Slot >> 16) & 0xFFFFu);
                     semiTransMode = static_cast<u8>((tpage >> 5) & 3u);
                 }
 
@@ -2498,36 +3051,10 @@ bool ComEffect::RenderGeoByIndex(u32 geoIndex, const Mat4& worldMatrix, u32 flag
         }
         rendered = true;
     }
-    else if (geoIndex == 0u && original->meshBuffer) {
-        if (original->usesSemiTrans) {
-            u8 semiTransMode = original->semiTransMode;
-            if (useSwapWord) {
-                const u16 tpage = static_cast<u16>((geoSwapWordSlot >> 16) & 0xFFFFu);
-                semiTransMode = static_cast<u8>((tpage >> 5) & 3u);
-            }
-
-            pddiBlendMode blendMode = PDDI_BLEND_ALPHA;
-            switch (semiTransMode & 3u) {
-                case 1: blendMode = PDDI_BLEND_ADD; break;
-                case 2: blendMode = PDDI_BLEND_SUBTRACT; break;
-                case 3: blendMode = PDDI_BLEND_PSX_QUARTER; break;
-                default: break;
-            }
-            p3d::context->SetBlendMode(blendMode);
-        }
-
-        p3d::context->DrawPrimBuffer(original->meshBuffer);
-
-        if (original->usesSemiTrans) {
-            p3d::context->SetBlendMode(PDDI_BLEND_NONE);
-        }
-
-        rendered = true;
-    }
 
     p3d::context->SetWorldMatrix(savedWorld);
 
-    if (useSwapWord) {
+    if (useWord0) {
         p3d::context->SetTexInfoOverride(false, 0);
     }
 
@@ -2535,16 +3062,17 @@ bool ComEffect::RenderGeoByIndex(u32 geoIndex, const Mat4& worldMatrix, u32 flag
     return rendered;
 }
 
-u32* ComEffect::GetGeoSwapWordSlot(s32 geoIndex) {
-    if (geoIndex < 0) {
+u32* ComEffect::GetGeoFastWord1Slot(s32 geoIndex) {
+    OriginalGeo* geo = GetGeo(geoIndex);
+    if (!geo) {
         return nullptr;
     }
 
-    if (static_cast<u32>(geoIndex) >= GetGeoCount()) {
+    if (!geo->dynamicColorList) {
         return nullptr;
     }
 
-    return &geoSwapWordSlot;
+    return geo->dynamicColorList;
 }
 
 bool ComEffect::FastRenderReady() const {
@@ -2554,6 +3082,7 @@ bool ComEffect::FastRenderReady() const {
 void ComEffect::InitFastRender(OriginalGeo* geo) {
     MARKFUNCTION(0x8004F288);
     fastDrawCount = 0;
+    fastDrawGeo = geo;
     if (!geo) {
         fastDrawGeoIndex = -1;
         return;
@@ -2579,6 +3108,328 @@ void ComEffect::InitFastRender(OriginalGeo* geo) {
     }
 }
 
+void ComEffect::FastZSortDisplayGCT3(u32 primCount) {
+    MARKFUNCTION(0x8004F5E8);
+
+    if (!p3d::context || !p3d::device || !fastDrawGeo || primCount == 0u || fastDrawCount == 0u) {
+        return;
+    }
+
+    struct FastSortedTri {
+        GeoRenderVertex verts[3] = {};
+        f32 depth = 0.0f;
+        bool usesSemiTrans = false;
+        u8 semiTransMode = 0;
+    };
+
+    const Mat4 savedWorld = p3d::context->GetWorldMatrix();
+    const Mat4& viewMatrix = p3d::context->GetViewMatrix();
+    OriginalGeo* drawGeo = fastDrawGeo;
+    if (!drawGeo->dynamicVerts || drawGeo->dynamicVertCount == 0u || !drawGeo->dynamicPrimStart || !drawGeo->dynamicPrimVertCount
+        || !drawGeo->dynamicPrimCmd || drawGeo->dynamicPrimCount == 0u) {
+        return;
+    }
+
+    GeoRenderVertex* baseVerts = new GeoRenderVertex[drawGeo->dynamicVertCount];
+    if (!baseVerts) {
+        return;
+    }
+
+    std::memcpy(baseVerts,
+                drawGeo->dynamicVerts,
+                sizeof(GeoRenderVertex) * drawGeo->dynamicVertCount);
+
+    std::vector<FastSortedTri> sortedTris(static_cast<size_t>(fastDrawCount) * static_cast<size_t>(primCount));
+    u32 sortedTriCount = 0;
+
+    for (u32 drawIndex = 0; drawIndex < fastDrawCount; drawIndex++) {
+        const FastDrawEntry& entry = fastDrawEntries[drawIndex];
+        const bool useWord0 = (entry.word0 != kFastWordInactive);
+        std::memcpy(drawGeo->dynamicVerts,
+                    baseVerts,
+                    sizeof(GeoRenderVertex) * drawGeo->dynamicVertCount);
+
+        ApplyPerPrimWord1(drawGeo, baseVerts, entry.word1);
+        if (useWord0) {
+            ApplyPerPrimWord0(drawGeo, entry.word0);
+        }
+        else {
+            drawGeo->meshBuffer->SetVertexData(drawGeo->dynamicVerts, drawGeo->dynamicVertCount);
+        }
+
+        u8 semiTransMode = drawGeo->semiTransMode;
+        if (useWord0) {
+            const u16 tpage = static_cast<u16>((entry.word0 >> 16) & 0xFFFFu);
+            semiTransMode = static_cast<u8>((tpage >> 5) & 3u);
+        }
+
+        const Mat4 drawWorld = savedWorld * entry.worldMatrix;
+        for (u32 primIndex = 0; primIndex < drawGeo->dynamicPrimCount; primIndex++) {
+            const u8 primCmd = static_cast<u8>(drawGeo->dynamicPrimCmd[primIndex] & 0xFCu);
+            if (primCmd != 0x34u) {
+                continue;
+            }
+
+            const u32 start = drawGeo->dynamicPrimStart[primIndex];
+            const u32 count = static_cast<u32>(drawGeo->dynamicPrimVertCount[primIndex]);
+            if (count != 3u || start + count > drawGeo->dynamicVertCount) {
+                continue;
+            }
+
+            FastSortedTri tri = {};
+            tri.usesSemiTrans = drawGeo->usesSemiTrans;
+            tri.semiTransMode = semiTransMode;
+
+            f32 depth = 0.0f;
+            for (u32 corner = 0; corner < 3u; corner++) {
+                const GeoRenderVertex& sourceVertex = drawGeo->dynamicVerts[start + corner];
+                GeoRenderVertex& outVertex = tri.verts[corner];
+                outVertex = sourceVertex;
+
+                f32 worldX = 0.0f;
+                f32 worldY = 0.0f;
+                f32 worldZ = 0.0f;
+                Mat4TransformPoint(drawWorld,
+                                   sourceVertex.x,
+                                   sourceVertex.y,
+                                   sourceVertex.z,
+                                   worldX,
+                                   worldY,
+                                   worldZ);
+                outVertex.x = worldX;
+                outVertex.y = worldY;
+                outVertex.z = worldZ;
+
+                f32 viewX = 0.0f;
+                f32 viewY = 0.0f;
+                f32 viewZ = 0.0f;
+                Mat4TransformPoint(viewMatrix, worldX, worldY, worldZ, viewX, viewY, viewZ);
+                depth += -viewZ;
+            }
+
+            tri.depth = depth * (1.0f / 3.0f);
+            if (sortedTriCount < sortedTris.size()) {
+                sortedTris[sortedTriCount++] = tri;
+            }
+        }
+    }
+
+    std::memcpy(drawGeo->dynamicVerts,
+                baseVerts,
+                sizeof(GeoRenderVertex) * drawGeo->dynamicVertCount);
+    drawGeo->meshBuffer->SetVertexData(drawGeo->dynamicVerts, drawGeo->dynamicVertCount);
+    delete[] baseVerts;
+
+    if (sortedTriCount == 0u) {
+        return;
+    }
+
+    std::sort(
+        sortedTris.begin(),
+        sortedTris.begin() + sortedTriCount,
+        [](const FastSortedTri& lhs, const FastSortedTri& rhs) {
+            return lhs.depth > rhs.depth;
+        });
+
+    static const u16 kTriIndices[3] = { 1, 2, 0 };
+    const u32 format = PDDI_V_POSITION | PDDI_V_COLOUR | PDDI_V_UV | PDDI_V_TEXINFO;
+
+    p3d::context->SetWorldMatrix(Mat4());
+    for (u32 triIndex = 0; triIndex < sortedTriCount; triIndex++) {
+        const FastSortedTri& tri = sortedTris[triIndex];
+        pddiPrimBufferDesc desc(PDDI_PRIM_TRIANGLES, format, 3u, 3u);
+        pddiPrimBuffer* buffer = p3d::device->NewPrimBuffer(desc);
+        if (!buffer) {
+            continue;
+        }
+
+        buffer->SetVertexData(tri.verts, 3u);
+        buffer->SetIndices(kTriIndices, 3u);
+
+        if (tri.usesSemiTrans) {
+            pddiBlendMode blendMode = PDDI_BLEND_ALPHA;
+            switch (tri.semiTransMode & 3u) {
+                case 1: blendMode = PDDI_BLEND_ADD; break;
+                case 2: blendMode = PDDI_BLEND_SUBTRACT; break;
+                case 3: blendMode = PDDI_BLEND_PSX_QUARTER; break;
+                default: break;
+            }
+            p3d::context->SetBlendMode(blendMode);
+        }
+
+        p3d::context->DrawPrimBuffer(buffer);
+
+        if (tri.usesSemiTrans) {
+            p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+        }
+
+        buffer->Release();
+    }
+
+    p3d::context->SetWorldMatrix(savedWorld);
+}
+
+void ComEffect::FastZSortDisplayGCT4(u32 primCount) {
+    MARKFUNCTION(0x8004F89C);
+
+    if (!p3d::context || !p3d::device || !fastDrawGeo || primCount == 0u || fastDrawCount == 0u) {
+        return;
+    }
+
+    struct FastSortedQuad {
+        GeoRenderVertex verts[4] = {};
+        f32 depth = 0.0f;
+        bool usesSemiTrans = false;
+        u8 semiTransMode = 0;
+    };
+
+    const Mat4 savedWorld = p3d::context->GetWorldMatrix();
+    const Mat4& viewMatrix = p3d::context->GetViewMatrix();
+    OriginalGeo* drawGeo = fastDrawGeo;
+    if (!drawGeo->dynamicVerts || drawGeo->dynamicVertCount == 0u || !drawGeo->dynamicPrimStart || !drawGeo->dynamicPrimVertCount
+        || !drawGeo->dynamicPrimCmd || drawGeo->dynamicPrimCount == 0u) {
+        return;
+    }
+
+    GeoRenderVertex* baseVerts = new GeoRenderVertex[drawGeo->dynamicVertCount];
+    if (!baseVerts) {
+        return;
+    }
+
+    std::memcpy(baseVerts,
+                drawGeo->dynamicVerts,
+                sizeof(GeoRenderVertex) * drawGeo->dynamicVertCount);
+
+    std::vector<FastSortedQuad> sortedQuads(static_cast<size_t>(fastDrawCount) * static_cast<size_t>(primCount));
+    u32 sortedQuadCount = 0;
+
+    for (u32 drawIndex = 0; drawIndex < fastDrawCount; drawIndex++) {
+        const FastDrawEntry& entry = fastDrawEntries[drawIndex];
+        const bool useWord0 = (entry.word0 != kFastWordInactive);
+        std::memcpy(drawGeo->dynamicVerts,
+                    baseVerts,
+                    sizeof(GeoRenderVertex) * drawGeo->dynamicVertCount);
+
+        ApplyPerPrimWord1(drawGeo, baseVerts, entry.word1);
+        if (useWord0) {
+            ApplyPerPrimWord0(drawGeo, entry.word0);
+        }
+        else {
+            drawGeo->meshBuffer->SetVertexData(drawGeo->dynamicVerts, drawGeo->dynamicVertCount);
+        }
+
+        u8 semiTransMode = drawGeo->semiTransMode;
+        if (useWord0) {
+            const u16 tpage = static_cast<u16>((entry.word0 >> 16) & 0xFFFFu);
+            semiTransMode = static_cast<u8>((tpage >> 5) & 3u);
+        }
+
+        const Mat4 drawWorld = savedWorld * entry.worldMatrix;
+        for (u32 primIndex = 0; primIndex < drawGeo->dynamicPrimCount; primIndex++) {
+            const u8 primCmd = static_cast<u8>(drawGeo->dynamicPrimCmd[primIndex] & 0xFCu);
+            if (primCmd != 0x3Cu) {
+                continue;
+            }
+
+            const u32 start = drawGeo->dynamicPrimStart[primIndex];
+            const u32 count = static_cast<u32>(drawGeo->dynamicPrimVertCount[primIndex]);
+            if (count != 4u || start + count > drawGeo->dynamicVertCount) {
+                continue;
+            }
+
+            FastSortedQuad quad = {};
+            quad.usesSemiTrans = drawGeo->usesSemiTrans;
+            quad.semiTransMode = semiTransMode;
+
+            f32 depth = 0.0f;
+            for (u32 corner = 0; corner < 4u; corner++) {
+                const GeoRenderVertex& sourceVertex = drawGeo->dynamicVerts[start + corner];
+                GeoRenderVertex& outVertex = quad.verts[corner];
+                outVertex = sourceVertex;
+
+                f32 worldX = 0.0f;
+                f32 worldY = 0.0f;
+                f32 worldZ = 0.0f;
+                Mat4TransformPoint(drawWorld,
+                                   sourceVertex.x,
+                                   sourceVertex.y,
+                                   sourceVertex.z,
+                                   worldX,
+                                   worldY,
+                                   worldZ);
+                outVertex.x = worldX;
+                outVertex.y = worldY;
+                outVertex.z = worldZ;
+
+                f32 viewX = 0.0f;
+                f32 viewY = 0.0f;
+                f32 viewZ = 0.0f;
+                Mat4TransformPoint(viewMatrix, worldX, worldY, worldZ, viewX, viewY, viewZ);
+                depth += -viewZ;
+            }
+
+            quad.depth = depth * 0.25f;
+            if (sortedQuadCount < sortedQuads.size()) {
+                sortedQuads[sortedQuadCount++] = quad;
+            }
+        }
+    }
+
+    std::memcpy(drawGeo->dynamicVerts,
+                baseVerts,
+                sizeof(GeoRenderVertex) * drawGeo->dynamicVertCount);
+    drawGeo->meshBuffer->SetVertexData(drawGeo->dynamicVerts, drawGeo->dynamicVertCount);
+    delete[] baseVerts;
+
+    if (sortedQuadCount == 0u) {
+        return;
+    }
+
+    std::sort(
+        sortedQuads.begin(),
+        sortedQuads.begin() + sortedQuadCount,
+        [](const FastSortedQuad& lhs, const FastSortedQuad& rhs) {
+            return lhs.depth > rhs.depth;
+        });
+
+    static const u16 kQuadIndices[6] = { 3, 2, 1, 2, 0, 1 };
+    const u32 format = PDDI_V_POSITION | PDDI_V_COLOUR | PDDI_V_UV | PDDI_V_TEXINFO;
+
+    p3d::context->SetWorldMatrix(Mat4());
+    for (u32 quadIndex = 0; quadIndex < sortedQuadCount; quadIndex++) {
+        const FastSortedQuad& quad = sortedQuads[quadIndex];
+        pddiPrimBufferDesc desc(PDDI_PRIM_TRIANGLES, format, 4u, 6u);
+        pddiPrimBuffer* buffer = p3d::device->NewPrimBuffer(desc);
+        if (!buffer) {
+            continue;
+        }
+
+        buffer->SetVertexData(quad.verts, 4u);
+        buffer->SetIndices(kQuadIndices, 6u);
+
+        if (quad.usesSemiTrans) {
+            pddiBlendMode blendMode = PDDI_BLEND_ALPHA;
+            switch (quad.semiTransMode & 3u) {
+                case 1: blendMode = PDDI_BLEND_ADD; break;
+                case 2: blendMode = PDDI_BLEND_SUBTRACT; break;
+                case 3: blendMode = PDDI_BLEND_PSX_QUARTER; break;
+                default: break;
+            }
+            p3d::context->SetBlendMode(blendMode);
+        }
+
+        p3d::context->DrawPrimBuffer(buffer);
+
+        if (quad.usesSemiTrans) {
+            p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+        }
+
+        buffer->Release();
+    }
+
+    p3d::context->SetWorldMatrix(savedWorld);
+}
+
 void ComEffect::DoFastRender() {
     MARKFUNCTION(0x8004F318);
 
@@ -2586,81 +3437,127 @@ void ComEffect::DoFastRender() {
         return;
     }
 
-    if (!p3d::context || fastDrawGeoIndex < 0) {
+    if (!p3d::context || fastDrawGeoIndex < 0 || !fastDrawGeo || !fastDrawGeo->meshBuffer) {
         fastDrawCount = 0;
         return;
     }
 
-    if (fastDrawCount > 1) {
-        const Mat4& view = p3d::context->GetViewMatrix();
-        const Mat4 sortBaseWorld = p3d::context->GetWorldMatrix();
+    const u32 drawCount = fastDrawCount;
+    const u32 savedWord0 = geoWord0Slot;
+    const Mat4 savedWorld = p3d::context->GetWorldMatrix();
+    OriginalGeo* drawGeo = fastDrawGeo;
 
-        for (u32 i = 0; i + 1 < fastDrawCount; i++) {
-            u32 bestIndex = i;
+    if (!drawGeo || !drawGeo->meshBuffer) {
+        fastDrawCount = 0;
+        p3d::context->SetWorldMatrix(savedWorld);
+        geoWord0Slot = savedWord0;
+        return;
+    }
 
-            f32 bestTx = 0.0f;
-            f32 bestTy = 0.0f;
-            f32 bestTz = 0.0f;
-            const Mat4 bestWorld = sortBaseWorld * fastDrawEntries[bestIndex].worldMatrix;
-            Mat4TransformPoint(view,
-                       bestWorld.m[12],
-                       bestWorld.m[13],
-                       bestWorld.m[14],
-                       bestTx,
-                       bestTy,
-                       bestTz);
-            f32 bestDepth = -bestTz;
+    // PSX FastRender falls back to regular single draw when queued count < 2.
+    if (drawCount < 2u) {
+        fastDrawCount = 0;
+        // MIPS branch at FastRender__9ComEffect+38 uses only queued matrix[0]
+        // and bypasses queued word0/word1 lane application in this path.
+        const Mat4 drawWorld = savedWorld * fastDrawEntries[0].worldMatrix;
+        p3d::context->SetWorldMatrix(drawWorld);
 
-            for (u32 j = i + 1; j < fastDrawCount; j++) {
-                f32 tx = 0.0f;
-                f32 ty = 0.0f;
-                f32 tz = 0.0f;
-                const Mat4 world = sortBaseWorld * fastDrawEntries[j].worldMatrix;
-                Mat4TransformPoint(view,
-                                   world.m[12],
-                                   world.m[13],
-                                   world.m[14],
-                                   tx,
-                                   ty,
-                                   tz);
-
-                const f32 depth = -tz;
-                if (depth > bestDepth) {
-                    bestDepth = depth;
-                    bestIndex = j;
-                }
+        if (drawGeo->usesSemiTrans) {
+            pddiBlendMode blendMode = PDDI_BLEND_ALPHA;
+            switch (drawGeo->semiTransMode & 3u) {
+                case 1: blendMode = PDDI_BLEND_ADD; break;
+                case 2: blendMode = PDDI_BLEND_SUBTRACT; break;
+                case 3: blendMode = PDDI_BLEND_PSX_QUARTER; break;
+                default: break;
             }
+            p3d::context->SetBlendMode(blendMode);
+        }
 
-            if (bestIndex != i) {
-                const FastDrawEntry temp = fastDrawEntries[i];
-                fastDrawEntries[i] = fastDrawEntries[bestIndex];
-                fastDrawEntries[bestIndex] = temp;
-            }
+        p3d::context->DrawPrimBuffer(drawGeo->meshBuffer);
+
+        if (drawGeo->usesSemiTrans) {
+            p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+        }
+
+        p3d::context->SetWorldMatrix(savedWorld);
+        geoWord0Slot = savedWord0;
+        return;
+    }
+
+    const u8 fastPrimCmd = ResolveFastRenderPrimCmd(drawGeo);
+    u32 cmd34Count = 0;
+    u32 cmd3CCount = 0;
+    u32 cmd24Count = 0;
+    u32 cmd2CCount = 0;
+    for (u32 primIndex = 0; primIndex < drawGeo->dynamicPrimCount; primIndex++) {
+        const u8 primCmd = static_cast<u8>(drawGeo->dynamicPrimCmd[primIndex] & 0xFCu);
+        switch (primCmd) {
+            case 0x34u: cmd34Count++; break;
+            case 0x3Cu: cmd3CCount++; break;
+            case 0x24u: cmd24Count++; break;
+            case 0x2Cu: cmd2CCount++; break;
+            default: break;
         }
     }
 
-    const u32 drawCount = fastDrawCount;
-    fastDrawCount = 0;
-    const u32 savedSwapWord = geoSwapWordSlot;
-    const Mat4 savedWorld = p3d::context->GetWorldMatrix();
-    const u32 replayGeoIndex = static_cast<u32>(fastDrawGeoIndex);
+    if (ShouldLogFastReplayDiag(resourceHash, fastPrimCmd)) {
+        LOG("[FastRenderDiag] effect=0x%08X geo=0x%08X drawCount=%u primCount=%u sel=0x%02X cmd34=%u cmd3C=%u cmd24=%u cmd2C=%u",
+            resourceHash,
+            drawGeo->nameCRC,
+            drawCount,
+            drawGeo->dynamicPrimCount,
+            fastPrimCmd,
+            cmd34Count,
+            cmd3CCount,
+            cmd24Count,
+            cmd2CCount);
+    }
 
-    for (u32 i = 0; i < drawCount; i++) {
-        geoSwapWordSlot = fastDrawEntries[i].swapWord;
+    if (fastPrimCmd == 0u) {
+        fastDrawCount = 0;
+        // PSX FastRender__9ComEffect only calls FastZSortDisplayGCT3/GCT4 in
+        // the queued multi-draw branch. If neither stream exists, it exits
+        // without issuing queued draws.
+        p3d::context->SetWorldMatrix(savedWorld);
+        geoWord0Slot = savedWord0;
+        return;
+    }
 
-        if (model && model->drawableType == 3) {
-            (void)RenderGeoByIndex(
-                replayGeoIndex,
-                fastDrawEntries[i].worldMatrix,
-                0x80000u);
+    if (fastPrimCmd == 0x34u) {
+        u32 gct3PrimCount = 0;
+        for (u32 primIndex = 0; primIndex < drawGeo->dynamicPrimCount; primIndex++) {
+            const u8 primCmd = static_cast<u8>(drawGeo->dynamicPrimCmd[primIndex] & 0xFCu);
+            if (primCmd == 0x34u) {
+                gct3PrimCount++;
+            }
         }
-        else {
-            Render(fastDrawEntries[i].worldMatrix, 0x80000u);
+
+        FastZSortDisplayGCT3(gct3PrimCount);
+        fastDrawCount = 0;
+        p3d::context->SetWorldMatrix(savedWorld);
+        geoWord0Slot = savedWord0;
+        return;
+    }
+
+    if (fastPrimCmd == 0x3Cu) {
+        u32 gct4PrimCount = 0;
+        for (u32 primIndex = 0; primIndex < drawGeo->dynamicPrimCount; primIndex++) {
+            const u8 primCmd = static_cast<u8>(drawGeo->dynamicPrimCmd[primIndex] & 0xFCu);
+            if (primCmd == 0x3Cu) {
+                gct4PrimCount++;
+            }
         }
+
+        FastZSortDisplayGCT4(gct4PrimCount);
+        fastDrawCount = 0;
+        p3d::context->SetWorldMatrix(savedWorld);
+        geoWord0Slot = savedWord0;
+        return;
     }
 
     p3d::context->SetWorldMatrix(savedWorld);
-    geoSwapWordSlot = savedSwapWord;
+    geoWord0Slot = savedWord0;
+    fastDrawCount = 0;
 }
 
 void ComEffect::SetUpUVlists() {
@@ -3099,8 +3996,8 @@ u32 ComEffect::GetClut(s32 /*mode*/) {
         return false;
     };
 
-    if (geoSwapWordSlot != kGeoSwapWordInactive) {
-        return static_cast<u16>(geoSwapWordSlot & 0xFFFFu);
+    if (geoWord0Slot != kFastWordInactive) {
+        return static_cast<u16>(geoWord0Slot & 0xFFFFu);
     }
 
     u16 cba = 0;
@@ -5108,4 +6005,45 @@ void WEffect_UnPopulateWEffects(s32 blockNum) {
     Effects_Die(blockNum, 5);
     Effects_Die(blockNum, 6);
     Effects_Die(blockNum, 7);
+}
+
+u32 WEffect_DebugGetComEffectResourceHash(const Effects* effect) {
+    if (!effect) {
+        return 0;
+    }
+
+    const s32 effectType = effect->effectType;
+    if (effectType != 1 && effectType != 4 && effectType != 5 && effectType != 7) {
+        return 0;
+    }
+
+    const WEffect* wEffect = static_cast<const WEffect*>(effect);
+    if (!wEffect->comEffect) {
+        return 0;
+    }
+
+    return wEffect->comEffect->resourceHash;
+}
+
+u32 WEffect_DebugGetComEffectGeoHash(const Effects* effect) {
+    if (!effect) {
+        return 0;
+    }
+
+    const s32 effectType = effect->effectType;
+    if (effectType != 1 && effectType != 4 && effectType != 5 && effectType != 7) {
+        return 0;
+    }
+
+    const WEffect* wEffect = static_cast<const WEffect*>(effect);
+    if (!wEffect->comEffect) {
+        return 0;
+    }
+
+    OriginalGeo* geo = wEffect->comEffect->GetGeo();
+    if (!geo) {
+        return 0;
+    }
+
+    return geo->nameCRC;
 }
