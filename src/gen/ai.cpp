@@ -782,24 +782,17 @@ void AI::MoveThings() {
     // 3. Humanoid vs humanoid collision
     HandleHumanoidHumanoidCollision();
 
-    // Debug: phase logging only when player is in upstairs area (y > 20000)
-    const bool dbgPhase = Player::s_player && Player::s_player->pos.y > 20000;
-    if (dbgPhase) LOG("[AI::MoveThings] step=obstacle_col");
-
     // 4. Obstacle collisions
     MoveThingsObstacleCollisions();
     HandleHumanoidObstacleCollisions(humanoidList);
-    if (dbgPhase) LOG("[AI::MoveThings] step=pickup_col");
 
     // 5. Pickup collisions
     MoveThingsPickupCollisions();
     HandleHumanoidPickupCollisions(humanoidList, inactivePickupList);
-    if (dbgPhase) LOG("[AI::MoveThings] step=env_col");
 
     // 6. Environment collisions
     HandleThingEnvironmentCollisions(humanoidList);
     HandleThingEnvironmentCollisions(pickupList);
-    if (dbgPhase) LOG("[AI::MoveThings] step=update_pos");
 
     // 7. Clear humanoid command bits
     for (ccMinNode* n = humanoidList.head; n; n = n->next) {
@@ -821,13 +814,11 @@ void AI::MoveThings() {
     // 9. Update positions
     UpdatePositions(humanoidList);
     UpdatePositions(pickupList);
-    if (dbgPhase) LOG("[AI::MoveThings] step=think");
 
     // 10. Think pass (privMoveList handles Think + death transfer)
     privMoveList(moveList);
     privMoveList(humanoidList);
     privMoveList(pickupList);
-    if (dbgPhase) LOG("[AI::MoveThings] step=camera");
 
     // 11. Camera
     MoveCamera();

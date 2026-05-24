@@ -1397,19 +1397,25 @@ void SModel::Show(u32 flags) {
     const u32 ownerFlags = backPtr->flags;
     const bool ownerDeadWindow = (ownerFlags & 0x80u) != 0;
     const bool ownerSemiFlag = (ownerFlags & 0x100u) != 0;
+    const s32 desiredSemiMode = (ownerDeadWindow && ownerSemiFlag) ? 1 : 0;
 
     DrawableSTree* drawableStree = GetDrawableSTree(this);
     if (drawableStree) {
-        OriginalSTree* semiTarget = drawableStree->GetAlternateSTree();
+        OriginalSTree* semiTarget = drawableStree->GetOriginalSTree();
         if (!semiTarget) {
-            semiTarget = drawableStree->GetOriginalSTree();
+            semiTarget = drawableStree->GetAlternateSTree();
         }
 
-        if (ownerDeadWindow) {
-            SetSemiMode__13OriginalSTreei(semiTarget, ownerSemiFlag ? 1 : 0);
+        bool semiLeakedOn = false;
+        if (semiTarget && semiTarget->skinData) {
+            semiLeakedOn = semiTarget->skinData->usesSemiTrans;
         }
-        else if (ownerSemiFlag) {
-            SetSemiMode__13OriginalSTreei(semiTarget, 0);
+
+        if (ownerDeadWindow || ownerSemiFlag || semiLeakedOn) {
+            SetSemiMode__13OriginalSTreei(semiTarget, desiredSemiMode);
+        }
+
+        if (!ownerDeadWindow && ownerSemiFlag) {
             backPtr->flags &= ~0x100u;
         }
     }
@@ -1684,9 +1690,9 @@ void SModel::InitSemiTransMode() {
         return;
     }
 
-    OriginalSTree* semiTarget = drawableStree->GetAlternateSTree();
+    OriginalSTree* semiTarget = drawableStree->GetOriginalSTree();
     if (!semiTarget) {
-        semiTarget = drawableStree->GetOriginalSTree();
+        semiTarget = drawableStree->GetAlternateSTree();
     }
 
     SetSemiMode__13OriginalSTreei(semiTarget, 0);

@@ -763,19 +763,8 @@ void HandleThingEnvironmentCollisions(ccList& thingList) {
 
         Thing* ticketIssuer = thing->GetTicketIssuer();
 
-        if (thing == Player::s_player && thing->pos.y > 20000) {
-            LOG("[HTEC] player pos=(%d,%d,%d) homePos=(%d,%d,%d) checkHeight=%d state=%d",
-                thing->pos.x, thing->pos.y, thing->pos.z,
-                thing->homePos.x, thing->homePos.y, thing->homePos.z,
-                checkHeight, thing->thingType < 29 ? ((Humanoid*)thing)->actionState : -1);
-        }
-
         if (skipWall == 0) {
             HandleThingWall(thing, radius, yMinOffset, checkHeight);
-        }
-
-        if (thing == Player::s_player && thing->pos.y > 20000) {
-            LOG("[HTEC] after wall: homePos=(%d,%d,%d)", thing->homePos.x, thing->homePos.y, thing->homePos.z);
         }
 
         if (ticketIssuer) {
@@ -783,10 +772,6 @@ void HandleThingEnvironmentCollisions(ccList& thingList) {
         }
         else {
             HandleThingFloor(thing, radius, yMinOffset, checkHeight);
-        }
-
-        if (thing == Player::s_player && thing->pos.y > 20000) {
-            LOG("[HTEC] after floor: homePos=(%d,%d,%d)", thing->homePos.x, thing->homePos.y, thing->homePos.z);
         }
 
         if (skipWall != 0 && !thing->GetTicketIssuer() && (thing->flags & TF_ON_GROUND) == 0) {
