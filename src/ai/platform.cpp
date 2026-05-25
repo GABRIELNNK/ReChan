@@ -280,7 +280,8 @@ void Platform::AnalyzeMesh(DBRoot* root) {
     const DBAttrib* a30 = root->FindAttrib(30);
     if (a30 && a30->value != 0) {
         drawDistSq = a30->value;
-        platformFlags |= 0x40000000;
+        // PSX: lui 0x40 -> 0x00400000 (bit 22)
+        platformFlags |= 0x400000;
     }
 
     const DBAttrib* a31 = root->FindAttrib(31);
@@ -290,7 +291,8 @@ void Platform::AnalyzeMesh(DBRoot* root) {
 
     const DBAttrib* a32 = root->FindAttrib(32);
     if (a32 && a32->value != 0) {
-        platformFlags |= 0x80000000;
+        // PSX: lui 0x80 -> 0x00800000 (bit 23)
+        platformFlags |= 0x800000;
     }
 
     const DBAttrib* a34 = root->FindAttrib(34);
@@ -746,7 +748,7 @@ void Platform::Move() {
         }
 
         if (childThing != nullptr) {
-            childThing->pos.y = pos.y;
+            childThing->orientation.y = orientation.y;
         }
 
         if (platformFlags & 0x800) {
@@ -1598,7 +1600,7 @@ void Platform::SetPlatformToPathNode(const char* name) {
     }
 
     HandlePathNodeTransition();
-    UpdatePosition();
+    CreateModel(nullptr);
 
     const LVector& dir = GetPathDirection(splinePath);
 
@@ -1637,24 +1639,15 @@ void Platform::TriggerByName(Thing* source, const char* name, const char* param)
                 return;
             }
 
-            SetPlatformToPathNode(name + 1);
             isActive = 1;
+            SetPlatformToPathNode(name + 1);
 
             // PSX virtual dispatch: vtable+20 (Think), then vtable+56 (AddPassenger)
             Think();
             AddPassenger(static_cast<DynamicThing*>(source));
 
-            LVector boxCentre = pos;
-            SVector localCentre = {};
-            localCentre.x = (s16)Div2TowardZero((s32)localCollBox.minX + (s32)localCollBox.maxX);
-            localCentre.y = (s16)Div2TowardZero((s32)localCollBox.minY + (s32)localCollBox.maxY);
-            localCentre.z = (s16)Div2TowardZero((s32)localCollBox.minZ + (s32)localCollBox.maxZ);
-
-            SVector rotatedCentre = {};
-            GetObjectToWorldSpaceVector(localCentre, rotatedCentre);
-            boxCentre.x += rotatedCentre.x;
-            boxCentre.y += rotatedCentre.y;
-            boxCentre.z += rotatedCentre.z;
+            LVector boxCentre = {};
+            FillBoxCentre(boxCentre, pos, orientation, localCollBox);
             boxCentre.y += (s32)localCollBox.maxY;
 
             if (Player::s_player) {
@@ -1666,7 +1659,7 @@ void Platform::TriggerByName(Thing* source, const char* name, const char* param)
             return;
         }
 
-        if (sourceType == 0 && ::_stricmp(name, "reset") == 0) {
+        if (sourceType == 0 && strcmp(name, "reset") == 0) {
             // PSX virtual dispatch: vtable+12 (Reset)
             Reset();
             return;
