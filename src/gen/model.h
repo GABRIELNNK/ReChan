@@ -33,6 +33,8 @@ using STreeXformVertsCallback = u32 (*)(tPrimGeom*, STreeJoint*, u32*, u16*);
 using STreeFixUpPolysCallback = u8* (*)(tPrimGeom*, void*, u32, u32);
 
 struct ModelFloorHeightState {
+    // Field names are legacy, but PSX logic treats slot 0 as previous floor
+    // and slot 1 as current floor (see Thing::ClearFloorHeight/SetFloorHeight).
     s32 current = (s32)0x80000001;
     s32 previous = (s32)0x80000001;
     s32 shadowMinX = 0;
