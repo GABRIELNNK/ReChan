@@ -396,9 +396,18 @@ void Obstacle::AllocateAndCreateShadow() {
     }
 
     Model* modelPtr = static_cast<Model*>(model);
-    if (!modelPtr->field36) {
-        modelPtr->field36 = new ModelFloorHeightState();
+    Shadow* shadow = GetModelShadow(modelPtr);
+    if (!shadow || shadow->GetFloorHeightState()->shadowType != MODEL_SHADOW_SIMPLE) {
+        delete shadow;
+        shadow = new SimpleShadow(modelPtr);
+        modelPtr->field36 = shadow;
     }
+
+    ModelFloorHeightState* shadowState = shadow->GetFloorHeightState();
+    shadowState->shadowMinX = -100;
+    shadowState->shadowMinY = -50;
+    shadowState->shadowMaxX = 100;
+    shadowState->shadowMaxZ = 50;
 
     UpdateShadowFloorHeight();
 }
@@ -412,11 +421,10 @@ void Obstacle::UpdateShadowFloorHeight() {
     }
 
     Model* modelPtr = static_cast<Model*>(model);
-    if (!modelPtr->field36) {
+    ModelFloorHeightState* floorState = GetModelFloorHeightState(modelPtr);
+    if (!floorState) {
         return;
     }
-
-    ModelFloorHeightState* floorState = static_cast<ModelFloorHeightState*>(modelPtr->field36);
 
     LVector boxCentre = {};
     FillBoxCentre(boxCentre, pos, orientation, collBox);
@@ -427,8 +435,8 @@ void Obstacle::UpdateShadowFloorHeight() {
         obstacleFloorHeight = worldFloorHeight;
     }
 
-    floorState->previous = floorState->current;
-    floorState->current = obstacleFloorHeight;
+    // Shadow placement reads slot 1 (Thing::SetFloorHeight target) as current floor.
+    floorState->previous = obstacleFloorHeight;
     floorState->shadowMinX = (s32)collBox.minX;
     floorState->shadowMinY = (s32)collBox.minY;
     floorState->shadowMaxX = (s32)collBox.maxX;
@@ -616,9 +624,7 @@ bool Obstacle::LedgeCheck(const tagCollisionBox& box, const LVector& normal, con
     const bool nearHands = correctionPos.y >= avgHandY - OBSTACLE_LEDGE_HAND_Y_TOL
         && correctionPos.y <= avgHandY + OBSTACLE_LEDGE_HAND_Y_TOL;
 
-    ModelFloorHeightState* floorState = model->field36
-        ? static_cast<ModelFloorHeightState*>(model->field36)
-        : nullptr;
+    ModelFloorHeightState* floorState = GetModelFloorHeightState(model);
     if (!floorState) {
         return false;
     }

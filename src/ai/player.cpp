@@ -1645,8 +1645,7 @@ void Player::_Stand() {
         if (model) {
             const Model* trackedModel = static_cast<const Model*>(model);
             if (trackedModel->field36) {
-                const ModelFloorHeightState* floorState =
-                    static_cast<const ModelFloorHeightState*>(trackedModel->field36);
+                const ModelFloorHeightState* floorState = GetModelFloorHeightState(trackedModel);
                 floorHeight = floorState->current;
             }
         }
@@ -1880,8 +1879,7 @@ void Player::_Jump() {
         if (wantsWallJump && ((flags & TF_ON_GROUND) == 0)) {
             s32 floorHeight = (s32)0x80000001;
             if (m && m->field36) {
-                const ModelFloorHeightState* floorState =
-                    static_cast<const ModelFloorHeightState*>(m->field36);
+                const ModelFloorHeightState* floorState = GetModelFloorHeightState(m);
                 floorHeight = floorState->current;
             }
             if (floorHeight == (s32)0x80000001 || (pos.y - floorHeight) > WALL_JUMP_MIN_HEIGHT_ABOVE_FLOOR) {
@@ -1949,8 +1947,7 @@ void Player::_Jump() {
                     if (frame >= 6) {
                         s32 floorHeight = (s32)0x80000001;
                         if (m && m->field36) {
-                            const ModelFloorHeightState* floorState =
-                                static_cast<const ModelFloorHeightState*>(m->field36);
+                            const ModelFloorHeightState* floorState = GetModelFloorHeightState(m);
                             floorHeight = floorState->current;
                         }
                         if (floorHeight == (s32)0x80000001 || (pos.y - floorHeight) >= 1024) {
@@ -2233,8 +2230,7 @@ void Player::_Run() {
         if (model) {
             const Model* trackedModel = static_cast<const Model*>(model);
             if (trackedModel->field36) {
-                const ModelFloorHeightState* floorState =
-                    static_cast<const ModelFloorHeightState*>(trackedModel->field36);
+                const ModelFloorHeightState* floorState = GetModelFloorHeightState(trackedModel);
                 floorHeight = floorState->current;
             }
         }

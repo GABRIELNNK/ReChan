@@ -118,7 +118,7 @@ void Untouchable::Draw() {
     const Mat4 savedWorld = p3d::context->GetWorldMatrix();
     Mat4 effectWorld;
     LVector effectPos = { effectPosX, effectPosY, effectPosZ };
-    p3dBuildTransMatrix(effectPos.x, effectPos.y, effectPos.z, effectWorld);
+    p3dBuildTransMatrix((f32)effectPos.x, (f32)effectPos.y, (f32)effectPos.z, effectWorld);
     p3d::context->SetWorldMatrix(savedWorld * effectWorld);
     particleMgr->Display();
     p3d::context->SetWorldMatrix(savedWorld);

@@ -1473,8 +1473,7 @@ bool Humanoid::CheckForLedges() {
     s32 floorDelta = 0x2000;
     Model* trackedModel = model ? static_cast<Model*>(model) : nullptr;
     if (trackedModel && trackedModel->field36) {
-        const ModelFloorHeightState* floorState =
-            static_cast<const ModelFloorHeightState*>(trackedModel->field36);
+        const ModelFloorHeightState* floorState = GetModelFloorHeightState(trackedModel);
         if (floorState->current != (s32)0x80000001) {
             floorDelta = ledgePos.y - floorState->current;
         }

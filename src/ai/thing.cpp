@@ -499,11 +499,11 @@ void Thing::ClearFloorHeight() {
     }
 
     Model* m = static_cast<Model*>(model);
-    if (!m->field36) {
+    ModelFloorHeightState* floorState = GetModelFloorHeightState(m);
+    if (!floorState) {
         return;
     }
 
-    ModelFloorHeightState* floorState = static_cast<ModelFloorHeightState*>(m->field36);
     // PSX slot order for floor state is [0]=previous floor, [1]=current floor.
     // Clear moves current->previous and invalidates current.
     floorState->current = floorState->previous;
@@ -518,11 +518,11 @@ void Thing::SetFloorHeight(s32 height) {
     }
 
     Model* m = static_cast<Model*>(model);
-    if (!m->field36) {
+    ModelFloorHeightState* floorState = GetModelFloorHeightState(m);
+    if (!floorState) {
         return;
     }
 
-    ModelFloorHeightState* floorState = static_cast<ModelFloorHeightState*>(m->field36);
     // PSX updates slot+4 (current floor for this frame accumulation).
     if (height > floorState->previous) {
         floorState->previous = height;

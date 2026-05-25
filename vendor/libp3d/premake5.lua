@@ -81,7 +81,6 @@ project "libp3d"
             libp3d_root .. "/vendor/sdl2/src/haptic/dummy/*.c",
             libp3d_root .. "/vendor/sdl2/src/haptic/windows/*.c",
             libp3d_root .. "/vendor/sdl2/src/hidapi/*.c",
-            libp3d_root .. "/vendor/sdl2/src/hidapi/windows/*.c",
             libp3d_root .. "/vendor/sdl2/src/joystick/*.c",
             libp3d_root .. "/vendor/sdl2/src/joystick/dummy/*.c",
             libp3d_root .. "/vendor/sdl2/src/joystick/hidapi/*.c",
@@ -107,7 +106,7 @@ project "libp3d"
             libp3d_root .. "/vendor/sdl2/src/sensor/windows/*.c",
             libp3d_root .. "/vendor/sdl2/src/stdlib/*.c",
             libp3d_root .. "/vendor/sdl2/src/thread/*.c",
-            libp3d_root .. "/vendor/sdl2/src/thread/generic/*.c",
+            libp3d_root .. "/vendor/sdl2/src/thread/generic/SDL_syscond.c",
             libp3d_root .. "/vendor/sdl2/src/thread/windows/*.c",
             libp3d_root .. "/vendor/sdl2/src/timer/*.c",
             libp3d_root .. "/vendor/sdl2/src/timer/windows/*.c",
@@ -115,13 +114,6 @@ project "libp3d"
             libp3d_root .. "/vendor/sdl2/src/video/dummy/*.c",
             libp3d_root .. "/vendor/sdl2/src/video/windows/*.c",
             libp3d_root .. "/vendor/sdl2/src/video/yuv2rgb/*.c",
-        }
-        links {
-            "cfgmgr32",
-            "imm32",
-            "setupapi",
-            "version",
-            "winmm",
         }
         defines {
             "_GLFW_WIN32",

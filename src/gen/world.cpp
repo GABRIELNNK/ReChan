@@ -3691,6 +3691,8 @@ void World::DrawEverythingHandler(const LVector* playerPos) {
     // PSX: find maxZDepth among far blocks (index >= 5), add 64, clamp to 0xFFFF
     // Used for OT layer setup on PSX - not functionally needed with z-buffer on PC.
 
+    BeginModelShadowQueue();
+
     // Render visible blocks
     for (u32 i = 0; i < visibleCount; i++) {
         DrawEntry& entry = drawArray[i];
@@ -3725,9 +3727,15 @@ void World::DrawEverythingHandler(const LVector* playerPos) {
             p3d::context->SetTexInfoOverride(false, 0);
             entry.block->Draw(&localPos);
 
+            // Host immediate path: queue model shadows during DrawLoop and flush
+            // after block geometry to emulate PSX OT composition.
+            FlushModelShadowQueue();
+
             Effects_DrawEffects(static_cast<s32>(bn));
         }
     }
+
+    EndModelShadowQueue();
 
     // PSX: DebugDrawSector, ExitLayer(2), profile end(7)
 }

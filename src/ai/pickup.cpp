@@ -607,6 +607,17 @@ s32 Pickup::SetupPickup(Thing* owner, u32 joint) {
     if (model) {
         Model* pickupModel = static_cast<Model*>(model);
         pickupModel->modelFlags |= 1u;
+
+        if (pickupModel->field36 && owner && owner->model) {
+            const Model* ownerModel = static_cast<const Model*>(owner->model);
+            const ModelFloorHeightState* ownerShadowState = GetModelFloorHeightState(ownerModel);
+            ModelFloorHeightState* pickupShadowState = GetModelFloorHeightState(pickupModel);
+            if (pickupShadowState && ownerShadowState) {
+                pickupShadowState->previous = ownerShadowState->previous;
+                pickupShadowState->current = ownerShadowState->current;
+            }
+        }
+
         result = static_cast<s32>(pickupModel->modelFlags);
     }
     attachedOwner = owner;
@@ -621,6 +632,17 @@ void Pickup::UpdatePosition() {
 
     if ((pickupFlags & 4u) != 0 && attachedOwner && attachedOwner->model) {
         HumanoidModel* modelPtr = static_cast<HumanoidModel*>(attachedOwner->model);
+
+        if (model && modelPtr && modelPtr->field36) {
+            Model* pickupModel = static_cast<Model*>(model);
+            ModelFloorHeightState* pickupShadowState = GetModelFloorHeightState(pickupModel);
+            const ModelFloorHeightState* ownerShadowState = GetModelFloorHeightState(modelPtr);
+            if (pickupShadowState && ownerShadowState) {
+                pickupShadowState->previous = ownerShadowState->previous;
+                pickupShadowState->current = ownerShadowState->current;
+            }
+        }
+
         AnimationMatrices* animMatrices = modelPtr ? modelPtr->animMatrices : nullptr;
         if (animMatrices) {
             const s32* matrix = AnimationMatrices::GetMatrix(animMatrices, static_cast<u32>(attachJoint));

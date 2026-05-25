@@ -4,11 +4,13 @@
 #include "gen/animstruct.h"
 #include "gen/charmgr.h"
 #include "gen/camera.h"
+#include "gen/config.h"
 #include "gen/display.h"
 #include "gen/envmgr.h"
 #include "gen/geometry.h"
 #include "gen/lights.h"
 #include "gen/paramanim.h"
+#include "gen/psxmath_helpers.h"
 #include "ai/player.h"
 #include "gen/skeleton.h"
 #include "p3d/byteread.h"
@@ -59,6 +61,11 @@ static bool IsLiveOriginalSTree(const OriginalSTree* tree) {
 
     return std::find(s_liveOriginalSTrees.begin(), s_liveOriginalSTrees.end(), tree) != s_liveOriginalSTrees.end();
 }
+
+static void BuildMat4FromPsxPackedMatrix(const s32* packedMatrix, Mat4& out);
+static void MakeBillboardMatrix(const LVector& pos, Mat4& out, s32 lockY);
+static void MakeBillboardMatrixFlip(const LVector& pos, Mat4& out, s32 lockY);
+static DrawableSTree* GetDrawableSTree(Model* model);
 
 // PSX: SetSemiMode__13OriginalSTreei (MODEL.CPP:3459, 0x8007205C)
 static s32 SetSemiMode__13OriginalSTreei(OriginalSTree* original, s32 mode) {
@@ -1203,7 +1210,7 @@ Model::Model() {
     drawable = nullptr;
     drawableType = 0;
     animStructure = nullptr;
-    field36 = new ModelFloorHeightState();
+    field36 = nullptr;
     ambientLight = nullptr;
     hwLights = nullptr;
     hwLightCount = 0;
@@ -1226,7 +1233,7 @@ Model::~Model() {
     DeleteHardwareLights();
 
     if (field36) {
-        delete static_cast<ModelFloorHeightState*>(field36);
+        delete static_cast<Shadow*>(field36);
         field36 = nullptr;
     }
 
@@ -1242,6 +1249,18 @@ void Model::Reset() {
 
 void Model::Show(u32 /*flags*/) {
     // Base does nothing - overridden by SModel/GModel
+}
+
+// PSX: DrawShadow__5ModelUl (MODEL.CPP:1898, 0x80072400)
+void Model::DrawShadow(u32 /*flags*/) {
+    MARKFUNCTION(0x80072400);
+
+    Shadow* shadow = GetModelShadow(this);
+    if (!shadow) {
+        return;
+    }
+
+    shadow->Show(nullptr);
 }
 
 void Model::Animate() {
@@ -1457,6 +1476,12 @@ void SModel::Show(u32 flags) {
     }
 
     p3d::context->SetWorldMatrix(savedWorld);
+
+    if ((backPtr->flags & 0x80u) == 0u) {
+        if ((modelFlags & 0x10u) != 0u && (modelFlags & 0x20u) == 0u) {
+            DrawShadow(flags);
+        }
+    }
 }
 
 // PSX: Animate__6SModel (MODEL.CPP:1416, 0x8006F640)
@@ -1813,6 +1838,10 @@ void GModel::Show(u32 flags) {
     }
 
     p3d::context->SetWorldMatrix(savedWorld);
+
+    if ((modelFlags & 0x10u) != 0u && (modelFlags & 0x20u) == 0u) {
+        DrawShadow(flags);
+    }
 }
 
 void GModel::SetOriginalGeo(OriginalGeo* original) {
@@ -2040,6 +2069,12 @@ void HumanoidModel::Animate() {
 // PSX: SetupModelCallbacks__13HumanoidModel (MHUMAN.CPP:69, 0x8006E114)
 void HumanoidModel::SetupModelCallbacks() {
     MARKFUNCTION(0x8006E114);
+
+    Shadow* shadow = GetModelShadow(this);
+    if (!shadow || shadow->GetFloorHeightState()->shadowType != MODEL_SHADOW_TREE) {
+        delete shadow;
+        field36 = new TreeShadow(this);
+    }
 
     if (!animMatrices) {
         return;

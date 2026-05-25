@@ -2,6 +2,7 @@
 #include "core.h"
 #include "p3d/p3dmath.h"
 #include "gen/cclist.h"
+#include "gen/shadows.h"
 
 // Original hierarchy (data containers stored in LevelManager):
 //   OriginalBasic -> OriginalTree -> OriginalSTree / OriginalGeo / OriginalETree
@@ -31,17 +32,6 @@ struct tPrimGeom;
 
 using STreeXformVertsCallback = u32 (*)(tPrimGeom*, STreeJoint*, u32*, u16*);
 using STreeFixUpPolysCallback = u8* (*)(tPrimGeom*, void*, u32, u32);
-
-struct ModelFloorHeightState {
-    // Field names are legacy, but PSX logic treats slot 0 as previous floor
-    // and slot 1 as current floor (see Thing::ClearFloorHeight/SetFloorHeight).
-    s32 current = (s32)0x80000001;
-    s32 previous = (s32)0x80000001;
-    s32 shadowMinX = 0;
-    s32 shadowMinY = 0;
-    s32 shadowMaxX = 0;
-    s32 shadowMaxZ = 0;
-};
 
 // Pre-parsed skinning data for CPU vertex skinning each frame
 struct SkinVertex {
@@ -356,6 +346,7 @@ public:
     ~Model() override;
     void Reset();
     virtual void Show(u32 flags);
+    void DrawShadow(u32 flags);
 
     virtual void Animate();
     virtual void ApplyAnimToModel(s32 thingType, s32 animEnum, s32 p3, s32 p4, s32 p5);

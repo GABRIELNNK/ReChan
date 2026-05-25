@@ -2283,6 +2283,16 @@ static void DrawGouraudRectPSX(f32 x, f32 y, f32 w, f32 h,
 
 }
 
+static void DrawGouraudRectPSX(s32 x, s32 y, s32 w, s32 h,
+                               u8 topR, u8 topG, u8 topB,
+                               u8 bottomR, u8 bottomG, u8 bottomB,
+                               u8 alpha) {
+    DrawGouraudRectPSX((f32)x, (f32)y, (f32)w, (f32)h,
+                       topR, topG, topB,
+                       bottomR, bottomG, bottomB,
+                       alpha);
+}
+
 static f32 GetMenuBorderPx() {
     return SCREEN_SCALE_Y((f32)DEF_BORDER_W);
 }
@@ -2336,6 +2346,10 @@ static void DrawSliderCircleMeterPSX(f32 rightX, f32 textY, f32 value, tTexture*
     }
 }
 
+static void DrawSliderCircleMeterPSX(s32 rightX, s32 textY, s32 value, tTexture* sliderOTex, tTexture* sliderFTex) {
+    DrawSliderCircleMeterPSX((f32)rightX, (f32)textY, (f32)value, sliderOTex, sliderFTex);
+}
+
 static void DrawUniformBorderRectPSX(f32 x, f32 y, f32 w, f32 h, f32 borderPx,
                                      u8 r, u8 g, u8 b, u8 a) {
     if (w <= 0 || h <= 0 || borderPx <= 0.0f)
@@ -2357,6 +2371,11 @@ static void DrawUniformBorderRectPSX(f32 x, f32 y, f32 w, f32 h, f32 borderPx,
     ScreenDraw::DrawColoredRect(x1 - t, y0, t, rectH, r, g, b, a);
 }
 
+static void DrawUniformBorderRectPSX(s32 x, s32 y, s32 w, s32 h, f32 borderPx,
+                                     u8 r, u8 g, u8 b, u8 a) {
+    DrawUniformBorderRectPSX((f32)x, (f32)y, (f32)w, (f32)h, borderPx, r, g, b, a);
+}
+
 static void DrawUniformHLinePSX(f32 x, f32 y, f32 w, f32 linePx,
                                 u8 r, u8 g, u8 b, u8 a) {
     if (w <= 0 || linePx <= 0.0f)
@@ -2372,6 +2391,11 @@ static void DrawUniformHLinePSX(f32 x, f32 y, f32 w, f32 linePx,
     ScreenDraw::DrawColoredRect(x0, y0, drawW, linePx, r, g, b, a);
 }
 
+static void DrawUniformHLinePSX(s32 x, s32 y, s32 w, f32 linePx,
+                                u8 r, u8 g, u8 b, u8 a) {
+    DrawUniformHLinePSX((f32)x, (f32)y, (f32)w, linePx, r, g, b, a);
+}
+
 static void DrawUniformVLinePSX(f32 x, f32 y, f32 h, f32 linePx,
                                 u8 r, u8 g, u8 b, u8 a) {
     if (h <= 0 || linePx <= 0.0f)
@@ -2385,6 +2409,11 @@ static void DrawUniformVLinePSX(f32 x, f32 y, f32 h, f32 linePx,
         return;
 
     ScreenDraw::DrawColoredRect(x0, y0, linePx, drawH, r, g, b, a);
+}
+
+static void DrawUniformVLinePSX(s32 x, s32 y, s32 h, f32 linePx,
+                                u8 r, u8 g, u8 b, u8 a) {
+    DrawUniformVLinePSX((f32)x, (f32)y, (f32)h, linePx, r, g, b, a);
 }
 
 static void DrawUniformBorderFillRectPSX(f32 x, f32 y, f32 w, f32 h, f32 borderPx,
@@ -2416,6 +2445,14 @@ static void DrawUniformBorderFillRectPSX(f32 x, f32 y, f32 w, f32 h, f32 borderP
     }
 }
 
+static void DrawUniformBorderFillRectPSX(s32 x, s32 y, s32 w, s32 h, f32 borderPx,
+                                         u8 borderR, u8 borderG, u8 borderB, u8 borderA,
+                                         u8 fillR, u8 fillG, u8 fillB, u8 fillA) {
+    DrawUniformBorderFillRectPSX((f32)x, (f32)y, (f32)w, (f32)h, borderPx,
+                                 borderR, borderG, borderB, borderA,
+                                 fillR, fillG, fillB, fillA);
+}
+
 static void DrawGouraudRectPSXVertical(f32 x, f32 y, f32 w, f32 h,
                                        u8 leftR, u8 leftG, u8 leftB,
                                        u8 rightR, u8 rightG, u8 rightB,
@@ -2445,6 +2482,10 @@ static void DrawMenuOrnament(tTexture* symbolTex, f32 x, f32 y) {
         SCREEN_SCALE_Y((f32)DEF_ORN_H),
         0.0f, 0.0f, 1.0f, 1.0f,
         DEF_ORN_R, DEF_ORN_G, DEF_ORN_B, DEF_ORN_A);
+}
+
+static void DrawMenuOrnament(tTexture* symbolTex, s32 x, s32 y) {
+    DrawMenuOrnament(symbolTex, (f32)x, (f32)y);
 }
 
 void feCustomMenuMgr::DrawMenuWindow(s32 x, s32 y, s32 w, s32 h, const char* title) const {
@@ -2490,7 +2531,8 @@ void feCustomMenuMgr::DrawMenuWindow(s32 x, s32 y, s32 w, s32 h, const char* tit
     }
 
     // Body fill
-    DrawRect(x + DEF_BORDER_W, bodyY0, w - DEF_BORDER_W * 2, bodyY1 - bodyY0, DEF_BODY_R, DEF_BODY_G, DEF_BODY_B, DEF_BODY_A);
+    DrawRect((f32)(x + DEF_BORDER_W), (f32)bodyY0, (f32)(w - DEF_BORDER_W * 2), (f32)(bodyY1 - bodyY0),
+             DEF_BODY_R, DEF_BODY_G, DEF_BODY_B, DEF_BODY_A);
 
     // Frame
     DrawUniformHLinePSX(x + DEF_BORDER_W, bodyY0, w - DEF_BORDER_W * 2, framePx, DEF_FRAME_R, DEF_FRAME_G, DEF_FRAME_B, DEF_FRAME_A);
@@ -2544,13 +2586,13 @@ void feCustomMenuMgr::RenderKeyBindingsPage(s32 panelX, s32 panelY, s32 panelW, 
     g_textManager->SetShadow(false);
     g_textManager->SetOutline(true);
 
-    const f32 contentTop = panelY + DEF_TITLE_BAR_H + DEF_CONTENT_TOP_PAD;
-    const f32 labelX = panelX + DEF_LABEL_X_PAD + DEF_KEYBIND_X_PAD;
+    const f32 contentTop = (f32)(panelY + DEF_TITLE_BAR_H + DEF_CONTENT_TOP_PAD);
+    const f32 labelX = (f32)(panelX + DEF_LABEL_X_PAD + DEF_KEYBIND_X_PAD);
     const f32 headerY = contentTop + DEF_CONTENT_PAD + DEF_TEXT_Y_OFF;
     const f32 firstRowY = headerY + DEF_KEYBIND_ROW_STEP;
-    const f32 slotW = DEF_KEYBIND_SLOT_W;
-    const f32 slotGap = DEF_KEYBIND_SLOT_GAP;
-    const f32 slot2Right = panelX + panelW - DEF_VALUE_X_PAD - DEF_KEYBIND_X_PAD;
+    const f32 slotW = (f32)DEF_KEYBIND_SLOT_W;
+    const f32 slotGap = (f32)DEF_KEYBIND_SLOT_GAP;
+    const f32 slot2Right = (f32)(panelX + panelW - DEF_VALUE_X_PAD - DEF_KEYBIND_X_PAD);
     const f32 slot2Left = slot2Right - slotW;
     const f32 slot1Right = slot2Left - slotGap;
     const f32 slot1Left = slot1Right - slotW;
@@ -2584,21 +2626,21 @@ void feCustomMenuMgr::RenderKeyBindingsPage(s32 panelX, s32 panelY, s32 panelW, 
         const f32 rowTextY = rowY + 0.8f;
 
         if ((row & 1) == 0) {
-            DrawRect(tableLeft, rowY - DEF_KEYBIND_ROW_TOP_PAD, tableW, DEF_KEYBIND_ROW_STEP,
+            DrawRect(tableLeft, (f32)(rowY - DEF_KEYBIND_ROW_TOP_PAD), tableW, (f32)DEF_KEYBIND_ROW_STEP,
                      DEF_KEYBIND_STRIPE_DARK_R, DEF_KEYBIND_STRIPE_DARK_G, DEF_KEYBIND_STRIPE_DARK_B, DEF_KEYBIND_STRIPE_DARK_A);
         }
         else {
-            DrawRect(tableLeft, rowY - DEF_KEYBIND_ROW_TOP_PAD, tableW, DEF_KEYBIND_ROW_STEP,
+            DrawRect(tableLeft, (f32)(rowY - DEF_KEYBIND_ROW_TOP_PAD), tableW, (f32)DEF_KEYBIND_ROW_STEP,
                      DEF_KEYBIND_STRIPE_WARM_R, DEF_KEYBIND_STRIPE_WARM_G, DEF_KEYBIND_STRIPE_WARM_B, DEF_KEYBIND_STRIPE_WARM_A);
         }
 
         if (selectedRow) {
-            const s32 cellLeft = (m_keyBindSlotCursor == 0) ? slot1Left : slot2Left;
-            DrawRect(cellLeft - DEF_KEYBIND_CELL_PAD, rowY - DEF_KEYBIND_ROW_TOP_PAD,
-                     slotW + DEF_KEYBIND_CELL_PAD * 2, DEF_KEYBIND_ROW_STEP,
+            const f32 cellLeft = (m_keyBindSlotCursor == 0) ? slot1Left : slot2Left;
+            DrawRect((f32)(cellLeft - DEF_KEYBIND_CELL_PAD), (f32)(rowY - DEF_KEYBIND_ROW_TOP_PAD),
+                     (f32)(slotW + DEF_KEYBIND_CELL_PAD * 2), (f32)DEF_KEYBIND_ROW_STEP,
                      DEF_KEYBIND_ACTIVE_FILL_R, DEF_KEYBIND_ACTIVE_FILL_G, DEF_KEYBIND_ACTIVE_FILL_B, DEF_KEYBIND_ACTIVE_FILL_A);
-            DrawUniformBorderRectPSX(cellLeft - DEF_KEYBIND_CELL_PAD, rowY - DEF_KEYBIND_ROW_TOP_PAD,
-                                     slotW + DEF_KEYBIND_CELL_PAD * 2, DEF_KEYBIND_ROW_STEP,
+            DrawUniformBorderRectPSX((f32)(cellLeft - DEF_KEYBIND_CELL_PAD), (f32)(rowY - DEF_KEYBIND_ROW_TOP_PAD),
+                                     (f32)(slotW + DEF_KEYBIND_CELL_PAD * 2), (f32)DEF_KEYBIND_ROW_STEP,
                                      GetMenuBorderPx(), m_pulse.GetRed8(), m_pulse.GetGreen8(), m_pulse.GetBlue8(), 255);
         }
 

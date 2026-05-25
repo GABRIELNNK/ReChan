@@ -179,7 +179,6 @@ static Mat4 BeginOverlay() {
     EnsureShader();
     Mat4 prev = p3d::context->GetProjectionMatrix();
 
-    p3d::context->ResolveForOverlayPass();
     p3d::context->SetProjectionMatrix(Ortho(0.0f, SCREEN_WIDTH, SCREEN_HEIGHT, 0.0f, -1.0f, 1.0f));
     p3d::context->EnableZBuffer(false);
     p3d::context->SetCullMode(PDDI_CULL_NONE);
