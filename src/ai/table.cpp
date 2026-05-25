@@ -59,10 +59,8 @@ void DynamicObstacle::AnalyzeMesh(DBRoot* root) {
     ObstacleFillCollisionBox(localBox, root, 5);
     SetCollisionBox(localBox);
 
-    // PSX: *(_WORD*)(a1+58) = 1 → maxHealth = 1
     maxHealth = 1;
 
-    // attrib 20 = effect name → effectHash; attrib 21 = effect variant flag
     const DBAttrib* a20 = root->FindAttrib(20);
     if (a20 && a20->strValue) {
         effectHash = p3dHash(a20->strValue);
@@ -243,7 +241,7 @@ void DynamicObstacle::HandleHumanoidCollision(Humanoid* hum) {
     LVector correctionNormal = {};
     LVector correctionPushedPos = {};
 
-    const bool corrected = CorrectThingPositionObstacle(
+    CorrectThingPositionObstacle(
         pos,
         pos,
         orientation.y,
@@ -258,9 +256,9 @@ void DynamicObstacle::HandleHumanoidCollision(Humanoid* hum) {
         correctionNormal,
         correctionPushedPos);
 
-    if (corrected && hum->velocity.y <= 0) {
+    if (correctionNormal.y > 0 && hum->velocity.y <= 0) {
         hum->SetFloorHeight(pos.y + static_cast<s32>(collBox.maxY));
-        HandleObjectInterAction(hum);
+        AddPassenger(hum);
     }
 
     hum->homePos = correctedPos;
@@ -514,6 +512,7 @@ void Table::HandlePickupCollision(Thing* pickup) {
 void Table::HandleHumanoidCollision(Humanoid* hum) {
     MARKFUNCTION(0x800152A8);
     DynamicObstacle::HandleHumanoidCollision(hum);
+    HandleObjectInterAction(hum);
 }
 
 Chair::Chair(const LVector* pos, u16 type)
@@ -562,4 +561,5 @@ void Chair::Throw(s32 a, s32 b, const LVector& matrix, const LVector& contactPos
 void Chair::HandleHumanoidCollision(Humanoid* hum) {
     MARKFUNCTION(0x80015434);
     DynamicObstacle::HandleHumanoidCollision(hum);
+    HandleObjectInterAction(hum);
 }
