@@ -615,6 +615,18 @@ void feCustomMenuMgr::BuildPages() {
         Button("FE_YS", EntryEvent_DeleteConfirmYes),
                });
 
+    auto& feSaveDone = AddPage(MenuPage_SaveDone, "FE_SVG", "Menu_Confirmation", MenuPage_SaveSlots, 0, false, -1, -1);
+    SetEntries(feSaveDone, {
+        Info("FE_SVD"),
+        Button("FE_OK", EntryEvent_Back),
+               });
+
+    auto& feDeleteDone = AddPage(MenuPage_DeleteDone, "FE_DLG", "Menu_Confirmation", MenuPage_DeleteSlots, 0, false, -1, -1);
+    SetEntries(feDeleteDone, {
+        Info("FE_DLD"),
+        Button("FE_OK", EntryEvent_Back),
+               });
+
     auto& feNewGame = AddPage(MenuPage_NewGameConfirm, "FE_NWG", "Menu_Confirmation", MenuPage_Frontend, 0, false, -1, -1);
     SetEntries(feNewGame, {
         Info("FE_NGQ"),
@@ -748,6 +760,14 @@ s32 feCustomMenuMgr::Invoke() {
             m_keyBindSlotCursor = 0;
         }
 
+        auto isKeyBindBackSelected = [this]() {
+            return m_cursor == 0;
+        };
+
+        auto setKeyBindBackSelected = [this](bool selected) {
+            m_cursor = selected ? 0 : -1;
+        };
+
         auto clampKeyBindScroll = [this]() {
             if (m_keyBindActionCursor < m_keyBindScrollTop) {
                 m_keyBindScrollTop = m_keyBindActionCursor;
@@ -856,6 +876,7 @@ s32 feCustomMenuMgr::Invoke() {
         }
 
         s32 hoverActionIndex = -1;
+        s32 hoverMenuEntry = -1;
         s32 hoverRowIndex = -1;
         s32 hoverSlotIndex = m_keyBindSlotCursor;
 
@@ -876,12 +897,12 @@ s32 feCustomMenuMgr::Invoke() {
             const s32 panelX = DEF_WINDOW_CENTER_X - page->frameW / 2;
             const s32 panelY = DEF_WINDOW_CENTER_Y - page->frameH / 2;
             const s32 contentTop = panelY + DEF_TITLE_BAR_H + DEF_CONTENT_TOP_PAD;
-            const s32 labelX = panelX + DEF_LABEL_X_PAD;
+            const s32 labelX = panelX + DEF_LABEL_X_PAD + DEF_KEYBIND_X_PAD;
             const s32 headerY = contentTop + DEF_CONTENT_PAD + DEF_TEXT_Y_OFF;
             const s32 firstRowY = headerY + DEF_KEYBIND_ROW_STEP;
             const s32 slotW = DEF_KEYBIND_SLOT_W;
             const s32 slotGap = DEF_KEYBIND_SLOT_GAP;
-            const s32 slot2Right = panelX + page->frameW - DEF_VALUE_X_PAD;
+            const s32 slot2Right = panelX + page->frameW - DEF_VALUE_X_PAD - DEF_KEYBIND_X_PAD;
             const s32 slot2Left = slot2Right - slotW;
             const s32 slot1Right = slot2Left - slotGap;
             const s32 slot1Left = slot1Right - slotW;
@@ -920,6 +941,33 @@ s32 feCustomMenuMgr::Invoke() {
                     hoverRowIndex = row;
                     break;
                 }
+
+                if (page->numEntries > 0) {
+                    const s32 rowSpan = (page->numEntries > 0) ? ((page->numEntries - 1) * DEF_ROW_STEP) : 0;
+                    const s32 extraH = CalcPageExtraHeight(*page);
+                    const s32 entryBlockH = DEF_CONTENT_PAD + rowSpan + DEF_ROW_TEXT_H + extraH;
+                    const s32 bodyAvailH = page->frameH - DEF_TITLE_BAR_H - DEF_BOTTOM_BAR_H - DEF_CONTENT_TOP_PAD - DEF_CONTENT_BOTTOM_PAD;
+                    const s32 bodyCenterPad = (bodyAvailH > entryBlockH) ? ((bodyAvailH - entryBlockH) / 2) : 0;
+                    const s32 menuFirstY = panelY + DEF_TITLE_BAR_H + DEF_CONTENT_TOP_PAD + bodyCenterPad + DEF_CONTENT_PAD;
+                    const s32 menuLabelX = panelX + DEF_LABEL_X_PAD;
+                    const s32 menuValueX = panelX + page->frameW - DEF_VALUE_X_PAD;
+                    const s32 menuCenterX = DEF_WINDOW_CENTER_X;
+
+                    s32 backRowTop = 0;
+                    ResolveEntryLayout(*page, 0,
+                                       menuFirstY, menuLabelX, menuValueX, menuCenterX,
+                                       &backRowTop, nullptr, nullptr, nullptr, nullptr);
+
+                    const s32 backRowH = DEF_ROW_STEP + GetEntryExtraHeight(*page, page->entries[0]);
+                    if (psxY >= (f32)backRowTop && psxY < (f32)(backRowTop + backRowH)) {
+                        hoverMenuEntry = 0;
+                    }
+                }
+            }
+
+            if (hoverActionIndex >= 0 && isKeyBindBackSelected()) {
+                setKeyBindBackSelected(false);
+                PlaySound(FE_SND_MENU_7);
             }
 
             if (hoverActionIndex >= 0 && hoverActionIndex != m_keyBindActionCursor) {
@@ -933,7 +981,16 @@ s32 feCustomMenuMgr::Invoke() {
                 PlaySound(FE_SND_MENU_7);
             }
 
+            if (hoverActionIndex < 0 && hoverMenuEntry == 0 && !isKeyBindBackSelected()) {
+                setKeyBindBackSelected(true);
+                PlaySound(FE_SND_MENU_7);
+            }
+
             if (scroll != 0) {
+                if (isKeyBindBackSelected()) {
+                    setKeyBindBackSelected(false);
+                }
+
                 const s32 oldScrollTop = m_keyBindScrollTop;
                 const s32 maxScrollTop = (kKeyBindingActionCount > DEF_KEYBIND_VISIBLE_ROWS)
                     ? (kKeyBindingActionCount - DEF_KEYBIND_VISIBLE_ROWS)
@@ -973,9 +1030,17 @@ s32 feCustomMenuMgr::Invoke() {
             }
 
             if (leftClick && hoverActionIndex >= 0) {
+                setKeyBindBackSelected(false);
                 m_keyBindCaptureActive = true;
                 m_keyBindCaptureBlockFrames = 1;
                 PlaySound(FE_SND_MENU_5);
+                return m_result;
+            }
+
+            if (leftClick && hoverMenuEntry == 0) {
+                setKeyBindBackSelected(true);
+                PlaySound(FE_SND_MENU_5);
+                Confirm();
                 return m_result;
             }
 
@@ -987,24 +1052,38 @@ s32 feCustomMenuMgr::Invoke() {
         }
 
         if (nonMouseInput && g_actionInput->JustPressed(ACTION_MENU_UP)) {
-            m_keyBindActionCursor--;
-            if (m_keyBindActionCursor < 0) {
+            if (isKeyBindBackSelected()) {
+                setKeyBindBackSelected(false);
                 m_keyBindActionCursor = kKeyBindingActionCount - 1;
+                clampKeyBindScroll();
             }
-            clampKeyBindScroll();
+            else if (m_keyBindActionCursor > 0) {
+                m_keyBindActionCursor--;
+                clampKeyBindScroll();
+            }
+            else {
+                setKeyBindBackSelected(true);
+            }
             PlaySound(FE_SND_MENU_7);
         }
 
         if (nonMouseInput && g_actionInput->JustPressed(ACTION_MENU_DOWN)) {
-            m_keyBindActionCursor++;
-            if (m_keyBindActionCursor >= kKeyBindingActionCount) {
+            if (isKeyBindBackSelected()) {
+                setKeyBindBackSelected(false);
                 m_keyBindActionCursor = 0;
+                clampKeyBindScroll();
             }
-            clampKeyBindScroll();
+            else if (m_keyBindActionCursor < (kKeyBindingActionCount - 1)) {
+                m_keyBindActionCursor++;
+                clampKeyBindScroll();
+            }
+            else {
+                setKeyBindBackSelected(true);
+            }
             PlaySound(FE_SND_MENU_7);
         }
 
-        if (nonMouseInput && g_actionInput->JustPressed(ACTION_MENU_LEFT)) {
+        if (nonMouseInput && !isKeyBindBackSelected() && g_actionInput->JustPressed(ACTION_MENU_LEFT)) {
             m_keyBindSlotCursor--;
             if (m_keyBindSlotCursor < 0) {
                 m_keyBindSlotCursor = DEF_KEYBIND_SLOT_COUNT - 1;
@@ -1012,7 +1091,7 @@ s32 feCustomMenuMgr::Invoke() {
             PlaySound(FE_SND_MENU_7);
         }
 
-        if (nonMouseInput && g_actionInput->JustPressed(ACTION_MENU_RIGHT)) {
+        if (nonMouseInput && !isKeyBindBackSelected() && g_actionInput->JustPressed(ACTION_MENU_RIGHT)) {
             m_keyBindSlotCursor++;
             if (m_keyBindSlotCursor >= DEF_KEYBIND_SLOT_COUNT) {
                 m_keyBindSlotCursor = 0;
@@ -1021,14 +1100,19 @@ s32 feCustomMenuMgr::Invoke() {
         }
 
         if (nonMouseInput && g_actionInput->JustPressed(ACTION_MENU_CONFIRM)) {
-            m_keyBindCaptureActive = true;
-            m_keyBindCaptureBlockFrames = 1;
             PlaySound(FE_SND_MENU_5);
+            if (isKeyBindBackSelected()) {
+                Confirm();
+            }
+            else {
+                m_keyBindCaptureActive = true;
+                m_keyBindCaptureBlockFrames = 1;
+            }
         }
 
         const s32 clearKey = g_actionInput->GetTriggeredKeyThisFrame();
-        if ((nonMouseInput && g_actionInput->JustPressed(ACTION_MENU_CLEAR)) ||
-            clearKey == KEY_DELETE || clearKey == KEY_BACKSPACE) {
+        if (!isKeyBindBackSelected() && ((nonMouseInput && g_actionInput->JustPressed(ACTION_MENU_CLEAR)) ||
+            clearKey == KEY_DELETE || clearKey == KEY_BACKSPACE)) {
             const Action action = (Action)m_keyBindActionCursor;
             SetDesktopBindingCodeUnique(action, m_keyBindSlotCursor, 0);
             g_settings.Save(SETTINGS_PATH);
@@ -1282,9 +1366,14 @@ void feCustomMenuMgr::SetPage(MenuPage page) {
     // Advance cursor past any leading Info entries.
     if (m_currPage != MenuPage_None) {
         const PageDef& pg = m_pages[m_currPage];
-        while (m_cursor < pg.numEntries && pg.entries[m_cursor].type == EntryType_Info) {
+        while (m_cursor >= 0 && m_cursor < pg.numEntries && pg.entries[m_cursor].type == EntryType_Info) {
             m_cursor++;
         }
+    }
+
+    if (m_currPage == MenuPage_KeyBindings) {
+        // Key bindings uses its own row/slot selection; keep Back unselected until navigated.
+        m_cursor = -1;
     }
 }
 
@@ -1549,8 +1638,9 @@ void feCustomMenuMgr::Confirm() {
                     RefreshSaveSlots();
                     const s32 savedSlot = m_pendingSaveSlot;
                     m_pendingSaveSlot = -1;
-                    SetPage(MenuPage_SaveSlots);
-                    m_cursor = savedSlot;
+                    m_pages[MenuPage_SaveDone].parentPage = MenuPage_SaveSlots;
+                    m_pages[MenuPage_SaveDone].parentEntry = savedSlot;
+                    SetPage(MenuPage_SaveDone);
                 }
                 else {
                     PlaySound(FE_SND_MENU_7);
@@ -1566,8 +1656,9 @@ void feCustomMenuMgr::Confirm() {
                     RefreshSaveSlots();
                     const s32 deletedSlot = m_pendingDeleteSlot;
                     m_pendingDeleteSlot = -1;
-                    SetPage(MenuPage_DeleteSlots);
-                    m_cursor = deletedSlot;
+                    m_pages[MenuPage_DeleteDone].parentPage = MenuPage_DeleteSlots;
+                    m_pages[MenuPage_DeleteDone].parentEntry = deletedSlot;
+                    SetPage(MenuPage_DeleteDone);
                 }
                 else {
                     PlaySound(FE_SND_MENU_7);
@@ -2618,10 +2709,12 @@ void feCustomMenuMgr::RenderKeyBindingsPage(s32 panelX, s32 panelY, s32 panelW, 
     g_textManager->PrintString(bind1Header ? bind1Header : "Bind 1", SCALE_AND_CENTER_X(slot1Left + slotW / 2), headerYScreen);
     g_textManager->PrintString(bind2Header ? bind2Header : "Bind 2", SCALE_AND_CENTER_X(slot2Left + slotW / 2), headerYScreen);
 
+    const bool backSelected = (m_cursor == 0);
+
     for (s32 row = 0; row < visibleRows; row++) {
         const s32 actionIndex = m_keyBindScrollTop + row;
         const Action action = (Action)actionIndex;
-        const bool selectedRow = (actionIndex == m_keyBindActionCursor);
+        const bool selectedRow = !backSelected && (actionIndex == m_keyBindActionCursor);
         const f32 rowY = firstRowY + row * DEF_KEYBIND_ROW_STEP;
         const f32 rowTextY = rowY + 0.8f;
 
@@ -3153,6 +3246,10 @@ void feCustomMenuMgr::Render() {
                 pushPrompt("FE_KBPR", "Press key or mouse");
                 pushPrompt("FE_KBCLR", "<ACT:MENU_CLEAR> Unbind");
                 pushPrompt("FE_KBCAN", "<ACT:MENU_BACK> Cancel");
+            }
+            else if (m_cursor == 0) {
+                pushPrompt("FE_HPSEL", "<ACT:MENU_CONFIRM> Select");
+                pushPrompt("FE_KBBCK", "<ACT:MENU_BACK> Back");
             }
             else {
                 pushPrompt("FE_KBSLT", "<ACT:MENU_LEFT>/<ACT:MENU_RIGHT> Slot");

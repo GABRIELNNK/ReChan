@@ -27,6 +27,7 @@
 #include "extra/fecustommenumgr.h"
 #include "pc/log.h"
 #include "fe/xcfont.h"
+#include "p3d/hash.h"
 
 static bool sEnabled = false;
 static bool sShowPlayer = false;
@@ -124,6 +125,21 @@ static const DebugLevelSelectorEntry kDebugLevelSelectorEntries[] = {
 };
 
 static s32 sDebugLevelSelectorChoice = 0;
+static bool sDebugLevelSelectorSpawnAtCheckpoint = false;
+static bool sDebugLevelSelectorUseCustomCheckpointName = false;
+static s32 sDebugLevelSelectorCheckpointIndex = 1;
+static char sDebugLevelSelectorCustomCheckpointName[32] = "gotoa1";
+
+struct DebugPendingCheckpointWarp {
+    bool active = false;
+    u32 targetLevelIndex = 0xFFFFFFFFu;
+    u32 targetPetalIndex = 0xFFFFFFFFu;
+    u32 checkpointCRC = 0;
+    s32 retryFrames = 0;
+    char checkpointName[32] = {};
+};
+
+static DebugPendingCheckpointWarp sDebugPendingCheckpointWarp = {};
 
 struct DebugVisibleThingLabel {
     Thing* thing = nullptr;
@@ -336,6 +352,140 @@ static bool ResolveDebugLevelSelectorEntry(
     }
 
     return true;
+}
+
+static void BuildAutoCheckpointName(u32 petalIndex, s32 checkpointIndex, char* outName, s32 outNameSize) {
+    if (!outName || outNameSize <= 0) {
+        return;
+    }
+
+    s32 safeIndex = checkpointIndex;
+    if (safeIndex < 0) {
+        safeIndex = 0;
+    }
+
+    u32 safePetal = petalIndex;
+    if (safePetal > 25u) {
+        safePetal = 0;
+    }
+
+    const char petalLetter = static_cast<char>('a' + safePetal);
+    std::snprintf(outName, static_cast<size_t>(outNameSize), "goto%c%d", petalLetter, safeIndex);
+}
+
+static void BuildSelectedCheckpointName(u32 targetPetalIndex, char* outName, s32 outNameSize) {
+    if (!outName || outNameSize <= 0) {
+        return;
+    }
+
+    if (sDebugLevelSelectorUseCustomCheckpointName && sDebugLevelSelectorCustomCheckpointName[0] != '\0') {
+        std::snprintf(outName, static_cast<size_t>(outNameSize), "%s", sDebugLevelSelectorCustomCheckpointName);
+        return;
+    }
+
+    BuildAutoCheckpointName(targetPetalIndex, sDebugLevelSelectorCheckpointIndex, outName, outNameSize);
+}
+
+static void QueueDebugCheckpointWarp(u32 targetLevelIndex, u32 targetPetalIndex, const char* checkpointName) {
+    sDebugPendingCheckpointWarp.active = false;
+    sDebugPendingCheckpointWarp.targetLevelIndex = targetLevelIndex;
+    sDebugPendingCheckpointWarp.targetPetalIndex = targetPetalIndex;
+    sDebugPendingCheckpointWarp.retryFrames = 0;
+
+    const char* name = (checkpointName && checkpointName[0] != '\0') ? checkpointName : "gotoa1";
+    std::snprintf(
+        sDebugPendingCheckpointWarp.checkpointName,
+        static_cast<size_t>(sizeof(sDebugPendingCheckpointWarp.checkpointName)),
+        "%s",
+        name);
+    sDebugPendingCheckpointWarp.checkpointCRC = p3dHash(sDebugPendingCheckpointWarp.checkpointName);
+    sDebugPendingCheckpointWarp.active = true;
+}
+
+static void ProcessPendingCheckpointWarp() {
+    if (!sDebugPendingCheckpointWarp.active) {
+        return;
+    }
+
+    if (!g_game) {
+        return;
+    }
+
+    World* world = g_game->GetWorld();
+    Player* player = Player::s_player;
+    if (!world || !player) {
+        return;
+    }
+
+    if (world->GetCurrentLevelIndex() != sDebugPendingCheckpointWarp.targetLevelIndex ||
+        world->GetCurrentPetalIndex() != sDebugPendingCheckpointWarp.targetPetalIndex) {
+        return;
+    }
+
+    const GameState gameState = g_game->GetState();
+    if (gameState != GameState::PrePlay && gameState != GameState::Play) {
+        return;
+    }
+
+    WorldPointNode* checkpointPoint = WorldPoints_GetNISPoint(sDebugPendingCheckpointWarp.checkpointCRC);
+    if (!checkpointPoint) {
+        sDebugPendingCheckpointWarp.retryFrames++;
+        if (sDebugPendingCheckpointWarp.retryFrames > 180) {
+            LOG(
+                "[DebugUI] Checkpoint warp failed: point='%s' crc=0x%08X not found in levelIndex=%u petal=%u",
+                sDebugPendingCheckpointWarp.checkpointName,
+                sDebugPendingCheckpointWarp.checkpointCRC,
+                sDebugPendingCheckpointWarp.targetLevelIndex,
+                sDebugPendingCheckpointWarp.targetPetalIndex);
+            sDebugPendingCheckpointWarp.active = false;
+        }
+        return;
+    }
+
+    player->pos = checkpointPoint->pos;
+    player->homePos = checkpointPoint->pos;
+    player->UpdatePosition();
+
+    s32 checkpointBlockNum = checkpointPoint->parValue;
+    if (g_blockManager) {
+        const u16 resolvedBlock = g_blockManager->GetBlockNumber(checkpointPoint->pos);
+        if (resolvedBlock != BLOCK_UNASSIGNED) {
+            checkpointBlockNum = static_cast<s32>(resolvedBlock);
+        }
+    }
+
+    if (checkpointBlockNum >= 0 && checkpointBlockNum <= 0xFFFF) {
+        player->blockNum = static_cast<u16>(checkpointBlockNum);
+    }
+
+    player->checkpoint.field0 = checkpointPoint->pos.x;
+    player->checkpoint.field4 = checkpointPoint->pos.y;
+    player->checkpoint.field8 = checkpointPoint->pos.z;
+    player->checkpoint.field12 = player->orientation.x;
+    player->checkpoint.field16 = player->orientation.y;
+    player->checkpoint.field20 = player->orientation.z;
+    player->checkpoint.field24 = (checkpointBlockNum >= 0) ? checkpointBlockNum : static_cast<s32>(player->blockNum);
+    player->checkpoint.field28 = 0;
+    player->checkpoint.SetValidState(1);
+    player->checkpoint.levelIndex = static_cast<s32>(sDebugPendingCheckpointWarp.targetLevelIndex);
+    player->checkpoint.petalIndex = static_cast<s32>(sDebugPendingCheckpointWarp.targetPetalIndex);
+
+    if (g_display && g_display->GetCamera()) {
+        g_display->GetCamera()->SetLookAtTarget(player, 1);
+    }
+
+    LOG(
+        "[DebugUI] Applied checkpoint warp: point='%s' crc=0x%08X pos=(%d,%d,%d) block=%d levelIndex=%u petal=%u",
+        sDebugPendingCheckpointWarp.checkpointName,
+        sDebugPendingCheckpointWarp.checkpointCRC,
+        checkpointPoint->pos.x,
+        checkpointPoint->pos.y,
+        checkpointPoint->pos.z,
+        checkpointBlockNum,
+        sDebugPendingCheckpointWarp.targetLevelIndex,
+        sDebugPendingCheckpointWarp.targetPetalIndex);
+
+    sDebugPendingCheckpointWarp.active = false;
 }
 
 static void RefreshPlayerDrunkenMasterState() {
@@ -1305,6 +1455,8 @@ void DebugUI::Draw() {
 
     DrawDebug3DLabels();
 
+    ProcessPendingCheckpointWarp();
+
     if (!sEnabled) {
         return;
     }
@@ -1512,16 +1664,60 @@ void DebugUI::Draw() {
                         targetLevelIndex,
                         targetPetalIndex);
 
+                    ImGui::Checkbox("Spawn at checkpoint after load", &sDebugLevelSelectorSpawnAtCheckpoint);
+                    if (sDebugLevelSelectorSpawnAtCheckpoint) {
+                        if (sDebugLevelSelectorCheckpointIndex < 0) {
+                            sDebugLevelSelectorCheckpointIndex = 0;
+                        }
+
+                        ImGui::Checkbox("Use custom point name", &sDebugLevelSelectorUseCustomCheckpointName);
+                        if (sDebugLevelSelectorUseCustomCheckpointName) {
+                            ImGui::InputText(
+                                "Checkpoint point",
+                                sDebugLevelSelectorCustomCheckpointName,
+                                static_cast<size_t>(sizeof(sDebugLevelSelectorCustomCheckpointName)));
+                        }
+                        else {
+                            ImGui::InputInt("Checkpoint index", &sDebugLevelSelectorCheckpointIndex, 1, 5);
+                        }
+
+                        char checkpointPreviewName[32] = {};
+                        BuildSelectedCheckpointName(
+                            targetPetalIndex,
+                            checkpointPreviewName,
+                            static_cast<s32>(sizeof(checkpointPreviewName)));
+                        ImGui::Text(
+                            "Checkpoint target: %s (crc=0x%08X)",
+                            checkpointPreviewName,
+                            p3dHash(checkpointPreviewName));
+                    }
+
                     if (ImGui::Button("Load Selected Level")) {
                         world->SetTargetLevelPetal(targetLevelIndex, targetPetalIndex);
                         world->ResetLevel();
+
+                        if (sDebugLevelSelectorSpawnAtCheckpoint) {
+                            char checkpointName[32] = {};
+                            BuildSelectedCheckpointName(
+                                targetPetalIndex,
+                                checkpointName,
+                                static_cast<s32>(sizeof(checkpointName)));
+                            QueueDebugCheckpointWarp(targetLevelIndex, targetPetalIndex, checkpointName);
+                        }
+                        else {
+                            sDebugPendingCheckpointWarp.active = false;
+                        }
+
                         g_game->SetState(GameState::QueueLevelPetalLoad);
                         LOG(
-                            "[DebugUI] Queued level load: target=%s levelID=%d levelIndex=%u petal=%u",
+                            "[DebugUI] Queued level load: target=%s levelID=%d levelIndex=%u petal=%u checkpoint=%s",
                             selectedEntry.label,
                             selectedEntry.levelID,
                             targetLevelIndex,
-                            targetPetalIndex);
+                            targetPetalIndex,
+                            (sDebugLevelSelectorSpawnAtCheckpoint
+                                ? sDebugPendingCheckpointWarp.checkpointName
+                                : "<disabled>"));
                     }
                 }
                 else {

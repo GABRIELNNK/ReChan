@@ -26,6 +26,8 @@ enum MenuPage : s32 {
     MenuPage_LoadConfirm,
     MenuPage_SaveConfirm,
     MenuPage_DeleteConfirm,
+    MenuPage_SaveDone,
+    MenuPage_DeleteDone,
     MenuPage_NewGameConfirm,
     MenuPage_ExitLevelConfirm,
     MenuPage_QuitConfirm,
