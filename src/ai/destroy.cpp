@@ -364,35 +364,44 @@ void DestructibleThing::HandleAttack(Humanoid* attacker, s32 damageType, s32 dam
     }
 }
 
-void DestructibleThing::HandleObstacleCollision(Obstacle* other) {
+void HandleObstacleDestructibleThingCollision(Obstacle* obstacle) {
     MARKFUNCTION(0x80010BFC);
 
-    (void)other;
-
-    if (!g_ai) {
+    if (!obstacle || !g_ai) {
         return;
     }
 
     tagCollisionSphere sphere = { COLLISION_SPHERE_RADIUS };
 
-    Obstacle* obstacle = static_cast<Obstacle*>(g_ai->moveList.head);
-    while (obstacle) {
-        Obstacle* next = static_cast<Obstacle*>(obstacle->next);
+    Obstacle* node = static_cast<Obstacle*>(g_ai->moveList.head);
+    while (node) {
+        Obstacle* next = static_cast<Obstacle*>(node->next);
 
-        if (obstacle->thingType == AITypes::TT_DESTRUCTIBLE_DP) {
-            DestructibleThing* destructible = static_cast<DestructibleThing*>(obstacle);
+        if (node->thingType == AITypes::TT_DESTRUCTIBLE_DP) {
+            DestructibleThing* destructible = static_cast<DestructibleThing*>(node);
+
             if ((destructible->flags & TF_MODEL_CREATED) != 0
                 && g_director->scriptState == 0
                 && destructible->aliveFlag
                 && destructible->destroyFlag == 0) {
-                if (CheckStaticBoxSphereCollision(pos, collBox, orientation.y, destructible->pos, sphere)) {
+                if (CheckStaticBoxSphereCollision(
+                        obstacle->pos,
+                        obstacle->collBox,
+                        obstacle->orientation.y,
+                        destructible->pos,
+                        sphere)) {
                     destructible->Destroy();
                 }
             }
         }
 
-        obstacle = next;
+        node = next;
     }
+}
+
+void DestructibleThing::HandleObstacleCollision(Obstacle* other) {
+    (void)other;
+    HandleObstacleDestructibleThingCollision(this);
 }
 
 s32 DestructibleThing::GetFloorMaterial() const {

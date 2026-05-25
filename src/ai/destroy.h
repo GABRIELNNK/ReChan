@@ -3,6 +3,8 @@
 
 class CDestructibleSound;
 
+void HandleObstacleDestructibleThingCollision(Obstacle* obstacle);
+
 class DestructibleThing : public Obstacle {
 public:
     u32 effectHash = 0;

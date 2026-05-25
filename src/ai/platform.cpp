@@ -1,4 +1,5 @@
 ﻿#include "gen/common.h"
+#include "ai/destroy.h"
 #include "ai/platform.h"
 #include "ai/activezn.h"
 #include "ai/humanoid.h"
@@ -20,6 +21,16 @@
 #include "snd/platsnd.h"
 #include "snd/sndfact.h"
 #include "p3d/p3dmath.h"
+
+static constexpr s32 COLLISION_TAG_IMPACT_REGION = static_cast<s32>(0x80000002u);
+static constexpr s32 COLLISION_TAG_HIT_TYPE = static_cast<s32>(0x80000003u);
+static constexpr s32 COLLISION_TAG_IMPULSE = static_cast<s32>(0x80000006u);
+static constexpr s32 COLLISION_TAG_DAMAGE = static_cast<s32>(0x80000007u);
+static constexpr s32 COLLISION_TAG_END = 0;
+
+static constexpr s32 PLATFORM_SQUASH_IMPACT_REGION = 6;
+static constexpr s32 PLATFORM_SQUASH_HIT_TYPE = 15;
+static constexpr s32 PLATFORM_SQUASH_DAMAGE = 0x02000000;
 
 static inline u32 PtrToken32(const void* p) {
     return static_cast<u32>(reinterpret_cast<u64>(p));
@@ -235,7 +246,12 @@ void Platform::AnalyzeMesh(DBRoot* root) {
     }
 
     const DBAttrib* a13 = root->FindAttrib(13);
-    if (a13) triggerDelay = a13->value;
+    if (a13) {
+        triggerDelay = a13->value;
+    }
+    else {
+        triggerDelay = 0;
+    }
 
     const DBAttrib* a14 = root->FindAttrib(14);
     if (a14) {
@@ -403,10 +419,6 @@ void Platform::AnalyzeMesh(DBRoot* root) {
         platformFlags |= 0x200;
     }
 
-    LOG("[Platform::AnalyzeMesh] name=%s pos=(%d,%d,%d) flags=0x%X box=(%d,%d,%d,%d,%d,%d) model=%p",
-        GetName() ? GetName() : "null", pos.x, pos.y, pos.z, platformFlags,
-        localCollBox.minX, localCollBox.minY, localCollBox.minZ,
-        localCollBox.maxX, localCollBox.maxY, localCollBox.maxZ, model);
 }
 
 void Platform::CreateModel(const char* name) {
@@ -511,9 +523,6 @@ void Platform::Reset() {
         }
     }
 
-    LOG("[Platform::Reset] name=%s pos=(%d,%d,%d) isActive=%d moveState=%d flags=0x%X model=%p",
-        GetName() ? GetName() : "null", pos.x, pos.y, pos.z,
-        isActive, moveState, platformFlags, model);
 }
 
 void Platform::Think() {
@@ -557,8 +566,6 @@ void Platform::Think() {
                     velocity.z = 0;
                     velocity.x = 0;
                     moveDone = 1;
-                    LOG("[Platform::Think] name=%s countdown expired -> DROP (bit 0x2000)",
-                        GetName() ? GetName() : "null");
                 }
                 else {
                     // PSX: invalidate collision box (0x80021A24)
@@ -566,8 +573,6 @@ void Platform::Think() {
                     // PSX: 0x800A9D60 = memset-like clear of invalidBox, then SetCollisionBox
                     SetCollisionBox(invalidBox);
                     platformFlags = (platformFlags | 0x2) & ~0x4;
-                    LOG("[Platform::Think] name=%s countdown expired -> VANISH (bit 0x1000, flags now 0x%X)",
-                        GetName() ? GetName() : "null", platformFlags);
                 }
             }
 
@@ -614,12 +619,11 @@ void Platform::Think() {
             LVector savedPos = pos;
             savedPos.y += velocity.y;
 
-            // PSX: gravity from player (0x80021BE0)
-            // velocity.y -= (Player::s_player->gravity * 3) / 2
+            // velocity.y -= (maxFallDivisor * 3) / 2
             if (Player::s_player) {
-                s32 g = ((DynamicThing*)Player::s_player)->gravity;
-                s32 gravComponent = (g * 3 + (g * 3 < 0 ? 1 : 0)) >> 1;
-                velocity.y -= gravComponent;
+                s32 fallDiv = ((DynamicThing*)Player::s_player)->maxFallDivisor;
+                s32 fallComponent = (fallDiv * 3 + (fallDiv * 3 < 0 ? 1 : 0)) >> 1;
+                velocity.y -= fallComponent;
             }
 
             // PSX: HandleEnvironmentCollision(0x80023D38) controls end-of-fall
@@ -648,7 +652,7 @@ void Platform::Think() {
                 pos = savedPos;
             }
         }
-        else if (field8C != 0 && (platformFlags & 0x2)) {
+        else if (triggerDelay != 0 && (platformFlags & 0x2)) {
             if (deathCountdown != 0) {
                 deathCountdown--;
             }
@@ -747,6 +751,11 @@ void Platform::Move() {
 
         if (platformFlags & 0x800) {
             flags |= 0x30;
+        }
+
+        // PSX: when bit 18 is set, call DESTROY.CPP helper 0x80010BFC.
+        if (platformFlags & 0x40000) {
+            HandleObstacleDestructibleThingCollision(this);
         }
 
         if (g_blockManager) {
@@ -1118,19 +1127,7 @@ bool Platform::HandleEnvironmentCollision(LVector& nextPos) {
     MARKFUNCTION(0x80023D38);
 
     LVector boxCentre = {};
-    {
-        SVector localCentre = {};
-        localCentre.x = (s16)Div2TowardZero((s32)collBox.minX + (s32)collBox.maxX);
-        localCentre.y = (s16)Div2TowardZero((s32)collBox.minY + (s32)collBox.maxY);
-        localCentre.z = (s16)Div2TowardZero((s32)collBox.minZ + (s32)collBox.maxZ);
-
-        SVector rotatedCentre = {};
-        GetObjectToWorldSpaceVector(localCentre, rotatedCentre);
-
-        boxCentre.x = pos.x + rotatedCentre.x;
-        boxCentre.y = pos.y + rotatedCentre.y;
-        boxCentre.z = pos.z + rotatedCentre.z;
-    }
+    FillBoxCentre(boxCentre, pos, orientation, collBox);
 
     const s32 xSpan = (s32)collBox.maxX - (s32)collBox.minX;
     const s32 zSpan = (s32)collBox.maxZ - (s32)collBox.minZ;
@@ -1241,7 +1238,10 @@ void Platform::HandleHumanoidCollision(Humanoid* hum) {
 
     LVector humPrevPos;
     humPrevPos.x = hum->pos.x - humVel.x;
-    humPrevPos.y = hum->pos.y - humVel.y;
+    humPrevPos.y = hum->pos.y;
+    if (humVel.y < 0) {
+        humPrevPos.y -= humVel.y;
+    }
     humPrevPos.z = hum->pos.z - humVel.z;
 
     bool onTop = false;
@@ -1399,7 +1399,18 @@ void Platform::HandleHumanoidCollision(Humanoid* hum) {
 
             // PSX: if health > 0, call HandleCollision + dialog/shock (PLATFORM.CPP:2230-2237)
             if (hum->health != 0) {
-                hum->HandleCollision(this, 1, 0);
+                hum->HandleCollision(
+                    this,
+                    1,
+                    COLLISION_TAG_IMPACT_REGION,
+                    PLATFORM_SQUASH_IMPACT_REGION,
+                    COLLISION_TAG_HIT_TYPE,
+                    PLATFORM_SQUASH_HIT_TYPE,
+                    COLLISION_TAG_DAMAGE,
+                    PLATFORM_SQUASH_DAMAGE,
+                    COLLISION_TAG_IMPULSE,
+                    &damageDir,
+                    COLLISION_TAG_END);
                 if (hum == (Humanoid*)Player::s_player) {
                     hum->LoadDialog(0x36, 0xFF);
                     Shock(SHOCK_9);
@@ -1615,8 +1626,8 @@ void Platform::TriggerByName(Thing* source, const char* name, const char* param)
 
     const u16 sourceType = source->thingType;
 
-    // PSX 0x80023AB8: for non-zero source type, require platformFlags bit 0.
-    if (sourceType != 0 && !(platformFlags & 0x1)) {
+    // PSX 0x80023AB8: for non-zero source type, require platformFlags bit 25.
+    if (sourceType != 0 && !(platformFlags & 0x02000000u)) {
         return;
     }
 
@@ -1684,13 +1695,7 @@ void Platform::TriggerByName(Thing* source, const char* name, const char* param)
         return;
     }
 
-    // PSX: null-name trigger path
-    LOG("[Platform::TriggerByName NULL] name=%s pos=(%d,%d,%d) flags=0x%X isActive=%d moveState=%d loopCount=%d splinePath=%p",
-        GetName() ? GetName() : "null", pos.x, pos.y, pos.z,
-        platformFlags, isActive, moveState, loopCount, splinePath);
-
     if (platformFlags & 0x2) {
-        LOG("[Platform::TriggerByName NULL] aborting: platformFlags bit 1 (0x2) already set");
         return;
     }
 
@@ -1700,17 +1705,12 @@ void Platform::TriggerByName(Thing* source, const char* name, const char* param)
     platformFlags |= 0x04000000;
 
     if (moveState != 0) {
-        LOG("[Platform::TriggerByName NULL] moveState=%d already running, skipping countdown init", moveState);
         return;
     }
 
     if (platformFlags & (0x1000 | 0x2000)) {
         moveState = 1;
         deathCountdown = loopCount;
-        LOG("[Platform::TriggerByName NULL] started moveState=1 deathCountdown=%d", deathCountdown);
-    }
-    else {
-        LOG("[Platform::TriggerByName NULL] flags bit 12/13 (0x1000/0x2000) not set -> platform will not self-countdown");
     }
 }
 

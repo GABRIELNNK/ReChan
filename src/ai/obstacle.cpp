@@ -245,9 +245,9 @@ static bool CollisionBoxLooksValid(const tagCollisionBox& box) {
     return box.minX <= box.maxX && box.minY <= box.maxY && box.minZ <= box.maxZ;
 }
 
-static constexpr s32 OBSTACLE_LEDGE_MIN_SPAN = 640;
-static constexpr s32 OBSTACLE_LEDGE_HAND_Y_TOL = 100;
-static constexpr s32 OBSTACLE_LEDGE_FLOOR_MIN_HEIGHT = 1022;
+static constexpr s32 OBSTACLE_LEDGE_MIN_SPAN = 0x100;
+static constexpr s32 OBSTACLE_LEDGE_HAND_Y_TOL = 0x100;
+static constexpr s32 OBSTACLE_LEDGE_FLOOR_MIN_HEIGHT = 0x380;
 static constexpr s32 OBSTACLE_DETECT_OBSTACLE_OFFSET_XZ = 0x100;
 static constexpr s32 OBSTACLE_DETECT_OBSTACLE_OFFSET_Y = 0x100;
 static constexpr s32 OBSTACLE_DETECT_OBSTACLE_RADIUS = 0x20;
@@ -619,7 +619,7 @@ bool Obstacle::LedgeCheck(const tagCollisionBox& box, const LVector& normal, con
     ModelFloorHeightState* floorState = model->field36
         ? static_cast<ModelFloorHeightState*>(model->field36)
         : nullptr;
-    if (!floorState || floorState->current == (s32)0x80000001) {
+    if (!floorState) {
         return false;
     }
 
