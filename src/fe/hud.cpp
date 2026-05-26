@@ -6,6 +6,7 @@
 #include "gen/time.h"
 #if CUSTOM_MENU
 #include "extra/customtext.h"
+#include "extra/customhudmgr.h"
 #endif
 #include "xclib/xclib.h"
 #include "ai/humanoid.h"
@@ -92,6 +93,9 @@ HUD::HUD() {
 // PSX: __3HUD (HUD.CPP:331, 0x8003F53C)
 HUD::~HUD() {
     MARKFUNCTION(0x8003F53C);
+#if CUSTOM_MENU
+    g_customHudMgr.Shutdown();
+#endif
 }
 
 // PSX: InternalReset__3HUD (HUD.CPP:350, 0x8003F650)
@@ -118,6 +122,11 @@ void HUD::Display() {
     }
     Update();
 #endif
+    // Custom HUD rendering path replaces FE section overlays while preserving
+    // all original HUD state/update behavior.
+#if CUSTOM_MENU
+    g_customHudMgr.Render(*this);
+#else
     if (section) {
 #if FIX_ASPECT_RATIO
         widescreenPatches.DrawSection(section);
@@ -125,6 +134,7 @@ void HUD::Display() {
         section->Draw();
 #endif
     }
+#endif
     // PSX: ExitLayer(view0, 4)
 }
 

@@ -7,6 +7,9 @@
 #include "gen/scoremgr.h"
 #include "gen/game.h"
 #include "gen/world.h"
+#if CUSTOM_MENU
+#include "pc/inputaction.h"
+#endif
 #include "ai/player.h"
 #include "snd/fesnd.h"
 #include "p3d/p3dmath.h"
@@ -895,19 +898,36 @@ void hdTally::Update() {
 
     bool fastForward = false;
     if (state != 8 && state != 9) {
-        if (g_inputManager) {
-            g_inputManager->Step();
-
-            const u32 controlVal = g_inputManager->GetControlVal(0);
-            const u8* playerMap = g_inputManager->PlayerMapArray();
-            const u32 mappedMask = playerMap ? (1u << playerMap[6]) : 0;
-
-            fastForward = (controlVal & mappedMask) != 0;
-            if ((controlVal & PsxPad::Start) != 0) {
+#if CUSTOM_MENU
+        bool handledByCustomActionInput = false;
+        if (g_actionInput) {
+            handledByCustomActionInput = true;
+            fastForward = g_actionInput->IsHeld(ACTION_MENU_CONFIRM);
+            if (g_actionInput->JustPressed(ACTION_MENU_CONFIRM)) {
                 if (g_frontEndSound) {
                     g_frontEndSound->ProcessSoundEvent(FE_SND_MENU_OPEN);
                 }
                 s_hdTallyFastForward = 1;
+            }
+        }
+
+        if (!handledByCustomActionInput)
+#endif
+        {
+            if (g_inputManager) {
+                g_inputManager->Step();
+
+                const u32 controlVal = g_inputManager->GetControlVal(0);
+                const u8* playerMap = g_inputManager->PlayerMapArray();
+                const u32 mappedMask = playerMap ? (1u << playerMap[6]) : 0;
+
+                fastForward = (controlVal & mappedMask) != 0;
+                if ((controlVal & PsxPad::Start) != 0) {
+                    if (g_frontEndSound) {
+                        g_frontEndSound->ProcessSoundEvent(FE_SND_MENU_OPEN);
+                    }
+                    s_hdTallyFastForward = 1;
+                }
             }
         }
 
@@ -970,26 +990,39 @@ void hdTally::DoDoneStuff() {
         doneTextPrim->colorA = doneColor.GetAlpha8();
     }
 
-    if (!g_inputManager) {
+    bool donePressed = false;
+
+#if CUSTOM_MENU
+    if (g_actionInput) {
+        donePressed = g_actionInput->JustPressed(ACTION_MENU_CONFIRM);
+    }
+#endif
+
+    if (!donePressed) {
+        if (!g_inputManager) {
+            return;
+        }
+
+        g_inputManager->Step();
+        const u32 controlVal = g_inputManager->GetControlVal(0);
+        const u8* playerMap = g_inputManager->PlayerMapArray();
+        u32 doneMask = PsxPad::Start;
+        if (playerMap) {
+            doneMask |= 1u << playerMap[6];
+        }
+        donePressed = (controlVal & doneMask) != 0;
+    }
+
+    if (!donePressed) {
         return;
     }
 
-    g_inputManager->Step();
-    const u32 controlVal = g_inputManager->GetControlVal(0);
-    const u8* playerMap = g_inputManager->PlayerMapArray();
-    u32 doneMask = PsxPad::Start;
-    if (playerMap) {
-        doneMask |= 1u << playerMap[6];
+    if (g_frontEndSound) {
+        g_frontEndSound->ProcessSoundEvent(20);
     }
-
-    if ((controlVal & doneMask) != 0) {
-        if (g_frontEndSound) {
-            g_frontEndSound->ProcessSoundEvent(20);
-        }
-        state = 9;
-        if (takesOvlPtr) {
-            takesOvlPtr->SetPauseState(0, 1);
-        }
+    state = 9;
+    if (takesOvlPtr) {
+        takesOvlPtr->SetPauseState(0, 1);
     }
 }
 

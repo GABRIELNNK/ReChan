@@ -132,6 +132,10 @@ public:
         return 0;
     }
 
+    bool IsCurrentLevelHub() const {
+        return GetCurLevelID() == 7;
+    }
+
     // Returns the level ID for an arbitrary level index.
     s32 GetLevelIDFromIndex(u32 levelIndex) const {
         if (levelList && levelIndex < (u32)levelCount)

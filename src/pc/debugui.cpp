@@ -25,6 +25,7 @@
 #include "gen/levelmgr.h"
 #include "gen/display.h"
 #include "extra/fecustommenumgr.h"
+#include "extra/customhudmgr.h"
 #include "pc/log.h"
 #include "fe/xcfont.h"
 #include "p3d/hash.h"
@@ -93,6 +94,14 @@ static bool sDebugShowDetailedEffectNames3D = true;
 static bool sDebugShowThingLabelHoverTooltip = true;
 static u16 sDebugSelectedThingUniqueID = INVALID_HANDLE;
 static bool sDisableHumanoidDamage = false;
+static bool sDebugTallyPreviewEnabled = false;
+static s32 sDebugTallyFightScore = 4000;
+static s32 sDebugTallyComboScore = 5500;
+static s32 sDebugTallyStyleScore = 6200;
+static s32 sDebugTallyRedDragons = 10;
+static s32 sDebugTallyGoldDragons = 0;
+static s32 sDebugTallyGrade = 5;
+static bool sDebugTallyShowMovieBonus = false;
 
 struct DebugLevelSelectorEntry {
     s32 levelID;
@@ -908,6 +917,30 @@ static u32 DebugUIColor(u8 r, u8 g, u8 b, u8 a) {
     return ((u32)a << 24) | ((u32)b << 16) | ((u32)g << 8) | (u32)r;
 }
 
+static void ClampDebugTallyPreviewValues() {
+    if (sDebugTallyFightScore < 0) {
+        sDebugTallyFightScore = 0;
+    }
+    if (sDebugTallyComboScore < 0) {
+        sDebugTallyComboScore = 0;
+    }
+    if (sDebugTallyStyleScore < 0) {
+        sDebugTallyStyleScore = 0;
+    }
+    if (sDebugTallyRedDragons < 0) {
+        sDebugTallyRedDragons = 0;
+    }
+    if (sDebugTallyGoldDragons < 0) {
+        sDebugTallyGoldDragons = 0;
+    }
+    if (sDebugTallyGrade < 0) {
+        sDebugTallyGrade = 0;
+    }
+    if (sDebugTallyGrade > 5) {
+        sDebugTallyGrade = 5;
+    }
+}
+
 static const char* DebugAIThingTypeName(u16 type) {
     switch (type) {
         case AITypes::TT_PLAYER: return "Player";
@@ -1458,7 +1491,22 @@ void DebugUI::Draw() {
     ProcessPendingCheckpointWarp();
 
     if (!sEnabled) {
+        sDebugTallyPreviewEnabled = false;
+        g_customHudMgr.SetDebugTallyPreviewEnabled(false);
         return;
+    }
+
+    ClampDebugTallyPreviewValues();
+    g_customHudMgr.SetDebugTallyPreviewEnabled(sDebugTallyPreviewEnabled);
+    if (sDebugTallyPreviewEnabled) {
+        g_customHudMgr.SetDebugTallyPreviewValues(
+            sDebugTallyFightScore,
+            sDebugTallyComboScore,
+            sDebugTallyStyleScore,
+            sDebugTallyRedDragons,
+            sDebugTallyGoldDragons,
+            sDebugTallyGrade,
+            sDebugTallyShowMovieBonus);
     }
 
     DrawDebugThingHoverTooltip();
@@ -1722,6 +1770,26 @@ void DebugUI::Draw() {
                 }
                 else {
                     ImGui::Text("Selected level is unavailable in this world table.");
+                }
+            }
+
+            ImGui::SeparatorText("HUD Tally Preview");
+            ImGui::Checkbox("Force tally preview overlay", &sDebugTallyPreviewEnabled);
+            ImGui::TextDisabled("Uses synthetic values to run tally count-up animation without finishing a level.");
+
+            if (sDebugTallyPreviewEnabled) {
+                ImGui::InputInt("Fight score", &sDebugTallyFightScore, 100, 1000);
+                ImGui::InputInt("Combo score", &sDebugTallyComboScore, 100, 1000);
+                ImGui::InputInt("Style score", &sDebugTallyStyleScore, 100, 1000);
+                ImGui::InputInt("Red dragons", &sDebugTallyRedDragons, 1, 5);
+                ImGui::InputInt("Gold dragons", &sDebugTallyGoldDragons, 1, 5);
+                ImGui::InputInt("Grade (0..5)", &sDebugTallyGrade, 1, 1);
+                ImGui::Checkbox("Show movie bonus text", &sDebugTallyShowMovieBonus);
+
+                ClampDebugTallyPreviewValues();
+
+                if (ImGui::Button("Replay tally animation")) {
+                    g_customHudMgr.RestartDebugTallyPreview();
                 }
             }
         }
