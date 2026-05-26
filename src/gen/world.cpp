@@ -3630,8 +3630,9 @@ void World::DrawEverythingHandler(const LVector* playerPos) {
     u32 numBlocks = blockMgr.GetNumBlocks();
     if (numBlocks == 0) return;
 
-    // PSX: tick UV accumulators each frame
-    TickAllUVPrimData();
+    if (g_game && g_game->GetState() == GameState::Play) {
+        TickAllUVPrimData();
+    }
 
     // PSX: DemandLoading when game state == 8
     if (g_game && g_game->GetState() == GameState::Play) {
