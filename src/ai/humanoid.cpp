@@ -4364,8 +4364,7 @@ void Humanoid::_Pickup() {
 void Humanoid::_Hotfoot() {
     MARKFUNCTION(0x80067F54);
 
-    const s32 faceImmediate = ((flags2 & TF2_NIS_ENTER) != 0) ? 0 : 1;
-    FaceAngleY(faceAngle, faceImmediate);
+    FaceAngleY(faceAngle, 1);
 
     SVector dir = {};
     dir.x = (s16)orientation.x;
@@ -4389,8 +4388,7 @@ void Humanoid::_Hotfoot() {
         SetActionState(AS_JUMP, 0);
     }
 
-    const bool nisActive = (flags2 & TF2_NIS_MASK) != 0;
-    if (!nisActive && (((u32)field368 >> 3) & 1u) == 0) {
+    if ((((u32)field368 >> 3) & 1u) == 0) {
         SetActionState(AS_RUN, 0);
     }
 
