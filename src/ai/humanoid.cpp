@@ -387,6 +387,16 @@ static s32 GetRelativeAngle(s32 sourceAngle, s32 targetAngle) {
     return delta;
 }
 
+static s32 WrapFacingTurnDelta(s32 delta) {
+    while (delta > 0x8000) {
+        delta -= 0xFFFF;
+    }
+    while (delta < -32768) {
+        delta += 0xFFFF;
+    }
+    return delta;
+}
+
 struct ThrowMoveData {
     u32 address = 0;
     LVector releaseVector = {};
@@ -3111,13 +3121,7 @@ void Humanoid::FacePoint(const LVector& point, s32 immediate) {
 
     // PSX FacePoint wraps with +/-0xFFFF before applying turn step.
     const s32 currentY = orientation.y;
-    s32 diff = targetAngle - currentY;
-    if (diff > 0x8000) {
-        diff -= 0xFFFF;
-    }
-    else if (diff < -32768) {
-        diff += 0xFFFF;
-    }
+    const s32 diff = WrapFacingTurnDelta(targetAngle - currentY);
 
     const s32 step = (s32)(s16)turnRate;
     if (diff >= 0) {
@@ -3594,15 +3598,7 @@ void Humanoid::FaceAngleY(s32 angle, s32 immediate) {
     }
 
     const s32 currentY = orientation.y;
-    s32 diff = angle - currentY;
-
-    // PSX wraps with +/-0xFFFF, not +/-0x10000.
-    if (diff > 0x8000) {
-        diff -= 0xFFFF;
-    }
-    else if (diff < -32768) {
-        diff += 0xFFFF;
-    }
+    const s32 diff = WrapFacingTurnDelta(angle - currentY);
 
     const s32 step = (s32)(s16)turnRate;
     if (diff >= 0) {
