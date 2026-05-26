@@ -457,6 +457,11 @@ void Game::MenuFade() {
 
     while (jcsIsPlaying()) {
         const f64 frameStart = Time::GetTimeInSeconds();
+        // Keep PSX-style frame-based dialog timeouts advancing while this
+        // blocking gate waits for jcsIsPlaying() to clear.
+        if (g_time) {
+            g_time->Step();
+        }
         rDoTaskList(&rMainTaskList, 0);
         if (g_time) {
             g_time->WaitForFrameEnd(frameStart);

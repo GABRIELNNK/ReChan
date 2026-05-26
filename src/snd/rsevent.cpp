@@ -678,6 +678,16 @@ static void UpdateDialogStatusFromSlots() {
     DialogEntry* primaryEntry = FindDialogEntry(g_primaryDialogHandle);
     DialogEntry* secondaryEntry = FindDialogEntry(g_secondaryDialogHandle);
 
+    // PSX dialog play requests carry a timeout; once it expires, stop the
+    // active primary voice so state transitions proceed on the same frame tick.
+    if (primaryEntry
+        && g_dialogQueues[0].handle == primaryEntry->handle
+        && g_dialogQueues[0].timeoutFrame > 0
+        && IsDialogEntryPlaying(primaryEntry)
+        && GetDialogFrameCounter() >= g_dialogQueues[0].timeoutFrame) {
+        StopDialogEntryVoice(primaryEntry);
+    }
+
     // PSX DialogTask states 10..14: transition when voice stops.
     if (primaryEntry
         && !IsDialogEntryPlaying(primaryEntry)
@@ -1062,6 +1072,7 @@ static s32 rsDialogEvent(s32 event, s32 param1, s32 param2, s32 param3) {
                 g_dialogQueues[0].priority = entry->priority;
                 g_dialogQueues[0].handle = entry->handle;
                 g_dialogQueues[0].dialogId = entry->dialogId;
+                UpdateDialogTimeout(static_cast<u32>(param3), param2, 0);
                 if (prePlayStatus == DialogStatus_LoadedPrimaryAndSecondary && requestedPrimaryHandle) {
                     g_dialogStatus = DialogStatus_PlayingPrimaryState14;
                 }
