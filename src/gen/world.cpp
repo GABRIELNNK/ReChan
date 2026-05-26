@@ -4218,6 +4218,8 @@ void World::LoadPetal(u32 petalIndex) {
         g_director->SetScript();
     }
 
+    ProcessSwitches();
+
     // PSX: ExecuteLoadCallbacks -> cameraLoadFunc -> SetupPaths after petal load.
     if (g_cameraManager) {
         g_cameraManager->SetupPaths();
