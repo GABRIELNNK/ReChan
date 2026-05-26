@@ -30,6 +30,7 @@
 #include "fe/gameoverscreen.h"
 #include "fe/xcfont.h"
 #include "gen/animmgr.h"
+#include "gen/animstruct.h"
 #include "fe/hud.h"
 #include "radmovie/movieplayer.h"
 #include "pc/inputaction.h"
@@ -339,6 +340,38 @@ static void AnimateLoop(ccList& list) {
             m->Animate();
         }
     }
+}
+
+static void SyncAnimationTicksLoop(ccList& list, s32 tick) {
+    for (ccMinNode* node = list.head; node != nullptr; node = node->next) {
+        Thing* thing = static_cast<Thing*>(node);
+        if (!thing->model) {
+            continue;
+        }
+
+        Model* model = static_cast<Model*>(thing->model);
+        AnimStructure* anim = static_cast<AnimStructure*>(model->animStructure);
+        if (!anim) {
+            continue;
+        }
+
+        anim->prevTick = tick;
+        anim->currentTick = tick;
+    }
+}
+
+// Pause/menu renders do not execute gameplay animation handlers, so keep
+// AnimStructure tick baselines in sync to avoid large post-resume deltas.
+static void SyncPausedAnimationTicks() {
+    if (!g_ai || !g_time) {
+        return;
+    }
+
+    const s32 tick = static_cast<s32>(g_time->frameCounter);
+    SyncAnimationTicksLoop(g_ai->humanoidList, tick);
+    SyncAnimationTicksLoop(g_ai->pickupList, tick);
+    SyncAnimationTicksLoop(g_ai->inactivePickupList, tick);
+    SyncAnimationTicksLoop(g_ai->moveList, tick);
 }
 
 // PSX: animLoopDSTACK__Fv (GAME.CPP:2634, 0x8002B368)
@@ -1269,6 +1302,8 @@ bool Game::gsDbgMenuState(Game*) {
 
 bool Game::gsMenuState(Game* game) {
     MARKFUNCTION(0x80029EF8); // gsMenuState
+
+    SyncPausedAnimationTicks();
 
 #if CUSTOM_MENU
     s32 result = CustomMenuDraw(g_feCustomMenuMgr);
