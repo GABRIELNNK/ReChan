@@ -5,6 +5,7 @@
 #include "p3d/texture.h"
 #include <cmath>
 #include <cstring>
+#include <utility>
 #include <vector>
 
 #if CUSTOM_MENU
@@ -204,7 +205,8 @@ public:
             return false;
         }
 
-        m_fonts.push_back(font);
+        m_fonts.push_back(std::move(font));
+        RefreshAllFontInfos();
         return true;
     }
 
@@ -216,6 +218,7 @@ public:
                     m_fonts[i].atlas = nullptr;
                 }
                 m_fonts.erase(m_fonts.begin() + i);
+                RefreshAllFontInfos();
                 return;
             }
         }
@@ -449,6 +452,21 @@ public:
     }
 
 private:
+    static bool RefreshFontInfo(FontRecord& font) {
+        if (font.ttfData.empty()) {
+            return false;
+        }
+        return stbtt_InitFont(&font.info, font.ttfData.data(), 0) != 0;
+    }
+
+    void RefreshAllFontInfos() {
+        for (s32 i = 0; i < (s32)m_fonts.size(); i++) {
+            if (!RefreshFontInfo(m_fonts[(size_t)i])) {
+                LOG("[TextBackend/STB] Failed to refresh font info for handle %u", m_fonts[(size_t)i].handle);
+            }
+        }
+    }
+
     const FontRecord* FindFont(TextFontHandle handle) const {
         for (s32 i = 0; i < (s32)m_fonts.size(); i++) {
             if (m_fonts[i].handle == handle) {

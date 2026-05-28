@@ -1222,6 +1222,7 @@ void CustomHudMgr::DrawPlayerHealthCard(const HUD& hud) {
                      kPlayerHealthNameA,
                      true,
                      false)) {
+        g_textManager->SetFontByName("Menu");
         g_textManager->PrintString(playerNameText, HudX(kPlayerHealthNameX), HudY(kPlayerHealthNameY));
     }
 
