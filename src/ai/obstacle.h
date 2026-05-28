@@ -63,6 +63,7 @@ public:
 
     static void FillBoxCentre(LVector& outPos, const LVector& pos, const LVector& orientation, const tagCollisionBox& box);
     static s32 GetWorldFloorHeight(const LVector& pos);
+    static s32 GetYRotation(s32 x, s32 z);
     static s32 StaticGetObstacleFloorHeight(const LVector& pos);
     static void HandlePickupObstacleCollision(Pickup* pickup);
     static void HandleHumanoidObstacleCollision(Humanoid* hum);

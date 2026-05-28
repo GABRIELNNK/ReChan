@@ -1,4 +1,5 @@
 #include "gen/path.h"
+#include "gen/psxmath_helpers.h"
 #include "p3d/p3dmath.h"
 #include "p3d/hash.h"
 
@@ -10,30 +11,22 @@ static const s32 VELOCITY_SENTINEL = (s32)0xABCDABCD;
 
 // Helper: integer-based vector normalize (16.16 fixed point in/out)
 static void IntV3Normalize(s32* v) {
-    f32 fx = (f32)v[0];
-    f32 fy = (f32)v[1];
-    f32 fz = (f32)v[2];
-    f32 mag = sqrt(fx * fx + fy * fy + fz * fz);
-    if (mag > 0.0f) {
-        v[0] = FLOAT_TO_FIX16(fx / mag);
-        v[1] = FLOAT_TO_FIX16(fy / mag);
-        v[2] = FLOAT_TO_FIX16(fz / mag);
+    const s32 mag = (s32)PsxRmMag3(v[0], v[1], v[2]);
+    if (mag > 0) {
+        v[0] = rmDiv16i(v[0], mag);
+        v[1] = rmDiv16i(v[1], mag);
+        v[2] = rmDiv16i(v[2], mag);
     }
 }
 
 // Helper: integer 3D magnitude
 static s32 IntMag3(s32 x, s32 y, s32 z) {
-    f32 fx = (f32)x;
-    f32 fy = (f32)y;
-    f32 fz = (f32)z;
-    return (s32)sqrt(fx * fx + fy * fy + fz * fz);
+    return (s32)PsxRmMag3(x, y, z);
 }
 
 // Helper: fixed-point divide (a << 16) / b
 static s32 IntDiv16(s32 a, s32 b) {
-    if (b == 0)
-        return 0;
-    return (s32)(((s64)a << 16) / b);
+    return rmDiv16i(a, b);
 }
 
 // NodeAttribs

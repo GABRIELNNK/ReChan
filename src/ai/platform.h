@@ -32,8 +32,8 @@ public:
     s32 pathInstance = 0;       // +212
     s32 drawDistSq = 0;         // +216
     tagCollisionBox localCollBox = { 0x7FFF, 0x7FFF, 0x7FFF, -0x7FFF, -0x7FFF, -0x7FFF, -0x7FFF, 0 };
-    LVector initialRot = {};    // +236
-    LVector initialPos = {};    // +248
+    LVector initialPos = {};    // +236
+    LVector initialRot = {};    // +248
     tagCollisionBox* field104 = nullptr; // +260: dual collision boxes for split geometry (PSX: ptr to tagCollisionBox[2])
     s32 childThingCRC = 0;      // +264
     Thing* childThing = nullptr; // +268

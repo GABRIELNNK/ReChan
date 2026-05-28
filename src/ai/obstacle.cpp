@@ -20,6 +20,7 @@
 #include "gen/levelmgr.h"
 #include "gen/model.h"
 #include "gen/path.h"
+#include "gen/psxmath_helpers.h"
 #include "gen/world.h"
 #include "p3d/byteread.h"
 #include "p3d/p3dmath.h"
@@ -337,6 +338,26 @@ s32 Obstacle::GetWorldFloorHeight(const LVector& pos) {
     CollisionSector::GetWorldFloorAndCeilingHeight(
         floorHeight, ceilingHeight, floorNormal, ceilingNormal, pos, 0);
     return floorHeight;
+}
+
+// PSX: GetYRotation__8Obstaclell (OBSTACLE.CPP:749, 0x8007B328)
+s32 Obstacle::GetYRotation(s32 x, s32 z) {
+    MARKFUNCTION(0x8007B328);
+
+    s32 clampedZ = z;
+    if (clampedZ < -0x10000) {
+        clampedZ = -0x10000;
+    }
+    else if (clampedZ > 0x10000) {
+        clampedZ = 0x10000;
+    }
+
+    const s32 angle = PsxAcos16FromFix16Clamped(clampedZ);
+    if (x < 0) {
+        return 0x8000 - angle;
+    }
+
+    return angle + 0x8000;
 }
 
 // PSX: StaticGetObstacleFloorHeight__8ObstacleRC10tagLVector (OBSTACLE.CPP:2232, 0x8007D198)

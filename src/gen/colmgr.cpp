@@ -14,7 +14,6 @@
 #include "gen/colvol.h"
 #include "fe/hud.h"
 #include "gen/scoremgr.h"
-#include "pc/log.h"
 
 static s32 g_floorDebugCounter = 0;
 
@@ -585,7 +584,6 @@ void HandleThingFloor(DynamicThing* thing, s32 radius, s32 yMinOffset, s32 check
     }
 
     // Clear ground/slope/ceiling bits, preserve others
-    const u32 flagsBeforeGroundClear = static_cast<u32>(thing->flags);
     bool wasOnGround = (thing->flags >> 12) & 1;
     thing->flags &= ~(TF_ON_GROUND | 0x10000 | 0x20000);
 
@@ -597,7 +595,8 @@ void HandleThingFloor(DynamicThing* thing, s32 radius, s32 yMinOffset, s32 check
     if (floorHNew > (s32)0x80000001) {
         s32 landingLevel = floorHNew - yMinOffset;
 
-        if (thing->pos.y >= landingLevel - g_floorStandingTol && localHomePosY < landingLevel + slopeCorr2) {
+        if (thing->pos.y >= landingLevel - g_floorStandingTol
+            && localHomePosY < landingLevel + slopeCorr2) {
             // PSX: falling velocity division for actionState 63 (flying back)
             if (!wasOnGround) {
                 s32 absVelY = localVelY < 0 ? -localVelY : localVelY;
@@ -615,6 +614,7 @@ void HandleThingFloor(DynamicThing* thing, s32 radius, s32 yMinOffset, s32 check
 
             // Land
             thing->Land();
+
             localHomePosY = landingLevel + 1;
             if (localVelY < 0) localVelY = 0;
 

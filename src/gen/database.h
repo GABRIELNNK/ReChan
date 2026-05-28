@@ -10,6 +10,7 @@ struct DBAttrib {
     u32 value;
     const char* strValue;
 
+    u32 GetAttribValue() const;
     const char* GetAttribString() const;
 };
 

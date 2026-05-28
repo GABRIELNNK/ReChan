@@ -13,7 +13,18 @@ Database* g_database = nullptr;
 // Destructor frees strValue if it was a string allocation.
 
 // PSX: GetAttribValue__C8DBAttrib (DATABASE.CPP:291)
-// Returns the numeric value.
+// Returns raw +4 slot (numeric value or string pointer bits on PSX).
+
+u32 DBAttrib::GetAttribValue() const {
+    MARKFUNCTION(0x80038254);
+
+    // PSX stores numeric value/string pointer in the same +4 slot.
+    if (type == 1) {
+        return value;
+    }
+
+    return (u32)(u64)strValue;
+}
 
 // PSX: GetAttribString__C8DBAttrib (DATABASE.CPP:297)
 // Returns the string pointer (value reinterpreted as char* on PSX).

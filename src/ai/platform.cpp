@@ -12,12 +12,14 @@
 #include "gen/game.h"
 #include "gen/blockmgr.h"
 #include "gen/geffect.h"
+#include "gen/geometry.h"
 #include "gen/levelmgr.h"
 #include "gen/model.h"
 #include "gen/path.h"
 #include "gen/switch.h"
 #include "gen/psxmath_helpers.h"
 #include "gen/world.h"
+#include "p3d/byteread.h"
 #include "snd/platsnd.h"
 #include "snd/sndfact.h"
 #include "p3d/p3dmath.h"
@@ -31,6 +33,9 @@ static constexpr s32 COLLISION_TAG_END = 0;
 static constexpr s32 PLATFORM_SQUASH_IMPACT_REGION = 6;
 static constexpr s32 PLATFORM_SQUASH_HIT_TYPE = 15;
 static constexpr s32 PLATFORM_SQUASH_DAMAGE = 0x02000000;
+
+// PSX data symbol: _8Platform.zeroVect at 0x800DC908.
+static const LVector PLATFORM_ZERO_DELTA_VELOCITY = { 0, 0, 0 };
 
 static inline u32 PtrToken32(const void* p) {
     return static_cast<u32>(reinterpret_cast<u64>(p));
@@ -66,10 +71,6 @@ static s32 ScaleAttribToPlatformFixed(s32 value) {
     s32 out = ((s32)(prod >> 32) + shifted) >> 8;
     out -= (shifted >> 31);
     return out;
-}
-
-static s32 PathYawFromNormXZ(s32 normX16, s32 normZ16) {
-    return (s32)rmATan216((f32)normX16, (f32)normZ16);
 }
 
 static const LVector& GetPathDirection(const Path* path) {
@@ -349,7 +350,7 @@ void Platform::AnalyzeMesh(DBRoot* root) {
     }
 
     const DBAttrib* a43 = root->FindAttrib(43);
-    if (a43 && a43->value != 0) {
+    if (a43 && a43->GetAttribValue() != 0) {
         platformFlags |= 0x1000000;
     }
 
@@ -395,12 +396,12 @@ void Platform::AnalyzeMesh(DBRoot* root) {
     }
 
     // PSX: if bit 11 (0x800) set, clear bit 26 (0x04000000).
-    // Otherwise: set 0x400000 only when a path exists, else clear bit 26.
+    // Otherwise: set bit 26 only when a path exists, else clear bit 26.
     if (platformFlags & 0x800) {
         platformFlags &= ~0x04000000;
     }
     else if (splinePath) {
-        platformFlags |= 0x400000;
+        platformFlags |= 0x04000000;
     }
     else {
         platformFlags &= ~0x04000000;
@@ -415,10 +416,10 @@ void Platform::AnalyzeMesh(DBRoot* root) {
         platformFlags |= 0x200000;
     }
 
-    // PSX: attrib 47 also sets bit 9 (0x200) when nonzero.
+    // PSX: attrib 47 sets bit 25 (0x02000000) when GetAttribValue() is nonzero.
     const DBAttrib* a47 = root->FindAttrib(47);
-    if (a47 && a47->value != 0) {
-        platformFlags |= 0x200;
+    if (a47 && a47->GetAttribValue() != 0) {
+        platformFlags |= 0x02000000;
     }
 
 }
@@ -453,10 +454,10 @@ void Platform::Reset() {
 
     platformFlags = (platformFlags & ~0x2) | 0x4;
     if (platformFlags & 0x800) {
-        platformFlags &= ~0x400000;
+        platformFlags &= ~0x04000000;
     }
     else {
-        platformFlags |= 0x400000;
+        platformFlags |= 0x04000000;
     }
 
     isActive = 0;
@@ -730,7 +731,7 @@ void Platform::Move() {
             const s32 normZ = rmDiv16i(dir.z, magXZ);
 
             const s32 pitchSignal = PsxAsin16FromFix16Clamped(normY);
-            const s32 yawSignal = PathYawFromNormXZ(normX, normZ);
+            const s32 yawSignal = Obstacle::GetYRotation(normX, normZ);
 
             if (pathSignal == SIGNAL_SENTINEL) {
                 field_192 = pitchSignal;
@@ -1054,7 +1055,7 @@ void Platform::Bob() {
     const LVector oldRot = orientation;
 
     const s16 phase = (s16)rmDiv16i(bobData[2], bobData[1]);
-    const s32 newY = initialRot.y + PsxMulShift16Signed(bobData[6], rmSin16(phase));
+    const s32 newY = initialPos.y + PsxMulShift16Signed(bobData[6], rmSin16(phase));
 
     prevVelocity.y += newY - oldPos.y;
 
@@ -1097,14 +1098,15 @@ void Platform::MovePassengers() {
         LVector savedVel = passenger->velocity;
         LVector savedHome = passenger->homePos;
 
-        savedVel.x += velocity.x;
-        savedVel.y += velocity.y;
-        savedVel.z += velocity.z;
+        savedHome.x += velocity.x;
+        savedHome.y += velocity.y;
+        savedHome.z += velocity.z;
 
         if (savedVel.y <= 0) {
             passenger->Land();
-            savedVel = passenger->velocity;
+            savedVel.x = passenger->velocity.x;
             savedVel.y = 0;
+            savedVel.z = passenger->velocity.z;
         }
 
         if (isActive) {
@@ -1446,7 +1448,8 @@ void Platform::HandleHumanoidCollision(Humanoid* hum) {
         // PSX: APPLY_POS (0x80024A20) - copy corrected pos unless ledge-climbing
         if (hum->actionState >= 25 && hum->actionState <= 27) {
             onTop = false;
-        } else {
+        } 
+        else {
             hum->homePos = outPos;
         }
     }
@@ -1536,34 +1539,46 @@ void Platform::FillVehicleCollisionBoxes(
 
     OriginalGeo* ogeo = static_cast<OriginalGeo*>(geo);
 
-    // PSX iterates actual vertices and calls IncludeVertexInBox on each.
-    // PC: use bounding box as approximation - split the geo's bbox at yThreshold.
-    s16 geoMinX = (s16)ogeo->bboxMin[0];
-    s16 geoMinY = (s16)ogeo->bboxMin[1];
-    s16 geoMinZ = (s16)ogeo->bboxMin[2];
-    s16 geoMaxX = (s16)ogeo->bboxMax[0];
-    s16 geoMaxY = (s16)ogeo->bboxMax[1];
-    s16 geoMaxZ = (s16)ogeo->bboxMax[2];
+    auto includeVertex = [](tagCollisionBox& box, s16 x, s16 y, s16 z) {
+        if (x < box.minX) box.minX = x;
+        if (x > box.maxX) box.maxX = x;
+        if (y < box.minY) box.minY = y;
+        if (y > box.maxY) box.maxY = y;
+        if (z < box.minZ) box.minZ = z;
+        if (z > box.maxZ) box.maxZ = z;
+    };
 
-    // box1: upper portion (y < threshold)
-    box1.minX = geoMinX;
-    box1.minY = geoMinY;
-    box1.minZ = geoMinZ;
-    box1.maxX = geoMaxX;
-    box1.maxY = (yThreshold < geoMaxY) ? yThreshold : geoMaxY;
-    box1.maxZ = geoMaxZ;
-    SetCollisionBoxExtent(box1);
+    box1 = INVALID_COLLISION_BOX;
+    box2 = INVALID_COLLISION_BOX;
 
-    // box2: lower portion (y >= threshold)
-    // PSX post-loop: copy X from box1, set minY = box1.maxY, expand Z by skin
+    const tPrimGeom* prim = ogeo->primGeom;
+    const u8* verts = prim ? prim->GetVertexList() : nullptr;
+    const u32 numVerts = prim ? (u32)prim->numVerts : 0;
+
+    if (verts && numVerts > 0) {
+        // PSX: iterate geometry vertices and split by Y threshold.
+        for (u32 i = 0; i < numVerts; i++) {
+            const u8* v = verts + i * 8u;
+            const s16 vx = p3dReadS16LE(v + 0);
+            const s16 vy = p3dReadS16LE(v + 2);
+            const s16 vz = p3dReadS16LE(v + 4);
+
+            if (vy < yThreshold) {
+                includeVertex(box1, vx, vy, vz);
+            }
+            else {
+                includeVertex(box2, vx, vy, vz);
+            }
+        }
+    }
+
+    // PSX post-loop: copy X from box1, set minY = box1.maxY, expand Z by skin.
     static constexpr s16 COLLISION_SKIN = 0x40; // PSX: gp+0x83C
     box2.minX = box1.minX;
-    box2.minY = box1.maxY;
-    box2.minZ = geoMinZ - COLLISION_SKIN;
     box2.maxX = box1.maxX;
-    box2.maxY = geoMaxY;
-    box2.maxZ = geoMaxZ + COLLISION_SKIN;
-    SetCollisionBoxExtent(box2);
+    box2.minY = box1.maxY;
+    box2.minZ = (s16)(box2.minZ - COLLISION_SKIN);
+    box2.maxZ = (s16)(box2.maxZ + COLLISION_SKIN);
 }
 
 void Platform::SetPlatformToPathNode(const char* name) {
@@ -1612,7 +1627,7 @@ void Platform::SetPlatformToPathNode(const char* name) {
     const s32 normZ = rmDiv16i(dir.z, magXZ);
 
     const s32 pitchSignal = PsxAsin16FromFix16Clamped(normY);
-    const s32 yawSignal = PathYawFromNormXZ(normX, normZ);
+    const s32 yawSignal = Obstacle::GetYRotation(normX, normZ);
 
     const s32 oldRotY = orientation.y;
 
@@ -1709,11 +1724,12 @@ void Platform::TriggerByName(Thing* source, const char* name, const char* param)
 
 const LVector* Platform::GetDeltaVelocity() const {
     MARKFUNCTION(0x80024B7C);
-    // PSX: bit 24 (0x1000000) = platform has movement, return prevVelocity
+    // PSX bytes at 0x80024B7C: if (platformFlags bit 24) return this + 0xAC
+    // (prevVelocity); otherwise return class zeroVect.
     if (platformFlags & 0x1000000) {
         return &prevVelocity;
     }
-    return &ZERO_DELTA_VELOCITY;
+    return &PLATFORM_ZERO_DELTA_VELOCITY;
 }
 
 s32 Platform::AtEndOfPath() const {
