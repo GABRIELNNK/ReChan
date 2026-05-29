@@ -3396,14 +3396,13 @@ void runDirector(Handler* h) {
     }
 }
 
-// PSX: DrawDirectorOverlays (DIRECTOR.CPP:2578, 0x8003BB34) - handler callback
-// PSX: EnterLayer(view, 3) -> HandleWideScreen -> DrawWideScreenPolys
-//      -> DrawEffects(4096) -> ExitLayer(view, 3)
+// DrawDirectorOverlays (DIRECTOR.CPP:2578, 0x8003BB34) - handler callback
+// We reorder and keep widescreen bars on top: HandleWideScreen -> DrawEffects(4096)
+// -> DrawWideScreenPolys.
 void DrawDirectorOverlays(Handler* h) {
     MARKFUNCTION(0x8003BB34);
     if (g_director) {
         g_director->HandleWideScreen();
-        g_director->DrawWideScreenPolys();
 
         // Overlay effects still sample PSX-style world VRAM pages. Ensure
         // overlay rendering starts from deterministic world texture state.
@@ -3417,6 +3416,14 @@ void DrawDirectorOverlays(Handler* h) {
         }
 
         Effects_DrawEffects(4096);
+
+        if (p3d::context) {
+            p3d::context->EnableZBuffer(false);
+        }
+        g_director->DrawWideScreenPolys();
+        if (p3d::context) {
+            p3d::context->EnableZBuffer(true);
+        }
     }
 }
 

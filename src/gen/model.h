@@ -30,6 +30,10 @@ struct STreeData;
 struct TransformAnim;
 struct tPrimGeom;
 
+// PSX: MODEL.CPP helpers 0x80071AF4 / 0x80071BCC
+void MakeBillboardMatrix(const LVector& pos, Mat4& out, s32 lockY);
+void MakeBillboardMatrixFlip(const LVector& pos, Mat4& out, s32 lockY);
+
 using STreeXformVertsCallback = u32 (*)(tPrimGeom*, STreeJoint*, u32*, u16*);
 using STreeFixUpPolysCallback = u8* (*)(tPrimGeom*, void*, u32, u32);
 

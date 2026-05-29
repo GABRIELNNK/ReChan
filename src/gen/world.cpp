@@ -3692,6 +3692,8 @@ void World::DrawEverythingHandler(const LVector* playerPos) {
     // PSX: find maxZDepth among far blocks (index >= 5), add 64, clamp to 0xFFFF
     // Used for OT layer setup on PSX - not functionally needed with z-buffer on PC.
 
+    const Mat4 passBaseWorld = p3d::context->GetWorldMatrix();
+
     BeginModelShadowQueue();
 
     // Render visible blocks
@@ -3707,6 +3709,9 @@ void World::DrawEverythingHandler(const LVector* playerPos) {
 
         u16 bn = entry.block->blockNum;
 
+        // Guard against world-matrix leakage between blocks.
+        p3d::context->SetWorldMatrix(passBaseWorld);
+
         p3d::context->SetVRAMHandle(vramHandle);
         p3d::context->SetTexInfoOverride(false, 0);
         p3d::context->SetBlendMode(PDDI_BLEND_NONE);
@@ -3714,6 +3719,15 @@ void World::DrawEverythingHandler(const LVector* playerPos) {
 
         // PSX: only draw entities + geometry if block is in draw list
         if (blockMgr.InDrawList(bn)) {
+            const Mat4 blockBaseWorld = passBaseWorld;
+            Mat4 effectBaseWorld = blockBaseWorld;
+            const s32 seamOffsetX = localPos.x - entry.block->posX;
+            const s32 seamOffsetY = localPos.y - entry.block->posY;
+            const s32 seamOffsetZ = localPos.z - entry.block->posZ;
+            effectBaseWorld.m[12] += static_cast<f32>(seamOffsetX);
+            effectBaseWorld.m[13] += static_cast<f32>(seamOffsetY);
+            effectBaseWorld.m[14] += static_cast<f32>(seamOffsetZ);
+
             // PSX: DrawLoop for each entity list
             if (g_ai) {
                 DrawEntityList(g_ai->humanoidList, bn, vramHandle);
@@ -3722,21 +3736,35 @@ void World::DrawEverythingHandler(const LVector* playerPos) {
                 DrawEntityList(g_ai->moveList, bn, vramHandle);
             }
 
-            // Host immediate path: draw opaque block first, then effects.
-            // PSX submits both into OT; final composition is depth-sorted at flush.
+            // Block geometry pass for this block.
             p3d::context->SetVRAMHandle(vramHandle);
             p3d::context->SetTexInfoOverride(false, 0);
+            p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+            p3d::context->SetCullMode(PDDI_CULL_NONE);
+
+            p3d::context->SetWorldMatrix(blockBaseWorld);
             entry.block->Draw(&localPos);
 
-            // Host immediate path: queue model shadows during DrawLoop and flush
-            // after block geometry to emulate PSX OT composition.
-            FlushModelShadowQueue();
+            // PC immediate draw path: submit block geometry before per-block effects so
+            // depth-tested blended effects in front are not overwritten by later block draws.
+            p3d::context->SetVRAMHandle(vramHandle);
+            p3d::context->SetTexInfoOverride(false, 0);
+            p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+            p3d::context->SetCullMode(PDDI_CULL_NONE);
+            p3d::context->SetWorldMatrix(effectBaseWorld);
 
+            ComEffect_SetSeamOffset(seamOffsetX, seamOffsetY, seamOffsetZ);
             Effects_DrawEffects(static_cast<s32>(bn));
+            ComEffect_SetSeamOffset(0, 0, 0);
+
+            // Flush queued model shadows after block geometry.
+            FlushModelShadowQueue();
         }
     }
 
     EndModelShadowQueue();
+
+    p3d::context->SetWorldMatrix(passBaseWorld);
 
     // PSX: DebugDrawSector, ExitLayer(2), profile end(7)
 }

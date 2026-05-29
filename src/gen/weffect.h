@@ -165,8 +165,8 @@ public:
     s32 UpdateSound();
     s32 ReleaseSound();
     PaletteData* SetupPaletteData(u32 paletteHash, u32 clutMode, u32 flags);
-
     static WEffect* Find(u32 effectHash);
+
 
     LVector pos = {};
     LVector spawnPos = {};
@@ -364,6 +364,11 @@ void WEffect_PurgePool();
 // PSX world wrappers (WORLD.CPP:1471/1520)
 void WEffect_PopulateWEffects();
 void WEffect_UnPopulateWEffects(s32 blockNum);
+
+// Sets the per-block seam offset applied to ComEffect world-space render positions
+// (pos-based Render path only). Call symmetrically around Effects_DrawEffects so
+// direct-position effects depth-align with seam-shifted block geometry.
+void ComEffect_SetSeamOffset(s32 x, s32 y, s32 z);
 
 // Debug helpers: expose resolved ComEffect identity for active world effects.
 u32 WEffect_DebugGetComEffectResourceHash(const Effects* effect);

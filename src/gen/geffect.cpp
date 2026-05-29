@@ -1,7 +1,7 @@
 #include "common.h"
 
 #include "gen/geffect.h"
-#include "gen/blockmgr.h"
+#include "gen/colsect.h"
 #include "gen/effects.h"
 #include "gen/weffect.h"
 #include "gen/pweffect.h"
@@ -115,9 +115,7 @@ s32 GEffect::Update() {
         blockPos = posRef;
     }
 
-    if (g_blockManager) {
-        blockNum = static_cast<s32>(g_blockManager->GetBlockNumber(*blockPos));
-    }
+    blockNum = CollisionSector::GetBlockNumber(*blockPos);
 
     const s32 previousCounter = frameCounter;
     frameCounter = previousCounter + 1;
@@ -244,7 +242,8 @@ s32 GEffect::CreateSound() {
         if (result >= 0 && createdParticleSound) {
             particleSound = createdParticleSound;
 
-            const LVector* soundPos = posRef ? posRef : &pos;
+            const bool followPos = (createFlags & 1u) != 0u;
+            const LVector* soundPos = (followPos && posRef) ? posRef : &pos;
             return particleSound->Initialize(const_cast<LVector*>(soundPos));
         }
 
@@ -263,7 +262,9 @@ s32 GEffect::CreateSound() {
     const s32 result = CSoundFactory::CreateObject(10010, &createdSound, comEffect->resourceHash);
     if (result >= 0 && createdSound) {
         worldSound = static_cast<CWorldEffectSound*>(createdSound);
-        return worldSound->Initialize(posRef);
+        const bool followPos = (createFlags & 1u) != 0u;
+        const LVector* soundPos = (followPos && posRef) ? posRef : &pos;
+        return worldSound->Initialize(soundPos);
     }
 
     return result;
@@ -517,7 +518,7 @@ Effects* GEffect_Create(u32 effectHash,
     effect->holdAlive = 0;
 
     effect->pos = *pos;
-    effect->posRef = pos;
+    effect->posRef = ((createFlags & 1u) != 0u) ? pos : nullptr;
 
     effect->scaleRef = nullptr;
     if (scale) {

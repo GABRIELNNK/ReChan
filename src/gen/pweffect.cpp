@@ -25,6 +25,8 @@
 #include <cstring>
 
 static const s32 kPathAttribNotFound = static_cast<s32>(0xABCDABCD);
+static constexpr bool kDebugFreezePWParticleRenderAtSpawn = false;
+static constexpr bool kDebugTracePWTransforms = false;
 
 static ccList g_pWEffectPool;
 
@@ -40,18 +42,29 @@ static u32 GetAttribValue(const DBAttrib* attrib) {
     return attrib ? attrib->value : 0;
 }
 
+static f32 QuantizePsxScale16(s32 scale16) {
+    const s16 matrixEntry = static_cast<s16>(scale16 >> 4);
+    return static_cast<f32>(matrixEntry) / 4096.0f;
+}
+
 static Mat4 BuildEffectWorldMatrix(const LVector& pos, const LVector* scale) {
     Mat4 world = Mat4();
     if (scale) {
-        world.m[0] = FIX16_TO_FLOAT(scale->x);
-        world.m[5] = FIX16_TO_FLOAT(scale->y);
-        world.m[10] = FIX16_TO_FLOAT(scale->z);
+        world.m[0] = QuantizePsxScale16(scale->x);
+        world.m[5] = QuantizePsxScale16(scale->y);
+        world.m[10] = QuantizePsxScale16(scale->z);
     }
 
     world.m[12] = static_cast<f32>(pos.x);
     world.m[13] = static_cast<f32>(pos.y);
     world.m[14] = static_cast<f32>(pos.z);
     return world;
+}
+
+static s32 ResolveEffectBlockNumber(const LVector& pos) {
+    // PSX parity: PW/FPW use collision-sector block lookup for effect routing.
+    const s32 collisionBlockNum = CollisionSector::GetBlockNumber(pos);
+    return (collisionBlockNum >= 0) ? collisionBlockNum : -1;
 }
 
 class PWPathInfo {
@@ -291,6 +304,7 @@ public:
     s32 ReleaseSound();
 
     LVector pos = {};
+    LVector debugSpawnPos = {};
 
     LVector* direction = nullptr;
     LVector* scale = nullptr;
@@ -304,6 +318,7 @@ public:
     s16 doneBits = 0;
     s16 startDelay = 0;
     s16 startDelayCounter = 0;
+    s16 debugSpawnCaptured = 0;
 
     u32 mentorHash = 0;
     PWEffect* mentor = nullptr;
@@ -454,12 +469,15 @@ s32 PWEffect::Create() {
             pos = *pathPos;
         }
 
-        blockNum = CollisionSector::GetBlockNumber(pos);
+        blockNum = ResolveEffectBlockNumber(pos);
     }
 
     if (mentor) {
         mentor->Create();
     }
+
+    debugSpawnPos = pos;
+    debugSpawnCaptured = 1;
 
     CreateSound();
     return 1;
@@ -490,7 +508,7 @@ s32 PWEffect::Update() {
                 pos = *pathPos;
             }
 
-            blockNum = CollisionSector::GetBlockNumber(pos);
+            blockNum = ResolveEffectBlockNumber(pos);
         }
 
         if (particleMgr) {
@@ -520,8 +538,33 @@ void PWEffect::Display(s32 inBlockNum) {
 
     particleMgr->SetDisplayOffset(nullptr);
 
+    const LVector& renderPos = (kDebugFreezePWParticleRenderAtSpawn && debugSpawnCaptured != 0) ? debugSpawnPos : pos;
+    const LVector* renderScale = nullptr;
+    if (!kDebugFreezePWParticleRenderAtSpawn && (createFlags & 4u) != 0u) {
+        renderScale = scale;
+    }
+
+    if (kDebugTracePWTransforms) {
+        static s32 sTraceBudget = 120;
+        static s32 sTraceDecimator = 0;
+        if (sTraceBudget > 0 && ((sTraceDecimator++ & 0x1F) == 0)) {
+            LOG("[PWDbg] type=PW hash=0x%08X block=%d freeze=%d cflags=0x%08X pos=(%d,%d,%d) scale=(%d,%d,%d)",
+                nameCRC,
+                blockNum,
+                kDebugFreezePWParticleRenderAtSpawn ? 1 : 0,
+                createFlags,
+                renderPos.x,
+                renderPos.y,
+                renderPos.z,
+                renderScale ? renderScale->x : 0,
+                renderScale ? renderScale->y : 0,
+                renderScale ? renderScale->z : 0);
+            sTraceBudget--;
+        }
+    }
+
     const Mat4 savedWorld = p3d::context->GetWorldMatrix();
-    const Mat4 effectWorld = BuildEffectWorldMatrix(pos, (createFlags & 4u) != 0u ? scale : nullptr);
+    const Mat4 effectWorld = BuildEffectWorldMatrix(renderPos, renderScale);
     p3d::context->SetWorldMatrix(savedWorld * effectWorld);
     particleMgr->Display();
     p3d::context->SetWorldMatrix(savedWorld);
@@ -570,14 +613,16 @@ s32 FPWEffect::SetMentor() {
         ccNode* node = g_ai->moveList.FindNodeCRC(followThingHash, nullptr);
         if (node) {
             mentorThing = static_cast<Thing*>(node);
-            mentorPosRef = mentorThing->GetSoundPosPtr();
-            if (!mentorPosRef) {
-                mentorPosRef = &mentorThing->pos;
+            const LVector* soundPos = mentorThing->GetSoundPosPtr();
+            if (!soundPos) {
+                soundPos = &mentorThing->pos;
             }
 
-            mentorOffset.x = pos.x - mentorPosRef->x;
-            mentorOffset.y = pos.y - mentorPosRef->y;
-            mentorOffset.z = pos.z - mentorPosRef->z;
+            mentorOffset.x = pos.x - soundPos->x;
+            mentorOffset.y = pos.y - soundPos->y;
+            mentorOffset.z = pos.z - soundPos->z;
+
+            mentorPosRef = &mentorThing->pos;
 
             canDisplay = 0;
             doneBits = 0;
@@ -616,6 +661,9 @@ s32 FPWEffect::Create() {
         mentor->Create();
     }
 
+    debugSpawnPos = pos;
+    debugSpawnCaptured = 1;
+
     CreateSound();
     return 1;
 }
@@ -630,7 +678,7 @@ s32 FPWEffect::Create2(const LVector* inPos, const LVector* inDirection, s32 fol
         pos = { 0, 0, 0 };
     }
 
-    blockNum = CollisionSector::GetBlockNumber(pos);
+    blockNum = ResolveEffectBlockNumber(pos);
 
     if (inDirection && direction) {
         *direction = *inDirection;
@@ -651,6 +699,9 @@ s32 FPWEffect::Create2(const LVector* inPos, const LVector* inDirection, s32 fol
     }
 
     SetMentor();
+
+    debugSpawnPos = pos;
+    debugSpawnCaptured = 1;
 
     if ((createFlags & 0x110u) != 0u && direction && particleMgr) {
         particleMgr->SetParticleDirection(direction);
@@ -681,32 +732,6 @@ s32 FPWEffect::Update() {
     if (startDelayCounter > 0) {
         startDelayCounter = static_cast<s16>(startDelayCounter - 1);
         return startDelayCounter;
-    }
-
-    // Mentor pointers can go stale when Things are removed from moveList.
-    // Re-resolve by hash each tick before any dereference.
-    if (followThingHash != 0) {
-        ccNode* liveNode = g_ai ? g_ai->moveList.FindNodeCRC(followThingHash, nullptr) : nullptr;
-        Thing* liveThing = liveNode ? static_cast<Thing*>(liveNode) : nullptr;
-
-        if (liveThing != mentorThing) {
-            mentorThing = liveThing;
-
-            if (mentorThing) {
-                mentorPosRef = mentorThing->GetSoundPosPtr();
-                if (!mentorPosRef) {
-                    mentorPosRef = &mentorThing->pos;
-                }
-
-                mentorOffset.x = pos.x - mentorPosRef->x;
-                mentorOffset.y = pos.y - mentorPosRef->y;
-                mentorOffset.z = pos.z - mentorPosRef->z;
-            }
-            else {
-                mentorPosRef = nullptr;
-                canDisplay = 1;
-            }
-        }
     }
 
     const s16 prevCounter = frameCounter;
@@ -865,14 +890,44 @@ void FPWEffect::Display(s32 inBlockNum) {
     }
 
     const LVector* displayPos = &pos;
-    if (!mentorThing && mentorPosRef) {
+    if (!kDebugFreezePWParticleRenderAtSpawn && !mentorThing && mentorPosRef) {
         displayPos = mentorPosRef;
+    }
+
+    if (kDebugFreezePWParticleRenderAtSpawn && debugSpawnCaptured != 0) {
+        displayPos = &debugSpawnPos;
+    }
+
+    const LVector* renderScale = nullptr;
+    if (!kDebugFreezePWParticleRenderAtSpawn && (createFlags & 4u) != 0u) {
+        renderScale = scale;
+    }
+
+    if (kDebugTracePWTransforms) {
+        static s32 sTraceBudget = 120;
+        static s32 sTraceDecimator = 0;
+        if (sTraceBudget > 0 && ((sTraceDecimator++ & 0x1F) == 0)) {
+            LOG("[PWDbg] type=FPW hash=0x%08X block=%d freeze=%d cflags=0x%08X pos=(%d,%d,%d) scale=(%d,%d,%d) mentor=%p mpos=%p",
+                nameCRC,
+                blockNum,
+                kDebugFreezePWParticleRenderAtSpawn ? 1 : 0,
+                createFlags,
+                displayPos ? displayPos->x : 0,
+                displayPos ? displayPos->y : 0,
+                displayPos ? displayPos->z : 0,
+                renderScale ? renderScale->x : 0,
+                renderScale ? renderScale->y : 0,
+                renderScale ? renderScale->z : 0,
+                mentorThing,
+                mentorPosRef);
+            sTraceBudget--;
+        }
     }
 
     particleMgr->SetDisplayOffset(nullptr);
 
     const Mat4 savedWorld = p3d::context->GetWorldMatrix();
-    const Mat4 effectWorld = BuildEffectWorldMatrix(*displayPos, (createFlags & 4u) != 0u ? scale : nullptr);
+    const Mat4 effectWorld = BuildEffectWorldMatrix(*displayPos, renderScale);
     p3d::context->SetWorldMatrix(savedWorld * effectWorld);
     particleMgr->Display();
     p3d::context->SetWorldMatrix(savedWorld);
@@ -1205,7 +1260,7 @@ s32 FPWEffect_Create2(u32 effectHash,
         return 0;
     }
 
-    if (CollisionSector::GetBlockNumber(*pos) == -1) {
+    if (ResolveEffectBlockNumber(*pos) == -1) {
         return 0;
     }
 
@@ -1244,7 +1299,7 @@ s32 FPWEffect_DebugSpawnParticle(u32 particleHash,
         return -1;
     }
 
-    const s32 collisionBlockNum = CollisionSector::GetBlockNumber(*pos);
+    const s32 collisionBlockNum = ResolveEffectBlockNumber(*pos);
 
     if (collisionBlockNum == -1) {
         return -3;

@@ -1215,6 +1215,39 @@ void glContext::EnableZBuffer(bool enable) {
         glDisable(GL_DEPTH_TEST);
 }
 
+void glContext::SetPolygonOffset(bool enable, f32 factor, f32 units) {
+    polyOffsetOverride = enable;
+    polyOffsetFactor = factor;
+    polyOffsetUnits = units;
+    if (enable) {
+        glEnable(GL_POLYGON_OFFSET_FILL);
+        glPolygonOffset(factor, units);
+    }
+    else {
+        glDisable(GL_POLYGON_OFFSET_FILL);
+        glPolygonOffset(0.0f, 0.0f);
+    }
+    // Force blend mode to re-evaluate on the next SetBlendMode call so the
+    // BLEND_NONE case picks up the new override state.
+    stateDirty = true;
+}
+
+void glContext::SetDepthClamp(bool enable) {
+    if (cachedDepthClamp == enable) {
+        return;
+    }
+
+    cachedDepthClamp = enable;
+#ifdef GL_DEPTH_CLAMP
+    if (enable) {
+        glEnable(GL_DEPTH_CLAMP);
+    }
+    else {
+        glDisable(GL_DEPTH_CLAMP);
+    }
+#endif
+}
+
 void glContext::SetBlendMode(pddiBlendMode mode) {
     if (!stateDirty && mode == cachedBlendMode)
         return;
@@ -1225,9 +1258,17 @@ void glContext::SetBlendMode(pddiBlendMode mode) {
             glDisable(GL_BLEND);
             glBlendEquation(GL_FUNC_ADD);
             glDepthMask(GL_TRUE);
-            // Restore depth-test precision for opaque geometry.
-            glDisable(GL_POLYGON_OFFSET_FILL);
-            glPolygonOffset(0.0f, 0.0f);
+            // Restore depth-test precision for opaque geometry —
+            // unless a polygon offset override is active (e.g., during effect rendering),
+            // in which case maintain that override so opaque effects also get forward bias.
+            if (polyOffsetOverride) {
+                glEnable(GL_POLYGON_OFFSET_FILL);
+                glPolygonOffset(polyOffsetFactor, polyOffsetUnits);
+            }
+            else {
+                glDisable(GL_POLYGON_OFFSET_FILL);
+                glPolygonOffset(0.0f, 0.0f);
+            }
             break;
         case PDDI_BLEND_ALPHA:
             glEnable(GL_BLEND);
@@ -1239,7 +1280,12 @@ void glContext::SetBlendMode(pddiBlendMode mode) {
             // positive depth offset pushes fragments toward camera so same-depth
             // effects pass the depth test against already-drawn opaque surfaces.
             glEnable(GL_POLYGON_OFFSET_FILL);
-            glPolygonOffset(1.0f, 1.0f);
+            if (polyOffsetOverride) {
+                glPolygonOffset(polyOffsetFactor, polyOffsetUnits);
+            }
+            else {
+                glPolygonOffset(1.0f, 1.0f);
+            }
             break;
         case PDDI_BLEND_ADD:
             glEnable(GL_BLEND);
@@ -1247,7 +1293,12 @@ void glContext::SetBlendMode(pddiBlendMode mode) {
             glBlendEquation(GL_FUNC_ADD);
             glDepthMask(GL_FALSE);
             glEnable(GL_POLYGON_OFFSET_FILL);
-            glPolygonOffset(1.0f, 1.0f);
+            if (polyOffsetOverride) {
+                glPolygonOffset(polyOffsetFactor, polyOffsetUnits);
+            }
+            else {
+                glPolygonOffset(1.0f, 1.0f);
+            }
             break;
         case PDDI_BLEND_SUBTRACT:
             glEnable(GL_BLEND);
@@ -1255,7 +1306,12 @@ void glContext::SetBlendMode(pddiBlendMode mode) {
             glBlendEquation(GL_FUNC_REVERSE_SUBTRACT);
             glDepthMask(GL_FALSE);
             glEnable(GL_POLYGON_OFFSET_FILL);
-            glPolygonOffset(1.0f, 1.0f);
+            if (polyOffsetOverride) {
+                glPolygonOffset(polyOffsetFactor, polyOffsetUnits);
+            }
+            else {
+                glPolygonOffset(1.0f, 1.0f);
+            }
             break;
         case PDDI_BLEND_PSX_QUARTER:
             glEnable(GL_BLEND);
@@ -1264,7 +1320,12 @@ void glContext::SetBlendMode(pddiBlendMode mode) {
             glBlendEquation(GL_FUNC_ADD);
             glDepthMask(GL_FALSE);
             glEnable(GL_POLYGON_OFFSET_FILL);
-            glPolygonOffset(1.0f, 1.0f);
+            if (polyOffsetOverride) {
+                glPolygonOffset(polyOffsetFactor, polyOffsetUnits);
+            }
+            else {
+                glPolygonOffset(1.0f, 1.0f);
+            }
             break;
     }
     stateDirty = false;

@@ -27,6 +27,7 @@ static constexpr s32 DESTRUCTIBLE_BREAK_FORCE_MAX = 0x3E8;
 static constexpr s32 DESTRUCTIBLE_BREAK_VEL_Y_MIN = -0xFA;
 static constexpr s32 DESTRUCTIBLE_BREAK_LAND_VEL_Y_MIN = -0x19;
 static constexpr s32 DESTRUCTIBLE_EFFECT_PARAM_FLAG = 0x80000000;
+static constexpr u32 DESTRUCTIBLE_DEFAULT_EFFECT_HASH = 0x065C8E90u;
 
 static constexpr s32 ACTION_STATE_56 = 56;
 static constexpr s32 ACTION_STATE_57 = 57;
@@ -145,7 +146,15 @@ void DestructibleThing::AnalyzeMesh(DBRoot* root) {
     attrib = root->FindAttrib(0x14);
     if (attrib) {
         const char* effectName = attrib->GetAttribString();
-        effectHash = effectName ? p3dHash(effectName) : 0;
+        if (effectName && effectName[0] != '\0') {
+            effectHash = p3dHash(effectName);
+        }
+        else {
+            effectHash = DESTRUCTIBLE_DEFAULT_EFFECT_HASH;
+        }
+    }
+    else {
+        effectHash = DESTRUCTIBLE_DEFAULT_EFFECT_HASH;
     }
 
     attrib = root->FindAttrib(0x15);

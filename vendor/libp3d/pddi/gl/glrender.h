@@ -201,6 +201,8 @@ public:
     void SetCullMode(pddiCullMode mode) override;
     void EnableZBuffer(bool enable) override;
     void SetBlendMode(pddiBlendMode mode) override;
+    void SetDepthClamp(bool enable) override;
+    void SetPolygonOffset(bool enable, f32 factor = 0.0f, f32 units = 0.0f) override;
     void SetScissor(int x, int y, int w, int h) override;
     void SetMultisampleEnabled(bool enable) override;
     void ResolveForOverlayPass() override;
@@ -255,8 +257,14 @@ private:
     // Renderstate cache
     pddiCullMode cachedCullMode = PDDI_CULL_NONE;
     bool cachedZBuffer = false;
+    bool cachedDepthClamp = false;
     pddiBlendMode cachedBlendMode = PDDI_BLEND_NONE;
     bool stateDirty = true;
+    // Polygon offset override: when true, SetBlendMode(BLEND_NONE) restores these
+    // values instead of disabling polygon offset.
+    bool polyOffsetOverride = false;
+    f32 polyOffsetFactor = 0.0f;
+    f32 polyOffsetUnits = 0.0f;
 
     void InitQuadMesh();
     void InitGouraudMesh();

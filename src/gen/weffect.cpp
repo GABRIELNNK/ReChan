@@ -7,6 +7,7 @@
 #include "gen/ai.h"
 #include "gen/blockmgr.h"
 #include "gen/camera.h"
+#include "gen/colsect.h"
 #include "gen/database.h"
 #include "gen/display.h"
 #include "gen/geffect.h"
@@ -37,26 +38,97 @@ static ComEffect* g_wEffectOwnedEffects[64] = {};
 static s32 g_wEffectComEffectCount = 0;
 static s32 g_wEffectOwnedCount = 0;
 
+// Seam offset applied during block draw phase so direct-position effects
+// (WEffect, SpotLight, FWEffect, GEffect, LensFlare) depth-align with
+// block geometry that has already been shifted by OffsetToPreventSeams.
+static LVector s_comEffectSeamOffset = { 0, 0, 0 };
+
+static bool IsFrontRenderFlags(u32 flags) {
+    return (flags & 0x1000800u) != 0u;
+}
+
+void ComEffect_SetSeamOffset(s32 x, s32 y, s32 z) {
+    s_comEffectSeamOffset.x = x;
+    s_comEffectSeamOffset.y = y;
+    s_comEffectSeamOffset.z = z;
+}
+
 static constexpr u32 kChefNisPotHash = 0x052EA764u;
+static constexpr bool kDebugRenderUntexturedBillboard = false;
+static constexpr u32 kDebugBillboardEffectHashFilter = 0u;
+static constexpr bool kDebugForceQuadForAllComEffects = false;
 
-static bool ShouldLogFastReplayDiag(u32 effectHash, u8 fastPrimCmd) {
-    static u32 sEffectHashes[128] = {};
-    static u8 sFastPrimCmds[128] = {};
-    static u32 sEntryCount = 0;
-
-    for (u32 i = 0; i < sEntryCount; i++) {
-        if (sEffectHashes[i] == effectHash && sFastPrimCmds[i] == fastPrimCmd) {
-            return false;
-        }
+static void DrawDebugUntexturedBillboard(const LVector& localPos, f32 halfSize) {
+    if (!p3d::context || !p3d::device || halfSize <= 0.0f) {
+        return;
     }
 
-    if (sEntryCount < (sizeof(sEffectHashes) / sizeof(sEffectHashes[0]))) {
-        sEffectHashes[sEntryCount] = effectHash;
-        sFastPrimCmds[sEntryCount] = fastPrimCmd;
-        sEntryCount++;
+    const Mat4 savedWorld = p3d::context->GetWorldMatrix();
+    const Mat4& view = p3d::context->GetViewMatrix();
+
+    f32 centerX = 0.0f;
+    f32 centerY = 0.0f;
+    f32 centerZ = 0.0f;
+    Mat4TransformPoint(savedWorld,
+                       static_cast<f32>(localPos.x),
+                       static_cast<f32>(localPos.y),
+                       static_cast<f32>(localPos.z),
+                       centerX,
+                       centerY,
+                       centerZ);
+
+    const f32 rightX = view.m[0];
+    const f32 rightY = view.m[4];
+    const f32 rightZ = view.m[8];
+    const f32 upX = view.m[1];
+    const f32 upY = view.m[5];
+    const f32 upZ = view.m[9];
+
+    const f32 rx = rightX * halfSize;
+    const f32 ry = rightY * halfSize;
+    const f32 rz = rightZ * halfSize;
+    const f32 ux = upX * halfSize;
+    const f32 uy = upY * halfSize;
+    const f32 uz = upZ * halfSize;
+
+    GeoRenderVertex verts[4] = {};
+    auto setVertex = [&](u32 index, f32 x, f32 y, f32 z) {
+        verts[index].x = x;
+        verts[index].y = y;
+        verts[index].z = z;
+        verts[index].r = 1.0f;
+        verts[index].g = 0.25f;
+        verts[index].b = 0.25f;
+        verts[index].u = 0.0f;
+        verts[index].v = 0.0f;
+        verts[index].tpage = -1.0f;
+        verts[index].cba = 0.0f;
+    };
+
+    setVertex(0, centerX - rx + ux, centerY - ry + uy, centerZ - rz + uz);
+    setVertex(1, centerX - rx - ux, centerY - ry - uy, centerZ - rz - uz);
+    setVertex(2, centerX + rx + ux, centerY + ry + uy, centerZ + rz + uz);
+    setVertex(3, centerX + rx - ux, centerY + ry - uy, centerZ + rz - uz);
+
+    static const u16 kIndices[6] = { 0, 1, 2, 2, 1, 3 };
+    const u32 format = PDDI_V_POSITION | PDDI_V_COLOUR | PDDI_V_UV | PDDI_V_TEXINFO;
+
+    pddiPrimBufferDesc desc(PDDI_PRIM_TRIANGLES, format, 4u, 6u);
+    pddiPrimBuffer* buffer = p3d::device->NewPrimBuffer(desc);
+    if (!buffer) {
+        return;
     }
 
-    return true;
+    buffer->SetVertexData(verts, 4u);
+    buffer->SetIndices(kIndices, 6u);
+
+    p3d::context->SetWorldMatrix(Mat4());
+    p3d::context->SetCullMode(PDDI_CULL_NONE);
+    p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+    p3d::context->DrawPrimBuffer(buffer);
+    p3d::context->SetWorldMatrix(savedWorld);
+
+    buffer->Release();
 }
 
 static bool IsTexturedDynPrimCmd(u8 primCmd) {
@@ -356,7 +428,7 @@ static bool ResolveFirstGeoFastWord1(const OriginalGeo* geo, u32* outColorWord) 
 
     if (geo && geo->dynamicColorList && geo->dynamicColorCount > 0) {
         if (outColorWord) {
-            *outColorWord = geo->dynamicColorList[0] & 0x00FFFFFFu;
+            *outColorWord = geo->dynamicColorList[0];
         }
         return true;
     }
@@ -413,6 +485,44 @@ static void ApplyPerPrimWord1(OriginalGeo* geo, const GeoRenderVertex* baseVerts
             continue;
         }
 
+        bool wrotePrim = false;
+        if (geo->dynamicPrimPacketOffset) {
+            const u8 primCmd = static_cast<u8>(geo->dynamicPrimCmd[primIndex] & 0xFCu);
+            const u32 packetCornerCount = (primCmd == 0x34u) ? 3u : ((primCmd == 0x3Cu) ? 4u : 0u);
+
+            if (packetCornerCount > 0u && count >= packetCornerCount) {
+                const u32 packetBase = geo->dynamicPrimPacketOffset[primIndex];
+                for (u32 packetCorner = 0; packetCorner < packetCornerCount; packetCorner++) {
+                    const u32 localWordOffset = 4u + (packetCorner * 12u);
+                    const u32 colourWordOffset = packetBase + localWordOffset;
+                    (void)colourWordOffset;
+
+                    const u32 dynCorner = (count - 1u) - packetCorner;
+                    const u32 vertexIndex = start + dynCorner;
+                    if (vertexIndex >= geo->dynamicVertCount) {
+                        continue;
+                    }
+
+                    const u32 sourceIndex = static_cast<u32>(geo->dynamicVertSourceIndex[vertexIndex]);
+                    if (sourceIndex >= colorList.size()) {
+                        continue;
+                    }
+
+                    DecodePackedColour24Fast(
+                        colorList[sourceIndex],
+                        &geo->dynamicVerts[vertexIndex].r,
+                        &geo->dynamicVerts[vertexIndex].g,
+                        &geo->dynamicVerts[vertexIndex].b);
+                    wrotePrim = true;
+                }
+
+                if (wrotePrim) {
+                    wroteAny = true;
+                    continue;
+                }
+            }
+        }
+
         for (u32 corner = 0; corner < count; corner++) {
             const u32 vertexIndex = start + corner;
             if (vertexIndex >= geo->dynamicVertCount) {
@@ -429,6 +539,10 @@ static void ApplyPerPrimWord1(OriginalGeo* geo, const GeoRenderVertex* baseVerts
                 &geo->dynamicVerts[vertexIndex].r,
                 &geo->dynamicVerts[vertexIndex].g,
                 &geo->dynamicVerts[vertexIndex].b);
+            wrotePrim = true;
+        }
+
+        if (wrotePrim) {
             wroteAny = true;
         }
     }
@@ -2672,6 +2786,13 @@ void ComEffect::Render(const LVector& pos, const LVector* scale, const u16* rota
         return;
     }
 
+    const bool frontRenderFlags = IsFrontRenderFlags(flags);
+
+    if (kDebugForceQuadForAllComEffects) {
+        DrawDebugUntexturedBillboard(pos, 160.0f);
+        return;
+    }
+
     MiscAnimNode* liveNode = ComEffect_ResolveLiveMiscAnimNode(this);
     const bool canApplyFrame = (frameCount > 0) && (currentFrame < frameCount);
     if (canApplyFrame && liveNode && (flags & 0x80000u) == 0u) {
@@ -2782,14 +2903,33 @@ void ComEffect::Render(const LVector& pos, const LVector* scale, const u16* rota
 
     const Mat4 savedWorld = p3d::context->GetWorldMatrix();
     const bool useWord0 = (geoWord0Slot != kFastWordInactive);
+    // PSX Render__9ComEffect uses both 0x800 and 0x1000000 render flags
+    // to push effects into foreground OT behavior.
+    const bool forceFrontRender = frontRenderFlags;
 
     if (useWord0) {
         p3d::context->SetTexInfoOverride(true, geoWord0Slot);
     }
 
+    if (forceFrontRender) {
+        p3d::context->EnableZBuffer(false);
+        p3d::context->SetDepthClamp(true);
+    }
+
+    if (!frontRenderFlags) {
+        world.m[12] += static_cast<f32>(s_comEffectSeamOffset.x);
+        world.m[13] += static_cast<f32>(s_comEffectSeamOffset.y);
+        world.m[14] += static_cast<f32>(s_comEffectSeamOffset.z);
+    }
+
     p3d::context->SetWorldMatrix(world);
     model->drawable->Display(flags);
     p3d::context->SetWorldMatrix(savedWorld);
+
+    if (forceFrontRender) {
+        p3d::context->SetDepthClamp(false);
+        p3d::context->EnableZBuffer(true);
+    }
 
     if (useWord0) {
         p3d::context->SetTexInfoOverride(false, 0);
@@ -2800,6 +2940,18 @@ void ComEffect::Render(const Mat4& worldMatrix, u32 flags) {
     MARKFUNCTION(0x8004EE48);
 
     if (!model || !model->drawable || !p3d::context) {
+        return;
+    }
+
+    const bool frontRenderFlags = IsFrontRenderFlags(flags);
+
+    if (kDebugForceQuadForAllComEffects) {
+        const LVector localPos = {
+            static_cast<s32>(worldMatrix.m[12]),
+            static_cast<s32>(worldMatrix.m[13]),
+            static_cast<s32>(worldMatrix.m[14]),
+        };
+        DrawDebugUntexturedBillboard(localPos, 160.0f);
         return;
     }
 
@@ -2834,15 +2986,26 @@ void ComEffect::Render(const Mat4& worldMatrix, u32 flags) {
     }
 
     const bool useWord0 = (geoWord0Slot != kFastWordInactive);
+    const bool forceFrontRender = frontRenderFlags;
 
     if (useWord0) {
         p3d::context->SetTexInfoOverride(true, geoWord0Slot);
+    }
+
+    if (forceFrontRender) {
+        p3d::context->EnableZBuffer(false);
+        p3d::context->SetDepthClamp(true);
     }
 
     const Mat4 composedWorld = savedWorld * worldMatrix;
     p3d::context->SetWorldMatrix(composedWorld);
     model->drawable->Display(flags);
     p3d::context->SetWorldMatrix(savedWorld);
+
+    if (forceFrontRender) {
+        p3d::context->SetDepthClamp(false);
+        p3d::context->EnableZBuffer(true);
+    }
 
     if (useWord0) {
         p3d::context->SetTexInfoOverride(false, 0);
@@ -2978,6 +3141,8 @@ bool ComEffect::RenderGeoByIndex(u32 geoIndex, const Mat4& worldMatrix, u32 flag
         return false;
     }
 
+    const bool frontRenderFlags = IsFrontRenderFlags(flags);
+
     if (model->drawableType != 3) {
         return false;
     }
@@ -3012,9 +3177,15 @@ bool ComEffect::RenderGeoByIndex(u32 geoIndex, const Mat4& worldMatrix, u32 flag
 
     bool rendered = false;
     const bool useWord0 = (geoWord0Slot != kFastWordInactive);
+    const bool forceFrontRender = frontRenderFlags;
 
     if (useWord0) {
         p3d::context->SetTexInfoOverride(true, geoWord0Slot);
+    }
+
+    if (forceFrontRender) {
+        p3d::context->EnableZBuffer(false);
+        p3d::context->SetDepthClamp(true);
     }
 
     Mat4 drawWorld = savedWorld * worldMatrix;
@@ -3052,6 +3223,11 @@ bool ComEffect::RenderGeoByIndex(u32 geoIndex, const Mat4& worldMatrix, u32 flag
     }
 
     p3d::context->SetWorldMatrix(savedWorld);
+
+    if (forceFrontRender) {
+        p3d::context->SetDepthClamp(false);
+        p3d::context->EnableZBuffer(true);
+    }
 
     if (useWord0) {
         p3d::context->SetTexInfoOverride(false, 0);
@@ -3233,7 +3409,7 @@ void ComEffect::FastZSortDisplayGCT3(u32 primCount) {
         sortedTris[j] = key;
     }
 
-    static const u16 kTriIndices[3] = { 1, 2, 0 };
+    static const u16 kTriIndices[3] = { 2, 1, 0 };
     const u32 format = PDDI_V_POSITION | PDDI_V_COLOUR | PDDI_V_UV | PDDI_V_TEXINFO;
 
     p3d::context->SetWorldMatrix(Mat4());
@@ -3397,7 +3573,7 @@ void ComEffect::FastZSortDisplayGCT4(u32 primCount) {
         sortedQuads[j] = key;
     }
 
-    static const u16 kQuadIndices[6] = { 3, 2, 1, 2, 0, 1 };
+    static const u16 kQuadIndices[6] = { 3, 2, 1, 3, 1, 0 };
     const u32 format = PDDI_V_POSITION | PDDI_V_COLOUR | PDDI_V_UV | PDDI_V_TEXINFO;
 
     p3d::context->SetWorldMatrix(Mat4());
@@ -3459,11 +3635,10 @@ void ComEffect::DoFastRender() {
         return;
     }
 
-    // PSX FastRender falls back to regular single draw when queued count < 2.
+    // PSX FastRender has a dedicated single-entry path (drawCount < 2)
+    // that bypasses FastZSort replay helpers.
     if (drawCount < 2u) {
         fastDrawCount = 0;
-        // MIPS branch at FastRender__9ComEffect+38 uses only queued matrix[0]
-        // and bypasses queued word0/word1 lane application in this path.
         const Mat4 drawWorld = savedWorld * fastDrawEntries[0].worldMatrix;
         p3d::context->SetWorldMatrix(drawWorld);
 
@@ -3489,75 +3664,59 @@ void ComEffect::DoFastRender() {
         return;
     }
 
-    const u8 fastPrimCmd = ResolveFastRenderPrimCmd(drawGeo);
-    u32 cmd34Count = 0;
-    u32 cmd3CCount = 0;
-    u32 cmd24Count = 0;
-    u32 cmd2CCount = 0;
-    for (u32 primIndex = 0; primIndex < drawGeo->dynamicPrimCount; primIndex++) {
-        const u8 primCmd = static_cast<u8>(drawGeo->dynamicPrimCmd[primIndex] & 0xFCu);
-        switch (primCmd) {
-            case 0x34u: cmd34Count++; break;
-            case 0x3Cu: cmd3CCount++; break;
-            case 0x24u: cmd24Count++; break;
-            case 0x2Cu: cmd2CCount++; break;
-            default: break;
+    // replay queued entries through standard draw paths
+    // instead of custom fast z-sort rebuild helpers.
+
+    const bool canReplayGeoByIndex = model && model->drawableType == 3 && fastDrawGeoIndex >= 0;
+    const u32 renderGeoIndex = static_cast<u32>(fastDrawGeoIndex);
+    u32* word1Slot = GetGeoFastWord1Slot(fastDrawGeoIndex);
+    const u32 savedWord1 = word1Slot ? *word1Slot : 0;
+
+    for (u32 drawIndex = 0; drawIndex < drawCount; drawIndex++) {
+        const FastDrawEntry& entry = fastDrawEntries[drawIndex];
+
+        if (word1Slot) {
+            *word1Slot = entry.word1;
         }
-    }
 
-    if (ShouldLogFastReplayDiag(resourceHash, fastPrimCmd)) {
-        LOG("[FastRenderDiag] effect=0x%08X geo=0x%08X drawCount=%u primCount=%u sel=0x%02X cmd34=%u cmd3C=%u cmd24=%u cmd2C=%u",
-            resourceHash,
-            drawGeo->nameCRC,
-            drawCount,
-            drawGeo->dynamicPrimCount,
-            fastPrimCmd,
-            cmd34Count,
-            cmd3CCount,
-            cmd24Count,
-            cmd2CCount);
-    }
+        geoWord0Slot = (entry.word0 != kFastWordInactive) ? entry.word0 : kFastWordInactive;
 
-    if (fastPrimCmd == 0u) {
-        fastDrawCount = 0;
-        // PSX FastRender__9ComEffect only calls FastZSortDisplayGCT3/GCT4 in
-        // the queued multi-draw branch. If neither stream exists, it exits
-        // without issuing queued draws.
-        p3d::context->SetWorldMatrix(savedWorld);
-        geoWord0Slot = savedWord0;
-        return;
-    }
+        if (canReplayGeoByIndex) {
+            // Replay queued particle entries through the resolved fast geo index.
+            // This avoids mutating shared dynamic vertex streams during fast replay.
+            RenderGeoByIndex(renderGeoIndex, entry.worldMatrix, 0x80000u);
+        }
+        else {
+            const Mat4 drawWorld = savedWorld * entry.worldMatrix;
+            p3d::context->SetWorldMatrix(drawWorld);
 
-    if (fastPrimCmd == 0x34u) {
-        u32 gct3PrimCount = 0;
-        for (u32 primIndex = 0; primIndex < drawGeo->dynamicPrimCount; primIndex++) {
-            const u8 primCmd = static_cast<u8>(drawGeo->dynamicPrimCmd[primIndex] & 0xFCu);
-            if (primCmd == 0x34u) {
-                gct3PrimCount++;
+            if (drawGeo->usesSemiTrans) {
+                u8 semiTransMode = drawGeo->semiTransMode;
+                if (entry.word0 != kFastWordInactive) {
+                    const u16 tpage = static_cast<u16>((entry.word0 >> 16) & 0xFFFFu);
+                    semiTransMode = static_cast<u8>((tpage >> 5) & 3u);
+                }
+
+                pddiBlendMode blendMode = PDDI_BLEND_ALPHA;
+                switch (semiTransMode & 3u) {
+                    case 1: blendMode = PDDI_BLEND_ADD; break;
+                    case 2: blendMode = PDDI_BLEND_SUBTRACT; break;
+                    case 3: blendMode = PDDI_BLEND_PSX_QUARTER; break;
+                    default: break;
+                }
+                p3d::context->SetBlendMode(blendMode);
+            }
+
+            p3d::context->DrawPrimBuffer(drawGeo->meshBuffer);
+
+            if (drawGeo->usesSemiTrans) {
+                p3d::context->SetBlendMode(PDDI_BLEND_NONE);
             }
         }
-
-        FastZSortDisplayGCT3(gct3PrimCount);
-        fastDrawCount = 0;
-        p3d::context->SetWorldMatrix(savedWorld);
-        geoWord0Slot = savedWord0;
-        return;
     }
 
-    if (fastPrimCmd == 0x3Cu) {
-        u32 gct4PrimCount = 0;
-        for (u32 primIndex = 0; primIndex < drawGeo->dynamicPrimCount; primIndex++) {
-            const u8 primCmd = static_cast<u8>(drawGeo->dynamicPrimCmd[primIndex] & 0xFCu);
-            if (primCmd == 0x3Cu) {
-                gct4PrimCount++;
-            }
-        }
-
-        FastZSortDisplayGCT4(gct4PrimCount);
-        fastDrawCount = 0;
-        p3d::context->SetWorldMatrix(savedWorld);
-        geoWord0Slot = savedWord0;
-        return;
+    if (word1Slot) {
+        *word1Slot = savedWord1;
     }
 
     p3d::context->SetWorldMatrix(savedWorld);
@@ -4269,9 +4428,7 @@ s32 WEffect::Create() {
             rotation[2] = static_cast<u16>(pathRot->z);
         }
 
-        if (g_blockManager) {
-            blockNum = static_cast<s32>(g_blockManager->GetBlockNumber(pos));
-        }
+        blockNum = CollisionSector::GetBlockNumber(pos);
     }
 
     CreateSound(nullptr);
@@ -4374,9 +4531,7 @@ s32 WEffect::Update() {
                 rotation[2] = static_cast<u16>(pathRot->z);
             }
 
-            if (g_blockManager) {
-                blockNum = static_cast<s32>(g_blockManager->GetBlockNumber(pos));
-            }
+            blockNum = CollisionSector::GetBlockNumber(pos);
         }
 
         if (uvData) {
@@ -4417,6 +4572,11 @@ void WEffect::Display(s32 inBlockNum) {
 
     const LVector* scalePtr = hasScale ? &scale : nullptr;
     comEffect->Render(pos, scalePtr, rotation, renderFlags);
+
+    if (kDebugRenderUntexturedBillboard
+        && (kDebugBillboardEffectHashFilter == 0u || nameCRC == kDebugBillboardEffectHashFilter)) {
+        DrawDebugUntexturedBillboard(pos, 160.0f);
+    }
 
     if (paletteData) {
         paletteData->TransferVram();
@@ -4467,9 +4627,7 @@ s32 SpotLight::Update() {
     pos = linkedEffect->pos;
     pos.y = basePos.y;
 
-    if (g_blockManager) {
-        blockNum = static_cast<s32>(g_blockManager->GetBlockNumber(pos));
-    }
+    blockNum = CollisionSector::GetBlockNumber(pos);
 
     if (uvData) {
         s32 vOffset = static_cast<s32>(uvData->maskV);
@@ -4966,15 +5124,13 @@ s32 FWEffect::Create2(const LVector* posOverride,
         overridePos = *posOverride;
         overrideFlags |= 1;
 
-        if (g_blockManager) {
-            const s32 overrideBlock = static_cast<s32>(g_blockManager->GetBlockNumber(*posOverride));
-            if (overrideBlock != -1) {
-                blockNum = overrideBlock;
-            }
+        const s32 overrideBlock = CollisionSector::GetBlockNumber(*posOverride);
+        if (overrideBlock != -1) {
+            blockNum = overrideBlock;
         }
     }
-    else if (g_blockManager) {
-        const s32 currentBlock = static_cast<s32>(g_blockManager->GetBlockNumber(pos));
+    else {
+        const s32 currentBlock = CollisionSector::GetBlockNumber(pos);
         if (currentBlock != -1) {
             blockNum = currentBlock;
         }
@@ -5414,9 +5570,7 @@ s32 LensFlare::Update() {
     flarePos.y = sourcePos.y + static_cast<s32>(rotatedOffset.y);
     flarePos.z = sourcePos.z + static_cast<s32>(rotatedOffset.z);
 
-    if (g_blockManager) {
-        blockNum = static_cast<s32>(g_blockManager->GetBlockNumber(flarePos));
-    }
+    blockNum = CollisionSector::GetBlockNumber(flarePos);
 
     if (pathNodes) {
         trackingFlags = static_cast<u32>(ComputeTracking(flarePos, cameraPos));
@@ -5477,11 +5631,11 @@ s32 LensFlare::Update() {
 void LensFlare::Display(s32 inBlockNum) {
     MARKFUNCTION(0x800BFB34);
 
-    if ((targetEffect && !targetEffect->active) || !g_blockManager) {
+    if (targetEffect && !targetEffect->active) {
         return;
     }
 
-    if (inBlockNum != 4096 && inBlockNum != static_cast<s32>(g_blockManager->GetBlockNumber(flarePos))) {
+    if (inBlockNum != 4096 && inBlockNum != CollisionSector::GetBlockNumber(flarePos)) {
         return;
     }
 

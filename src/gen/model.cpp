@@ -63,8 +63,6 @@ static bool IsLiveOriginalSTree(const OriginalSTree* tree) {
 }
 
 static void BuildMat4FromPsxPackedMatrix(const s32* packedMatrix, Mat4& out);
-static void MakeBillboardMatrix(const LVector& pos, Mat4& out, s32 lockY);
-static void MakeBillboardMatrixFlip(const LVector& pos, Mat4& out, s32 lockY);
 static DrawableSTree* GetDrawableSTree(Model* model);
 
 // PSX: SetSemiMode__13OriginalSTreei (MODEL.CPP:3459, 0x8007205C)
@@ -151,7 +149,7 @@ static void BuildMat4FromPsxPackedMatrix(const s32* packedMatrix, Mat4& out) {
 }
 
 // PSX: MakeBillboardMatrix (MODEL.CPP:3199, 0x80071AF4)
-static void MakeBillboardMatrix(const LVector& pos, Mat4& out, s32 lockY) {
+void MakeBillboardMatrix(const LVector& pos, Mat4& out, s32 lockY) {
     MARKFUNCTION(0x80071AF4);
 
     if (!g_display || !g_display->GetCamera()) {
@@ -173,7 +171,7 @@ static void MakeBillboardMatrix(const LVector& pos, Mat4& out, s32 lockY) {
 }
 
 // PSX: MakeBillboardMatrixFlip (MODEL.CPP:3230, 0x80071BCC)
-static void MakeBillboardMatrixFlip(const LVector& pos, Mat4& out, s32 lockY) {
+void MakeBillboardMatrixFlip(const LVector& pos, Mat4& out, s32 lockY) {
     MARKFUNCTION(0x80071BCC);
 
     if (!g_display || !g_display->GetCamera()) {
@@ -1460,8 +1458,17 @@ void SModel::Show(u32 flags) {
     const Mat4 savedWorld = p3d::context->GetWorldMatrix();
     p3d::context->SetWorldMatrix(world);
 
+    const bool forceFrontBlink = ownerDeadWindow && ownerSemiFlag;
+    if (forceFrontBlink) {
+        p3d::context->EnableZBuffer(false);
+    }
+
     // PSX: calls drawable->Display(flags) through vtable
     drawable->Display(flags);
+
+    if (forceFrontBlink) {
+        p3d::context->EnableZBuffer(true);
+    }
 
     if (ambientLight) {
         RestoreWorldAmbientLightToPort();

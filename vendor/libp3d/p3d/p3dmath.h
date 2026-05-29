@@ -310,23 +310,74 @@ inline s32 rmMag3ff(s32 a1, s32 a2, s32 a3) {
 
 // rmRangedRandom - PRNG returning value in [0, range)
 // PSX: 0x80078404, Source: C:\chan\devsys\psx\radlib\SOURCE\MATH\RANDOM\RANDOM0.C:48
-inline u32 rmRangedRandom(u32 range) {
+inline u32& rmRandomSeedRef() {
     static u32 seed = 0x12345678;
+    return seed;
+}
+
+inline u32 rmAdvanceRandomSeed(u32 seed) {
+    const u32 a = seed ^ 0x1D872B41u;
+    const u32 b = a ^ (a >> 5);
+    const u32 c = a ^ (b << 27);
+    return b ^ c;
+}
+
+inline u32 rmRangedRandom(u32 range) {
+    u32& seed = rmRandomSeedRef();
     if (range == 0) {
         return 0;
     }
-    seed ^= 0x1D872B41;
-    seed ^= (seed >> 5);
-    seed ^= (seed << 27);
-    return seed % range;
+
+    const u32 value = seed;
+    seed = rmAdvanceRandomSeed(seed);
+    return value % range;
+}
+
+// rmSignedRandom17CurrentSeed - particle path helper used by PSX PARTICLE.CPP.
+// Returns (seed & 0x1FFFF) - 0xFFFF from current seed, then advances the seed.
+inline s32 rmSignedRandom17CurrentSeed() {
+    u32& seed = rmRandomSeedRef();
+    const u32 oldSeed = seed;
+    seed = rmAdvanceRandomSeed(seed);
+    return static_cast<s32>(oldSeed & 0x1FFFFu) - 0xFFFF;
 }
 
 // rmDiv16i - 16.16 fixed-point division (PSX: 0x8007D8B4)
-// Returns (a << 16) / b as a 16.16 fixed-point result.
+// Returns PSX DIVIDE.C result (scaled long division with sign handling).
 // Source: C:\chan\devsys\psx\radlib\SOURCE\MATH\MULTDIV\DIVIDE.C:30
 inline s32 rmDiv16i(s32 a, s32 b) {
-    if (b == 0) return (a >= 0) ? 0x7FFFFFFF : -0x7FFFFFFF;
-    return (s32)(((s64)a << 16) / b);
+    s32 shift = 16;
+    s32 negate = 0;
+
+    if (b < 0) {
+        b = -b;
+        negate = 1;
+    }
+
+    if (a < 0) {
+        a = -a;
+        negate ^= 1;
+    }
+
+    while (a <= 0x1FFFFFFF) {
+        if (shift == 0) {
+            break;
+        }
+        a *= 4;
+        shift -= 2;
+    }
+
+    const u32 denom = static_cast<u32>(b) >> shift;
+    if (denom != 0u) {
+        const s32 q = a / static_cast<s32>(denom);
+        return negate ? -q : q;
+    }
+
+    if (a == 0) {
+        return 0;
+    }
+
+    return negate ? static_cast<s32>(0x80000001u) : 0x7FFFFFFF;
 }
 
 // rmV3Normalize - normalize integer vector to 16.16 fixed-point unit vector

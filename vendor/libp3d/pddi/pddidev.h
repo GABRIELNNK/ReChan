@@ -172,6 +172,12 @@ public:
     virtual void SetCullMode(pddiCullMode mode) = 0;
     virtual void EnableZBuffer(bool enable) = 0;
     virtual void SetBlendMode(pddiBlendMode mode) = 0;
+    // Enables/disables depth clamp (clip-space Z clamp instead of near/far clip).
+    virtual void SetDepthClamp(bool enable) = 0;
+    // Override polygon offset for all subsequent draws (including BLEND_NONE).
+    // Disable by calling with enable=false. While enabled, SetBlendMode(BLEND_NONE)
+    // restores these values instead of zeroing polygon offset.
+    virtual void SetPolygonOffset(bool enable, f32 factor = 0.0f, f32 units = 0.0f) = 0;
     virtual void SetScissor(int x, int y, int w, int h) = 0;
     // Controls whether immediate-mode 2D draws should use multisample rasterization.
     virtual void SetMultisampleEnabled(bool enable) = 0;

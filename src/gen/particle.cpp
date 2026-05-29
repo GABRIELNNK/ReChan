@@ -5,6 +5,7 @@
 #include "gen/camera.h"
 #include "gen/model.h"
 #include "gen/psxmath_helpers.h"
+#include "gen/time.h"
 #include "gen/weffect.h"
 
 #include "p3d/context.h"
@@ -16,6 +17,8 @@
 
 static const s32 kMaxParticleSystems = 64;
 static const s32 kParticleInfoCount = 140;
+static constexpr bool kDebugFreezeParticleRenderAtSpawn = false;
+static constexpr bool kDebugTraceParticleTransforms = false;
 
 class ParticleInfo : public ccMinNode {
 public:
@@ -189,8 +192,50 @@ static s32 ReadS32Particle(const u8* p) {
     return static_cast<s32>(p3dReadU32LE(p));
 }
 
+static u32 RandomBits17() {
+    u32& seed = rmRandomSeedRef();
+    const u32 bits = seed & 0x1FFFFu;
+    seed = rmAdvanceRandomSeed(seed);
+    return bits;
+}
+
+static const s32 kOneOverDividePsxRaw[] = {
+    65536, 65536, 32768, 21845, 16384, 13107, 10922, 9362, 8192, 7281,
+    6553, 5957, 5461, 5041, 4681, 4369, 4096, 3855, 3640, 3449,
+    3276, 3120, 2978, 2849, 2730, 2621, 2520, 2427, 2340, 2259,
+    2184, 2114, 2048, 1985, 1927, 1872, 1820, 1771, 1724, 1680,
+    1638, 1598, 1560, 1524, 1489, 1456, 1424, 1394, 1365, 1337,
+    1310, 1285, 1260, 1236, 1213, 1191, 1170, 1149, 1129, 1110,
+    1092,
+
+    // Immediate data following gOneODivide in PSX image:
+    // NormalTable[1] = {0}; dword_800D9990[2] = {61440, 0}; thePolyDC[12] = {0...}
+    0,
+    61440, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+};
+
 static s32 RandomSigned16() {
-    return static_cast<s32>(rmRangedRandom(0x1FFFFu)) - 0xFFFF;
+    return static_cast<s32>(RandomBits17()) - 0xFFFF;
+}
+
+static s32 MulLo32(s32 lhs, s32 rhs) {
+    return static_cast<s32>(static_cast<s64>(lhs) * static_cast<s64>(rhs));
+}
+
+static s32 MulHi16FromLo32(s32 lhs, s32 rhs) {
+    return MulLo32(lhs, rhs) >> 16;
+}
+
+static u8 MulByte2FromLo32(s32 lhs, s32 rhs) {
+    return static_cast<u8>(static_cast<u32>(MulLo32(lhs, rhs)) >> 16);
+}
+
+static bool RandomSignFromSeedByte() {
+    u32& seed = rmRandomSeedRef();
+    const u8 lowByte = static_cast<u8>(seed);
+    seed = rmAdvanceRandomSeed(seed);
+    return (((static_cast<u32>(lowByte) + 1u) & 1u) != 0u);
 }
 
 static s32 Reciprocal16(s32 value) {
@@ -202,7 +247,24 @@ static s32 Reciprocal16(s32 value) {
         value = -value;
     }
 
-    return rmDiv16i(0x10000, value);
+    const u32 index = static_cast<u32>(value);
+    const u32 rawCount = static_cast<u32>(sizeof(kOneOverDividePsxRaw) / sizeof(kOneOverDividePsxRaw[0]));
+    if (index < rawCount) {
+        return kOneOverDividePsxRaw[index];
+    }
+
+    // PSX reads past gOneODivide into subsequent globals with no bounds check.
+    // Returning zero keeps deterministic behavior for farther-out indices.
+    return 0;
+}
+
+static f32 QuantizePsxScale16(s32 scale16) {
+    const s16 matrixEntry = static_cast<s16>(scale16 >> 4);
+    return static_cast<f32>(matrixEntry) / 4096.0f;
+}
+
+static s32 AbsS32(s32 value) {
+    return (value < 0) ? -value : value;
 }
 
 static bool ParticleGeoEligible(const OriginalGeo* geo) {
@@ -217,7 +279,7 @@ static bool ParticleGeoEligible(const OriginalGeo* geo) {
 
 static void BuildParticleScaleMatrix(s32 scale, Mat4& out) {
     out = Mat4();
-    const f32 s = FIX16_TO_FLOAT(scale);
+    const f32 s = QuantizePsxScale16(scale);
     out.m[0] = s;
     out.m[5] = s;
     out.m[10] = s;
@@ -225,44 +287,56 @@ static void BuildParticleScaleMatrix(s32 scale, Mat4& out) {
 
 static s32 QuantizeParticleAngle(s32 rotation) {
     const u16 angle = static_cast<u16>(rotation >> 8);
-    const u16 quantized = static_cast<u16>(((static_cast<u32>(angle) + 2u) >> 2) << 2);
+    const u16 quantized = static_cast<u16>((static_cast<u32>(angle) + 2u) >> 2);
     return static_cast<s32>(quantized);
 }
 
+static s16 ExpandPsxParticleSinCosAngle(s32 quantizedAngle) {
+    // PSX Display path calls P3D_SinCos_GTE(((u16)(rotation >> 8) + 2) >> 2).
+    // P3D_SinCos_GTE consumes quarter-angle units; rmSin16 uses full 0x10000 turn.
+    return static_cast<s16>(quantizedAngle << 2);
+}
+
 static void PreMultiplyRotZ(Mat4& matrix, s32 angle16) {
-    Mat4 rot;
-    p3dBuildRotMatrixZ(ANGLE2RAD(angle16), rot);
+    const s16 sinCosAngle = ExpandPsxParticleSinCosAngle(angle16);
+    const f32 sinV = FIX16_TO_FLOAT(rmSin16(sinCosAngle));
+    const f32 cosV = FIX16_TO_FLOAT(rmSin16(static_cast<s16>(sinCosAngle + 0x4000)));
+
+    Mat4 rot = Mat4();
+    rot.m[0] = cosV;
+    rot.m[1] = sinV;
+    rot.m[4] = -sinV;
+    rot.m[5] = cosV;
+
     matrix = rot * matrix;
 }
 
 static void PreMultiplyRotY(Mat4& matrix, s32 angle16) {
-    Mat4 rot;
-    p3dBuildRotMatrixY(ANGLE2RAD(angle16), rot);
+    const s16 sinCosAngle = ExpandPsxParticleSinCosAngle(angle16);
+    const f32 sinV = FIX16_TO_FLOAT(rmSin16(sinCosAngle));
+    const f32 cosV = FIX16_TO_FLOAT(rmSin16(static_cast<s16>(sinCosAngle + 0x4000)));
+
+    Mat4 rot = Mat4();
+    rot.m[0] = cosV;
+    rot.m[2] = -sinV;
+    rot.m[8] = sinV;
+    rot.m[10] = cosV;
+
     matrix = rot * matrix;
 }
 
 static void PreMultiplyRotX(Mat4& matrix, s32 angle16) {
-    Mat4 rot;
-    p3dBuildRotMatrixX(ANGLE2RAD(angle16), rot);
+    const s16 sinCosAngle = ExpandPsxParticleSinCosAngle(angle16);
+    const f32 sinV = FIX16_TO_FLOAT(rmSin16(sinCosAngle));
+    const f32 cosV = FIX16_TO_FLOAT(rmSin16(static_cast<s16>(sinCosAngle + 0x4000)));
+
+    Mat4 rot = Mat4();
+    rot.m[5] = cosV;
+    rot.m[6] = sinV;
+    rot.m[9] = -sinV;
+    rot.m[10] = cosV;
+
     matrix = rot * matrix;
-}
-
-static void BuildBillboardMatrixPSX(const LVector& pos, Mat4& out, bool lockY) {
-    if (!g_display || !g_display->GetCamera()) {
-        p3dFillTransMatrix(pos, out);
-        return;
-    }
-
-    const LVector& cameraPos = g_display->GetCamera()->GetPosition();
-    Vec3 heading(
-        FIX16_TO_FLOAT(cameraPos.x - pos.x),
-        lockY ? 0.0f : FIX16_TO_FLOAT(cameraPos.y - pos.y),
-        FIX16_TO_FLOAT(cameraPos.z - pos.z));
-
-    const Vec3 up(0.0f, 1.0f, 0.0f);
-    out = Mat4();
-    p3dFillHeadingMatrix(heading, up, out);
-    p3dFillTransMatrix(pos, out);
 }
 
 static void SphereToCart(s16 azimuth, s16 polar, LVector& out) {
@@ -319,34 +393,43 @@ s32 ParticleSystem::ParseData(const u8* body, u32 bodySize) {
     u32 flags = 0;
     u32 cursor = 0;
 
+    auto readLongStream = [&]() -> s32 {
+        if (cursor + 4 > bodySize) {
+            cursor = bodySize;
+            return 0;
+        }
+
+        const s32 value = ReadS32Particle(body + cursor);
+        cursor += 4;
+        return value;
+    };
+
+    auto readCharStream = [&]() -> char {
+        if (cursor >= bodySize) {
+            return '\0';
+        }
+
+        const char c = static_cast<char>(body[cursor]);
+        cursor++;
+        return c;
+    };
+
     while (cursor + 4 <= bodySize) {
         const u16 tag = ReadU16Particle(body + cursor);
         const u16 length = ReadU16Particle(body + cursor + 2);
         cursor += 4;
 
-        u32 payloadSize = length;
-        if (cursor + payloadSize > bodySize) {
-            payloadSize = bodySize - cursor;
-        }
-
-        const u8* payload = body + cursor;
-
-        auto readLongAt = [&](u32 offset) -> s32 {
-            if (offset + 4 > payloadSize) {
-                return 0;
-            }
-            return ReadS32Particle(payload + offset);
-        };
-
         if (tag == 0x0100) {
-            stats->speedBase = readLongAt(0);
-            stats->speedRange = readLongAt(4);
+            stats->speedBase = readLongStream();
+            stats->speedRange = readLongStream();
+            (void)readLongStream();
+            (void)readLongStream();
         }
         else if (tag == 0x0200) {
-            const s32 v0 = readLongAt(0) << 16;
-            const s32 v1 = readLongAt(4) << 16;
-            const s32 v2 = readLongAt(8) << 16;
-            const s32 v3 = readLongAt(12) << 16;
+            const s32 v0 = readLongStream() << 16;
+            const s32 v1 = readLongStream() << 16;
+            const s32 v2 = readLongStream() << 16;
+            const s32 v3 = readLongStream() << 16;
 
             if (v2 <= 0) {
                 stats->scaleBase = 0x10000;
@@ -358,18 +441,22 @@ s32 ParticleSystem::ParseData(const u8* body, u32 bodySize) {
             }
         }
         else if (tag == 0x0300) {
-            stats->lifeBase = static_cast<u16>(readLongAt(0));
-            stats->lifeRange = static_cast<u16>(readLongAt(4));
+            stats->lifeBase = static_cast<u16>(readLongStream());
+            stats->lifeRange = static_cast<u16>(readLongStream());
+            (void)readLongStream();
+            (void)readLongStream();
         }
         else if (tag == 0x0400) {
-            stats->dragBase = readLongAt(0);
-            stats->dragRange = readLongAt(4);
+            stats->dragBase = readLongStream();
+            stats->dragRange = readLongStream();
+            (void)readLongStream();
+            (void)readLongStream();
         }
         else if (tag == 0x0500) {
-            const s32 v0 = readLongAt(0) << 16;
-            const s32 v1 = readLongAt(4) << 16;
-            const s32 v2 = readLongAt(8) << 16;
-            const s32 v3 = readLongAt(12) << 16;
+            const s32 v0 = readLongStream() << 16;
+            const s32 v1 = readLongStream() << 16;
+            const s32 v2 = readLongStream() << 16;
+            const s32 v3 = readLongStream() << 16;
 
             if (v2 > 0) {
                 stats->accelBase = rmDiv16i(v0, v2);
@@ -378,100 +465,102 @@ s32 ParticleSystem::ParseData(const u8* body, u32 bodySize) {
             }
         }
         else if (tag == 0x0510) {
-            stats->spawnPerBurst = static_cast<u16>(readLongAt(0));
-            stats->maxParticles = static_cast<u16>(readLongAt(8));
+            stats->spawnPerBurst = static_cast<u16>(readLongStream());
+            (void)readLongStream();
+            stats->maxParticles = static_cast<u16>(readLongStream());
+            (void)readLongStream();
         }
         else if (tag == 0x0600) {
-            stats->dirX = readLongAt(0);
-            stats->dirY = readLongAt(4);
+            stats->dirX = readLongStream();
+            stats->dirY = readLongStream();
             stats->dirXDefault = stats->dirX;
             stats->dirYDefault = stats->dirY;
         }
         else if (tag == 0x0610) {
-            stats->spreadX = readLongAt(0);
-            stats->spreadY = readLongAt(4);
+            stats->spreadX = readLongStream();
+            stats->spreadY = readLongStream();
         }
         else if (tag == 0x0700) {
-            stats->growFrames = static_cast<u16>(readLongAt(0));
+            stats->growFrames = static_cast<u16>(readLongStream());
         }
         else if (tag == 0x0710) {
-            stats->shrinkFrames = static_cast<u16>(readLongAt(0));
+            stats->shrinkFrames = static_cast<u16>(readLongStream());
         }
         else if (tag == 0x0715) {
-            stats->normalizeFrames = static_cast<u16>(readLongAt(0));
+            stats->normalizeFrames = static_cast<u16>(readLongStream());
         }
         else if (tag == 0x0720) {
-            stats->gravity = static_cast<u16>(readLongAt(0));
+            stats->gravity = static_cast<u16>(readLongStream());
         }
         else if (tag == 0x0730) {
-            stats->particleLife = static_cast<u16>(readLongAt(0));
+            stats->particleLife = static_cast<u16>(readLongStream());
         }
         else if (tag == 0x0740) {
-            stats->burstStart = static_cast<u16>(readLongAt(0));
+            stats->burstStart = static_cast<u16>(readLongStream());
         }
         else if (tag == 0x0750) {
-            stats->burstEnd = static_cast<u16>(readLongAt(0));
+            stats->burstEnd = static_cast<u16>(readLongStream());
         }
         else if (tag == 0x0760) {
-            stats->animEndFrame = static_cast<u16>(readLongAt(0));
+            stats->animEndFrame = static_cast<u16>(readLongStream());
         }
         else if (tag == 0x0770) {
-            stats->animDelay = static_cast<u16>(readLongAt(0));
+            stats->animDelay = static_cast<u16>(readLongStream());
         }
         else if (tag == 0x0780) {
-            stats->maxActive = static_cast<u16>(readLongAt(0));
+            stats->maxActive = static_cast<u16>(readLongStream());
         }
         else if (tag == 0x0800) {
-            if (readLongAt(0) != 0) {
+            if (readLongStream() != 0) {
                 flags |= 0x10u;
             }
         }
         else if (tag == 0x0810) {
-            if (readLongAt(0) != 0) {
+            if (readLongStream() != 0) {
                 flags |= 0x20u;
             }
         }
         else if (tag == 0x0820) {
-            if (readLongAt(0) != 0) {
+            if (readLongStream() != 0) {
                 flags |= 8u;
             }
         }
         else if (tag == 0x0830) {
-            if (readLongAt(0) != 0) {
+            if (readLongStream() != 0) {
                 flags |= 0x8000u;
             }
         }
         else if (tag == 0x0840) {
-            if (readLongAt(0) != 0) {
+            if (readLongStream() != 0) {
                 flags |= 2u;
             }
         }
         else if (tag == 0x0850) {
-            if (readLongAt(0) != 0) {
+            if (readLongStream() != 0) {
                 flags |= 0x1000u;
             }
         }
         else if (tag == 0x0860) {
-            if (readLongAt(0) != 0) {
+            if (readLongStream() != 0) {
                 flags |= 0x4000u;
             }
         }
         else if (tag == 0x0870) {
-            if (readLongAt(0) != 0) {
+            if (readLongStream() != 0) {
                 flags |= 0x2000u;
             }
         }
         else if (tag == 0x0880) {
-            if (readLongAt(0) != 0) {
+            if (readLongStream() != 0) {
                 flags |= 0x10000u;
             }
         }
         else if (tag == 0x0900) {
-            stats->fastRenderWord1Value = static_cast<u32>(readLongAt(0));
+            stats->fastRenderWord1Value = static_cast<u32>(readLongStream());
         }
         else if (tag == 0x1000) {
-            const s32 resourceHash = readLongAt(0);
-            const s32 animHash = readLongAt(4);
+            const s32 resourceHash = readLongStream();
+            const s32 animHash = readLongStream();
 
             if (!stats->comEffect) {
                 stats->comEffect = new ComEffect();
@@ -480,25 +569,38 @@ s32 ParticleSystem::ParseData(const u8* body, u32 bodySize) {
             if (stats->comEffect) {
                 stats->comEffect->LoadETree(resourceHash, animHash);
             }
+
+            if (cursor + 32 > bodySize) {
+                cursor = bodySize;
+            }
+            else {
+                cursor += 32;
+            }
         }
         else if (tag == 0x1100) {
-            const u32 hash = static_cast<u32>(readLongAt(0));
+            const u32 hash = static_cast<u32>(readLongStream());
 
             char nameBuffer[32] = {};
-            const u32 copyLen = (payloadSize > 4) ? ((payloadSize - 4 > 31) ? 31 : payloadSize - 4) : 0;
-            if (copyLen > 0) {
-                std::memcpy(nameBuffer, payload + 4, copyLen);
-                nameBuffer[31] = '\0';
-                SetName(nameBuffer, 1);
+            for (s32 i = 0; i < 32; i++) {
+                nameBuffer[i] = readCharStream();
             }
+            nameBuffer[31] = '\0';
+            SetName(nameBuffer, 0);
 
             nameCRC = hash;
         }
 
-        cursor += payloadSize;
+        else {
+            u32 skip = static_cast<u32>(length);
+            if (cursor + skip > bodySize) {
+                skip = bodySize - cursor;
+            }
+            cursor += skip;
+        }
     }
 
     stats->flags = flags;
+
     if ((flags & 0x10000u) != 0u && stats->comEffect) {
         (void)stats->comEffect->SetUpFirstGeo();
     }
@@ -745,8 +847,10 @@ s32 ParticleSystem::InitParticles(const LVector& origin) {
         info->animHoldCounter = 0;
         info->active = 0;
 
-        const s32 lifeRand = static_cast<s32>((static_cast<s64>(RandomSigned16()) * stats->lifeRange) >> 16);
-        info->life = static_cast<u8>(static_cast<s32>(stats->lifeBase) + lifeRand);
+        const s16 lifeRangeSigned = static_cast<s16>(stats->lifeRange);
+        const u8 lifeBaseByte = static_cast<u8>(stats->lifeBase);
+        const u8 lifeRand = MulByte2FromLo32(RandomSigned16(), static_cast<s32>(lifeRangeSigned));
+        info->life = static_cast<u8>(lifeBaseByte + lifeRand);
 
         info->posX = static_cast<s16>(origin.x);
         info->posY = static_cast<s16>(origin.y);
@@ -759,8 +863,8 @@ s32 ParticleSystem::InitParticles(const LVector& origin) {
             info->meshIndex = 0;
         }
 
-        const s16 azimuth = static_cast<s16>(stats->dirX + ((static_cast<s64>(RandomSigned16()) * stats->spreadX) >> 16));
-        const s16 polar = static_cast<s16>(stats->dirY + ((static_cast<s64>(RandomSigned16()) * stats->spreadY) >> 16));
+        const s16 azimuth = static_cast<s16>(stats->dirX + MulHi16FromLo32(RandomSigned16(), stats->spreadX));
+        const s16 polar = static_cast<s16>(stats->dirY + MulHi16FromLo32(RandomSigned16(), stats->spreadY));
 
         LVector dir = {};
         SphereToCart(azimuth, polar, dir);
@@ -797,7 +901,8 @@ s32 ParticleSystem::InitParticles(const LVector& origin) {
             info->velZ = static_cast<s16>(dir.z);
         }
 
-        const s32 rotationRandom = static_cast<s32>((static_cast<s64>(stats->dragRange) * RandomSigned16()) >> 16);
+        const s32 rotationRand = RandomSigned16();
+        const s32 rotationRandom = static_cast<s32>((static_cast<s64>(stats->dragRange) * rotationRand) >> 16);
         s32 rotationStep = (rotationRandom + stats->dragBase) << 8;
 
         if ((stats->flags & 0x2000u) != 0u && info->life != 0) {
@@ -805,22 +910,25 @@ s32 ParticleSystem::InitParticles(const LVector& origin) {
             rotationStep = static_cast<s32>((static_cast<s64>(rotationStep) * invLife) >> 16);
         }
 
-        if ((rmRangedRandom(2) & 1u) == 0u) {
+        if (!RandomSignFromSeedByte()) {
             rotationStep = -rotationStep;
         }
 
         info->rotationStep = rotationStep;
 
         if ((stats->flags & 0x1000u) != 0u) {
-            info->rotation = static_cast<s32>((static_cast<s64>(RandomSigned16()) * 0xFFFF) >> 8);
+            const s64 rotationMul = static_cast<s64>(RandomSigned16()) * 0xFFFF;
+            const s32 rotationHigh = static_cast<s32>(rotationMul >> 16);
+            info->rotation = static_cast<s32>(rotationHigh << 8);
         }
         else {
             info->rotation = 0;
         }
 
-        info->axisMask = axisPattern[(rmRangedRandom(4) + 1u) & 3u];
+        const u32 axisRandRaw = static_cast<u32>(RandomSigned16() + 0xFFFF);
+        info->axisMask = axisPattern[(axisRandRaw + 1u) & 3u];
 
-        const s32 scaleRandom = static_cast<s32>((static_cast<s64>(stats->scaleRange) * RandomSigned16()) >> 16);
+        const s32 scaleRandom = MulHi16FromLo32(stats->scaleRange, RandomSigned16());
         s32 scale = scaleRandom + stats->scaleBase;
 
         if ((stats->flags & 0x2000u) != 0u && info->life != 0) {
@@ -842,7 +950,7 @@ s32 ParticleSystem::InitParticles(const LVector& origin) {
         }
 
         if ((stats->flags & 4u) != 0u) {
-            const s32 dragRand = static_cast<s32>((static_cast<s64>(stats->accelRange) * RandomSigned16()) >> 16);
+            const s32 dragRand = MulHi16FromLo32(stats->accelRange, RandomSigned16());
             info->dragScale = dragRand + stats->accelBase;
         }
         else {
@@ -871,24 +979,26 @@ s32 ParticleSystem::Update() {
     s32 activeCount = 0;
     bool hadAnyNode = false;
 
+    const s16 particleLife = static_cast<s16>(stats->particleLife);
+    const s16 animEndFrameSigned = static_cast<s16>(stats->animEndFrame);
+    const s16 animDelaySigned = static_cast<s16>(stats->animDelay);
+    const s16 normalizeFramesSigned = static_cast<s16>(stats->normalizeFrames);
+    const s16 normalizeFramesAbs = (normalizeFramesSigned < 0) ? static_cast<s16>(-normalizeFramesSigned) : normalizeFramesSigned;
+    const s16 growFramesSigned = static_cast<s16>(stats->growFrames);
+    const s16 shrinkFramesSigned = static_cast<s16>(stats->shrinkFrames);
+    const s16 gravitySigned = static_cast<s16>(stats->gravity);
+    const u16 frameRate = 30;
+    const bool lowFrameRate = frameRate < 0x1Au;
+
     for (ccMinNode* node = particleList->head; node;) {
         ParticleInfo* info = static_cast<ParticleInfo*>(node);
         node = node->next;
         hadAnyNode = true;
 
-        if (info->life == 0) {
-            info->active = 0;
-            particleList->RemNode(info);
-            g_particleAvailList.AddNodeTail(info);
-            continue;
-        }
-
-        info->age = static_cast<u8>(info->age + 1);
-
-        if (stats->particleLife < info->age) {
+        if (particleLife < static_cast<s16>(info->frameAge)) {
             const u8 prevHold = info->animHoldCounter;
             info->animHoldCounter = static_cast<u8>(info->animHoldCounter + 1);
-            if (prevHold >= static_cast<u8>(stats->animDelay)) {
+            if (static_cast<s16>(prevHold) >= animDelaySigned) {
                 info->animHoldCounter = 0;
                 info->animFrame = static_cast<u8>(info->animFrame + 1);
                 if (stats->comEffect && stats->comEffect->EndOfFrame(info->animFrame)) {
@@ -897,13 +1007,24 @@ s32 ParticleSystem::Update() {
             }
         }
 
+        if (lowFrameRate && info->life < 9u) {
+            info->life = 0;
+        }
+
+        if (info->life == 0) {
+            info->active = 0;
+            particleList->RemNode(info);
+            g_particleAvailList.AddNodeTail(info);
+            continue;
+        }
+
         info->frameAge = static_cast<u8>(info->frameAge + 1);
 
-        if (stats->particleLife < info->frameAge) {
+        if (particleLife < static_cast<s16>(info->frameAge)) {
             const u8 prevCounter = info->animFrameCounter;
             info->animFrameCounter = static_cast<u8>(info->animFrameCounter + 2);
 
-            if (static_cast<u8>(prevCounter + 1) >= static_cast<u8>(stats->animEndFrame)) {
+            if (static_cast<s16>(static_cast<u8>(prevCounter + 1)) >= animEndFrameSigned) {
                 info->active = 1;
                 info->animFrameCounter = 0;
                 info->life = static_cast<u8>(info->life - 1);
@@ -922,7 +1043,7 @@ s32 ParticleSystem::Update() {
                 averagePos.z += info->posZ;
                 activeCount++;
 
-                if ((stats->flags & 0x80000u) != 0u && info->age < stats->normalizeFrames) {
+                if ((stats->flags & 0x80000u) != 0u && static_cast<s16>(info->age) < normalizeFramesAbs) {
                     info->velX = static_cast<s16>(info->velX + info->velNormX);
                     info->velY = static_cast<s16>(info->velY + info->velNormY);
                     info->velZ = static_cast<s16>(info->velZ + info->velNormZ);
@@ -934,18 +1055,18 @@ s32 ParticleSystem::Update() {
                     info->velZ = static_cast<s16>((static_cast<s64>(info->velZ) * info->dragScale) >> 16);
                 }
 
-                if ((stats->flags & 0x40000u) != 0u && info->age < stats->growFrames) {
+                if ((stats->flags & 0x40000u) != 0u && static_cast<s16>(info->age) < growFramesSigned) {
                     info->scale += info->scaleStep;
                 }
 
-                if ((stats->flags & 0x100000u) != 0u && info->life < stats->shrinkFrames) {
+                if ((stats->flags & 0x100000u) != 0u && static_cast<s16>(info->life) < shrinkFramesSigned) {
                     info->scale -= info->scaleStep2;
                 }
 
                 info->rotation += info->rotationStep;
 
                 if ((stats->flags & 2u) != 0u) {
-                    info->velY = static_cast<s16>(info->velY + ((-static_cast<s16>(stats->gravity)) >> 1));
+                    info->velY = static_cast<s16>(info->velY + ((-gravitySigned) >> 1));
                 }
             }
         }
@@ -977,11 +1098,15 @@ void ParticleSystem::Display() {
         return;
     }
 
-    if (!stats->comEffect->PointInView(averagePos, 512)) {
+    const LVector& cullPos = kDebugFreezeParticleRenderAtSpawn ? basePos : averagePos;
+    if (!stats->comEffect->PointInView(cullPos, 512)) {
         return;
     }
 
     u32 renderFlags = ((stats->flags & 0x800u) != 0u) ? 0x800u : 0u;
+    if ((stats->flags & 2u) != 0u) {
+        renderFlags |= 0x1000000u;
+    }
     if ((stats->flags & 0x10000u) != 0u) {
         renderFlags |= 0x800000u;
         stats->comEffect->InitFastRender(stats->comEffect->GetGeo());
@@ -991,11 +1116,70 @@ void ParticleSystem::Display() {
     Mat4 billboardMatrix = Mat4();
     if (billboard && particleList->head) {
         const Mat4& parentWorld = p3d::context->GetWorldMatrix();
-        LVector billboardPos = averagePos;
+        LVector billboardPos = kDebugFreezeParticleRenderAtSpawn ? basePos : averagePos;
         billboardPos.x += static_cast<s32>(parentWorld.m[12]);
         billboardPos.y += static_cast<s32>(parentWorld.m[13]);
         billboardPos.z += static_cast<s32>(parentWorld.m[14]);
-        BuildBillboardMatrixPSX(billboardPos, billboardMatrix, false);
+        MakeBillboardMatrix(billboardPos, billboardMatrix, 0);
+    }
+
+    if (kDebugTraceParticleTransforms) {
+        static s32 sTraceBudget = 200;
+        static s32 sTraceDecimator = 0;
+
+        if (sTraceBudget > 0 && ((sTraceDecimator++ & 0x1F) == 0)) {
+            ParticleInfo* sample = nullptr;
+            for (ccMinNode* node = particleList->head; node; node = node->next) {
+                ParticleInfo* info = static_cast<ParticleInfo*>(node);
+                if (info->active) {
+                    sample = info;
+                    break;
+                }
+            }
+
+            if (sample) {
+                const Mat4& parentWorld = p3d::context->GetWorldMatrix();
+                const s32 quantized = QuantizeParticleAngle(sample->rotation);
+                LOG("[ParticleDbg] hash=0x%08X flags=0x%08X freeze=%d base=(%d,%d,%d) avg=(%d,%d,%d) parentT=(%d,%d,%d) p=(%d,%d,%d) v=(%d,%d,%d) scale=%d scaleStep=%d rotStep=%d rot=%d qrot=%d axis=0x%02X frame=%u",
+                    nameCRC,
+                    stats->flags,
+                    kDebugFreezeParticleRenderAtSpawn ? 1 : 0,
+                    basePos.x,
+                    basePos.y,
+                    basePos.z,
+                    averagePos.x,
+                    averagePos.y,
+                    averagePos.z,
+                    static_cast<s32>(parentWorld.m[12]),
+                    static_cast<s32>(parentWorld.m[13]),
+                    static_cast<s32>(parentWorld.m[14]),
+                    static_cast<s32>(sample->posX),
+                    static_cast<s32>(sample->posY),
+                    static_cast<s32>(sample->posZ),
+                    static_cast<s32>(sample->velX),
+                    static_cast<s32>(sample->velY),
+                    static_cast<s32>(sample->velZ),
+                    sample->scale,
+                    sample->scaleStep,
+                    sample->rotationStep,
+                    sample->rotation,
+                    quantized,
+                    static_cast<u32>(sample->axisMask),
+                    static_cast<u32>(sample->animFrame));
+
+                const s32 maxAbsPos = PsxMax(AbsS32(static_cast<s32>(sample->posX)),
+                    PsxMax(AbsS32(static_cast<s32>(sample->posY)), AbsS32(static_cast<s32>(sample->posZ))));
+                if (maxAbsPos > 30000 || AbsS32(sample->scale) > 0x80000 || AbsS32(sample->rotationStep) > 0x200000) {
+                    LOG("[ParticleDbg] anomaly hash=0x%08X maxAbsPos=%d scale=%d rotStep=%d",
+                        nameCRC,
+                        maxAbsPos,
+                        sample->scale,
+                        sample->rotationStep);
+                }
+
+                sTraceBudget--;
+            }
+        }
     }
 
     for (ccMinNode* node = particleList->head; node; node = node->next) {
@@ -1009,6 +1193,9 @@ void ParticleSystem::Display() {
             static_cast<s32>(info->posY),
             static_cast<s32>(info->posZ),
         };
+        if (kDebugFreezeParticleRenderAtSpawn) {
+            renderPos = basePos;
+        }
 
         if (displayOffset) {
             renderPos.x += displayOffset->x;
@@ -1017,9 +1204,10 @@ void ParticleSystem::Display() {
         }
 
         Mat4 world;
-        BuildParticleScaleMatrix(info->scale, world);
+        BuildParticleScaleMatrix(kDebugFreezeParticleRenderAtSpawn ? 0x10000 : info->scale, world);
 
-        const s32 angle16 = QuantizeParticleAngle(info->rotation);
+        const s32 angle16 = kDebugFreezeParticleRenderAtSpawn ? 0 : QuantizeParticleAngle(info->rotation);
+        const u8 animFrame = kDebugFreezeParticleRenderAtSpawn ? 0 : info->animFrame;
         if (billboard) {
             if (angle16 != 0) {
                 PreMultiplyRotZ(world, angle16);
@@ -1059,7 +1247,7 @@ void ParticleSystem::Display() {
         if ((stats->flags & 0x4000u) != 0u && stats->comEffect) {
             if (stats->fastRenderWord1Slot) {
                 u32* word1 = static_cast<u32*>(stats->fastRenderWord1Slot);
-                stats->comEffect->SetFrame(info->animFrame);
+                stats->comEffect->SetFrame(animFrame);
                 const u32 previousWord = *word1;
                 *word1 = stats->fastRenderWord1Value;
 
@@ -1076,7 +1264,7 @@ void ParticleSystem::Display() {
             continue;
         }
 
-        stats->comEffect->SetFrame(info->animFrame);
+        stats->comEffect->SetFrame(animFrame);
         stats->comEffect->Render(particleWorld, renderFlags);
     }
 
