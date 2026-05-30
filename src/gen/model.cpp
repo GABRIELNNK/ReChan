@@ -338,6 +338,21 @@ static DrawableSTree* GetDrawableSTree(Model* model) {
     return static_cast<DrawableSTree*>(model->drawable);
 }
 
+static void SetSemiModeForDrawableSTree(DrawableSTree* drawableStree, s32 mode) {
+    if (!drawableStree) {
+        return;
+    }
+
+    OriginalSTree* originalStree = drawableStree->GetOriginalSTree();
+    OriginalSTree* alternateStree = drawableStree->GetAlternateSTree();
+    if (originalStree) {
+        SetSemiMode__13OriginalSTreei(originalStree, mode);
+    }
+    if (alternateStree && alternateStree != originalStree) {
+        SetSemiMode__13OriginalSTreei(alternateStree, mode);
+    }
+}
+
 static void SyncFlipTreeWithDrawable(Model* model, AnimStructure* anim) {
     if (!model || !anim || !anim->flip) {
         return;
@@ -819,12 +834,30 @@ void DrawableSTree::Display(u32 /*flags*/) {
         Mat4* jointMatrices = new Mat4[skel->numJoints];
         skel->ComputeWorldMatricesWithCallbacks(jointMatrices);
         const Mat4 modelWorld = p3d::context->GetWorldMatrix();
+        Mat4 lightingWorld = modelWorld;
+        {
+            const f32 basisXLen = std::sqrt(
+                lightingWorld.m[0] * lightingWorld.m[0]
+                + lightingWorld.m[1] * lightingWorld.m[1]
+                + lightingWorld.m[2] * lightingWorld.m[2]);
+
+            if (basisXLen > 0.00001f) {
+                const f32 invScale = 1.0f / basisXLen;
+                lightingWorld.m[0] *= invScale;
+                lightingWorld.m[1] *= invScale;
+                lightingWorld.m[2] *= invScale;
+                lightingWorld.m[4] *= invScale;
+                lightingWorld.m[5] *= invScale;
+                lightingWorld.m[6] *= invScale;
+                lightingWorld.m[8] *= invScale;
+                lightingWorld.m[9] *= invScale;
+                lightingWorld.m[10] *= invScale;
+            }
+        }
 
         std::vector<u16> litScratch;
         std::vector<u8> litWritten;
-        std::vector<u8> litPackets;
         bool hasLitScratch = false;
-        bool hasLitPackets = false;
         u8 scratchMinR = 255;
         u8 scratchMinG = 255;
         u8 scratchMinB = 255;
@@ -875,7 +908,7 @@ void DrawableSTree::Display(u32 /*flags*/) {
                 STreeJoint clampedJoint = *joint;
                 clampedJoint.primGeomStartIdx = static_cast<u16>(startIndex);
                 clampedJoint.primGeomCount = static_cast<u16>(clampedEnd - startIndex);
-                Mat4 lightingMatrix = modelWorld * jointMatrices[jointIndex];
+                Mat4 lightingMatrix = lightingWorld * jointMatrices[jointIndex];
                 renderSource->xformVertsCallback(renderSource->primGeom,
                                                  &clampedJoint,
                                                  reinterpret_cast<u32*>(&lightingMatrix),
@@ -912,8 +945,6 @@ void DrawableSTree::Display(u32 /*flags*/) {
                     if (litB > scratchMaxB) scratchMaxB = litB;
                 }
             }
-
-            hasLitPackets = BuildLitPacketScratch(renderSource, &litPackets);
         }
 
         std::vector<f32> vertData(skin->numVerts * 10);
@@ -931,9 +962,27 @@ void DrawableSTree::Display(u32 /*flags*/) {
                 const u32 sourceIndex = static_cast<u32>(sv.sourceIndex);
                 const u16 rg = litScratch[sourceIndex * 2u + 0u];
                 const u16 b = litScratch[sourceIndex * 2u + 1u];
-                litR = static_cast<f32>(rg & 0xFFu) / 128.0f;
-                litG = static_cast<f32>((rg >> 8) & 0xFFu) / 128.0f;
-                litB = static_cast<f32>(b & 0xFFu) / 128.0f;
+                const u32 lightR = static_cast<u32>(rg & 0xFFu);
+                const u32 lightG = static_cast<u32>((rg >> 8) & 0xFFu);
+                const u32 lightB = static_cast<u32>(b & 0xFFu);
+
+                u32 baseR = static_cast<u32>(sv.r * 128.0f + 0.5f);
+                u32 baseG = static_cast<u32>(sv.g * 128.0f + 0.5f);
+                u32 baseB = static_cast<u32>(sv.b * 128.0f + 0.5f);
+                if (baseR > 255u) baseR = 255u;
+                if (baseG > 255u) baseG = 255u;
+                if (baseB > 255u) baseB = 255u;
+
+                u32 modR = (baseR * lightR + 64u) >> 7;
+                u32 modG = (baseG * lightG + 64u) >> 7;
+                u32 modB = (baseB * lightB + 64u) >> 7;
+                if (modR > 255u) modR = 255u;
+                if (modG > 255u) modG = 255u;
+                if (modB > 255u) modB = 255u;
+
+                litR = static_cast<f32>(modR) / 128.0f;
+                litG = static_cast<f32>(modG) / 128.0f;
+                litB = static_cast<f32>(modB) / 128.0f;
             }
 
             vertData[i * 10 + 0] = wx;
@@ -952,10 +1001,6 @@ void DrawableSTree::Display(u32 /*flags*/) {
                            static_cast<s32>(suitIndex),
                            skin,
                            &vertData);
-
-        if (hasLitPackets) {
-            ApplyLitPacketColoursToSkin(skin, litPackets, &vertData);
-        }
 
         skinnedBuffer->SetVertexData(vertData.data(), skin->numVerts);
         const bool skinBlendApplied = applySkinBlendState(skin);
@@ -1418,18 +1463,18 @@ void SModel::Show(u32 flags) {
 
     DrawableSTree* drawableStree = GetDrawableSTree(this);
     if (drawableStree) {
-        OriginalSTree* semiTarget = drawableStree->GetOriginalSTree();
-        if (!semiTarget) {
-            semiTarget = drawableStree->GetAlternateSTree();
-        }
-
         bool semiLeakedOn = false;
-        if (semiTarget && semiTarget->skinData) {
-            semiLeakedOn = semiTarget->skinData->usesSemiTrans;
+        OriginalSTree* originalStree = drawableStree->GetOriginalSTree();
+        OriginalSTree* alternateStree = drawableStree->GetAlternateSTree();
+        if (originalStree && originalStree->skinData && originalStree->skinData->usesSemiTrans) {
+            semiLeakedOn = true;
+        }
+        if (alternateStree && alternateStree->skinData && alternateStree->skinData->usesSemiTrans) {
+            semiLeakedOn = true;
         }
 
         if (ownerDeadWindow || ownerSemiFlag || semiLeakedOn) {
-            SetSemiMode__13OriginalSTreei(semiTarget, desiredSemiMode);
+            SetSemiModeForDrawableSTree(drawableStree, desiredSemiMode);
         }
 
         if (!ownerDeadWindow && ownerSemiFlag) {
@@ -1458,17 +1503,8 @@ void SModel::Show(u32 flags) {
     const Mat4 savedWorld = p3d::context->GetWorldMatrix();
     p3d::context->SetWorldMatrix(world);
 
-    const bool forceFrontBlink = ownerDeadWindow && ownerSemiFlag;
-    if (forceFrontBlink) {
-        p3d::context->EnableZBuffer(false);
-    }
-
     // PSX: calls drawable->Display(flags) through vtable
     drawable->Display(flags);
-
-    if (forceFrontBlink) {
-        p3d::context->EnableZBuffer(true);
-    }
 
     if (ambientLight) {
         RestoreWorldAmbientLightToPort();
@@ -1722,12 +1758,7 @@ void SModel::InitSemiTransMode() {
         return;
     }
 
-    OriginalSTree* semiTarget = drawableStree->GetOriginalSTree();
-    if (!semiTarget) {
-        semiTarget = drawableStree->GetAlternateSTree();
-    }
-
-    SetSemiMode__13OriginalSTreei(semiTarget, 0);
+    SetSemiModeForDrawableSTree(drawableStree, 0);
 }
 
 // PSX: PlayDynamicAnim__6SModeli (MODEL.CPP:1710, 0x8006FAFC)

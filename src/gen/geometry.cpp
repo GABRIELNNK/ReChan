@@ -1465,14 +1465,18 @@ u8* RP_FixUpPolysCBF_CL(tPrimGeom* geometry, void* view, u32 loopIndex, u32 poly
         const u8 litR = static_cast<u8>(rg & 0xFFu);
         const u8 litG = static_cast<u8>((rg >> 8) & 0xFFu);
         const u8 litB = static_cast<u8>(b & 0xFFu);
+        const u8 litI = static_cast<u8>((static_cast<u32>(litR)
+            + static_cast<u32>(litG)
+            + static_cast<u32>(litB)
+            + 1u) / 3u);
 
         const u8 baseR = polyColour ? polyColour[0] : packet[colourOffset + 0u];
         const u8 baseG = polyColour ? polyColour[1] : packet[colourOffset + 1u];
         const u8 baseB = polyColour ? polyColour[2] : packet[colourOffset + 2u];
 
-        packet[colourOffset + 0u] = ModulatePsxColourChannel(baseR, litR);
-        packet[colourOffset + 1u] = ModulatePsxColourChannel(baseG, litG);
-        packet[colourOffset + 2u] = ModulatePsxColourChannel(baseB, litB);
+        packet[colourOffset + 0u] = ModulatePsxColourChannel(baseR, litI);
+        packet[colourOffset + 1u] = ModulatePsxColourChannel(baseG, litI);
+        packet[colourOffset + 2u] = ModulatePsxColourChannel(baseB, litI);
     };
 
     for (u32 bucket = 0; bucket < 4u; bucket++) {
