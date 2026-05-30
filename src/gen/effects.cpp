@@ -5,7 +5,6 @@
 u32 g_wEffectGlobalFrame = 0;
 
 static ccMinList g_effectsList;
-static ccMinNode* g_effectsInsertAfter = nullptr;
 static constexpr s32 kEffectsDefaultResult = static_cast<s32>(0x800E0000);
 
 static bool IsDirectorOverlayRoute(const Effects* effect) {
@@ -106,7 +105,6 @@ s32 Effects_UnloadAll() {
 
     g_effectsList.head = nullptr;
     g_effectsList.tail = nullptr;
-    g_effectsInsertAfter = nullptr;
     return result;
 }
 
@@ -159,7 +157,7 @@ s32 Effects_DrawEffects(s32 blockNum) {
 s32 Effects_AddEffect(Effects* effect, s32 addToHead) {
     MARKFUNCTION(0x8004C9D8);
 
-    ccMinNode* after = addToHead ? nullptr : g_effectsInsertAfter;
+    ccMinNode* after = addToHead ? nullptr : g_effectsList.tail;
     g_effectsList.AddNode(after, effect);
     effect->inEffectsList = 1;
     return 1;

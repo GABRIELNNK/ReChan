@@ -3,6 +3,7 @@
 #include "gen/model.h"
 #include "gen/psxmath_helpers.h"
 #include "ai/humanoid.h"
+#include "p3d/context.h"
 #include "p3d/skeleton.h"
 #include "p3d/matrix.h"
 #include "p3d/hash.h"
@@ -594,16 +595,22 @@ s32 AnimationMatrices::CopyMatrix(u32 joint, const Mat4& jointMatrix) {
         return 1;
     }
 
-    // PSX CopyMatrix captures the current port/world matrix for the joint.
-    Humanoid* owner = static_cast<Humanoid*>(GetHumanoid());
-    Model* model = owner ? static_cast<Model*>(owner->model) : nullptr;
-    if (model) {
-        Mat4 worldMatrix;
-        BuildModelWorldMatrix(model, worldMatrix);
-        WritePsxMatrix(matrixData, worldMatrix * jointMatrix);
+    // PSX CopyMatrix pulls the active port world matrix at callback time.
+    // Prefer the live render context world matrix over rebuilding from model fields.
+    if (p3d::context) {
+        WritePsxMatrix(matrixData, p3d::context->GetWorldMatrix() * jointMatrix);
     }
     else {
-        WritePsxMatrix(matrixData, jointMatrix);
+        Humanoid* owner = static_cast<Humanoid*>(GetHumanoid());
+        Model* model = owner ? static_cast<Model*>(owner->model) : nullptr;
+        if (model) {
+            Mat4 worldMatrix;
+            BuildModelWorldMatrix(model, worldMatrix);
+            WritePsxMatrix(matrixData, worldMatrix * jointMatrix);
+        }
+        else {
+            WritePsxMatrix(matrixData, jointMatrix);
+        }
     }
 
     copied = 1;

@@ -10,6 +10,7 @@
 #include "gen/control.h"
 #include "gen/colsect.h"
 #include "gen/director.h"
+#include "gen/trail.h"
 #include "snd/rsevent.h"
 #include "snd/hmndsnd.h"
 #include "p3d/p3dmath.h"
@@ -278,6 +279,11 @@ Player::Player(const LVector* initialPos)
     // PSX PLAYER.CPP:1014 creates Behaviour in Player ctor.
     if (!behaviour) {
         behaviour = new Behaviour(this, AITypes::TT_PLAYER, 0);
+    }
+
+    // PSX PLAYER.CPP:1014 allocates a 16-segment trail pool at Humanoid +512.
+    if (!trails) {
+        trails = new Trails(16);
     }
 }
 
@@ -1852,7 +1858,6 @@ handleLanding:
 // PSX: wall jump check, combat transitions, jump phase tracking via field700/704/706/712,
 // jump table system (standingJumpHold/Tap, runJumpHold/Tap), air control,
 // HandleLand call, transition to fall when velocity negative AND height threshold met.
-// DoJump is called from SetActionState(AS_JUMP/AS_PAUSE), NOT from here.
 void Player::_Jump() {
     MARKFUNCTION(0x80031C68);
 

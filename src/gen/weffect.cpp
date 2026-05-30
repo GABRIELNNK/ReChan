@@ -3140,7 +3140,6 @@ bool ComEffect::RenderGeoByIndex(u32 geoIndex, const Mat4& worldMatrix, u32 flag
     if (!model || !model->drawable || !p3d::context) {
         return false;
     }
-
     const bool frontRenderFlags = IsFrontRenderFlags(flags);
 
     if (model->drawableType != 3) {

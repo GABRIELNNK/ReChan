@@ -1,12 +1,14 @@
 #pragma once
 #include "ai/obstacle.h"
 
+class Trails;
+
 class SlipperyFloor : public Obstacle {
 public:
     // PSX +116 (ptr): first trail particle system pointer
-    void* trailA = nullptr;
+    Trails* trailA = nullptr;
     // PSX +120 (ptr): second trail particle system pointer
-    void* trailB = nullptr;
+    Trails* trailB = nullptr;
 
     SlipperyFloor(const LVector* pos, u16 type);
     ~SlipperyFloor() override;
@@ -20,5 +22,5 @@ public:
     void HandlePickupCollision(Thing* pickup) override;
     void HandleHumanoidCollision(Humanoid* hum) override;
 
-    void DoTrailEffect();
+    void DoTrailEffect(Humanoid* hum);
 };

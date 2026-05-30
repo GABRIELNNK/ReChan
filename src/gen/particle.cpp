@@ -291,16 +291,171 @@ static s32 QuantizeParticleAngle(s32 rotation) {
     return static_cast<s32>(quantized);
 }
 
-static s16 ExpandPsxParticleSinCosAngle(s32 quantizedAngle) {
-    // PSX Display path calls P3D_SinCos_GTE(((u16)(rotation >> 8) + 2) >> 2).
-    // P3D_SinCos_GTE consumes quarter-angle units; rmSin16 uses full 0x10000 turn.
-    return static_cast<s16>(quantizedAngle << 2);
+// PSX: dword_8009EF5C from GTEMATH.ASM (P3D_SinCos_GTE quarter-wave packed table).
+// low16 = sin sample, high16 = cos sample in 12-bit fixed scale (0x1000 = 1.0).
+static constexpr u32 kP3dSinCosGteOctantTable[] = {
+    0x10000000, 0x10000009, 0x10000010, 0x10000016, 0x1000001C, 0x10000023, 0x10000029, 0x1000002F,
+    0x1000003C, 0xFFF0042, 0xFFF0048, 0xFFF004F, 0xFFF0055, 0xFFF005B, 0xFFF0061, 0xFFF0068,
+    0xFFF006E, 0xFFE0074, 0xFFE007B, 0xFFE0081, 0xFFE0087, 0xFFE008D, 0xFFD0094, 0xFFD009A,
+    0xFFD00A0, 0xFFD00A6, 0xFFC00AD, 0xFFC00B3, 0xFFC00B9, 0xFFC00C0, 0xFFB00C6, 0xFFB00CC,
+    0xFFB00D2, 0xFFA00D9, 0xFFA00DF, 0xFFA00E5, 0xFF900EB, 0xFF900F2, 0xFF800F8, 0xFF800FE,
+    0xFF80105, 0xFF7010B, 0xFF70111, 0xFF60117, 0xFF6011E, 0xFF60124, 0xFF5012A, 0xFF50130,
+    0xFF40137, 0xFF4013D, 0xFF30143, 0xFF3014A, 0xFF20150, 0xFF20156, 0xFF1015C, 0xFF10163,
+    0xFF00169, 0xFF0016F, 0xFEF0175, 0xFEE017C, 0xFEE0182, 0xFED0188, 0xFED018E, 0xFEC0195,
+    0xFEB019B, 0xFEB01A1, 0xFEA01A7, 0xFE901AE, 0xFE901B4, 0xFE801BA, 0xFE701C0, 0xFE701C7,
+    0xFE601CD, 0xFE501D3, 0xFE501D9, 0xFE401E0, 0xFE301E6, 0xFE201EC, 0xFE201F2, 0xFE101F9,
+    0xFE001FF, 0xFDF0205, 0xFDE020B, 0xFDE0211, 0xFDD0218, 0xFDC021E, 0xFDB0224, 0xFDA022A,
+    0xFD90231, 0xFD90237, 0xFD8023D, 0xFD70243, 0xFD60249, 0xFD50250, 0xFD40256, 0xFD3025C,
+    0xFD20262, 0xFD10269, 0xFD0026F, 0xFCF0275, 0xFCE027B, 0xFCD0281, 0xFCC0288, 0xFCB028E,
+    0xFCA0294, 0xFC9029A, 0xFC802A0, 0xFC702A7, 0xFC602AD, 0xFC502B3, 0xFC402B9, 0xFC302BF,
+    0xFC202C6, 0xFC102CC, 0xFC002D2, 0xFBF02D8, 0xFBE02DE, 0xFBD02E4, 0xFBB02EB, 0xFBA02F1,
+    0xFB902F7, 0xFB802FD, 0xFB70303, 0xFB6030A, 0xFB40310, 0xFB30316, 0xFB2031C, 0xFB10322,
+    0xFAF0328, 0xFAE032E, 0xFAD0335, 0xFAC033B, 0xFAA0341, 0xFA90347, 0xFA8034D, 0xFA70353,
+    0xFA5035A, 0xFA40360, 0xFA30366, 0xFA1036C, 0xFA00372, 0xF9F0378, 0xF9D037E, 0xF9C0385,
+    0xF9A038B, 0xF990391, 0xF980397, 0xF96039D, 0xF9503A3, 0xF9303A9, 0xF9203AF, 0xF9003B5,
+    0xF8F03BC, 0xF8D03C2, 0xF8C03C8, 0xF8B03CE, 0xF8903D4, 0xF8803DA, 0xF8603E0, 0xF8403E6,
+    0xF8303EC, 0xF8103F2, 0xF8003F9, 0xF7E03FF, 0xF7D0405, 0xF7B040B, 0xF7A0411, 0xF780417,
+    0xF76041D, 0xF750423, 0xF730429, 0xF71042F, 0xF700435, 0xF6E043B, 0xF6C0441, 0xF6B0447,
+    0xF69044E, 0xF670454, 0xF66045A, 0xF640460, 0xF620466, 0xF61046C, 0xF5F0472, 0xF5D0478,
+    0xF5B047E, 0xF5A0484, 0xF58048A, 0xF560490, 0xF540496, 0xF52049C, 0xF5104A2, 0xF4F04A8,
+    0xF4D04AE, 0xF4B04B4, 0xF4904BA, 0xF4704C0, 0xF4504C6, 0xF4404CC, 0xF4204D2, 0xF4004D8,
+    0xF3E04DE, 0xF3C04E4, 0xF3A04EA, 0xF3804F0, 0xF3604F6, 0xF3404FC, 0xF320502, 0xF300508,
+    0xF2E050E, 0xF2C0514, 0xF2A051A, 0xF280520, 0xF260526, 0xF24052C, 0xF220531, 0xF200537,
+    0xF1E053D, 0xF1C0543, 0xF1A0549, 0xF18054F, 0xF160555, 0xF14055B, 0xF120561, 0xF0F0567,
+    0xF0D056D, 0xF0B0573, 0xF090579, 0xF07057E, 0xF050584, 0xF03058A, 0xF000590, 0xEFE0596,
+    0xEFC059C, 0xEFA05A2, 0xEF805A8, 0xEF505AE, 0xEF305B3, 0xEF105B9, 0xEEF05BF, 0xEEC05C5,
+    0xEEA05CB, 0xEE805D1, 0xEE605D7, 0xEE305DC, 0xEE105E2, 0xEDF05E8, 0xEDC05EE, 0xEDA05F4,
+    0xED805FA, 0xED505FF, 0xED30605, 0xED1060B, 0xECE0611, 0xECC0617, 0xEC9061D, 0xEC70622,
+    0xEC50628, 0xEC2062E, 0xEC00634, 0xEBD063A, 0xEBB063F, 0xEB80645, 0xEB6064B, 0xEB30651,
+    0xEB10656, 0xEAE065C, 0xEAC0662, 0xEA90668, 0xEA7066D, 0xEA40673, 0xEA20679, 0xE9F067F,
+    0xE9D0684, 0xE9A068A, 0xE980690, 0xE950696, 0xE92069B, 0xE9006A1, 0xE8D06A7, 0xE8B06AD,
+    0xE8806B2, 0xE8506B8, 0xE8306BE, 0xE8006C3, 0xE7D06C9, 0xE7B06CF, 0xE7806D4, 0xE7506DA,
+    0xE7306E0, 0xE7006E5, 0xE6D06EB, 0xE6B06F1, 0xE6806F6, 0xE6506FC, 0xE620702, 0xE600707,
+    0xE5D070D, 0xE5A0713, 0xE570718, 0xE54071E, 0xE520724, 0xE4F0729, 0xE4C072F, 0xE490734,
+    0xE46073A, 0xE440740, 0xE410745, 0xE3E074B, 0xE3B0750, 0xE380756, 0xE35075C, 0xE320761,
+    0xE2F0767, 0xE2D076C, 0xE2A0772, 0xE270777, 0xE24077D, 0xE210783, 0xE1E0788, 0xE1B078E,
+    0xE180793, 0xE150799, 0xE12079E, 0xE0F07A4, 0xE0C07A9, 0xE0907AF, 0xE0607B4, 0xE0307BA,
+    0xE0007BF, 0xDFD07C5, 0xDFA07CA, 0xDF707D0, 0xDF407D5, 0xDF107DB, 0xDED07E0, 0xDEA07E6,
+    0xDE707EB, 0xDE407F1, 0xDE107F6, 0xDDE07FB, 0xDDB0801, 0xDD80806, 0xDD4080C, 0xDD10811,
+    0xDCE0817, 0xDCB081C, 0xDC80821, 0xDC50827, 0xDC1082C, 0xDBE0832, 0xDBB0837, 0xDB8083C,
+    0xDB40842, 0xDB10847, 0xDAE084D, 0xDAB0852, 0xDA70857, 0xDA4085D, 0xDA10862, 0xD9D0867,
+    0xD9A086D, 0xD970872, 0xD940877, 0xD90087D, 0xD8D0882, 0xD8A0887, 0xD86088D, 0xD830892,
+    0xD7F0897, 0xD7C089D, 0xD7908A2, 0xD7508A7, 0xD7208AC, 0xD6E08B2, 0xD6B08B7, 0xD6808BC,
+    0xD6408C2, 0xD6108C7, 0xD5D08CC, 0xD5A08D1, 0xD5608D7, 0xD5308DC, 0xD4F08E1, 0xD4C08E6,
+    0xD4808EB, 0xD4508F1, 0xD4108F6, 0xD3E08FB, 0xD3A0900, 0xD370905, 0xD33090B, 0xD300910,
+    0xD2C0915, 0xD29091A, 0xD25091F, 0xD210924, 0xD1E092A, 0xD1A092F, 0xD170934, 0xD130939,
+    0xD0F093E, 0xD0C0943, 0xD080948, 0xD04094E, 0xD010953, 0xCFD0958, 0xCF9095D, 0xCF60962,
+    0xCF20967, 0xCEE096C, 0xCEB0971, 0xCE70976, 0xCE3097B, 0xCE00980, 0xCDC0985, 0xCD8098B,
+    0xCD40990, 0xCD10995, 0xCCD099A, 0xCC9099F, 0xCC509A4, 0xCC109A9, 0xCBE09AE, 0xCBA09B3,
+    0xCB609B8, 0xCB209BD, 0xCAE09C2, 0xCAB09C7, 0xCA709CC, 0xCA309D1, 0xC9F09D6, 0xC9B09DA,
+    0xC9709DF, 0xC9309E4, 0xC8F09E9, 0xC8C09EE, 0xC8809F3, 0xC8409F8, 0xC8009FD, 0xC7C0A02,
+    0xC780A07, 0xC740A0C, 0xC700A11, 0xC6C0A15, 0xC680A1A, 0xC640A1F, 0xC600A24, 0xC5C0A29,
+    0xC580A2E, 0xC540A33, 0xC500A37, 0xC4C0A3C, 0xC480A41, 0xC440A46, 0xC400A4B, 0xC3C0A50,
+    0xC380A54, 0xC340A59, 0xC300A5E, 0xC2C0A63, 0xC280A67, 0xC240A6C, 0xC200A71, 0xC1B0A76,
+    0xC170A7B, 0xC130A7F, 0xC0F0A84, 0xC0B0A89, 0xC070A8D, 0xC030A92, 0xBFF0A97, 0xBFA0A9C,
+    0xBF60AA0, 0xBF20AA5, 0xBEE0AAA, 0xBEA0AAE, 0xBE50AB3, 0xBE10AB8, 0xBDD0ABC, 0xBD90AC1,
+    0xBD50AC6, 0xBD00ACA, 0xBCC0ACF, 0xBC80AD4, 0xBC40AD8, 0xBBF0ADD, 0xBBB0AE1, 0xBB70AE6,
+    0xBB30AEB, 0xBAE0AEF, 0xBAA0AF4, 0xBA60AF8, 0xBA10AFD, 0xB9D0B02, 0xB990B06, 0xB940B0B,
+    0xB900B0F, 0xB8C0B14, 0xB870B18, 0xB830B1D, 0xB7F0B21, 0xB7A0B26, 0xB760B2A, 0xB710B2F,
+    0xB6D0B33, 0xB690B38, 0xB640B3C, 0xB600B41, 0xB5B0B45, 0xB570B4A, 0xB530B4E, 0x0B500B50,
+};
+
+static u32 ReadP3dSinCosGtePacked(u16 tableOffset) {
+    const u16 index = static_cast<u16>(tableOffset >> 2);
+    const u16 entryCount = static_cast<u16>(sizeof(kP3dSinCosGteOctantTable) / sizeof(kP3dSinCosGteOctantTable[0]));
+    if (index < entryCount) {
+        return kP3dSinCosGteOctantTable[index];
+    }
+
+    // GTEMATH.ASM includes a final 45-degree boundary value at offset 0x800.
+    return 0x0B500B50;
+}
+
+static void P3dSinCosGteParticle(u16 quantizedAngle, f32& outSin, f32& outCos) {
+    s32 sinV = 0;
+    s32 cosV = 0;
+
+    const u16 octant = static_cast<u16>((quantizedAngle >> 11) & 7u);
+    u16 tableOffset = 0;
+    u32 packed = 0;
+    s32 low = 0;
+    s32 high = 0;
+
+    switch (octant) {
+    case 0:
+        tableOffset = static_cast<u16>((quantizedAngle + 1u) & 0x0FFCu);
+        packed = ReadP3dSinCosGtePacked(tableOffset);
+        low = static_cast<s16>(packed & 0xFFFFu);
+        high = static_cast<s16>((packed >> 16) & 0xFFFFu);
+        sinV = low;
+        cosV = high;
+        break;
+    case 1:
+        tableOffset = static_cast<u16>((0x1002u - quantizedAngle) & 0x0FFCu);
+        packed = ReadP3dSinCosGtePacked(tableOffset);
+        low = static_cast<s16>(packed & 0xFFFFu);
+        high = static_cast<s16>((packed >> 16) & 0xFFFFu);
+        sinV = high;
+        cosV = low;
+        break;
+    case 2:
+        tableOffset = static_cast<u16>((quantizedAngle - 0x0FFFu) & 0x0FFCu);
+        packed = ReadP3dSinCosGtePacked(tableOffset);
+        low = static_cast<s16>(packed & 0xFFFFu);
+        high = static_cast<s16>((packed >> 16) & 0xFFFFu);
+        sinV = high;
+        cosV = -low;
+        break;
+    case 3:
+        tableOffset = static_cast<u16>((0x2002u - quantizedAngle) & 0x0FFCu);
+        packed = ReadP3dSinCosGtePacked(tableOffset);
+        low = static_cast<s16>(packed & 0xFFFFu);
+        high = static_cast<s16>((packed >> 16) & 0xFFFFu);
+        sinV = low;
+        cosV = -high;
+        break;
+    case 4:
+        tableOffset = static_cast<u16>((quantizedAngle - 0x1FFFu) & 0x0FFCu);
+        packed = ReadP3dSinCosGtePacked(tableOffset);
+        low = static_cast<s16>(packed & 0xFFFFu);
+        high = static_cast<s16>((packed >> 16) & 0xFFFFu);
+        sinV = -low;
+        cosV = -high;
+        break;
+    case 5:
+        tableOffset = static_cast<u16>((0x3002u - quantizedAngle) & 0x0FFCu);
+        packed = ReadP3dSinCosGtePacked(tableOffset);
+        low = static_cast<s16>(packed & 0xFFFFu);
+        high = static_cast<s16>((packed >> 16) & 0xFFFFu);
+        sinV = -high;
+        cosV = -low;
+        break;
+    case 6:
+        tableOffset = static_cast<u16>((quantizedAngle - 0x2FFFu) & 0x0FFCu);
+        packed = ReadP3dSinCosGtePacked(tableOffset);
+        low = static_cast<s16>(packed & 0xFFFFu);
+        high = static_cast<s16>((packed >> 16) & 0xFFFFu);
+        sinV = -high;
+        cosV = low;
+        break;
+    default:
+        tableOffset = static_cast<u16>((0x4002u - quantizedAngle) & 0x0FFCu);
+        packed = ReadP3dSinCosGtePacked(tableOffset);
+        low = static_cast<s16>(packed & 0xFFFFu);
+        high = static_cast<s16>((packed >> 16) & 0xFFFFu);
+        sinV = -low;
+        cosV = high;
+        break;
+    }
+
+    outSin = static_cast<f32>(sinV) / 4096.0f;
+    outCos = static_cast<f32>(cosV) / 4096.0f;
 }
 
 static void PreMultiplyRotZ(Mat4& matrix, s32 angle16) {
-    const s16 sinCosAngle = ExpandPsxParticleSinCosAngle(angle16);
-    const f32 sinV = FIX16_TO_FLOAT(rmSin16(sinCosAngle));
-    const f32 cosV = FIX16_TO_FLOAT(rmSin16(static_cast<s16>(sinCosAngle + 0x4000)));
+    f32 sinV = 0.0f;
+    f32 cosV = 1.0f;
+    P3dSinCosGteParticle(static_cast<u16>(angle16), sinV, cosV);
 
     Mat4 rot = Mat4();
     rot.m[0] = cosV;
@@ -312,9 +467,9 @@ static void PreMultiplyRotZ(Mat4& matrix, s32 angle16) {
 }
 
 static void PreMultiplyRotY(Mat4& matrix, s32 angle16) {
-    const s16 sinCosAngle = ExpandPsxParticleSinCosAngle(angle16);
-    const f32 sinV = FIX16_TO_FLOAT(rmSin16(sinCosAngle));
-    const f32 cosV = FIX16_TO_FLOAT(rmSin16(static_cast<s16>(sinCosAngle + 0x4000)));
+    f32 sinV = 0.0f;
+    f32 cosV = 1.0f;
+    P3dSinCosGteParticle(static_cast<u16>(angle16), sinV, cosV);
 
     Mat4 rot = Mat4();
     rot.m[0] = cosV;
@@ -326,9 +481,9 @@ static void PreMultiplyRotY(Mat4& matrix, s32 angle16) {
 }
 
 static void PreMultiplyRotX(Mat4& matrix, s32 angle16) {
-    const s16 sinCosAngle = ExpandPsxParticleSinCosAngle(angle16);
-    const f32 sinV = FIX16_TO_FLOAT(rmSin16(sinCosAngle));
-    const f32 cosV = FIX16_TO_FLOAT(rmSin16(static_cast<s16>(sinCosAngle + 0x4000)));
+    f32 sinV = 0.0f;
+    f32 cosV = 1.0f;
+    P3dSinCosGteParticle(static_cast<u16>(angle16), sinV, cosV);
 
     Mat4 rot = Mat4();
     rot.m[5] = cosV;
@@ -1215,7 +1370,8 @@ void ParticleSystem::Display() {
 
             // PSX composes particle local scale/rotation matrix with the shared
             // billboard basis before translation is filled per particle.
-            world = world * billboardMatrix;
+            // p3dMultMatrix(a,b,out) semantics are out = b * a.
+            world = billboardMatrix * world;
         }
         else if (angle16 != 0) {
             if ((info->axisMask & 1u) != 0u) {
@@ -1239,7 +1395,9 @@ void ParticleSystem::Display() {
             const u16 meshIndex = static_cast<u16>(info->meshIndex % meshEntryCount);
             const ParticleMeshEntry& entry = meshEntries[meshIndex];
 
-            Mat4 entryWorld = particleWorld * entry.localMatrix;
+            // PSX path uses p3dMultMatrix(particleWorld, localMatrix, out),
+            // which is localMatrix * particleWorld in host Mat4 terms.
+            Mat4 entryWorld = entry.localMatrix * particleWorld;
             stats->comEffect->RenderGeoByIndex(entry.geoIndex, entryWorld, renderFlags | 0x80000u);
             continue;
         }

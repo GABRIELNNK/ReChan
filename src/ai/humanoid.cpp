@@ -3,6 +3,7 @@
 #include "ai/boss.h"
 #include "ai/humndata.h"
 #include "ai/obstacle.h"
+#include "ai/platform.h"
 #include "ai/pickup.h"
 #include "ai/player.h"
 #include "ai/table.h"
@@ -21,6 +22,8 @@
 #include "gen/scoremgr.h"
 #include "gen/time.h"
 #include "gen/world.h"
+#include "gen/geffect.h"
+#include "gen/trail.h"
 #include "gen/psxmath_helpers.h"
 #include "fe/hud.h"
 #include "snd/rsevent.h"
@@ -87,6 +90,15 @@ static constexpr s32 BACK_GRAB_MIN_RELATIVE_ANGLE = 5461;
 static constexpr u32 BACK_GRAB_RELATIVE_ANGLE_RANGE = 0xD8E3;
 static constexpr u16 HUMANOID_STUN_DURATION = 66;
 static constexpr s32 HUMANOID_ANIM_DEAD = 17;
+static constexpr u32 HUMANOID_STUN_EFFECT_HASH = 0x004CC954u;
+static constexpr u32 HUMANOID_LAND_IMPACT_EFFECT_HASH = 0x0B0E21C4u;
+static constexpr u32 HUMANOID_STRIKE_IMPACT_EFFECT_HASH = 0x03E24164u;
+// PSX 0x800DD0E0..0x800DD0E2: SPL_PLAYER_TRAIL_{R,G,B}
+static u8 s_splPlayerTrailR = 0x7Fu;
+static u8 s_splPlayerTrailG = 0x7Fu;
+static u8 s_splPlayerTrailB = 0x7Fu;
+// PSX 0x800DD0E4: SPL_PLAYER_TRAIL_FRAMES
+static s32 s_splPlayerTrailFrames = 0x10;
 static constexpr u32 PLAYER_DIVE_ROLL_KICK_ROOT_ADDRESS = 0x800CEE44u;
 static constexpr u32 PLAYER_BACK_GRAB_KICK_ROOT_ADDRESS = 0x800CEE6Cu;
 // PSX gp+1948, data block default at 0x800DD0E8.
@@ -1075,12 +1087,15 @@ Humanoid::~Humanoid() {
         humanoidSound->Release();
         humanoidSound = nullptr;
     }
+    if (trails) {
+        delete static_cast<Trails*>(trails);
+        trails = nullptr;
+    }
     delete behaviour;
     behaviour = nullptr;
     fightingSystem = nullptr;
     defaultFightingSystem = nullptr;
     humanoidData = nullptr;
-    trails = nullptr;
 }
 
 // PSX: Think__8Humanoid (HUMANOID.CPP:1133)
@@ -2712,9 +2727,50 @@ void Humanoid::SetActionState(u32 state, s32 param) {
         case AS_STUNNED:
         {
             field468 = HUMANOID_STUN_DURATION;
+            animControl = 0;
+            LOG("[EffectsParity] Enter AS_STUNNED thingType=%u\n", static_cast<u32>(thingType));
             if (model) {
                 Model* m = static_cast<Model*>(model);
                 m->SetAnim(4, param, 0, 0);
+
+                HumanoidModel* hm = static_cast<HumanoidModel*>(m);
+                AnimationMatrices* animMatrices = hm ? hm->animMatrices : nullptr;
+                if (animMatrices) {
+                    LVector effectPos = {};
+                    const LVector* effectPosRef = nullptr;
+                    u32 createFlags = 0x80000000u;
+
+                    const s32* rootMatrix = animMatrices->GetMatrix(0u);
+                    if (rootMatrix) {
+                        // PSX passes matrix translation pointer (+0x14) directly when follow-pos is enabled.
+                        effectPosRef = reinterpret_cast<const LVector*>(rootMatrix + 5);
+                        createFlags |= 1u;
+                    }
+                    else {
+                        LVector throwaway = {};
+                        animMatrices->GetAttack(0u, throwaway, effectPos);
+                        effectPosRef = &effectPos;
+                    }
+
+                    Effects* effect = GEffect_Create(
+                        HUMANOID_STUN_EFFECT_HASH,
+                        effectPosRef,
+                        nullptr,
+                        nullptr,
+                        1,
+                        0,
+                        createFlags);
+                    if (effect) {
+                        // Keep PSX-style nonzero token semantics in the +224 s32 slot.
+                        animControl = 1;
+                    }
+                    else {
+                        animControl = 0;
+                        LOG(
+                            "[EffectsParity] AS_STUNNED effect create miss hash=%08X\n",
+                            HUMANOID_STUN_EFFECT_HASH);
+                    }
+                }
             }
             field344 = 0;
             field348 = 8;
@@ -4310,6 +4366,18 @@ void Humanoid::HandleLand(s32 height) {
         Shock(ShockEnum::SHOCK_8);
     }
 
+    if (fallDamage > 0) {
+        LOG("[EffectsParity] HandleLand fallDamage=%d thingType=%u\n", fallDamage, static_cast<u32>(thingType));
+        Effects* landEffect =
+            GEffect_Create(HUMANOID_LAND_IMPACT_EFFECT_HASH, &pos, nullptr, nullptr, 0, 0x19, 0);
+        if (!landEffect) {
+            LOG(
+                "[EffectsParity] HandleLand effect create miss hash=%08X fallDamage=%d\n",
+                HUMANOID_LAND_IMPACT_EFFECT_HASH,
+                fallDamage);
+        }
+    }
+
     if (health == 0) {
         SetActionState(AS_DEAD, 0);
     }
@@ -5768,7 +5836,8 @@ static void DoTrailCallbacks(Humanoid* humanoid, const PsxFightingJointRaw* join
 
     HumanoidModel* hm = static_cast<HumanoidModel*>(humanoid->model);
     AnimationMatrices* animMatrices = hm ? hm->animMatrices : nullptr;
-    if (!animMatrices) {
+    Trails* trailEffect = static_cast<Trails*>(humanoid->trails);
+    if (!animMatrices || !trailEffect) {
         return;
     }
 
@@ -5777,7 +5846,65 @@ static void DoTrailCallbacks(Humanoid* humanoid, const PsxFightingJointRaw* join
         if (humanoid->prevAttackJointIndex != -1) {
             animMatrices->SetExtraCallbacks(humanoid->prevAttackJointIndex, 1);
         }
+        return;
     }
+
+    if (((animMatrices->extraMask >> humanoid->prevAttackJointIndex) & 1) == 0) {
+        return;
+    }
+
+    LVector trailStart = {};
+    LVector trailEnd = {};
+    animMatrices->GetAttack(static_cast<u32>(joint->JointIndex()), trailStart, trailStart);
+
+    if (joint->JointIndex() == static_cast<u8>(humanoid->prevAttackJointIndex)) {
+        trailEnd = trailStart;
+        trailEnd.y += 100;
+    }
+    else {
+        animMatrices->GetAttack(static_cast<u32>(humanoid->prevAttackJointIndex), trailEnd, trailEnd);
+    }
+
+    s32 trailR = static_cast<s32>(s_splPlayerTrailR);
+    s32 trailG = static_cast<s32>(s_splPlayerTrailG);
+    s32 trailB = static_cast<s32>(s_splPlayerTrailB);
+    if (joint->TrailFlags() == 2) {
+        trailR = 100;
+        trailG = 100;
+        trailB = 220;
+    }
+
+    const u32 trailColor = static_cast<u32>(trailR & 0xFF)
+        | (static_cast<u32>(trailG & 0xFF) << 8)
+        | (static_cast<u32>(trailB & 0xFF) << 16);
+
+    const Thing* ticketIssuer = humanoid->GetTicketIssuer();
+    const Platform* movingPlatform = (ticketIssuer && ticketIssuer->thingType == AITypes::TT_PLATFORM)
+        ? static_cast<const Platform*>(ticketIssuer)
+        : nullptr;
+
+    const LVector* posRef = nullptr;
+    if (movingPlatform && rmMag3ff(
+            movingPlatform->velocity.x,
+            movingPlatform->velocity.y,
+            movingPlatform->velocity.z)
+            > 0) {
+        posRef = &humanoid->pos;
+    }
+    else if (rmMag3ff(humanoid->force.x, humanoid->force.y, humanoid->force.z) > 0) {
+        posRef = &humanoid->pos;
+    }
+
+    if (posRef) {
+        trailEffect->SetCurrentPos(&humanoid->pos);
+    }
+
+    trailEffect->Add(
+        &trailStart,
+        &trailEnd,
+        trailColor,
+        s_splPlayerTrailFrames,
+        posRef);
 }
 
 // PSX: ProcessFightingMoveStrikeJoint__8HumanoidRC13FightingJointlllii (HUMANOID.CPP:7017)
@@ -5905,6 +6032,23 @@ s32 Humanoid::ProcessFightingMoveStrikeJoint(
 
         const s32 impactRegion = victim->GetImpactRegion(attack.endA);
 
+        if (soundEvent == 2 || soundEvent == 3 || soundEvent == 12) {
+            Effects* strikeEffect = GEffect_Create(
+                HUMANOID_STRIKE_IMPACT_EFFECT_HASH,
+                &attack.endA,
+                nullptr,
+                nullptr,
+                0,
+                0,
+                0x80000000u);
+            if (!strikeEffect) {
+                LOG(
+                    "[EffectsParity] Strike effect create miss hash=%08X soundEvent=%d\n",
+                    HUMANOID_STRIKE_IMPACT_EFFECT_HASH,
+                    soundEvent);
+            }
+        }
+
         victim->HandleCollision(
             this,
             1,
@@ -5946,7 +6090,6 @@ s32 Humanoid::ProcessFightingMoveStrikeJoint(
         Thing* brokenWeapon = rightHandObj;
         if (brokenWeapon->health == 0 && weaponBreakOnEmpty != 0) {
             DropPickup(1, 1);
-
             if (rightHandObj == brokenWeapon) {
                 rightHandObj = nullptr;
                 flags2 &= ~1u;

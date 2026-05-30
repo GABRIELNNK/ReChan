@@ -175,7 +175,7 @@ public:
     // PSX +220 (ptr): face angle data table
     void* faceAngleData = nullptr;
 
-    // PSX +224 (s32): animation control
+    // PSX +224 (s32): transient effect handle/signal used by stunned state flow.
     s32 animControl = 0;
 
     // PSX +228 (s32): reserved

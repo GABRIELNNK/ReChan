@@ -5,6 +5,8 @@
 #include "gen/effects.h"
 #include "p3d/lvector.h"
 
+struct OriginalGeo;
+
 struct TrailInfo : public ccMinNode {
     s32 x1 = 0;
     s32 y1 = 0;
@@ -61,6 +63,12 @@ private:
     void ChanZSortDisplayTexture(s32 count);
 
     s32 mode = 0;
+
+    // PSX TRAIL.CPP +40/+44/+48/+52: textured trail geometry selectors.
+    OriginalGeo* textureGeoFirst = nullptr;
+    OriginalGeo* textureGeoSecond = nullptr;
+    OriginalGeo* textureGeoMid = nullptr;
+    OriginalGeo* textureGeoLast = nullptr;
 
     TrailInfo* trailInfoPool = nullptr;
     ccMinList freeList;
