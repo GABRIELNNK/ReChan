@@ -1101,6 +1101,33 @@ Humanoid::~Humanoid() {
 void Humanoid::Think() {
     MARKFUNCTION(0x80063808);
 
+    const bool directorInputLocked =
+        g_director && g_director->scriptState != 0 && g_director->enableInput == 0;
+    const bool isPlayerHumanoid = (this == static_cast<Humanoid*>(Player::s_player));
+    const bool isDirectorControlledNis =
+        actionState == static_cast<s32>(AS_NIS_MODE) || (flags2 & TF2_NIS_ENTER) != 0;
+
+    // PSX cutscene scripts can continue after g_directorActive drops; freeze
+    // non-player AI while Director still owns the scene unless the actor is in
+    // explicit NIS control from the script itself.
+    if (directorInputLocked && !isPlayerHumanoid && !isDirectorControlledNis) {
+        if (model) {
+            HumanoidModel* hm = static_cast<HumanoidModel*>(model);
+            hm->attackHandRadius = 72;
+            hm->attackFootRadius = 100;
+        }
+
+        moveSpeed = 0;
+        runSpeed = 0;
+        velocity = {};
+        contactForce = {};
+        maxFallDivisor = 0;
+        flags &= ~TF_BIT1;
+        flags2 &= ~TF2_BIT3;
+        field368 = 0;
+        return;
+    }
+
     // PSX step 1: CHumanoidSound::Think
     if (humanoidSound) {
         humanoidSound->Think();

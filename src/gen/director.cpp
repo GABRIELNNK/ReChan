@@ -130,13 +130,18 @@ static constexpr u32 kDirectorScriptDefaultBegin = 0x800D86E0u;
 void runDirector(Handler* h);
 void DrawDirectorOverlays(Handler* h);
 
-static s32 start_generic[10] = {
-    9, 6, -1, 98, 102, 40, 103, 256, 100, 0
+static s32 start_generic[] = {
+    9, 6, -1, 98, 102, 40, 103, 256, 100, 0,
+    99, 255, 5, 14, kHashJackie, 1, 6, 45, 73, 75,
+    98, 99, 0, 5, 8, 4
 };
 
-static s32 start_frantic[12] = {
+static s32 start_frantic[] = {
     9, 6, -1, 73, 74, 98, 102, 40, 103, 256,
-    100, 0
+    100, 0, 99, 255, 5, 14, kHashJackie, 73, 84, kHashJackie,
+    85, 5, 15, 0, 346, 16, 0, 346, 1, 21,
+    kHashJackie, 346, 17, kHashJackie, 14, kHashJackie, 1, 73, 75, 98,
+    99, 0, 5, 8, 22, 0, 346, 4
 };
 
 static s32 gotopoint[7] = { 9, 64, 19, kHashJackie, 20, 8, 2 };
@@ -1824,9 +1829,9 @@ void Director::Process() {
                 scriptPtr += 2;
                 if (Player::s_player) {
                     if (val)
-                        Player::s_player->flags |= 0x4u;
+                        Player::s_player->playerFlags |= PF_COMBAT_READY;
                     else
-                        Player::s_player->flags &= ~0x4u;
+                        Player::s_player->playerFlags &= ~PF_COMBAT_READY;
                 }
                 break;
             }
