@@ -491,18 +491,29 @@ void Game::MenuFade() {
     MARKFUNCTION(0x80029E34);
 
     while (jcsIsPlaying()) {
-        rDoTaskList(&rMainTaskList, rFrameCount60);
-        std::this_thread::yield();
+        const f64 frameStart = Time::GetTimeInSeconds();
+        // Keep PSX-style frame-based dialog timeouts advancing while this
+        // blocking gate waits for jcsIsPlaying() to clear.
+        if (g_time) {
+            g_time->Step();
+        }
+        rDoTaskList(&rMainTaskList, 0);
+        if (g_time) {
+            g_time->WaitForFrameEnd(frameStart);
+        }
     }
 
     FadeBegin();
     while (FadeUpdate()) {
+        const f64 frameStart = Time::GetTimeInSeconds();
         g_display->BeginFrame();
         MenuRender(nullptr);
         FadeRender();
         g_display->EndFrame();
-        rDoTaskList(&rMainTaskList, rFrameCount60);
-        std::this_thread::yield();
+        rDoTaskList(&rMainTaskList, 0);
+        if (g_time) {
+            g_time->WaitForFrameEnd(frameStart);
+        }
     }
     FadeEnd();
 
