@@ -414,8 +414,8 @@ void HandleThingFloor(DynamicThing* thing, s32 radius, s32 yMinOffset, s32 check
 
     // PSX: climbing state 23 search offset
     s32 isClimbing = 0;
-    if ((!humanoid && Player::s_player && Player::s_player->actionState == 23) ||
-        (humanoid && humanoid->actionState == 23)) {
+    if ((!humanoid && Player::s_player && Player::s_player->actionState == (s32)AS_LEDGE_LATCH) ||
+        (humanoid && humanoid->actionState == (s32)AS_LEDGE_LATCH)) {
         isClimbing = 1;
     }
     if (isClimbing) {
@@ -603,7 +603,7 @@ void HandleThingFloor(DynamicThing* thing, s32 radius, s32 yMinOffset, s32 check
                 s32 threshold = g_colFallVelThreshold < 0 ? -g_colFallVelThreshold : g_colFallVelThreshold;
                 if (absVelY >= threshold && thing->thingType < 29) {
                     Humanoid* hum = (Humanoid*)thing;
-                    if (hum->actionState == 63 && g_colFallVelDivisor != 0) {
+                    if (hum->actionState == (s32)AS_THROW_FREE_FALL && g_colFallVelDivisor != 0) {
                         localVelY = -(localVelY / g_colFallVelDivisor);
                     }
                 }

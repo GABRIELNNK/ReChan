@@ -440,7 +440,7 @@ void Player::SetActionState(u32 state, s32 param) {
     }
 
     // PSX: if previous actionState was 3, unload stored animation
-    if (actionState == 3) {
+    if (actionState == (s32)AS_WALL_JUMP_TAUNT) {
         if (g_characterManager) {
             g_characterManager->UnloadAnimationBatch(0, currentAnimEnum);
         }
@@ -629,37 +629,29 @@ void Player::SetActionState(u32 state, s32 param) {
             // Fall through to Humanoid for stateDispatch + animation setup
             break;
         }
-        case AS_BACKFLIP:
+        case AS_STRAFE:
         {
             // PSX case 11: face enemy + strafe init.
-            // FindFoe, SetHumanoidTarget, stateDispatch=26(SD_BACKFLIP)
+            // FindFoe, SetHumanoidTarget, stateDispatch=26(SD_STRAFE)
             stateTimer = 0;
             SetHumanoidTarget(FindFoe(PLAYER_STRAFE_TARGET_RANGE, PLAYER_STRAFE_TARGET_HALF_ANGLE, 0));
             field344 = 0;
-            stateDispatch = SD_BACKFLIP;
+            stateDispatch = SD_STRAFE;
             field348 = 8;
             actionState = (s32)state;
+            return;
+        }
+        case AS_TAUNT_ENTRY:
+        {
+            // PSX Player switch has no dedicated case 4; use shared Humanoid mapping.
+            Humanoid::SetActionState(state, param);
             return;
         }
         case AS_DIVE_ROLL:
         {
-            // PSX: bit 5 (R1) triggers this - rolling dodge animation
+            // PSX case 12 uses dispatch slot 27 (strafe-chain) with anim 24.
             field344 = 0;
-            stateDispatch = SD_DIVE_ROLL;
-            field348 = 8;
-            if (model) {
-                Model* m = static_cast<Model*>(model);
-                m->SetAnim(PLAYER_ANIM_STRAFE, param, 1, 0);
-            }
-            field488 = 0;
-            actionState = (s32)state;
-            return;
-        }
-        case AS_STRAFE:
-        {
-            // PSX case 12: stateDispatch=27(SD_STRAFE), play anim 24
-            field344 = 0;
-            stateDispatch = SD_STRAFE;
+            stateDispatch = SD_DIVE_ROLL_CHAIN;
             field348 = 8;
             if (model) {
                 Model* m = static_cast<Model*>(model);
@@ -850,6 +842,17 @@ void Player::SetActionState(u32 state, s32 param) {
         case AS_KICK_ATTACK:
         {
             // PSX cases 32,34: acquire a foe and attempt to enter combat combo.
+            if (rightHandObj || leftHandObj) {
+                const Pickup* heldPickup = rightHandObj
+                    ? static_cast<const Pickup*>(rightHandObj)
+                    : static_cast<const Pickup*>(leftHandObj);
+                LOG(
+                    "[PickupCombat] player set state pickupType=%u nextState=%d cmd=0x%08X fromState=%d",
+                    heldPickup ? static_cast<u32>(heldPickup->thingType) : 0u,
+                    static_cast<s32>(state),
+                    static_cast<u32>(commandBits),
+                    actionState);
+            }
             SetHumanoidTarget(FindFoe(750, 10922, 0));
             if (!EnterCombatCombo()) {
                 return;
@@ -994,6 +997,9 @@ void Player::SetActionState(u32 state, s32 param) {
 // then falls through to Humanoid::ProcessAction for shared Humanoid dispatches.
 void Player::ProcessAction() {
     switch (stateDispatch) {
+        // PSX class-specific slot dispatch: on Player, slots 23/27 both execute dive-roll handler.
+        case SD_DIVE_ROLL:     _DiveRoll(); return;
+        case SD_DIVE_ROLL_CHAIN: _DiveRoll(); return;
         // Player-specific handlers (PSX: direct function pointer, stateDispatch = -1)
         case SD_HARDFALL:      _HardFall(); return;
         case SD_HARDLAND:      _HardLand(); return;
@@ -1286,7 +1292,7 @@ s32 Player::LoadCombatDialog() {
 
     // PSX: a1[121] = +484 = field484 (FightingComboNode pointer)
     // PSX: if (!v2 || actionState == 37) return 0
-    if (!field484 || actionState == 37) {
+    if (!field484 || actionState == (s32)AS_BACK_GRAB_LATCH) {
         return 0;
     }
 
@@ -1402,7 +1408,7 @@ bool Player::PlayerSingleEncounterCheak() {
         Humanoid* h = hArray[i];
         if (h != (Humanoid*)this) {
             if (h) {
-                if (h->actionState == 2) {
+                if (h->actionState == (s32)AS_STAND_ANIM) {
                     ++nearbyCount;
                 }
                 else {
@@ -1533,18 +1539,18 @@ void Player::_Stand() {
         field616 = 0;
     }
 
-    // PSX: bit 5 (R1 dive roll) -> FaceAngleY + SetActionState(4, AS_DIVE_ROLL) -> return
+    // PSX: bit 5 from stand enters dive-roll state (12).
     if ((cb >> 5) & 1) {
         FaceAngleY(faceAngle, 0);
         SetActionState(AS_DIVE_ROLL, 0);
         return;
     }
 
-    // PSX command requests for grab-family input: bits 7,15,17,18.
+    // PSX command requests for grab-family input: bits 7,15,16,19.
     {
         s32 hasPickupBits = 0;
         if (((cb >> GA_GRAB) & 1) || ((cb >> GA_GRAB_FORWARD) & 1)
-            || ((cb >> GA_GRAB_HELD) & 1) || ((cb >> GA_GRAB_FWD_HELD) & 1)) {
+            || ((cb >> 16) & 1) || ((cb >> 19) & 1)) {
             hasPickupBits = 1;
         }
         if (hasPickupBits) {
@@ -1572,16 +1578,16 @@ void Player::_Stand() {
         goto standPostDispatch;
     }
 
-    // PSX: bit 2 (run) or bit 6 (backflip) -> movement
+    // PSX: bit 2 (run) or bit 6 (strafe request) -> movement
     {
         s32 hasMove = 0;
         if (((cb >> 2) & 1) || ((cb >> 6) & 1)) {
             hasMove = 1;
         }
         if (hasMove) {
-            // PSX: backflip (bit6) -> SetActionState(11) -> LABEL_87
+            // PSX: bit6 -> SetActionState(11) -> LABEL_87
             if ((cb >> 6) & 1) {
-                SetActionState(AS_BACKFLIP, 0);
+                SetActionState(AS_STRAFE, 0);
                 goto standPostDispatch;
             }
 
@@ -1631,7 +1637,9 @@ void Player::_Stand() {
             ((cb >> GA_BACK_PUNCH) & 1) || ((cb >> GA_BACK_KICK) & 1)
             || ((cb >> GA_HEAVY_PUNCH) & 1) || ((cb >> GA_HEAVY_KICK) & 1)
             || ((cb >> GA_SPECIAL_GRAB) & 1) || ((cb >> GA_GRAB_FORWARD) & 1)
+            || ((cb >> 16) & 1)
             || ((cb >> GA_GRAB_HELD) & 1) || ((cb >> GA_GRAB_FWD_HELD) & 1)
+            || ((cb >> 19) & 1)
             || ((cb >> 20) & 1)) {
             hasCombat = 1;
         }
@@ -2124,7 +2132,7 @@ void Player::_HardLand() {
 }
 
 // PSX: _Run__6Player (PLAYER.CPP:3397, 0x800325CC) - 1148 bytes, 73 blocks
-// PSX flow: pickup/backflip -> bit1 (return) -> slope/jump/combat (fall through)
+// PSX flow: pickup/strafe -> bit1 (return) -> slope/jump/combat (fall through)
 // -> strafe (return) -> FaceAngleY -> ground check -> force accumulator.
 // Most transitions fall through to the force accumulator at LABEL_58.
 void Player::_Run() {
@@ -2132,11 +2140,11 @@ void Player::_Run() {
 
     u32 cb = (u32)commandBits;
 
-    // PSX: pickup/throw/backflip section (all fall through to LABEL_13)
+    // PSX: pickup/throw/strafe section (all fall through to LABEL_13)
     {
         s32 hasPickup = 0;
         if (((cb >> GA_GRAB) & 1) || ((cb >> GA_GRAB_FORWARD) & 1)
-            || ((cb >> GA_GRAB_HELD) & 1) || ((cb >> GA_GRAB_FWD_HELD) & 1)) {
+            || ((cb >> 16) & 1)) {
             hasPickup = 1;
         }
         if (hasPickup) {
@@ -2149,7 +2157,7 @@ void Player::_Run() {
             }
         }
         else if ((cb >> 6) & 1) {
-            SetActionState(AS_BACKFLIP, 0);
+            SetActionState(AS_STRAFE, 0);
             // PSX: falls through to LABEL_13
         }
     }
@@ -2196,7 +2204,9 @@ void Player::_Run() {
                 ((cb >> GA_BACK_PUNCH) & 1) || ((cb >> GA_BACK_KICK) & 1)
                 || ((cb >> GA_HEAVY_PUNCH) & 1) || ((cb >> GA_HEAVY_KICK) & 1)
                 || ((cb >> GA_SPECIAL_GRAB) & 1) || ((cb >> GA_GRAB_FORWARD) & 1)
+                || ((cb >> 16) & 1)
                 || ((cb >> GA_GRAB_HELD) & 1) || ((cb >> GA_GRAB_FWD_HELD) & 1)
+                || ((cb >> 19) & 1)
                 || ((cb >> 20) & 1)) {
                 hasCombat = 1;
             }

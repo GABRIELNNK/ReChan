@@ -304,7 +304,7 @@ void TrapDoor::HandleHumanoidCollision(Humanoid* hum) {
         hum->homePos = savedHomePos;
     }
 
-    if (hum->actionState == 0x17) {
+    if (hum->actionState == (s32)AS_LEDGE_LATCH) {
         hum->LetGoOfLedge();
     }
 }

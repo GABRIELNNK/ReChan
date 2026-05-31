@@ -628,7 +628,7 @@ void Stack::HandleHumanoidCollision(Humanoid* hum) {
     }
 
     hum->HandleCollision(this, 1, damage, 0x80000007, 0);
-    hum->SetActionState(0x45, 0);
+    hum->SetActionState(AS_COLLAPSE_STUN, 0);
 
     if (hum->thingType != 0) {
         g_scoreManager->AddStylePoints(100);

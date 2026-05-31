@@ -1227,7 +1227,7 @@ void Platform::HandleHumanoidCollision(Humanoid* hum) {
 
     if (!hum) return;
     if (platformFlags & 0x20) return;
-    if (hum->actionState == 73) return;
+    if (hum->actionState == (s32)AS_NIS_MODE) return;
     if ((platformFlags & 0x10) && hum == (Humanoid*)Player::s_player) return;
 
     tagCollisionBox box = collBox;
@@ -1446,7 +1446,7 @@ void Platform::HandleHumanoidCollision(Humanoid* hum) {
         }
 
         // PSX: APPLY_POS (0x80024A20) - copy corrected pos unless ledge-climbing
-        if (hum->actionState >= 25 && hum->actionState <= 27) {
+        if (hum->actionState >= (s32)AS_LADDER_CLIMB_DOWN && hum->actionState <= (s32)AS_LADDER_CLIMBING) {
             onTop = false;
         } 
         else {
@@ -1461,7 +1461,7 @@ void Platform::HandleHumanoidCollision(Humanoid* hum) {
                 if (moveState == 0) {
                     if ((platformFlags & 0x1000) || (platformFlags & 0x2000)) {
                         moveState = 1;
-                        if (hum->actionState == 23 && loopCount >= 6 && loopCount < 27) {
+                        if (hum->actionState == (s32)AS_LEDGE_LATCH && loopCount >= 6 && loopCount < 27) {
                             deathCountdown = 27;
                         } else {
                             deathCountdown = loopCount;

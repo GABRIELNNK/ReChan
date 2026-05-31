@@ -1,6 +1,5 @@
 #include "ai/humanoid.h"
 #include "ai/activezn.h"
-#include "ai/boss.h"
 #include "ai/humndata.h"
 #include "ai/obstacle.h"
 #include "ai/platform.h"
@@ -1826,7 +1825,7 @@ void Humanoid::HandleCollisionReactionStates(s32 hitType, s32 impactRegion) {
         case AS_BACK_GRAB_RECEIVE_LATCH:
         case AS_BACK_GRAB_RECEIVE:
             contactForce = {};
-            SetActionState(((impactRegion >> 4) & 1) ? 51 : 52, 0);
+            SetActionState(((impactRegion >> 4) & 1) ? AS_STUN_REACT_PUNCH : AS_STUN_REACT_KICK, 0);
             break;
 
         default:
@@ -1862,13 +1861,13 @@ void Humanoid::HandleCollisionReactionStates(s32 hitType, s32 impactRegion) {
                     }
 
                     if ((impactRegion & 1) == 0) {
-                        SetActionState(((impactRegion >> 4) & 1) ? 49 : 50, 0);
+                        SetActionState(((impactRegion >> 4) & 1) ? AS_HIT_REACT_COMBO_A : AS_HIT_REACT_COMBO_B, 0);
                     }
                     else if ((impactRegion >> 4) & 1) {
-                        SetActionState(46, 0);
+                        SetActionState(AS_HIT_REACT_PUNCH_A, 0);
                     }
                     else if (((impactRegion >> 5) & 1) || ((impactRegion >> 6) & 1)) {
-                        SetActionState(47, 0);
+                        SetActionState(AS_HIT_REACT_KICK_A, 0);
                     }
                     break;
             }
@@ -1924,9 +1923,9 @@ void Humanoid::HandleCollision(Thing* other, s32 damage, ...) {
     }
 
     const bool otherIsHumanoid = other->thingType < static_cast<u16>(AITypes::TT_HUMANOID_LAST + 1);
-    if (actionState == 41 && otherIsHumanoid && (other->flags & TF_BIT1) == 0) {
+    if (actionState == AS_COUNTER_ATTACK_LATCH && otherIsHumanoid && (other->flags & TF_BIT1) == 0) {
         SetHumanoidTarget(static_cast<Humanoid*>(other));
-        SetActionState(42, 0);
+        SetActionState(AS_COUNTER_ATTACK, 0);
         return;
     }
 
@@ -1999,9 +1998,8 @@ void Humanoid::HandleCollision(Thing* other, s32 damage, ...) {
             HandleHitShock(hitType);
 
             if (appliedDamage > DROP_PICKUP_DAMAGE_THRESHOLD && rightHandObj) {
-                // PSX writes held pickup +0x134 before forced drop.
-                u8* pickupBytes = reinterpret_cast<u8*>(rightHandObj);
-                *reinterpret_cast<u32*>(pickupBytes + 0x134) = (this == (Humanoid*)Player::s_player) ? 1u : 0u;
+                Pickup* heldPickup = static_cast<Pickup*>(rightHandObj);
+                heldPickup->field308 = (this == static_cast<Humanoid*>(Player::s_player)) ? 1 : 0;
                 DropPickup(1, 1);
             }
         }
@@ -2111,8 +2109,8 @@ void Humanoid::AnalyzeMesh(DBRoot* root) {
             }
             case 0x1D:
                 if (p3dHash(attrib->GetAttribString()) == p3dHash("AS_NISMode")) {
-                    field364 = 73;
-                    SetActionState(73, 0);
+                    field364 = AS_NIS_MODE;
+                    SetActionState(AS_NIS_MODE, 0);
                 }
                 break;
             case 0x1F:
@@ -2267,7 +2265,7 @@ void Humanoid::SetActionState(u32 state, s32 param) {
             }
             flags2 &= ~0x70u;
             break;
-        case AS_DIVE_ROLL:
+        case AS_TAUNT_ENTRY:
         {
             // PSX Humanoid case 4: taunt entry (dispatch slot 23), not dive-roll.
             field344 = 0;
@@ -2338,15 +2336,22 @@ void Humanoid::SetActionState(u32 state, s32 param) {
             }
             flags2 &= ~0x70u;
             break;
-        case AS_BACKFLIP:
-            field344 = 0;
-            stateDispatch = SD_BACKFLIP;
-            field348 = 8;
-            break;
         case AS_STRAFE:
-            // PSX case 12: dive-roll dispatch slot and anim 24 setup.
             field344 = 0;
             stateDispatch = SD_STRAFE;
+            field348 = 8;
+            break;
+        case AS_DIVE_ROLL:
+            // State 12 is player dive-roll; non-player callers are normalized to strafe.
+            if (this != static_cast<Humanoid*>(Player::s_player)) {
+                state = AS_STRAFE;
+                field344 = 0;
+                stateDispatch = SD_STRAFE;
+                field348 = 8;
+                break;
+            }
+            field344 = 0;
+            stateDispatch = SD_DIVE_ROLL_CHAIN;
             field348 = 8;
             if (model) {
                 Model* m = static_cast<Model*>(model);
@@ -2456,14 +2461,36 @@ void Humanoid::SetActionState(u32 state, s32 param) {
             break;
         case AS_PUNCH_ATTACK:
         case AS_KICK_ATTACK:
+            if (rightHandObj || leftHandObj) {
+                const Pickup* heldPickup = rightHandObj
+                    ? static_cast<const Pickup*>(rightHandObj)
+                    : static_cast<const Pickup*>(leftHandObj);
+                LOG(
+                    "[PickupCombat] set state thingType=%u pickupType=%u nextState=%d cmd=0x%08X fromState=%d",
+                    static_cast<u32>(thingType),
+                    heldPickup ? static_cast<u32>(heldPickup->thingType) : 0u,
+                    static_cast<s32>(state),
+                    static_cast<u32>(commandBits),
+                    actionState);
+            }
             if (!EnterCombatCombo()) {
-                actionState = prevState;
                 return;
             }
             break;
         case AS_COMBAT_IDLE:
+            if (rightHandObj || leftHandObj) {
+                const Pickup* heldPickup = rightHandObj
+                    ? static_cast<const Pickup*>(rightHandObj)
+                    : static_cast<const Pickup*>(leftHandObj);
+                LOG(
+                    "[PickupCombat] set state thingType=%u pickupType=%u nextState=%d cmd=0x%08X fromState=%d",
+                    static_cast<u32>(thingType),
+                    heldPickup ? static_cast<u32>(heldPickup->thingType) : 0u,
+                    static_cast<s32>(state),
+                    static_cast<u32>(commandBits),
+                    actionState);
+            }
             if (!EnterCombatCombo()) {
-                actionState = prevState;
                 return;
             }
             velocity = {};
@@ -2558,13 +2585,6 @@ void Humanoid::SetActionState(u32 state, s32 param) {
         }
         case AS_THROW_PICKUP:
             stateDispatch = SD_THROW;
-            if (thingType == AITypes::TT_BUTCH) {
-                LOG("[ChefPot] SetActionState AS_THROW_PICKUP param=%d cmd=0x%08X right=%p left=%p",
-                    param,
-                    static_cast<u32>(commandBits),
-                    rightHandObj,
-                    leftHandObj);
-            }
             if (model && rightHandObj) {
                 Model* m = static_cast<Model*>(model);
                 m->SetAnim(static_cast<s32>(static_cast<Pickup*>(rightHandObj)->GetThrowMove()), param, 0, 0);
@@ -2620,7 +2640,9 @@ void Humanoid::SetActionState(u32 state, s32 param) {
                 Model* m = static_cast<Model*>(model);
                 AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
                 if (anim) {
-                    m->SetAnim(anim->animEnum, param, 0, 0);
+                    // PSX case 50 replays the current anim and arms CallNextAction.
+                    // Force reapply to avoid same-anim early-out keeping callback path inert.
+                    m->SetAnim(anim->animEnum, param, 1, 0);
                     SetCallNextActionCallback(m);
                 }
             }
@@ -2934,25 +2956,15 @@ void Humanoid::ProcessAction() {
         case SD_RUN:          _Run(); break;
         case SD_JUMP:         _Jump(); break;
         case SD_FALL:         _Fall(); break;
-        case SD_STRAFE:
-            // PSX slot 27 resolves to _DiveRoll on Humanoid and _Straif on Player.
-            if (this == (Humanoid*)Player::s_player) {
-                _Straif();
-            }
-            else {
-                _DiveRoll();
-            }
+        case SD_DIVE_ROLL_CHAIN:
+            // PSX slot 27 on Humanoid resolves to strafe-chain; Player handles slot 27 in Player::ProcessAction.
+            _Straif();
             break;
         case SD_DIVE_ROLL:
-            // PSX slot 23 resolves to _Taunt on Humanoid and _DiveRoll on Player.
-            if (this == (Humanoid*)Player::s_player) {
-                _DiveRoll();
-            }
-            else {
-                _Taunt();
-            }
+            // PSX slot 23 on Humanoid resolves to taunt; Player handles slot 23 in Player::ProcessAction.
+            _Taunt();
             break;
-        case SD_BACKFLIP:     _Straif(); break;
+        case SD_STRAFE:       _Straif(); break;
         case SD_PAUSE:        _Pause(); break;
         case SD_GOT_HIT_HIGH: _GotHitHigh(); break;
         case SD_GOT_HIT_MED:  _GotHitMed(); break;
@@ -2968,21 +2980,6 @@ void Humanoid::ProcessAction() {
         case SD_PUSH:         _TableThrow(); break;
         case SD_GET_UP:       _CrouchUp(); break;
         case SD_THROW:        _Throw(); break;
-        case SD_BUTCH_STOMP:
-            if (thingType == AITypes::TT_BUTCH) {
-                static_cast<Butch*>(this)->_Stomp();
-            }
-            break;
-        case SD_BUTCH_CHARGE:
-            if (thingType == AITypes::TT_BUTCH) {
-                static_cast<Butch*>(this)->_Charge();
-            }
-            break;
-        case SD_BUTCH_THROW_POT:
-            if (thingType == AITypes::TT_BUTCH) {
-                static_cast<Butch*>(this)->_ThrowPot();
-            }
-            break;
         case SD_FIGHTING_COMBO: ProcessFightingComboNode(); break;
         case SD_BACK_GRAB_LATCH: BackGrabCharacterLatch(); break;
         case SD_BACK_GRAB: BackGrabCharacter(); break;
@@ -2995,42 +2992,12 @@ void Humanoid::ProcessAction() {
         case SD_COUNTER_ATTACK: CounterAttack(); break;
         case SD_COUNTER_ATTACK_RECOVERY: CounterAttackRecovery(); break;
         case SD_THROW_CHARACTER_RECEIVE: ThrowCharacterReceive(); break;
-        case SD_THROW_FREE_FALL:
-            if (thingType == AITypes::TT_DANTE) {
-                static_cast<Dante*>(this)->_ThrowFreeFall();
-            }
-            else {
-                ThrowFreeFall();
-            }
-            break;
-        case SD_GOT_HIT_FREEFORM:
-            if (thingType == AITypes::TT_DANTE) {
-                static_cast<Dante*>(this)->_GotHitFreeForm();
-            }
-            else {
-                GotHitFreeForm();
-            }
-            break;
-        case SD_DANTE_MISSILE_PREPARE:
-            if (thingType == AITypes::TT_DANTE) {
-                static_cast<Dante*>(this)->_MissilePrepare();
-            }
-            break;
-        case SD_DANTE_TARGET_MISSILE_ATTACK:
-            if (thingType == AITypes::TT_DANTE) {
-                static_cast<Dante*>(this)->_TargetMissileAttack();
-            }
-            break;
+        case SD_THROW_FREE_FALL: ThrowFreeFall(); break;
+        case SD_GOT_HIT_FREEFORM: GotHitFreeForm(); break;
+        case SD_DANTE_MISSILE_PREPARE: break;
+        case SD_DANTE_TARGET_MISSILE_ATTACK: break;
         case SD_LEDGE_LATCH:  _LedgeLatch(); break;
-        case SD_LEDGE_PULLUP:
-            // PSX dispatch slot 46 is class-specific: Dante missile attack / humanoid ledge pull-up.
-            if (thingType == AITypes::TT_DANTE) {
-                static_cast<Dante*>(this)->_MissileAttack();
-            }
-            else {
-                _LedgePullup();
-            }
-            break;
+        case SD_LEDGE_PULLUP: _LedgePullup(); break;
         case SD_LADDER_LATCH_TOP: _LadderLatchTop(); break;
         case SD_LADDER_LATCH: _LadderLatch(); break;
         case SD_CLIMB_LADDER: _ClimbLadder(); break;
@@ -3087,7 +3054,7 @@ void Humanoid::Killed() {
 s32 Humanoid::GetStraifPhase() {
     MARKFUNCTION(0x8006CF7C);
 
-    if (actionState != AS_BACKFLIP) {
+    if (actionState != AS_STRAFE) {
         return 0;
     }
 
@@ -3723,11 +3690,12 @@ void Humanoid::_Stand() {
             return;
 
         case 6:
-            SetActionState(AS_BACKFLIP, 0);
+            SetActionState(AS_STRAFE, 0);
             return;
 
         case GA_GRAB:
         case GA_GRAB_FORWARD:
+        case 16:
         case GA_GRAB_HELD:
             if (rightHandObj != 0 || leftHandObj != 0) {
                 const s32 weaponField = rightHandObj ? static_cast<Pickup*>(rightHandObj)->weaponField : 0;
@@ -3758,11 +3726,12 @@ void Humanoid::_Stand() {
             return;
 
         case GA_GRAB_FWD_HELD:
+        case 19:
             SetActionState(AS_COMBAT_IDLE, 0);
             return;
 
         case 21:
-            SetActionState(AS_DIVE_ROLL, 0);
+            SetActionState(AS_STRAFE, 0);
             return;
 
         case 30:
@@ -3898,10 +3867,11 @@ void Humanoid::_Taunt() {
             SetActionState(AS_RUN, ANIM_BLEND);
             return;
         case 6:
-            SetActionState(AS_BACKFLIP, 0);
+            SetActionState(AS_STRAFE, 0);
             return;
         case GA_GRAB:
         case GA_GRAB_FORWARD:
+        case 16:
         case GA_GRAB_HELD:
             if (rightHandObj != 0 || leftHandObj != 0) {
                 const s32 weaponField = rightHandObj ? static_cast<Pickup*>(rightHandObj)->weaponField : 0;
@@ -3930,6 +3900,7 @@ void Humanoid::_Taunt() {
             SetActionState(AS_PUNCH_ATTACK, 0);
             return;
         case GA_GRAB_FWD_HELD:
+        case 19:
             SetActionState(AS_COMBAT_IDLE, 0);
             return;
         case 21:
@@ -3970,9 +3941,9 @@ void Humanoid::_Run() {
     flags2 |= 0x0008; // ground sticking
     s32 sd = commandBits;
 
-    // Backflip (bit 6)
+    // Strafe request (bit 6)
     if (sd & 0x0040) {
-        SetActionState(AS_BACKFLIP, 0);
+        SetActionState(AS_STRAFE, 0);
         return;
     }
 
@@ -3988,9 +3959,11 @@ void Humanoid::_Run() {
         return;
     }
 
-    // Multi-hit combat (bits 7,15,17,18) -> pickup/throw or combat idle
+    // Multi-hit combat (bits 7,15,16,17,18,19) -> pickup/throw or combat idle
     if (((sd >> GA_GRAB) & 1) || ((sd >> GA_GRAB_FORWARD) & 1)
-        || ((sd >> GA_GRAB_HELD) & 1) || ((sd >> GA_GRAB_FWD_HELD) & 1)) {
+        || ((sd >> 16) & 1)
+        || ((sd >> GA_GRAB_HELD) & 1) || ((sd >> GA_GRAB_FWD_HELD) & 1)
+        || ((sd >> 19) & 1)) {
         if (rightHandObj != 0 || leftHandObj != 0) {
             if (rightHandObj && static_cast<Pickup*>(rightHandObj)->weaponField != 0) {
                 SetActionState(AS_COMBAT_IDLE, 0);
@@ -4000,6 +3973,9 @@ void Humanoid::_Run() {
             }
         }
         else {
+            if (CheckForPickup() == 1) {
+                return;
+            }
             SetActionState(AS_COMBAT_IDLE, 0);
         }
         return;
@@ -4017,9 +3993,9 @@ void Humanoid::_Run() {
         return;
     }
 
-    // Dive roll (bit 21)
+    // Alternate strafe request (bit 21)
     if (sd & 0x200000) {
-        SetActionState(AS_DIVE_ROLL, 0);
+        SetActionState(AS_STRAFE, 0);
         return;
     }
 
@@ -4109,11 +4085,14 @@ void Humanoid::_Straif() {
         return;
     }
 
-    // Grab/combat (bits 7,15,17,18)
+    // Grab/combat (bits 7,15,16,17,18,19)
     if (((sd >> GA_GRAB) & 1) || ((sd >> GA_GRAB_FORWARD) & 1)
-        || ((sd >> GA_GRAB_HELD) & 1) || ((sd >> GA_GRAB_FWD_HELD) & 1)) {
+        || ((sd >> 16) & 1)
+        || ((sd >> GA_GRAB_HELD) & 1) || ((sd >> GA_GRAB_FWD_HELD) & 1)
+        || ((sd >> 19) & 1)) {
         if (rightHandObj || leftHandObj) {
-            if (!((s32*)rightHandObj)[79]) {
+            Pickup* heldPickup = static_cast<Pickup*>(rightHandObj);
+            if (!heldPickup->weaponField) {
                 ReleaseTarget();
                 SetActionState(AS_THROW_PICKUP, 0);
                 return;
@@ -4151,10 +4130,10 @@ void Humanoid::_Straif() {
         return;
     }
 
-    // Dive roll (bit 21)
+    // Alternate strafe request (bit 21)
     if (sd & 0x200000) {
         ReleaseTarget();
-        SetActionState(AS_DIVE_ROLL, 0);
+        SetActionState(AS_STRAFE, 0);
         return;
     }
 
@@ -4190,7 +4169,11 @@ void Humanoid::_Straif() {
 
     // PSX: resolve faceAngleData - use rightHandObj's if available (weapon strafe anims)
     s32* animArray = nullptr;
-    if (!rightHandObj || !(animArray = (s32*)(*(void**)((u8*)rightHandObj + 220)))) {
+    if (rightHandObj) {
+        Pickup* heldPickup = static_cast<Pickup*>(rightHandObj);
+        animArray = const_cast<s32*>(heldPickup->moveStruct);
+    }
+    if (!animArray) {
         animArray = (s32*)faceAngleData;
     }
     if (!animArray) {
@@ -5018,19 +5001,6 @@ void Humanoid::_Throw() {
     if (pickup != nullptr && frame >= throwFrame) {
         ccList* pickupList = g_ai ? &g_ai->pickupList : nullptr;
 
-        if (thingType == AITypes::TT_BUTCH) {
-            const s32 throwForce = ((flags2 & 0x0001) != 0) ? s_throwPickupReleaseForce : 0;
-            LOG("[ChefPot] _Throw release owner=%p frame=%d throwFrame=%d pickup=%p name='%s' type=%u flags2=0x%08X force=%d",
-                this,
-                frame,
-                throwFrame,
-                pickup,
-                pickup->GetName(),
-                pickup->thingType,
-                flags2,
-                throwForce);
-        }
-
         if ((flags2 & 0x0001) != 0) {
             if (this == static_cast<Humanoid*>(Player::s_player)) {
                 PlayDialog(84, 10);
@@ -5055,33 +5025,11 @@ void Humanoid::_Throw() {
             pickup->Release(this, pickupList, nullptr, 0);
         }
 
-        if (thingType == AITypes::TT_BUTCH) {
-            LOG("[ChefPot] _Throw released pickup=%p pos=(%d,%d,%d) vel=(%d,%d,%d)",
-                pickup,
-                pickup->pos.x,
-                pickup->pos.y,
-                pickup->pos.z,
-                pickup->velocity.x,
-                pickup->velocity.y,
-                pickup->velocity.z);
-        }
-
         rightHandObj = nullptr;
     }
 
     // PSX: if animation completed (loopCount > 0)
     if (anim->loopCount > 0) {
-        if (thingType == AITypes::TT_BUTCH && rightHandObj != nullptr) {
-            Pickup* heldPickup = static_cast<Pickup*>(rightHandObj);
-            LOG("[ChefPot] _Throw looped with held pickup owner=%p frame=%d pickup=%p name='%s' type=%u throwFrame=%d",
-                this,
-                frame,
-                heldPickup,
-                heldPickup->GetName(),
-                heldPickup->thingType,
-                heldPickup->GetThrowMoveThrowFrame());
-        }
-
         ReleaseTarget();
         SetActionState(AS_STAND, 0);
     }
@@ -5667,6 +5615,19 @@ s32 Humanoid::SetCurrentFightingNode() {
     const PsxFightingMoveRaw* move = nextNode->moveData;
     HumanoidModel* hm = static_cast<HumanoidModel*>(model);
     if (!hm->IsAnimationLoaded(static_cast<s32>(move->anim))) {
+        if (rightHandObj || leftHandObj) {
+            const Pickup* heldPickup = rightHandObj
+                ? static_cast<const Pickup*>(rightHandObj)
+                : static_cast<const Pickup*>(leftHandObj);
+            LOG(
+                "[PickupCombat] missing anim thingType=%u pickupType=%u cmd=0x%08X node=0x%08X anim=%d state=%d",
+                static_cast<u32>(thingType),
+                heldPickup ? static_cast<u32>(heldPickup->thingType) : 0u,
+                static_cast<u32>(commandBits),
+                static_cast<u32>(nextNode->psxAddress),
+                static_cast<s32>(move->anim),
+                actionState);
+        }
         SetActionState(AS_STAND, 0);
         return 0;
     }
@@ -5966,12 +5927,11 @@ s32 Humanoid::ProcessFightingMoveStrikeJoint(
     const s32 soundEvent = static_cast<s32>(joint->SoundEvent());
     const bool weaponJoint = rightHandObj != nullptr && static_cast<u32>(soundEvent - 10) < 3u;
     if (weaponJoint) {
-        const LVector* weaponOffset = reinterpret_cast<const LVector*>(
-            reinterpret_cast<const u8*>(rightHandObj) + 240);
+        const Pickup* heldPickup = static_cast<const Pickup*>(rightHandObj);
         attack.hasSecondary = 1;
         animMatrices->GetWeaponAttack(
             static_cast<u32>(joint->JointIndex()),
-            *weaponOffset,
+            heldPickup->collisionPoints[0],
             attack.startB,
             attack.endB);
         attack.radiusB = ATTACKER_WEAPON_RADIUS;
@@ -6606,6 +6566,10 @@ s32 Humanoid::TestWallContextFightingRequestRemap() {
 s32 Humanoid::EnterCombatCombo() {
     MARKFUNCTION(0x8006B8C8);
 
+    const Pickup* heldPickup = rightHandObj
+        ? static_cast<const Pickup*>(rightHandObj)
+        : static_cast<const Pickup*>(leftHandObj);
+
     if (!TestAndSetWeaponKungFU()) {
         defaultFightingSystem = fightingSystem;
     }
@@ -6621,12 +6585,30 @@ s32 Humanoid::EnterCombatCombo() {
         static_cast<u32>(commandBits));
 
     if (field488 == 0) {
+        if (heldPickup) {
+            LOG(
+                "[PickupCombat] no node thingType=%u pickupType=%u cmd=0x%08X root=0x%08X state=%d",
+                static_cast<u32>(thingType),
+                static_cast<u32>(heldPickup->thingType),
+                static_cast<u32>(commandBits),
+                static_cast<u32>(reinterpret_cast<uintptr_t>(defaultFightingSystem)),
+                actionState);
+        }
         return 0;
     }
 
     const FightingComboNode* requestedNode =
         ResolveFightingNodeAddressConst(static_cast<u32>(field488));
     if (!requestedNode || !requestedNode->moveData) {
+        if (heldPickup) {
+            LOG(
+                "[PickupCombat] bad node thingType=%u pickupType=%u cmd=0x%08X node=0x%08X state=%d",
+                static_cast<u32>(thingType),
+                static_cast<u32>(heldPickup->thingType),
+                static_cast<u32>(commandBits),
+                static_cast<u32>(field488),
+                actionState);
+        }
         field488 = 0;
         return 0;
     }
@@ -6639,13 +6621,24 @@ s32 Humanoid::EnterCombatCombo() {
 
     Humanoid* target = FightTargetAndThrowLatch(requestedNode->moveData->fightingType);
     if (requestedNode->moveData->fightingType == 2 && !target) {
+        if (heldPickup) {
+            LOG(
+                "[PickupCombat] throw latch miss thingType=%u pickupType=%u cmd=0x%08X node=0x%08X anim=%d state=%d",
+                static_cast<u32>(thingType),
+                static_cast<u32>(heldPickup->thingType),
+                static_cast<u32>(commandBits),
+                static_cast<u32>(requestedNode->psxAddress),
+                static_cast<s32>(requestedNode->moveData->anim),
+                actionState);
+        }
         field488 = 0;
         return 0;
     }
 
     SetHumanoidTarget(target);
     LoadCombatDialog();
-    return SetCurrentFightingNode();
+    SetCurrentFightingNode();
+    return 1;
 }
 
 // PSX: _CounterAttack__8Humanoid (HUMANOID.CPP:5861)

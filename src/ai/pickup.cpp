@@ -153,16 +153,16 @@ static const TypeFightingSystemEntry kWeaponTypeFightingSystemTable[] = {
 
 static const WeaponTypePickupEntry kWeaponTypePickupSystemTable[] = {
     { 301, 189, 0x800D0FA8u, 0x800D0F8Cu, 0x800D0FE0u },
-    { 309, 487, 0x800D12B8u, 0x800D129Cu, 0x800D12D4u },
-    { 310, 500, 0x800D1360u, 0x800D1344u, 0x800D137Cu },
+    { 309, 231, 0x800D12B8u, 0x800D129Cu, 0x800D12D4u },
+    { 310, 244, 0x800D1360u, 0x800D1344u, 0x800D137Cu },
     { 311, 254, 0x800D1408u, 0x800D13ECu, 0x800D1424u },
     { 312, 261, 0x800D14E8u, 0x800D14CCu, 0x800D1504u },
     { 313, 189, 0x800D0FA8u, 0x800D0F8Cu, 0x800D0FE0u },
-    { 316, 476, 0x800D11D8u, 0x800D11BCu, 0x800D11A0u },
-    { 321, 476, 0x800D11D8u, 0x800D11BCu, 0x800D11A0u },
-    { 324, 462, 0x800D10DCu, 0x800D10C0u, 0x800D10A4u },
-    { 325, 462, 0x800D10DCu, 0x800D10C0u, 0x800D10A4u },
-    { 327, 462, 0x800D10DCu, 0x800D10C0u, 0x800D10A4u },
+    { 316, 220, 0x800D11D8u, 0x800D11BCu, 0x800D11A0u },
+    { 321, 220, 0x800D11D8u, 0x800D11BCu, 0x800D11A0u },
+    { 324, 206, 0x800D10DCu, 0x800D10C0u, 0x800D10A4u },
+    { 325, 206, 0x800D10DCu, 0x800D10C0u, 0x800D10A4u },
+    { 327, 206, 0x800D10DCu, 0x800D10C0u, 0x800D10A4u },
     { 328, 254, 0x800D1408u, 0x800D13ECu, 0x800D1424u },
 };
 
@@ -202,7 +202,9 @@ static u32 GetPickupFighting(u16 type) {
 
     for (const TypeFightingSystemEntry& entry : kWeaponTypeFightingSystemTable) {
         if (entry.type == type) {
-            return FindPickupFightingRootAddress(entry.hash);
+            // PSX GetPickupFighting routes through FindFightingSystem, which
+            // falls back to Player_Punch_Root when hash lookup misses.
+            return FindPickupFightingRootAddress(entry.hash, kPlayerPunchRootAddress);
         }
     }
 
@@ -563,6 +565,8 @@ void Pickup::AnalyzeMesh(DBRoot* root) {
     if (const DBAttrib* attrib = root->FindAttrib(30)) {
         const char* attribString = attrib->GetAttribString();
         if (attribString) {
+            // PSX AnalyzeMesh sets +212 via FindFightingSystem(hash), which falls back
+            // to Player_Punch_Root when the hash is not present in fightingSystemTable.
             fightingSystemRoot = FindPickupFightingRootAddress((u32)p3dHash(attribString), kPlayerPunchRootAddress);
         }
     }

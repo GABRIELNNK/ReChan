@@ -615,7 +615,9 @@ bool Obstacle::LedgeCheck(const tagCollisionBox& box, const LVector& normal, con
     }
 
     const s32 actionState = hum->actionState;
-    if (actionState == 32 || actionState == 34 || actionState == 35) {
+    if (actionState == (s32)AS_PUNCH_ATTACK
+        || actionState == (s32)AS_KICK_ATTACK
+        || actionState == (s32)AS_STATE_35) {
         return false;
     }
 

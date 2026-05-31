@@ -10,6 +10,10 @@ class hdMenuItem;
 class Thing;
 class WDBSwitch;
 
+// PSX player load-group hashes are checkpoint-backed state restored during
+// AI::Populate; World later syncs those stored hashes back onto the player slot.
+void SeedPlayerLoadGroups(u32 primaryHash, u32 secondaryHash);
+
 // PSX globals used by front-end destination selection return flow.
 extern LVector g_destSelectReturnPos;
 extern bool g_destSelectReturnPosValid;

@@ -179,7 +179,7 @@ void Boss::CreateModel(const char* name) {
         static_cast<SModel*>(m)->SetupModelCallbacks();
     }
 
-    if (actionState != 0x49) {
+    if (actionState != (s32)AS_NIS_MODE) {
         SetActionState(AS_STAND, 0);
     }
 
@@ -445,7 +445,7 @@ void Butch::_Charge() {
     }
 
     if (((cb >> GA_AI_DIVE_ROLL) & 1u) != 0) {
-        SetActionState(AS_DIVE_ROLL, 0);
+        SetActionState(AS_STRAFE, 0);
         return;
     }
 
@@ -518,7 +518,7 @@ void Grontar::SetActionState(u32 state, s32 param) {
     }
 
     field344 = 0;
-    stateDispatch = SD_STRAFE;
+    stateDispatch = SD_DIVE_ROLL;
     field348 = 8;
     field488 = 0;
 
@@ -1208,7 +1208,7 @@ void Paul::_GotHitHigh() {
     Humanoid::_GotHitHigh();
 
     if (((static_cast<u32>(commandBits) >> 6) & 1u) != 0) {
-        SetActionState(AS_BACKFLIP, 0);
+        SetActionState(AS_STRAFE, 0);
     }
 }
 
@@ -1219,7 +1219,7 @@ void Paul::_GotHitMed() {
     Humanoid::_GotHitMed();
 
     if (((static_cast<u32>(commandBits) >> 6) & 1u) != 0) {
-        SetActionState(AS_BACKFLIP, 0);
+        SetActionState(AS_STRAFE, 0);
     }
 }
 

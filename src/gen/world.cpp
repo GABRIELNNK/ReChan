@@ -1174,18 +1174,20 @@ static s32 g_switchLoadGroupIndex = 0;
 // PSX: directorGOTO (0x800DD6E8)
 static s32 g_directorGOTO = 0;
 
+void SeedPlayerLoadGroups(u32 primaryHash, u32 secondaryHash) {
+    g_switchLoadGroupHash[0] = primaryHash;
+    g_switchLoadGroupHash[1] = secondaryHash;
+}
+
 static void PurgeSwitchLoadGroups() {
-    if (g_characterManager) {
-        for (s32 index = 0; index < 2; index++) {
-            if (g_switchLoadGroupHash[index] != 0) {
+    for (s32 index = 0; index < 2; index++) {
+        if (g_switchLoadGroupHash[index] != 0) {
+            if (g_characterManager) {
                 g_characterManager->UnloadAnimation(AITypes::TT_PLAYER, g_switchLoadGroupHash[index]);
             }
+            g_switchLoadGroupHash[index] = 0;
+            g_switchLoadGroupIndex = index;
         }
-    }
-
-    for (s32 index = 0; index < 2; index++) {
-        g_switchLoadGroupHash[index] = 0;
-        g_switchLoadGroupIndex = index;
     }
 }
 
@@ -1236,34 +1238,42 @@ static PlayerModel* ResolveSwitchPlayerModel(Thing* thing) {
     return dynamic_cast<PlayerModel*>(model);
 }
 
+// PSX: gfAsyncLoadGroup__FP5ThingUlPPCc (SWITCH.CPP:819, 0x80094518)
 static s32 SwitchAsyncLoadGroup(Thing* /*thing*/, u32 argc, const char** argv) {
+    MARKFUNCTION(0x80094518);
+
     if (argc == 0 || !argv || !SwitchStringEqualsNoCase(argv[0], "keep")) {
         PurgeSwitchLoadGroups();
     }
 
-    u32 argIndex = 0;
-    if (argc > 0 && argv && SwitchStringEqualsNoCase(argv[0], "keep")) {
-        argIndex = 1;
-
-        if (argIndex < argc && argv[argIndex]) {
-            const u32 keepHash = p3dHash(argv[argIndex]);
-            for (s32 index = 0; index < 2; index++) {
-                if (g_switchLoadGroupHash[index] == keepHash) {
-                    g_switchLoadGroupIndex = (index == 0) ? 1 : 0;
-                    break;
-                }
-            }
-            argIndex++;
-        }
-    }
-
-    while (argIndex < argc) {
-        const char* name = argv[argIndex++];
+    for (u32 argIndex = 0; argv && argIndex < argc; argIndex++) {
+        const char* name = argv[argIndex];
         if (!name) {
             continue;
         }
 
-        LoadSwitchLoadGroup(name, p3dHash(name));
+        if (!SwitchStringEqualsNoCase(name, "keep")) {
+            LoadSwitchLoadGroup(name, p3dHash(name));
+            continue;
+        }
+
+        argIndex++;
+        if (argIndex >= argc) {
+            break;
+        }
+
+        const char* keepName = argv[argIndex];
+        if (!keepName) {
+            continue;
+        }
+
+        const u32 keepHash = p3dHash(keepName);
+        for (s32 slot = 0; slot < 2; slot++) {
+            if (g_switchLoadGroupHash[slot] == keepHash) {
+                g_switchLoadGroupIndex = (slot == 0) ? 1 : 0;
+                break;
+            }
+        }
     }
 
     return 1;
@@ -4253,6 +4263,10 @@ void World::LoadPetal(u32 petalIndex) {
     if (g_cameraManager) {
         g_cameraManager->SetupPaths();
     }
+
+    // PSX: gSyncLoadGroup(0); gSyncLoadGroup(1)
+    SyncSwitchLoadGroup(0);
+    SyncSwitchLoadGroup(1);
 
     rsEvent(RS_LEVEL_BEGIN, 0, 0, 0);
 

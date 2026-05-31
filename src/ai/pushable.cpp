@@ -199,7 +199,7 @@ void Pushable::MovePassengers() {
         }
 
         if (absVelX > kPassengerCarryThreshold || absVelZ > kPassengerCarryThreshold) {
-            if (hum->actionState < 0x2E) {
+            if (hum->actionState < (s32)AS_HIT_REACT_PUNCH_A) {
                 hum->HandleCollision(this, 1, 0x80000002, 4, 7, 10, 3, 14, 0);
                 if (hum->thingType != 0) {
                     if (g_scoreManager) {
@@ -478,7 +478,7 @@ void Pushable::HandleHumanoidCollision(Humanoid* hum) {
         return;
     }
 
-    if (hum->actionState >= 0x22 && hum->actionState < 0x24) {
+    if (hum->actionState >= (s32)AS_KICK_ATTACK && hum->actionState < (s32)AS_COMBAT_IDLE) {
         hum->homePos = correctedPos;
         return;
     }
@@ -486,7 +486,7 @@ void Pushable::HandleHumanoidCollision(Humanoid* hum) {
     const bool doImpulse = (hum->velocity.x != 0 || hum->velocity.z != 0) &&
         hum->actionState != (s32)AS_STAND &&
         hum->actionState != (s32)AS_PAUSE &&
-        hum->actionState != 12;
+        hum->actionState != (s32)AS_STRAFE;
 
     if (doImpulse) {
         const s32 sinY = rmSin16(hum->orientation.y);

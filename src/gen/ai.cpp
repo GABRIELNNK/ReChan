@@ -982,6 +982,30 @@ void AI::Populate() {
                     player->homePos = pt->pos;
                     player->pos = pt->pos;
 
+                    if (const DBAttrib* a52 = pt->FindAttrib(52)) {
+                        if (const char* loadGroupName = a52->GetAttribString()) {
+                            player->checkpoint.field44 = (s32)p3dHash(loadGroupName);
+                        }
+                        else {
+                            player->checkpoint.field44 = 0;
+                        }
+                    }
+                    else {
+                        player->checkpoint.field44 = 0;
+                    }
+
+                    if (const DBAttrib* a53 = pt->FindAttrib(53)) {
+                        if (const char* loadGroupName = a53->GetAttribString()) {
+                            player->checkpoint.field48 = (s32)p3dHash(loadGroupName);
+                        }
+                        else {
+                            player->checkpoint.field48 = 0;
+                        }
+                    }
+                    else {
+                        player->checkpoint.field48 = 0;
+                    }
+
                     s32 yRot = pt->field44;
                     player->SetDesiredMoveDirection(yRot);
                     player->FaceAngleY(yRot, 0);
@@ -991,6 +1015,13 @@ void AI::Populate() {
                         player->blockNum = (u16)a15->value;
                     }
                 }
+
+                // PSX mirrors the checkpoint-backed load-group hashes into the
+                // live player load-group state during Populate before World
+                // later re-syncs those groups onto the player slot.
+                SeedPlayerLoadGroups(
+                    static_cast<u32>(player->checkpoint.field44),
+                    static_cast<u32>(player->checkpoint.field48));
 
                 player->UpdatePosition();
                 player->flags |= TF_ACTIVATED;

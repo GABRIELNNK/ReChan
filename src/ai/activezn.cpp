@@ -458,7 +458,7 @@ s32 ActiveZone::DoActionsAtNode(LinearPath* path, s32 nodeIndex, Humanoid* human
                 break;
 
             case 'h':
-                humanoid->SetActionState(1, 0);
+                humanoid->SetActionState(AS_STAND, 0);
                 humanoid->RequestAction(7);
                 break;
 
@@ -469,7 +469,7 @@ s32 ActiveZone::DoActionsAtNode(LinearPath* path, s32 nodeIndex, Humanoid* human
             case 'j':
                 humanoid->field316 = nodeAttrib->GetAttrib('j');
                 humanoid->SetTauntAnim(nodeAttrib->GetAttrib('o'));
-                humanoid->SetActionState(5, 0);
+                humanoid->SetActionState(AS_TAUNT_PAUSE, 0);
                 break;
 
             case 'k':
@@ -499,9 +499,10 @@ s32 ActiveZone::DoActionsAtNode(LinearPath* path, s32 nodeIndex, Humanoid* human
 
             case 'o':
                 humanoid->SetTauntAnim(nodeAttrib->GetAttrib('o'));
-                if (humanoid->actionState != 5) {
+                if (humanoid->actionState != AS_TAUNT_PAUSE
+                    && humanoid->actionState != AS_TAUNT_ENTRY) {
                     humanoid->FaceThingDesired(Player::s_player);
-                    humanoid->SetActionState(4, 0);
+                    humanoid->SetActionState(AS_TAUNT_ENTRY, 0);
                 }
                 break;
 
@@ -510,7 +511,7 @@ s32 ActiveZone::DoActionsAtNode(LinearPath* path, s32 nodeIndex, Humanoid* human
                 break;
 
             case 'q':
-                humanoid->SetActionState(1, 0);
+                humanoid->SetActionState(AS_STAND, 0);
                 humanoid->RequestAction(5);
                 break;
 

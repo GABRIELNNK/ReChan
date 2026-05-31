@@ -19,14 +19,14 @@ enum ActionState : u32 {
     AS_STAND = 1,
     AS_STAND_ANIM = 2,
     AS_WALL_JUMP_TAUNT = 3,   // PSX Player case 3: wall jump taunt/idle
-    AS_STRAFE = 4,
+    AS_TAUNT_ENTRY = 4,       // PSX Humanoid case 4: taunt/provoke entry
     AS_TAUNT_PAUSE = 5,       // PSX Humanoid case 5: taunt/pause hold
     AS_PAUSE = 6,             // Humanoid: pause/guard. Player: running jump
     AS_JUMP = 8,              // standing jump (no tables)
     AS_WALL_JUMP = 9,         // PSX Player case 9: wall jump
     AS_RUN = 10,
-    AS_BACKFLIP = 11,         // PSX Player case 11: face enemy + strafe init
-    AS_DIVE_ROLL = 12,
+    AS_STRAFE = 11,           // PSX case 11: strafe/targeting init path
+    AS_DIVE_ROLL = 12,        // PSX case 12: dive-roll path
     AS_FALL = 13,
     AS_HARDFALL = 14,
     AS_HARDLAND = 15,
@@ -45,7 +45,9 @@ enum ActionState : u32 {
     AS_LADDER_DISMOUNT = 28,  // PSX: exit ladder (jump off)
     AS_HOTFOOT = 30,          // PSX case 30: feet-on-fire movement state
     AS_PUNCH_ATTACK = 32,
+    AS_STATE_33 = 33,        // PSX state 33: referenced by pressure gates
     AS_KICK_ATTACK = 34,
+    AS_STATE_35 = 35,        // PSX state 35: referenced by pressure/ledge gates
     AS_COMBAT_IDLE = 36,
     AS_BACK_GRAB_LATCH = 37,
     AS_BACK_GRAB = 38,
@@ -56,6 +58,12 @@ enum ActionState : u32 {
     AS_COUNTER_ATTACK_RECOVERY = 43,
     AS_PICKUP = 44,           // PSX Player case 44: pick up object
     AS_THROW_PICKUP = 45,
+    AS_HIT_REACT_PUNCH_A = 46, // PSX case 46: punch-react setup, got-hit-high dispatch
+    AS_HIT_REACT_KICK_A = 47,  // PSX case 47: kick-react setup, got-hit-med dispatch
+    AS_HIT_REACT_COMBO_A = 49, // PSX case 49: combo-react setup, got-hit-high dispatch
+    AS_HIT_REACT_COMBO_B = 50, // PSX case 50: replay-current react, got-hit-med dispatch
+    AS_STUN_REACT_PUNCH = 51,  // PSX case 51: punch-react setup, stunned dispatch
+    AS_STUN_REACT_KICK = 52,   // PSX case 52: kick-react setup, stunned dispatch
     AS_GOT_HIT_FREEFORM = 53, // PSX case 53: got-hit freeform hang/fall
     AS_STUNNED = 55,
     AS_SPIN_BACK = 56,        // PSX case 56: spin-back knockback
@@ -86,13 +94,13 @@ enum StateDispatch : u16 {
     SD_NONE = 0,
     SD_STAND = 22,
     // PSX dispatch values are class-specific vtable slots.
-    // Humanoid slot 23 -> _Taunt; Player slot 23 -> dive-roll handler.
+    // Slot 23: Humanoid -> _Taunt, Player -> _DiveRoll.
     SD_DIVE_ROLL = 23,
     SD_PAUSE = 24,
     SD_RUN = 25,
-    SD_BACKFLIP = 26,
-    // Humanoid slot 27 -> _DiveRoll; Player slot 27 -> _Straif.
-    SD_STRAFE = 27,
+    SD_STRAFE = 26,
+    // Slot 27: Humanoid -> _Straif, Player -> _DiveRoll.
+    SD_DIVE_ROLL_CHAIN = 27,
     SD_JUMP = 28,
     SD_FALL = 29,
     SD_GOT_HIT_HIGH = 30,
@@ -242,7 +250,7 @@ public:
     u16 field348 = 8;
 
     // PSX +352 (s32): input command bitfield (set by AI/controls, read by action handlers)
-    // Bits: 1=guard, 2=kick, 3=punch, 4=taunt, 5=strafe, 6=backflip,
+    // Bits: 1=guard, 2=kick, 3=punch, 4=taunt, 5=strafe, 6=strafe alternate,
     //        7=combat, 8-20=combos, 21=dive roll, 30=env hit, 31=explosion
     s32 commandBits = 0;
 

@@ -97,21 +97,21 @@ static Humanoid* bossPaul = nullptr;
 static s32 OscarHenchmanSyncCounter = 0;
 
 static bool IsPlayerAggressiveCombatState(s32 actionState) {
-    if ((u32)(actionState - 0x45) < 4u) {
+    if ((u32)(actionState - (s32)AS_COLLAPSE_STUN) < 4u) {
         return true;
     }
-    return actionState == 0x38;
+    return actionState == (s32)AS_SPIN_BACK;
 }
 
 static bool IsOscarSyncActionState(s32 actionState) {
     switch (actionState) {
-    case 0x24:
-    case 0x25:
-    case 0x26:
-    case 0x3B:
-    case 0x3C:
-    case 0x3D:
-    case 0x3E:
+    case AS_COMBAT_IDLE:
+    case AS_BACK_GRAB_LATCH:
+    case AS_BACK_GRAB:
+    case AS_THROW_CHARACTER_RECEIVE:
+    case AS_BACK_GRAB_RECEIVE_PRE_LATCH:
+    case AS_BACK_GRAB_RECEIVE_LATCH:
+    case AS_BACK_GRAB_RECEIVE:
         return true;
     default:
         return false;
@@ -120,12 +120,12 @@ static bool IsOscarSyncActionState(s32 actionState) {
 
 static bool IsDantePhase1PressureState(s32 actionState) {
     switch (actionState) {
-    case 6:
-    case 8:
-    case 13:
-    case 16:
-    case 33:
-    case 35:
+    case AS_PAUSE:
+    case AS_JUMP:
+    case AS_FALL:
+    case AS_FLIP:
+    case AS_STATE_33:
+    case AS_STATE_35:
         return true;
     default:
         return false;
@@ -741,7 +741,7 @@ void Behaviour::GrontarDMS(Behaviour* self) {
     }
 
     if (distanceToPlayer < GRONTAR_FAR_ATTACK_DIST) {
-        if (player->actionState == 12) {
+        if (player->actionState == (s32)AS_STRAFE) {
             owner->RequestAction(7);
             resetComboState();
             return;
@@ -790,8 +790,8 @@ void Behaviour::GrontarDMS(Behaviour* self) {
         return;
     }
 
-    if (player->actionState == 1) {
-        if (owner->actionState != 4 && (s32)rmRangedRandom(100) >= 99) {
+    if (player->actionState == (s32)AS_STAND) {
+        if (owner->actionState != (s32)AS_TAUNT_ENTRY && (s32)rmRangedRandom(100) >= 99) {
             owner->field316 = 0x5A;
             owner->RequestAction(0x15);
             return;
@@ -802,7 +802,7 @@ void Behaviour::GrontarDMS(Behaviour* self) {
     }
 
     s32 playerInField = 0;
-    if (player->actionState == 11 || player->actionState == 10) {
+    if (player->actionState == (s32)AS_STRAFE || player->actionState == (s32)AS_RUN) {
         playerInField = IsPointInFieldOf(player->pos, owner->pos, owner->orientation.y, 0x1555, 0x1555);
     }
 
@@ -936,11 +936,11 @@ void Behaviour::PaulDMS(Behaviour* self) {
 
     const s32 ownerInPlayerField = IsPointInFieldOf(owner->pos, player->pos, player->orientation.y, 0x1555, 0x1555) ? 1 : 0;
     const s32 playerPressureState = IsDantePhase1PressureState(player->actionState) ? 1 : 0;
-    const s32 playerIsStrafing = (player->actionState == 12) ? 1 : 0;
+    const s32 playerIsStrafing = (player->actionState == (s32)AS_STRAFE) ? 1 : 0;
     const s32 ownerInCombatState = ((u32)(owner->actionState - 0x20) < 5u) ? 1 : 0;
 
     s32& strafeDecision = self->field80To176[9]; // +0x74
-    if (owner->actionState == 11) {
+    if (owner->actionState == (s32)AS_STRAFE) {
         if (owner->GetStraifPhase() != 0) {
             if (strafeDecision == 2) {
                 owner->SetDesiredMoveDirection(owner->faceAngle + 0x8000);
@@ -1139,7 +1139,7 @@ void Behaviour::OscarDMS(Behaviour* self) {
         }
     }
 
-    if (player->actionState == 0x3E) {
+    if (player->actionState == (s32)AS_BACK_GRAB_RECEIVE) {
         if (distanceToPlayer <= OSCAR_CLOSE_DIST) {
             self->ComplexAttack();
             return;
@@ -1170,7 +1170,7 @@ void Behaviour::OscarDMS(Behaviour* self) {
         return;
     }
 
-    if (player->actionState == 0x0B && player->field256 == (uintptr_t)owner) {
+    if (player->actionState == (s32)AS_STRAFE && player->field256 == (uintptr_t)owner) {
         targetingBossFlag = 1;
     }
 
@@ -1372,7 +1372,7 @@ void Behaviour::OscarHenchmanDMS(Behaviour* self) {
 
     if (forwardPressure != 0) {
         if (distanceToPlayer <= OSCAR_CLOSE_DIST) {
-            if (bossOscar && bossOscar->actionState == 0x24) {
+            if (bossOscar && bossOscar->actionState == (s32)AS_COMBAT_IDLE) {
                 owner->RequestAction(1);
             }
             else {
@@ -1538,7 +1538,7 @@ void Behaviour::DanteDMS_Phase1(Behaviour* self) {
 
     const s32 ownerInPlayerField = IsPointInFieldOf(owner->pos, player->pos, player->orientation.y, 0x1555, 0x1555) ? 1 : 0;
     const s32 pressureState = IsDantePhase1PressureState(player->actionState) ? 1 : 0;
-    const s32 playerIsStrafing = (player->actionState == 12) ? 1 : 0;
+    const s32 playerIsStrafing = (player->actionState == (s32)AS_STRAFE) ? 1 : 0;
 
     if (IsPlayerAggressiveCombatState(player->actionState)) {
         self->nextHandlerThisOffset = 0;
@@ -1826,7 +1826,7 @@ void Behaviour::DanteDMS_Phase3(Behaviour* self) {
         return;
     }
 
-    if (owner->actionState != 0x50 && (s32)rmRangedRandom(100) < 40) {
+    if (owner->actionState != (s32)AS_TARGET_MISSILE_ATTACK && (s32)rmRangedRandom(100) < 40) {
         owner->field316 = 0x5A;
         owner->RequestAction(0x15);
         return;
@@ -2319,10 +2319,10 @@ void Behaviour::PlayerUserControl(Behaviour* self) {
 
     if ((u32)(actionReq - 2) < 3
         || actionReq == GA_STRAFE
+        || actionReq == 19
         || actionReq == GA_GRAB
         || actionReq == GA_GRAB_FORWARD
-        || actionReq == GA_GRAB_HELD
-        || actionReq == GA_GRAB_FWD_HELD) {
+        || actionReq == 16) {
         owner->SetDesiredMoveDirection(targetAngle);
     }
 
@@ -2685,7 +2685,7 @@ void Behaviour::NDMS(Behaviour* b) {
         b->comboScriptCursor = 0;
     }
 
-    if ((u32)(actionState - 69) < 4u || actionState == 56) {
+    if ((u32)(actionState - (s32)AS_COLLAPSE_STUN) < 4u || actionState == (s32)AS_SPIN_BACK) {
         return;
     }
 
@@ -3380,8 +3380,8 @@ void Behaviour::DieWhenWeHitTheGround(Behaviour* b) {
         b->owner->health = 0;
     }
 
-    if (b->owner->actionState != 72) {
-        b->owner->SetActionState(72, 0);
+    if (b->owner->actionState != (s32)AS_DEAD) {
+        b->owner->SetActionState(AS_DEAD, 0);
     }
 }
 

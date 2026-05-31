@@ -388,7 +388,7 @@ void Launcher::HandleHumanoidDefaultLaunch(Humanoid* hum) {
         if (flags & TF_ON_GROUND) {
             // First launch: clear launcher's TF_ON_GROUND, set player action state
             flags &= ~TF_ON_GROUND;
-            hum->SetActionState(0x10, 0);
+            hum->SetActionState(AS_FLIP, 0);
         }
         else {
             // Subsequent launch: use constant force Y instead

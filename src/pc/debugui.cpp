@@ -269,7 +269,6 @@ static const char* ActionStateName(s32 s) {
         case AS_JUMP: return "Jump";
         case AS_WALL_JUMP: return "WallJump";
         case AS_RUN: return "Run";
-        case AS_BACKFLIP: return "Backflip";
         case AS_STRAFE: return "Strafe";
         case AS_FALL: return "Fall";
         case AS_HARDFALL: return "HardFall";
@@ -544,8 +543,8 @@ static const char* StateDispatchName(u16 d) {
         case SD_DIVE_ROLL: return "DiveRoll";
         case SD_PAUSE: return "Pause";
         case SD_RUN: return "Run";
-        case SD_BACKFLIP: return "Backflip";
         case SD_STRAFE: return "Strafe";
+        case SD_DIVE_ROLL_CHAIN: return "StrafeChain";
         case SD_JUMP: return "Jump";
         case SD_FALL: return "Fall";
         case SD_GOT_HIT_HIGH: return "GotHitHigh";
@@ -1821,7 +1820,7 @@ void DebugUI::Draw() {
                 ImGui::SeparatorText("Input Bits");
                 ImGui::Text("Command Bits: 0x%08X", cb);
                 ImGui::Text("Run:%d Jump:%d Guard:%d Strafe:%d", (cb >> 2) & 1, (cb >> 3) & 1, (cb >> 4) & 1, (cb >> 5) & 1);
-                ImGui::Text("Backflip:%d Attack:%d Pickup:%d", (cb >> 6) & 1, (cb >> 7) & 1, (cb >> 15) & 1);
+                ImGui::Text("Strafe2:%d Attack:%d Pickup:%d", (cb >> 6) & 1, (cb >> 7) & 1, (cb >> 15) & 1);
 
                 ImGui::SeparatorText("Stats");
                 ImGui::Text("Health: %d", p->health);
