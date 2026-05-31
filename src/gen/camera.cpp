@@ -694,16 +694,9 @@ void Camera::DebugCam() {
     }
 
     if (p3d::input->IsKeyTriggered(KEY_ENTER)) {
-        if (Player::s_player) {
-            Player::s_player->pos = position;
-            Player::s_player->homePos = position;
-            Player::s_player->velocity = {};
-            Player::s_player->contactForce = {};
-
-            World* world = g_game ? g_game->GetWorld() : nullptr;
-            if (world) {
-                world->CheckThingSwitches(Player::s_player);
-            }
+        Player* player = Player::s_player;
+        if (player) {
+            player->Teleport(position);
         }
     }
 

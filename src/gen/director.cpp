@@ -474,6 +474,117 @@ static s32 sndchina3[18] = {
     0x100030C2, 0x100030C9, 0x00000000,
 };
 
+// PSX: sewer NIS sound tables at 0x800D6B44/0x800D6BA0/0x800D6C00.
+// Packed format: high nibble event type, middle sound id, low 12 bits frame.
+static s32 sndsewer1[23] = {
+    0x10099000, 0x10003002, 0x1009D007, 0x10003018, 0x10012036,
+    0x10088040, 0x10009074, 0x1000306E, 0x10003074, 0x100B7080,
+    0x1009D080, 0x10023080, 0x1001A08C, 0x1001A09A, 0x1000D0A6,
+    0x100880A7, 0x100010AE, 0x100010B1, 0x100010B7, 0x100010CD,
+    0x100890D1, 0x100090D5, 0x00000000,
+};
+
+static s32 sndsewer2[24] = {
+    0x1000300B, 0x10003016, 0x1000301E, 0x10003026, 0x10003029,
+    0x1001A02D, 0x1001A03D, 0x100C7041, 0x1001A046, 0x100C7049,
+    0x100C7056, 0x1000305D, 0x1001A061, 0x2000D09B, 0x300000AC,
+    0x1001A0BE, 0x1001E0C4, 0x1000D0CE, 0x100010D7, 0x100010DA,
+    0x100190D9, 0x100010DD, 0x100010F3, 0x00000000,
+};
+
+static s32 sndsewer3[13] = {
+    0x1002A000, 0x1009D000, 0x10099014, 0x1009902C, 0x10099041,
+    0x10099055, 0x10099067, 0x10099077, 0x1009908A, 0x10099099,
+    0x100990A7, 0x100090B3, 0x00000000,
+};
+
+// PSX: additional director sound tables in 0x800D6ACC..0x800D6F00.
+static s32 sndwater1[9] = {
+    0x1001A007, 0x1000C00D, 0x1000301B, 0x1000301F, 0x1001A04D,
+    0x1001A070, 0x10003077, 0x1000307A, 0x00000000,
+};
+
+static s32 sndwater2[14] = {
+    0x10003007, 0x1001A00B, 0x10012013, 0x2000B014, 0x100C6037,
+    0x3000005C, 0x1000A06A, 0x10011071, 0x100000CB, 0x100000D6,
+    0x1001A0E1, 0x100000F4, 0x100000F7, 0x00000000,
+};
+
+static s32 sndwater3[7] = {
+    0x10093000, 0x1000C02C, 0x1000303B, 0x10003041, 0x10003046,
+    0x10003074, 0x00000000,
+};
+
+static s32 sndroof1[40] = {
+    0x10003002, 0x1000300A, 0x10003013, 0x1000301B, 0x10003022,
+    0x1008302C, 0x10003044, 0x1008304E, 0x10003062, 0x1001A067,
+    0x1001A071, 0x1008406E, 0x1008608F, 0x10086098, 0x100030AE,
+    0x100030BD, 0x100110D0, 0x100030DE, 0x100030E4, 0x100030EC,
+    0x100030F4, 0x100030FC, 0x10095102, 0x1000C139, 0x1000C141,
+    0x10003142, 0x10003145, 0x10003148, 0x10003162, 0x1000316F,
+    0x10003177, 0x10003186, 0x1001A19F, 0x1001A1A9, 0x100031B8,
+    0x1001A1C7, 0x1001A1D0, 0x100031E6, 0x100031E7, 0x00000000,
+};
+
+static s32 sndroof2[34] = {
+    0x1000100F, 0x1000301E, 0x1001A02C, 0x1001A036, 0x10083039,
+    0x10003045, 0x1000304D, 0x1000304F, 0x1001A04F, 0x10025058,
+    0x1008A059, 0x10003060, 0x1001206A, 0x2000B06B, 0x10012087,
+    0x100120B7, 0x100260B8, 0x100220B8, 0x1001A0B8, 0x300000C6,
+    0x1000C0F5, 0x1000C0FD, 0x100030FE, 0x10003100, 0x10003101,
+    0x10094118, 0x1001A120, 0x1000312C, 0x10003132, 0x10003139,
+    0x10003140, 0x10003147, 0x10003166, 0x00000000,
+};
+
+static s32 sndroof3[18] = {
+    0x10093000, 0x10087000, 0x1001A03B, 0x1000806A, 0x10029090,
+    0x100290A7, 0x100030AB, 0x100030AE, 0x100030B8, 0x100030BE,
+    0x100030E7, 0x100030E8, 0x1001A128, 0x1001A133, 0x1001A143,
+    0x10003149, 0x1000314A, 0x00000000,
+};
+
+static s32 sndfactory1[30] = {
+    0x10099002, 0x10003006, 0x10083012, 0x1000A01C, 0x1000A026,
+    0x1000302E, 0x10003036, 0x10003039, 0x1001A045, 0x100B7045,
+    0x1000304A, 0x1001A04F, 0x10096053, 0x10090053, 0x1000305A,
+    0x10003061, 0x1001A064, 0x1000306A, 0x1000306F, 0x1001A070,
+    0x10012074, 0x10003075, 0x10096078, 0x1008A079, 0x1000307A,
+    0x10003080, 0x1001A091, 0x10096093, 0x1000C0A7, 0x00000000,
+};
+
+static s32 sndfactory2[22] = {
+    0x20022000, 0x10003003, 0x1000300B, 0x1009A00F, 0x10003011,
+    0x1000301F, 0x10003026, 0x1000304C, 0x1000305B, 0x1009A0B6,
+    0x100030BA, 0x100030BE, 0x1001A0DA, 0x1000C0EA, 0x100030F2,
+    0x100030F6, 0x1001A102, 0x1001A10C, 0x10022122, 0x1000312D,
+    0x30022135, 0x00000000,
+};
+
+static s32 sndfactory3[22] = {
+    0x10003001, 0x10003009, 0x10003012, 0x10003017, 0x1001A020,
+    0x10056027, 0x1001A02A, 0x1001A02C, 0x1006503E, 0x1008903F,
+    0x1002F048, 0x1002F04F, 0x1009308E, 0x100930B3, 0x1001A0C8,
+    0x1000C0E2, 0x100030EF, 0x100030F1, 0x100030FA, 0x10003100,
+    0x10003120, 0x00000000,
+};
+
+static s32 sndtable_800D6ECC[3] = {
+    0x1000300D, 0x100030A6, 0x00000000,
+};
+
+static s32 sndtable_800D6ED8[7] = {
+    0x1000301A, 0x1000302E, 0x10003058, 0x1000306C, 0x10003091,
+    0x1000309E, 0x00000000,
+};
+
+static s32 sndtable_800D6EF4[3] = {
+    0x10007012, 0x10007075, 0x00000000,
+};
+
+static s32 sndtable_800D6F00[5] = {
+    0x10007011, 0x1000702D, 0x1000302F, 0x10003081, 0x00000000,
+};
+
 // PSX: fade script at 0x800CC36C.
 // Called by victory_poor/ok/good/perfect before tally/dialog branches.
 static s32 fade[8] = {
@@ -641,6 +752,22 @@ static void RegisterKnownDirectorScriptRegions() {
     registerCompiledOverlayScript(0x800D69E4u, sndchina1, ScriptArrayWordCount(sndchina1));
     registerCompiledOverlayScript(0x800D6A44u, sndchina2, ScriptArrayWordCount(sndchina2));
     registerCompiledOverlayScript(0x800D6A84u, sndchina3, ScriptArrayWordCount(sndchina3));
+    registerCompiledOverlayScript(0x800D6ACCu, sndwater1, ScriptArrayWordCount(sndwater1));
+    registerCompiledOverlayScript(0x800D6AF0u, sndwater2, ScriptArrayWordCount(sndwater2));
+    registerCompiledOverlayScript(0x800D6B28u, sndwater3, ScriptArrayWordCount(sndwater3));
+    registerCompiledOverlayScript(0x800D6B44u, sndsewer1, ScriptArrayWordCount(sndsewer1));
+    registerCompiledOverlayScript(0x800D6BA0u, sndsewer2, ScriptArrayWordCount(sndsewer2));
+    registerCompiledOverlayScript(0x800D6C00u, sndsewer3, ScriptArrayWordCount(sndsewer3));
+    registerCompiledOverlayScript(0x800D6C34u, sndroof1, ScriptArrayWordCount(sndroof1));
+    registerCompiledOverlayScript(0x800D6CD4u, sndroof2, ScriptArrayWordCount(sndroof2));
+    registerCompiledOverlayScript(0x800D6D5Cu, sndroof3, ScriptArrayWordCount(sndroof3));
+    registerCompiledOverlayScript(0x800D6DA4u, sndfactory1, ScriptArrayWordCount(sndfactory1));
+    registerCompiledOverlayScript(0x800D6E1Cu, sndfactory2, ScriptArrayWordCount(sndfactory2));
+    registerCompiledOverlayScript(0x800D6E74u, sndfactory3, ScriptArrayWordCount(sndfactory3));
+    registerCompiledOverlayScript(0x800D6ECCu, sndtable_800D6ECC, ScriptArrayWordCount(sndtable_800D6ECC));
+    registerCompiledOverlayScript(0x800D6ED8u, sndtable_800D6ED8, ScriptArrayWordCount(sndtable_800D6ED8));
+    registerCompiledOverlayScript(0x800D6EF4u, sndtable_800D6EF4, ScriptArrayWordCount(sndtable_800D6EF4));
+    registerCompiledOverlayScript(0x800D6F00u, sndtable_800D6F00, ScriptArrayWordCount(sndtable_800D6F00));
     registerCompiledOverlayScript(0x800208BCu, boss_setup, ScriptArrayWordCount(boss_setup));
     registerCompiledOverlayScript(0x80020904u, boss_genericStartNIS, ScriptArrayWordCount(boss_genericStartNIS));
     registerCompiledOverlayScript(0x80020918u, boss_victory_widescreen, ScriptArrayWordCount(boss_victory_widescreen));

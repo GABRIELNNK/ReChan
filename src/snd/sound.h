@@ -25,6 +25,8 @@ public:
     // PC: per-bank sample handles (22 banks x 71 slots)
     struct BankInfo {
         AudioSample samples[MAX_SAMPLES_PER_BANK] = {};
+        // Raw descriptor word at +8 from RSDBACH tag 0x11 table (used by rsdAllocPhonograph).
+        u32 descriptorWord2[MAX_SAMPLES_PER_BANK] = {};
         u32 numSamples = 0;
     };
     BankInfo banks[MAX_WAX_BANKS] = {};

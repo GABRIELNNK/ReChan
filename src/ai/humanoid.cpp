@@ -2638,13 +2638,9 @@ void Humanoid::SetActionState(u32 state, s32 param) {
         case 50:
             if (model) {
                 Model* m = static_cast<Model*>(model);
-                AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);
-                if (anim) {
-                    // PSX case 50 replays the current anim and arms CallNextAction.
-                    // Force reapply to avoid same-anim early-out keeping callback path inert.
-                    m->SetAnim(anim->animEnum, param, 1, 0);
-                    SetCallNextActionCallback(m);
-                }
+                // PSX case 50 selects anim 12 and arms CallNextAction.
+                m->SetAnim(12, param, 0, 0);
+                SetCallNextActionCallback(m);
             }
             walkCycleFlag = 1;
             field344 = 0;

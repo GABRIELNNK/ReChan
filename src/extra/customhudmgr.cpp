@@ -2144,12 +2144,6 @@ void CustomHudMgr::DrawTallyOverlay(const HUD& hud) {
         }
     }
 
-    if (!useDebugPreview && hud.tally.rdragonBonusOvl.IsVisible()) {
-        if (BeginHudText(kHudBodyFontName, 0.30f, TextAlign_Center, 0, 0, 0, 255, false, false)) {
-            g_textManager->PrintString(dragonBonusText, HudX(x + w * 0.5f), HudY(y + h - 30.0f));
-        }
-    }
-
     if (movieBonusVisible) {
         m_tallyMovieBonusShakePhase += dt;
         if (m_tallyMovieBonusShakePhase > 1024.0f) {

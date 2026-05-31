@@ -46,6 +46,8 @@
 #include "pc/settings.h"
 #include "radlib/rtask.h"
 
+#include <thread>
+
 #if CUSTOM_TEXT
 #include "extra/customtext.h"
 #endif
@@ -489,29 +491,18 @@ void Game::MenuFade() {
     MARKFUNCTION(0x80029E34);
 
     while (jcsIsPlaying()) {
-        const f64 frameStart = Time::GetTimeInSeconds();
-        // Keep PSX-style frame-based dialog timeouts advancing while this
-        // blocking gate waits for jcsIsPlaying() to clear.
-        if (g_time) {
-            g_time->Step();
-        }
-        rDoTaskList(&rMainTaskList, 0);
-        if (g_time) {
-            g_time->WaitForFrameEnd(frameStart);
-        }
+        rDoTaskList(&rMainTaskList, rFrameCount60);
+        std::this_thread::yield();
     }
 
     FadeBegin();
     while (FadeUpdate()) {
-        const f64 frameStart = Time::GetTimeInSeconds();
         g_display->BeginFrame();
         MenuRender(nullptr);
         FadeRender();
         g_display->EndFrame();
-        rDoTaskList(&rMainTaskList, 0);
-        if (g_time) {
-            g_time->WaitForFrameEnd(frameStart);
-        }
+        rDoTaskList(&rMainTaskList, rFrameCount60);
+        std::this_thread::yield();
     }
     FadeEnd();
 

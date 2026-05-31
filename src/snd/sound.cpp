@@ -78,6 +78,10 @@ void Sound::SetupSound() {
         banks[i].numSamples = count;
 
         for (u32 j = 0; j < count; j++) {
+            if (j < bank.sampleDescs.size()) {
+                banks[i].descriptorWord2[j] = bank.sampleDescs[j].flags;
+            }
+
             if (bank.pcmSamples[j].empty()) continue;
             u32 numFrames = (u32)bank.pcmSamples[j].size();
 

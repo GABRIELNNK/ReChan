@@ -16,6 +16,45 @@ static u32 g_dialogHeaderSize = 0;
 static u32 g_dialogDataBaseOffset = 0;
 static u16 g_lastDialogChoiceOffset = 0;
 
+static void SetDlgStatus(s32 status);
+
+static u32 GetDialogPhonographIndexForActiveBank() {
+    // PSX LocInfo[loc][6] values at 0x800D6588:
+    // normal levels use 46, Chinatown/Sewer bosses use 48, Rooftop boss uses 47.
+    if (!g_sound) {
+        return 46;
+    }
+
+    const s32 bank = g_sound->activeSfxBank;
+    if (bank == 3 || bank == 11) {
+        return 48;
+    }
+    if (bank == 15) {
+        return 47;
+    }
+    return 46;
+}
+
+static u32 GetDialogTransferLimitBytes() {
+    if (!g_sound || g_sound->activeSfxBank < 0) {
+        return 0;
+    }
+
+    const u32 bank = (u32)g_sound->activeSfxBank;
+    if (bank >= MAX_WAX_BANKS) {
+        return 0;
+    }
+
+    const u32 phonographIndex = GetDialogPhonographIndexForActiveBank();
+    if (phonographIndex >= MAX_SAMPLES_PER_BANK) {
+        return 0;
+    }
+
+    // PSX rsdAllocPhonograph returns 2 * descriptor[+8] into gp+1224.
+    const u32 halfwords = g_sound->banks[bank].descriptorWord2[phonographIndex];
+    return halfwords * 2u;
+}
+
 static s32 ComputeDialogLoadDelayFrames(u32 sectors) {
     if (sectors == 0) {
         return 1;
@@ -111,6 +150,7 @@ static bool SelectDialogClipOffset(s32 character, s32 dialogID, u32* outStart, u
 
     const u8 dialogCount = DialogHeaderU8(charInfoOffset);
     if (dialogCount == 0) {
+        SetDlgStatus(8);
         return false;
     }
 
@@ -129,11 +169,12 @@ static bool SelectDialogClipOffset(s32 character, s32 dialogID, u32* outStart, u
         }
     }
     if (dialogIndex < 0) {
+        SetDlgStatus(8);
         return false;
     }
 
     const u32 streamSectors = (u32)DialogHeaderU16(streamTableOffset + ((u32)dialogIndex * 2));
-    u32 streamStart = g_dialogDataBaseOffset + streamSectors * DIALOG_SECTOR_SIZE;
+    const u32 streamStartBase = g_dialogDataBaseOffset + streamSectors * DIALOG_SECTOR_SIZE;
 
     const u16 clipInfoOffset = DialogHeaderU16(clipInfoTableOffset + ((u32)dialogIndex * 2));
     if (clipInfoOffset >= g_dialogHeaderSize) {
@@ -142,6 +183,7 @@ static bool SelectDialogClipOffset(s32 character, s32 dialogID, u32* outStart, u
 
     const u8 clipCount = DialogHeaderU8(clipInfoOffset);
     if (clipCount == 0) {
+        SetDlgStatus(8);
         return false;
     }
 
@@ -150,81 +192,85 @@ static bool SelectDialogClipOffset(s32 character, s32 dialogID, u32* outStart, u
         return false;
     }
 
-    u8 available[256] = {};
-    u32 availableCount = 0;
-    for (u32 i = 0; i < (u32)clipCount; ++i) {
-        const u8 flags = DialogHeaderU8(clipSizeTableOffset + i);
-        if ((flags & 0xC0) == 0) {
-            available[availableCount++] = (u8)i;
-        }
-    }
+    const u32 transferLimitBytes = GetDialogTransferLimitBytes();
 
-    if (availableCount == 0) {
-        for (u32 i = 0; i < (u32)clipCount; ++i) {
-            const u32 off = clipSizeTableOffset + i;
-            const u8 flags = DialogHeaderU8(off);
-            if ((flags & 0x80) != 0 && (flags & 0x40) == 0) {
-                g_dialogHeader[off] = (u8)(flags & 0x3F);
-            }
-        }
-
+    while (true) {
+        u8 available[256] = {};
+        u32 availableCount = 0;
         for (u32 i = 0; i < (u32)clipCount; ++i) {
             const u8 flags = DialogHeaderU8(clipSizeTableOffset + i);
             if ((flags & 0xC0) == 0) {
                 available[availableCount++] = (u8)i;
             }
         }
-    }
 
-    if (availableCount == 0) {
-        return false;
-    }
+        if (availableCount == 0) {
+            for (u32 i = 0; i < (u32)clipCount; ++i) {
+                const u32 off = clipSizeTableOffset + i;
+                const u8 flags = DialogHeaderU8(off);
+                if ((flags & 0x80) != 0 && (flags & 0x40) == 0) {
+                    g_dialogHeader[off] = (u8)(flags & 0x3F);
+                }
+            }
 
-    u32 selectedSlot = (u32)rmRangedRandom((s32)availableCount);
-    u32 selected = (u32)available[selectedSlot];
-    u16 choiceOffset = (u16)(clipSizeTableOffset + selected);
-
-    // PSX avoids immediate repeats when multiple variants are available,
-    // but it does not fail dialog playback if only one choice exists.
-    if (availableCount > 1 && choiceOffset == g_lastDialogChoiceOffset) {
-        for (u32 i = 1; i < availableCount; ++i) {
-            const u32 trySlot = (selectedSlot + i) % availableCount;
-            const u32 trySelected = (u32)available[trySlot];
-            const u16 tryOffset = (u16)(clipSizeTableOffset + trySelected);
-            if (tryOffset != g_lastDialogChoiceOffset) {
-                selectedSlot = trySlot;
-                selected = trySelected;
-                choiceOffset = tryOffset;
-                break;
+            for (u32 i = 0; i < (u32)clipCount; ++i) {
+                const u8 flags = DialogHeaderU8(clipSizeTableOffset + i);
+                if ((flags & 0xC0) == 0) {
+                    available[availableCount++] = (u8)i;
+                }
             }
         }
-    }
 
-    for (u32 i = 0; i < selected; ++i) {
-        const u32 clipSectors = (u32)(DialogHeaderU8(clipSizeTableOffset + i) & 0x3F);
-        streamStart += clipSectors * DIALOG_SECTOR_SIZE;
-    }
+        if (availableCount == 0) {
+            SetDlgStatus(9);
+            return false;
+        }
 
-    const u32 selectedSectors = (u32)(DialogHeaderU8(choiceOffset) & 0x3F);
-    const u32 clipSize = selectedSectors * DIALOG_SECTOR_SIZE;
-    if (clipSize == 0) {
-        return false;
-    }
+        const u32 selectedSlot = (u32)rmRangedRandom((s32)availableCount);
+        const u32 selected = (u32)available[selectedSlot];
+        const u16 choiceOffset = (u16)(clipSizeTableOffset + selected);
 
-    const u32 clipEnd = streamStart + clipSize;
-    if (streamStart >= g_dialogFileData.size() || clipEnd > g_dialogFileData.size()) {
-        return false;
-    }
+        // PSX SelectDialog rejects immediate repeat selection instead of rerolling.
+        if (choiceOffset == g_lastDialogChoiceOffset) {
+            SetDlgStatus(9);
+            return false;
+        }
 
-    *outStart = streamStart;
-    *outEnd = clipEnd;
-    *outChoiceOffset = choiceOffset;
-    *outSectors = selectedSectors;
-    return true;
+        u32 streamStart = streamStartBase;
+        for (u32 i = 0; i < selected; ++i) {
+            const u32 clipSectors = (u32)(DialogHeaderU8(clipSizeTableOffset + i) & 0x3F);
+            streamStart += clipSectors * DIALOG_SECTOR_SIZE;
+        }
+
+        const u32 selectedSectors = (u32)(DialogHeaderU8(choiceOffset) & 0x3F);
+        const u32 clipSize = selectedSectors * DIALOG_SECTOR_SIZE;
+        if (clipSize == 0) {
+            return false;
+        }
+
+        if (transferLimitBytes < clipSize) {
+            SetDlgStatus(10);
+            if ((u32)choiceOffset < g_dialogHeader.size()) {
+                g_dialogHeader[choiceOffset] = (u8)(DialogHeaderU8(choiceOffset) | 0x40);
+            }
+            continue;
+        }
+
+        const u32 clipEnd = streamStart + clipSize;
+        if (streamStart >= g_dialogFileData.size() || clipEnd > g_dialogFileData.size()) {
+            return false;
+        }
+
+        *outStart = streamStart;
+        *outEnd = clipEnd;
+        *outChoiceOffset = choiceOffset;
+        *outSectors = selectedSectors;
+        return true;
+    }
 }
 
-static AudioSample LoadDialogSample(s32 character, s32 dialogID, u32* outSectors) {
-    if (!outSectors) {
+static AudioSample LoadDialogSample(s32 character, s32 dialogID, u16* outChoiceOffset, u32* outSectors) {
+    if (!outChoiceOffset || !outSectors) {
         return AUDIO_SAMPLE_INVALID;
     }
 
@@ -248,8 +294,7 @@ static AudioSample LoadDialogSample(s32 character, s32 dialogID, u32* outSectors
         return AUDIO_SAMPLE_INVALID;
     }
 
-    g_dialogHeader[choiceOffset] = (u8)(g_dialogHeader[choiceOffset] | 0x80);
-    g_lastDialogChoiceOffset = choiceOffset;
+    *outChoiceOffset = choiceOffset;
     *outSectors = selectedSectors;
     return sample;
 }
@@ -276,6 +321,8 @@ static s32 g_primaryDialogPriority = -1;
 static s32 g_secondaryDialogPriority = -1;
 // PSX: gp+1212 - JCSDLG state machine status used by handle validation/playability.
 static s32 g_dialogStatus = 0;
+// PSX: gp+1208 - dialog system enabled by jcsStartDialog / disabled by jcsStopDialog.
+static s32 g_dialogSystemStarted = 0;
 // Host bookkeeping for PSX-like async load state transition (state 1 -> 5).
 static s32 g_dialogLoadPending = 0;
 static s32 g_dialogLoadRequestFrame = -1;
@@ -296,6 +343,7 @@ static_assert(sizeof(DialogQueueInfo) == 32, "DialogQueueInfo must match PSX g_D
 static DialogQueueInfo g_dialogQueues[2] = {};
 // PSX: gp+1236 - SetDlgStatus output value.
 static s32 g_dialogResultStatus = 0;
+static bool g_dialogStatusUpdateInProgress = false;
 
 enum DialogStatus : s32 {
     DialogStatus_Idle = 0,
@@ -327,6 +375,9 @@ static void ClearDialogPendingLoadState();
 static void PromotePendingDialogLoadState();
 static void UpdateDialogStatusFromSlots();
 static s32 IsPrimaryHandle(s32 handle);
+static s32 PlayDialogHandle(DialogEntry* entry);
+static s32 PlayLoadedState(s32 playPosition, s32 nextState);
+static s32 PlayDialogRequest(s32 handleParam, s32 playPosition, u32 timeout);
 
 // PSX: SetDlgStatus__F9DlgStatus
 static void SetDlgStatus(s32 status) {
@@ -591,26 +642,6 @@ static DialogEntry* FindDialogEntry(s32 handle) {
     return nullptr;
 }
 
-static DialogEntry* FindDialogEntryByClip(s32 character, s32 dialogId, s32 priority) {
-    DialogEntry* primaryEntry = FindDialogEntry(g_primaryDialogHandle);
-    if (primaryEntry
-        && primaryEntry->character == character
-        && primaryEntry->dialogId == dialogId
-        && primaryEntry->priority == priority) {
-        return primaryEntry;
-    }
-
-    DialogEntry* secondaryEntry = FindDialogEntry(g_secondaryDialogHandle);
-    if (secondaryEntry
-        && secondaryEntry->character == character
-        && secondaryEntry->dialogId == dialogId
-        && secondaryEntry->priority == priority) {
-        return secondaryEntry;
-    }
-
-    return nullptr;
-}
-
 static bool IsDialogEntryPlaying(const DialogEntry* entry) {
     return entry
         && entry->voice != AUDIO_VOICE_INVALID
@@ -659,6 +690,54 @@ static void PromoteSecondaryToPrimarySlot() {
     g_secondaryDialogPriority = -1;
 }
 
+// PSX: CheckFlushCount__F5Queue (JCSDLG.CPP:1859, 0x80043700)
+static void CheckDialogFlushCount(s32 queue) {
+    if (queue < 0 || queue >= 2) {
+        return;
+    }
+
+    DialogQueueInfo& q = g_dialogQueues[queue];
+    if (q.flushFrame == 0) {
+        return;
+    }
+
+    const s32 frameCounter = GetDialogFrameCounter();
+    if (q.flushFrame > frameCounter - 1200) {
+        return;
+    }
+
+    q.flushFrame = frameCounter;
+    if (queue == 0 && g_dialogQueues[0].priority >= 0x3FFFFFFF) {
+        KillDialogByHandleInternal(g_primaryDialogHandle);
+    }
+}
+
+// PSX: DialogTask states 5..9 (JCSDLG.CPP:1977..2014, 0x80043808)
+static void ProcessDialogLoadedStates() {
+    if (g_dialogStatus < DialogStatus_LoadedPrimary || g_dialogStatus > DialogStatus_LoadedPrimaryAndSecondary) {
+        return;
+    }
+
+    DialogQueueInfo& q0 = g_dialogQueues[0];
+    if (q0.timeoutFrame != 0) {
+        const s32 frameCounter = GetDialogFrameCounter();
+        if (q0.timeoutFrame < frameCounter) {
+            KillDialogByHandleInternal(g_primaryDialogHandle);
+            SetDlgStatus(12);
+        }
+        else {
+            PlayDialogRequest(g_primaryDialogHandle, q0.playPosition, 0u);
+        }
+    }
+    else {
+        CheckDialogFlushCount(0);
+    }
+
+    if (g_dialogStatus == DialogStatus_LoadedPrimaryAndSecondary) {
+        CheckDialogFlushCount(1);
+    }
+}
+
 static void ReleaseNonSlotDialogEntries() {
     for (s32 i = 0; i < DIALOG_ENTRY_COUNT; ++i) {
         DialogEntry& entry = g_dialogEntries[i];
@@ -675,18 +754,18 @@ static void ReleaseNonSlotDialogEntries() {
 }
 
 static void UpdateDialogStatusFromSlots() {
+    if (g_dialogStatusUpdateInProgress) {
+        return;
+    }
+
+    g_dialogStatusUpdateInProgress = true;
+
     DialogEntry* primaryEntry = FindDialogEntry(g_primaryDialogHandle);
     DialogEntry* secondaryEntry = FindDialogEntry(g_secondaryDialogHandle);
 
-    // PSX dialog play requests carry a timeout; once it expires, stop the
-    // active primary voice so state transitions proceed on the same frame tick.
-    if (primaryEntry
-        && g_dialogQueues[0].handle == primaryEntry->handle
-        && g_dialogQueues[0].timeoutFrame > 0
-        && IsDialogEntryPlaying(primaryEntry)
-        && GetDialogFrameCounter() >= g_dialogQueues[0].timeoutFrame) {
-        StopDialogEntryVoice(primaryEntry);
-    }
+    ProcessDialogLoadedStates();
+    primaryEntry = FindDialogEntry(g_primaryDialogHandle);
+    secondaryEntry = FindDialogEntry(g_secondaryDialogHandle);
 
     // PSX DialogTask states 10..14: transition when voice stops.
     if (primaryEntry
@@ -778,6 +857,7 @@ static void UpdateDialogStatusFromSlots() {
     if (!primaryEntry) {
         g_dialogStatus = DialogStatus_Idle;
         ClearDialogPendingLoadState();
+        g_dialogStatusUpdateInProgress = false;
         return;
     }
 
@@ -785,12 +865,15 @@ static void UpdateDialogStatusFromSlots() {
         if (g_dialogStatus < DialogStatus_PlayingPrimary || g_dialogStatus > DialogStatus_PlayingPrimaryState14) {
             g_dialogStatus = secondaryEntry ? DialogStatus_PlayingPrimaryWithSecondary : DialogStatus_PlayingPrimary;
         }
+        g_dialogStatusUpdateInProgress = false;
         return;
     }
 
     if (g_dialogStatus >= DialogStatus_PlayingPrimary && g_dialogStatus <= DialogStatus_PlayingPrimaryState14) {
         g_dialogStatus = secondaryEntry ? DialogStatus_LoadedPrimaryAndSecondary : DialogStatus_LoadedPrimary;
     }
+
+    g_dialogStatusUpdateInProgress = false;
 }
 
 // PSX load path is asynchronous (state 1 while loading, then state 5 once data is ready).
@@ -826,12 +909,18 @@ static void PromotePendingDialogLoadState() {
 
 // PSX: IsPrimaryHandle__Fl
 static s32 IsPrimaryHandle(s32 handle) {
-    return (handle > 0 && handle == g_primaryDialogHandle) ? 1 : 0;
+    if (handle <= 0 || handle != g_primaryDialogHandle) {
+        return 0;
+    }
+    return (handle != g_secondaryDialogHandle) ? 1 : 0;
 }
 
 // PSX: IsSecondaryHandle__Fl
 static s32 IsSecondaryHandle(s32 handle) {
-    return (handle > 0 && handle == g_secondaryDialogHandle) ? 1 : 0;
+    if (handle <= 0 || handle == g_primaryDialogHandle) {
+        return 0;
+    }
+    return (handle == g_secondaryDialogHandle) ? 1 : 0;
 }
 
 // PSX: IsEitherHandle__Fl
@@ -903,7 +992,7 @@ static DialogEntry* AllocateDialogEntry() {
     return entry;
 }
 
-static s32 PlayDialogHandle(DialogEntry* entry, u32 distanceHint) {
+static s32 PlayDialogHandle(DialogEntry* entry) {
     if (!entry || !entry->valid || !g_sound) {
         return 0;
     }
@@ -914,10 +1003,6 @@ static s32 PlayDialogHandle(DialogEntry* entry, u32 distanceHint) {
 
     if (entry->voice != AUDIO_VOICE_INVALID) {
         if (AudioEngine::IsVoicePlaying(entry->voice)) {
-            if (distanceHint != 0) {
-                const f32 maxDistance = (f32)distanceHint * 100.0f;
-                AudioEngine::SetVoiceDistanceRange(entry->voice, 0.0f, maxDistance);
-            }
             return 1;
         }
 
@@ -930,12 +1015,131 @@ static s32 PlayDialogHandle(DialogEntry* entry, u32 distanceHint) {
         return 0;
     }
 
-    if (distanceHint != 0) {
-        const f32 maxDistance = (f32)distanceHint * 100.0f;
-        AudioEngine::SetVoiceDistanceRange(entry->voice, 0.0f, maxDistance);
+    return 1;
+}
+
+// PSX: PlayLoaded__FPC10tagLVector5State (JCSDLG.CPP:2664, 0x8004406C)
+static s32 PlayLoadedState(s32 playPosition, s32 nextState) {
+    DialogEntry* primaryEntry = FindDialogEntry(g_primaryDialogHandle);
+    if (!primaryEntry || !IsPrimaryHandle(primaryEntry->handle)) {
+        return 0;
     }
 
+    const u16 clipEntry = g_dialogQueues[0].clipEntry;
+    if (clipEntry == 0) {
+        KillDialogByHandleInternal(0);
+        return 0;
+    }
+
+    const bool clipAlreadyUsed = (DialogHeaderU8((u32)clipEntry) & 0x80) != 0;
+    if (clipEntry == g_lastDialogChoiceOffset || clipAlreadyUsed) {
+        KillDialogByHandleInternal(0);
+        return 0;
+    }
+
+    // JCSDLG keeps only one active dialog voice at a time.
+    for (s32 i = 0; i < DIALOG_ENTRY_COUNT; ++i) {
+        DialogEntry& other = g_dialogEntries[i];
+        if (!other.valid || other.handle == primaryEntry->handle) {
+            continue;
+        }
+        StopDialogEntryVoice(&other);
+    }
+
+    const s32 started = PlayDialogHandle(primaryEntry);
+    if (started == 0) {
+        KillDialogByHandleInternal(0);
+        return 0;
+    }
+
+    g_dialogStatus = nextState;
+    if ((u32)clipEntry < g_dialogHeader.size()) {
+        g_dialogHeader[clipEntry] = (u8)(g_dialogHeader[clipEntry] | 0x80);
+    }
+    g_lastDialogChoiceOffset = clipEntry;
+    g_dialogQueues[0].clipEntry = 0;
+    g_dialogQueues[0].playPosition = playPosition;
+    g_dialogQueues[0].timeoutFrame = 0;
+    ClearDialogPendingLoadState();
     return 1;
+}
+
+// PSX: jcsPlayDialog__FlPC10tagLVectorUl (JCSDLG.CPP:1121, 0x80043044)
+static s32 PlayDialogRequest(s32 handleParam, s32 playPosition, u32 timeout) {
+    SetDlgStatus(0);
+
+    if (g_dialogSystemStarted == 0 || !g_sound) {
+        SetDlgStatus(1);
+        return 0;
+    }
+
+    const s32 handle = ResolveDialogHandleParam(handleParam);
+    if (!jcsValidateHandle(handle)) {
+        SetDlgStatus(6);
+        return 0;
+    }
+
+    switch (g_dialogStatus) {
+        case DialogStatus_Idle:
+        case DialogStatus_KillRequestedPrimary:
+        case DialogStatus_LoadDeferredSecondary:
+            SetDlgStatus(7);
+            return 0;
+
+        case DialogStatus_LoadRequestedPrimary:
+        case DialogStatus_LoadDeferredPrimary:
+            return UpdateDialogTimeout(timeout, playPosition, 0);
+
+        case DialogStatus_LoadedPrimary:
+            return PlayLoadedState(playPosition, DialogStatus_PlayingPrimary);
+
+        case DialogStatus_LoadedPrimaryWithDeferred:
+            if (!IsPrimaryHandle(handle)) {
+                return UpdateDialogTimeout(timeout, playPosition, 1);
+            }
+            return PlayLoadedState(playPosition, DialogStatus_PlayingPrimaryWithSecondary);
+
+        case DialogStatus_LoadedPrimaryWithDeferredFromState2:
+            if (!IsPrimaryHandle(handle)) {
+                return UpdateDialogTimeout(timeout, playPosition, 1);
+            }
+            return PlayLoadedState(playPosition, DialogStatus_PlayingPrimaryState12);
+
+        case DialogStatus_LoadedPrimaryWithDeferredFromState3:
+            if (IsSecondaryHandle(handle)) {
+                SetDlgStatus(7);
+                return 0;
+            }
+            return PlayLoadedState(playPosition, DialogStatus_PlayingPrimaryState13);
+
+        case DialogStatus_LoadedPrimaryAndSecondary:
+            if (IsPrimaryHandle(handle)) {
+                return PlayLoadedState(playPosition, DialogStatus_PlayingPrimaryState14);
+            }
+            if (g_primaryDialogPriority < g_secondaryDialogPriority) {
+                return UpdateDialogTimeout(timeout, playPosition, 1);
+            }
+            KillDialogByHandleInternal(0);
+            return PlayLoadedState(playPosition, DialogStatus_PlayingPrimary);
+
+        case DialogStatus_PlayingPrimaryWithSecondary:
+        case DialogStatus_PlayingPrimaryState12:
+        case DialogStatus_PlayingPrimaryState14:
+            if (!IsSecondaryHandle(handle)) {
+                return 1;
+            }
+            return UpdateDialogTimeout(timeout, playPosition, 1);
+
+        case DialogStatus_PlayingPrimaryState13:
+            if (IsSecondaryHandle(handle)) {
+                SetDlgStatus(7);
+                return 0;
+            }
+            return 1;
+
+        default:
+            return 1;
+    }
 }
 
 // PSX: rsDialogEvent (RSEVENT.CPP:82, 0x8003470C)
@@ -943,19 +1147,14 @@ static s32 rsDialogEvent(s32 event, s32 param1, s32 param2, s32 param3) {
     switch (event) {
         case RS_LOAD_DIALOG:
         {
+            SetDlgStatus(0);
+            if (g_dialogSystemStarted == 0 || !g_sound) {
+                SetDlgStatus(1);
+                return 0;
+            }
+
             PromotePendingDialogLoadState();
             UpdateDialogStatusFromSlots();
-
-            DialogEntry* existing = FindDialogEntryByClip(param1, param2, param3);
-            if (existing) {
-                if (IsPrimaryHandle(existing->handle)) {
-                    g_primaryDialogPriority = existing->priority;
-                }
-                else if (IsSecondaryHandle(existing->handle)) {
-                    g_secondaryDialogPriority = existing->priority;
-                }
-                return existing->handle;
-            }
 
             DialogEntry* entry = AllocateDialogEntry();
             if (!entry) {
@@ -966,8 +1165,9 @@ static s32 rsDialogEvent(s32 event, s32 param1, s32 param2, s32 param3) {
             entry->dialogId = param2;
             entry->priority = param3;
 
+            u16 clipChoiceOffset = 0;
             u32 loadSectors = 0;
-            entry->sample = LoadDialogSample(param1, param2, &loadSectors);
+            entry->sample = LoadDialogSample(param1, param2, &clipChoiceOffset, &loadSectors);
             if (entry->sample == AUDIO_SAMPLE_INVALID) {
                 entry->valid = false;
                 return 0;
@@ -985,6 +1185,7 @@ static s32 rsDialogEvent(s32 event, s32 param1, s32 param2, s32 param3) {
                 g_dialogQueues[0].priority = entry->priority;
                 g_dialogQueues[0].handle = entry->handle;
                 g_dialogQueues[0].sectors = static_cast<s32>(loadSectors);
+                g_dialogQueues[0].clipEntry = clipChoiceOffset;
                 g_dialogQueues[0].dialogId = entry->dialogId;
                 ResetDialogQueueInfo(1);
                 g_dialogStatus = DialogStatus_LoadRequestedPrimary;
@@ -1009,6 +1210,7 @@ static s32 rsDialogEvent(s32 event, s32 param1, s32 param2, s32 param3) {
             g_dialogQueues[1].priority = entry->priority;
             g_dialogQueues[1].handle = entry->handle;
             g_dialogQueues[1].sectors = static_cast<s32>(loadSectors);
+            g_dialogQueues[1].clipEntry = clipChoiceOffset;
             g_dialogQueues[1].dialogId = entry->dialogId;
             ClearDialogPendingLoadState();
             g_dialogStatus = primaryPlaying ? DialogStatus_PlayingPrimaryWithSecondary : DialogStatus_LoadedPrimaryAndSecondary;
@@ -1016,109 +1218,14 @@ static s32 rsDialogEvent(s32 event, s32 param1, s32 param2, s32 param3) {
         }
 
         case RS_PLAY_DIALOG:
-        {
-            PromotePendingDialogLoadState();
-            UpdateDialogStatusFromSlots();
-            SetDlgStatus(0);
-
-            const s32 prePlayStatus = g_dialogStatus;
-            const s32 requestedHandle = ResolveDialogHandleParam(param1);
-            const bool requestedPrimaryHandle = IsPrimaryHandle(requestedHandle) != 0;
-
-            DialogEntry* entry = FindDialogEntry(requestedHandle);
-            if (!entry || !entry->valid) {
-                return 0;
-            }
-
-            DialogEntry* primaryEntry = FindDialogEntry(g_primaryDialogHandle);
-
-            if (IsSecondaryHandle(requestedHandle)) {
-                // PSX-style behavior: secondary requests are deferred while primary is active.
-                if (primaryEntry && IsDialogEntryPlaying(primaryEntry)) {
-                    UpdateDialogTimeout(static_cast<u32>(param3), param2, 1);
-                    if (g_dialogStatus < DialogStatus_PlayingPrimaryWithSecondary
-                        || g_dialogStatus > DialogStatus_PlayingPrimaryState14) {
-                        g_dialogStatus = DialogStatus_PlayingPrimaryWithSecondary;
-                    }
-                    return 1;
-                }
-
-                g_dialogQueues[0] = g_dialogQueues[1];
-                ResetDialogQueueInfo(1);
-                g_primaryDialogHandle = g_secondaryDialogHandle;
-                g_primaryDialogPriority = g_secondaryDialogPriority;
-                g_secondaryDialogHandle = 0;
-                g_secondaryDialogPriority = -1;
-                entry = FindDialogEntry(g_primaryDialogHandle);
-            }
-
-            if (!entry || !IsPrimaryHandle(entry->handle)) {
-                return 0;
-            }
-
-            // Ensure only one dialog voice is active at a time.
-            for (s32 i = 0; i < DIALOG_ENTRY_COUNT; ++i) {
-                DialogEntry& other = g_dialogEntries[i];
-                if (!other.valid || other.handle == entry->handle) {
-                    continue;
-                }
-                StopDialogEntryVoice(&other);
-            }
-
-            const s32 started = PlayDialogHandle(entry, (u32)param3);
-            if (started != 0) {
-                g_primaryDialogHandle = entry->handle;
-                g_primaryDialogPriority = entry->priority;
-                g_dialogQueues[0].priority = entry->priority;
-                g_dialogQueues[0].handle = entry->handle;
-                g_dialogQueues[0].dialogId = entry->dialogId;
-                UpdateDialogTimeout(static_cast<u32>(param3), param2, 0);
-                if (prePlayStatus == DialogStatus_LoadedPrimaryAndSecondary && requestedPrimaryHandle) {
-                    g_dialogStatus = DialogStatus_PlayingPrimaryState14;
-                }
-                else if (prePlayStatus == DialogStatus_LoadedPrimaryWithDeferred) {
-                    g_dialogStatus = DialogStatus_PlayingPrimaryWithSecondary;
-                }
-                else if (prePlayStatus == DialogStatus_LoadedPrimaryWithDeferredFromState2) {
-                    g_dialogStatus = DialogStatus_PlayingPrimaryState12;
-                }
-                else if (prePlayStatus == DialogStatus_LoadedPrimaryWithDeferredFromState3) {
-                    g_dialogStatus = DialogStatus_PlayingPrimaryState13;
-                }
-                else {
-                    g_dialogStatus = DialogStatus_PlayingPrimary;
-                }
-                ClearDialogPendingLoadState();
-            }
-            else {
-                UpdateDialogStatusFromSlots();
-            }
-
-            return started;
-        }
+            return PlayDialogRequest(param1, param2, static_cast<u32>(param3));
 
         case RS_STOP_DIALOG:
         {
-            KillDialogByHandleInternal(g_secondaryDialogHandle);
-            KillDialogByHandleInternal(g_primaryDialogHandle);
-
-            // Force-stop fallback to avoid carrying transitional JCSDLG states after global stop.
-            for (s32 i = 0; i < DIALOG_ENTRY_COUNT; ++i) {
-                if (!g_dialogEntries[i].valid) {
-                    continue;
-                }
-                ReleaseDialogEntry(&g_dialogEntries[i]);
-            }
-            g_primaryDialogHandle = 0;
-            g_secondaryDialogHandle = 0;
-            g_primaryDialogPriority = -1;
-            g_secondaryDialogPriority = -1;
-            ResetDialogQueueInfo(0);
-            ResetDialogQueueInfo(1);
-            UpdateDialogState(DialogStatus_Idle);
-            ClearDialogPendingLoadState();
-            // Ensure no stale non-slot entries remain after kill paths.
-            ReleaseNonSlotDialogEntries();
+            // PSX jcsStopDialog -> KillAllDialog: kill current primary twice to flush primary+secondary slots.
+            KillDialogByHandleInternal(0);
+            KillDialogByHandleInternal(0);
+            g_dialogSystemStarted = 0;
             return 0;
         }
 
@@ -1443,6 +1550,10 @@ void jcsFadeOutEngine(u32 flags) {
     // PSX: bit 0 -> jcsPauseDialog
     if (flags & 0x01) {
         LOG("[jcsFadeOutEngine] PauseDialog (flags=0x%X)", flags);
+        if (g_dialogStatus >= DialogStatus_PlayingPrimary
+            && g_dialogStatus <= DialogStatus_PlayingPrimaryState14) {
+            KillDialogByHandleInternal(0);
+        }
         PauseDialogTimeout(0);
         PauseDialogTimeout(1);
     }
@@ -1456,12 +1567,10 @@ void jcsFadeOutEngine(u32 flags) {
 
 // PSX: jcsValidateHandle (JCSDLG.CPP:1639, 0x800434D8)
 s32 jcsValidateHandle(s32 handle) {
+    MARKFUNCTION(0x800434D8);
+
     PromotePendingDialogLoadState();
     UpdateDialogStatusFromSlots();
-
-    if (FindDialogEntry(handle) == nullptr) {
-        return 0;
-    }
 
     if (!IsCurrentHandle(handle)) {
         return 0;
@@ -1494,6 +1603,8 @@ s32 jcsValidateHandle(s32 handle) {
 
 // PSX: jcsIsPlayable (JCSDLG.CPP:428, 0x80042908)
 s32 jcsIsPlayable(s32 handle) {
+    MARKFUNCTION(0x80042908);
+
     PromotePendingDialogLoadState();
 
     if (!jcsValidateHandle(handle)) {
@@ -1526,27 +1637,23 @@ s32 jcsIsPlaying() {
 
 // PSX: jcsIsPlaying(handle) (JCSDLG.CPP:506, 0x800429CC)
 s32 jcsIsPlaying(s32 handle) {
+    MARKFUNCTION(0x800429CC);
+
     PromotePendingDialogLoadState();
     UpdateDialogStatusFromSlots();
 
-    if (!jcsValidateHandle(handle)) {
-        return 0;
+    s32 result = 0;
+    if (jcsValidateHandle(handle) && g_dialogStatus >= 10 && g_dialogStatus < 15) {
+        result = IsPrimaryHandle(handle);
     }
 
-    if (g_dialogStatus >= 10 && g_dialogStatus < 15) {
-        DialogEntry* primaryEntry = FindDialogEntry(g_primaryDialogHandle);
-        if (!IsDialogEntryPlaying(primaryEntry)) {
-            UpdateDialogStatusFromSlots();
-            return 0;
-        }
-        return IsPrimaryHandle(handle);
-    }
-
-    return 0;
+    return result;
 }
 
 // PSX: jcsQueryDialogPriority() (JCSDLG.CPP:1285, 0x80043218)
 s32 jcsQueryDialogPriority() {
+    MARKFUNCTION(0x80043218);
+
     PromotePendingDialogLoadState();
     UpdateDialogStatusFromSlots();
 
@@ -1564,6 +1671,8 @@ s32 jcsQueryDialogPriority() {
 
 // PSX: jcsQueryDialogPriority(handle) (JCSDLG.CPP:1312, 0x80043254)
 s32 jcsQueryDialogPriority(s32 handle) {
+    MARKFUNCTION(0x80043254);
+
     PromotePendingDialogLoadState();
 
     if (!jcsValidateHandle(handle)) {
@@ -1579,6 +1688,8 @@ s32 jcsQueryDialogPriority(s32 handle) {
 
 // PSX: jcsStartDialog__Fv (JCSDLG.CPP:1648, 0x800434F0)
 void jcsStartDialog() {
+    MARKFUNCTION(0x800434F0);
+
     for (s32 i = 0; i < DIALOG_ENTRY_COUNT; ++i) {
         DialogEntry& entry = g_dialogEntries[i];
         if (entry.voice != AUDIO_VOICE_INVALID) {
@@ -1596,6 +1707,7 @@ void jcsStartDialog() {
     g_primaryDialogPriority = -1;
     g_secondaryDialogPriority = -1;
     g_dialogStatus = DialogStatus_Idle;
+    g_dialogSystemStarted = 1;
     ClearDialogPendingLoadState();
     ResetDialogQueueInfo(0);
     ResetDialogQueueInfo(1);

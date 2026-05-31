@@ -18,6 +18,8 @@
 #include "gen/ai.h"
 #include "gen/blockmgr.h"
 #include "gen/scoremgr.h"
+#include "gen/game.h"
+#include "gen/world.h"
 
 // Command bit masks - derived from GameAction enum bit positions.
 // RequestAction does: commandBits |= (1 << actionID)
@@ -1080,6 +1082,16 @@ void Player::GetViewSpot(LVector* outPos, LVector* outTarget) {
             outTarget->y += 450;
         }
     }
+}
+
+void Player::Teleport(const LVector& newPos) {
+    pos = newPos;
+    homePos = newPos;
+    velocity = {};
+    contactForce = {};
+    UpdatePosition();
+    g_blockManager->DemandLoading();
+    g_game->GetWorld()->CheckThingSwitches(this);
 }
 
 // PSX: SignalEnemyGetUp__6Player (PLAYER.CPP:1382)

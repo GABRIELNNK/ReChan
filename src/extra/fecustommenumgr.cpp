@@ -1397,6 +1397,11 @@ void feCustomMenuMgr::Activate(MenuPage startPage) {
         s32 track = 23;
         rsEvent(RS_LOAD_AND_PLAY_DIALOG, 0, track, 0x1C);
     }
+    else if (startPage == MenuPage_Location) {
+        World* world = g_game ? g_game->GetWorld() : nullptr;
+        s32 track = (world && world->GetCurLevelID() == 7) ? 18 : 23;
+        rsEvent(RS_LOAD_AND_PLAY_DIALOG, 0, track, 0x1C);
+    }
 
     SetPage(startPage);
 

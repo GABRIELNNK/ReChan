@@ -205,6 +205,8 @@ public:
 
     s32 GetLivesLeft() const { return livesLeft; }
 
+    void Teleport(const LVector& newPos);
+
     void SignalEnemyGetUp();
     void SignalEnemyDead(Humanoid* enemy);
     bool EnterCombatCombo();
