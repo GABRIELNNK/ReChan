@@ -200,7 +200,7 @@ void Pushable::MovePassengers() {
 
         if (absVelX > kPassengerCarryThreshold || absVelZ > kPassengerCarryThreshold) {
             if (hum->actionState < (s32)AS_HIT_REACT_PUNCH_A) {
-                hum->HandleCollision(this, 1, 0x80000002, 4, 7, 10, 3, 14, 0);
+                hum->HandleCollision(this, 1, 0x80000002, 4, 0x80000007, 10, 0x80000003, 14, 0);
                 if (hum->thingType != 0) {
                     if (g_scoreManager) {
                         g_scoreManager->AddStylePoints(100);
@@ -441,8 +441,8 @@ void Pushable::HandleHumanoidCollision(Humanoid* hum) {
         (field136 * normZ_hi > kImpactThresholdZ);
 
     if (impact) {
-        if (hum->actionState < (s32)AS_THROW_PICKUP) {
-            hum->HandleCollision(this, 1);
+        if (hum->actionState < (s32)AS_HIT_REACT_PUNCH_A) {
+            hum->HandleCollision(this, 1, 0x80000002, 4, 0x80000007, 20, 0x80000003, 14, 0);
             if (hum->thingType != 0) {
                 if (g_scoreManager) {
                     g_scoreManager->AddStylePoints(100);
@@ -463,9 +463,9 @@ void Pushable::HandleHumanoidCollision(Humanoid* hum) {
         if (hum->actionState != (s32)AS_LEDGE_LATCH) {
             hum->SetActionState(AS_LEDGE_LATCH, 0);
             hum->PrepareLedgeLatch(correctionPushedPos, correctionNormal);
-        }
-        if (hum->humanoidSound) {
-            hum->humanoidSound->Grab((CSoundMaterial)GetFloorMaterial());
+            if (hum->humanoidSound) {
+                hum->humanoidSound->Grab((CSoundMaterial)GetFloorMaterial());
+            }
         }
         AddPassenger(hum);
         return;
@@ -486,7 +486,7 @@ void Pushable::HandleHumanoidCollision(Humanoid* hum) {
     const bool doImpulse = (hum->velocity.x != 0 || hum->velocity.z != 0) &&
         hum->actionState != (s32)AS_STAND &&
         hum->actionState != (s32)AS_PAUSE &&
-        hum->actionState != (s32)AS_STRAFE;
+        hum->actionState != (s32)AS_DIVE_ROLL;
 
     if (doImpulse) {
         const s32 sinY = rmSin16(hum->orientation.y);

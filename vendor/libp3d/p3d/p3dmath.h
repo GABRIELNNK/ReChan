@@ -397,9 +397,9 @@ inline void rmV3Normalize(LVector* out, const LVector* in) {
 
 // rmV3Dot - integer 3D dot product
 inline s32 rmV3Dot(const LVector* a, const LVector* b) {
-    return (s32)((s64)a->x * (s64)b->x
-        + (s64)a->y * (s64)b->y
-        + (s64)a->z * (s64)b->z);
+    return (s32)((((s64)a->x * (s64)b->x) >> 16)
+        + (((s64)a->y * (s64)b->y) >> 16)
+        + (((s64)a->z * (s64)b->z) >> 16));
 }
 
 // rmV3Scale - scale vector by 16.16 fixed-point scalar

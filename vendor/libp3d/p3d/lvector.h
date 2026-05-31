@@ -15,7 +15,7 @@ struct Vec3;
 
 // PSX 3D integer vector (tagLVector) - 16.16 fixed-point world units
 struct LVector {
-    s32 x, y, z;
+    s32 x, y, z = 0;
 
     LVector operator+(const LVector& r) const { return {x + r.x, y + r.y, z + r.z}; }
     LVector operator-(const LVector& r) const { return {x - r.x, y - r.y, z - r.z}; }
