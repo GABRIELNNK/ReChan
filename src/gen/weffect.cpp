@@ -53,7 +53,6 @@ void ComEffect_SetSeamOffset(s32 x, s32 y, s32 z) {
     s_comEffectSeamOffset.z = z;
 }
 
-static constexpr u32 kChefNisPotHash = 0x052EA764u;
 static constexpr bool kDebugRenderUntexturedBillboard = false;
 static constexpr u32 kDebugBillboardEffectHashFilter = 0u;
 static constexpr bool kDebugForceQuadForAllComEffects = false;
@@ -760,6 +759,12 @@ static ccList g_wEffectPool;
         if (__etOriginal->geoParts && __etOriginal->geoPartCount > 0) {                            \
             u32 _count = 0;                                                                         \
             for (u16 _i = 0; _i < __etOriginal->geoPartCount; _i++) {                              \
+                if (__etOriginal->skeleton                                                          \
+                    && __etOriginal->skeleton->joints                                               \
+                    && _i < __etOriginal->skeleton->numJoints                                       \
+                    && ((__etOriginal->skeleton->joints[_i].flags & STF_HAS_MESH) == 0)) {         \
+                    continue;                                                                       \
+                }                                                                                   \
                 const OriginalGeo* _geo = __etOriginal->geoParts[_i];                              \
                 if (_geo && _geo->meshBuffer) {                                                     \
                     _count++;                                                                       \
@@ -779,6 +784,12 @@ static ccList g_wEffectPool;
         }                                                                                           \
         u32 _renderableIndex = 0;                                                                   \
         for (u16 _i = 0; _i < __etOriginal->geoPartCount; _i++) {                                  \
+            if (__etOriginal->skeleton                                                              \
+                && __etOriginal->skeleton->joints                                                   \
+                && _i < __etOriginal->skeleton->numJoints                                           \
+                && ((__etOriginal->skeleton->joints[_i].flags & STF_HAS_MESH) == 0)) {             \
+                continue;                                                                           \
+            }                                                                                       \
             OriginalGeo* _geo = __etOriginal->geoParts[_i];                                         \
             if (!_geo || !_geo->meshBuffer) {                                                       \
                 continue;                                                                           \
@@ -1660,12 +1671,29 @@ PaletteData* WEffect::SetupPaletteData(u32 paletteHash, u32 clutMode, u32 flags)
         _self->scaleBindingCount = 0;                                                                \
         _self->scaleBindingCapacity = 0;                                                             \
                                                                                                     \
-        if (!_self->scaleData || !_self->model || !_self->model->drawable || _self->model->drawableType != 2) { \
+        if (!_self->scaleData || !_self->model || !_self->model->drawable) {                       \
             break;                                                                                  \
         }                                                                                           \
                                                                                                     \
-        OriginalSTree* _active = GetActiveSTree(_self->model->drawable);                           \
-        STreeData* _skeleton = _active ? _active->skeleton : nullptr;                               \
+        STreeData* _skeleton = nullptr;                                                             \
+        if (_self->model->drawableType == 2) {                                                      \
+            OriginalSTree* _active = GetActiveSTree(_self->model->drawable);                       \
+            _skeleton = _active ? _active->skeleton : nullptr;                                      \
+        }                                                                                            \
+        else if (_self->model->drawableType == 3) {                                                 \
+            DrawableETree* _drawableETree = static_cast<DrawableETree*>(_self->model->drawable);   \
+            if (_self->model->animStructure) {                                                      \
+                AnimStructure* _animStruct = static_cast<AnimStructure*>(_self->model->animStructure); \
+                TransformFlip* _flip = _animStruct ? _animStruct->GetFlip() : nullptr;             \
+                if (_flip && _flip->tree && _flip->tree->joints && _flip->tree->numJoints > 0) {  \
+                    _skeleton = _flip->tree;                                                        \
+                }                                                                                    \
+            }                                                                                        \
+            if (!_skeleton && _drawableETree && _drawableETree->original) {                        \
+                _skeleton = _drawableETree->original->skeleton;                                     \
+            }                                                                                        \
+        }                                                                                            \
+                                                                                                    \
         if (!_skeleton || !_skeleton->joints || _skeleton->numJoints == 0) {                       \
             break;                                                                                  \
         }                                                                                           \
@@ -3637,25 +3665,61 @@ void ComEffect::DoFastRender() {
     // PSX FastRender has a dedicated single-entry path (drawCount < 2)
     // that bypasses FastZSort replay helpers.
     if (drawCount < 2u) {
-        fastDrawCount = 0;
-        const Mat4 drawWorld = savedWorld * fastDrawEntries[0].worldMatrix;
-        p3d::context->SetWorldMatrix(drawWorld);
+        const FastDrawEntry& entry = fastDrawEntries[0];
+        const bool canReplayGeoByIndex = model && model->drawableType == 3 && fastDrawGeoIndex >= 0;
+        const u32 renderGeoIndex = static_cast<u32>(fastDrawGeoIndex);
+        u32* word1Slot = GetGeoFastWord1Slot(fastDrawGeoIndex);
+        const u32 savedWord1 = word1Slot ? *word1Slot : 0;
 
-        if (drawGeo->usesSemiTrans) {
-            pddiBlendMode blendMode = PDDI_BLEND_ALPHA;
-            switch (drawGeo->semiTransMode & 3u) {
-                case 1: blendMode = PDDI_BLEND_ADD; break;
-                case 2: blendMode = PDDI_BLEND_SUBTRACT; break;
-                case 3: blendMode = PDDI_BLEND_PSX_QUARTER; break;
-                default: break;
-            }
-            p3d::context->SetBlendMode(blendMode);
+        if (word1Slot) {
+            *word1Slot = entry.word1;
         }
 
-        p3d::context->DrawPrimBuffer(drawGeo->meshBuffer);
+        geoWord0Slot = (entry.word0 != kFastWordInactive) ? entry.word0 : kFastWordInactive;
+        fastDrawCount = 0;
 
-        if (drawGeo->usesSemiTrans) {
-            p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+        if (canReplayGeoByIndex) {
+            RenderGeoByIndex(renderGeoIndex, entry.worldMatrix, 0x80000u);
+        }
+        else {
+            const bool useWord0 = (entry.word0 != kFastWordInactive);
+            const Mat4 drawWorld = savedWorld * entry.worldMatrix;
+            p3d::context->SetWorldMatrix(drawWorld);
+
+            if (useWord0) {
+                p3d::context->SetTexInfoOverride(true, entry.word0);
+            }
+
+            if (drawGeo->usesSemiTrans) {
+                u8 semiTransMode = drawGeo->semiTransMode;
+                if (useWord0) {
+                    const u16 tpage = static_cast<u16>((entry.word0 >> 16) & 0xFFFFu);
+                    semiTransMode = static_cast<u8>((tpage >> 5) & 3u);
+                }
+
+                pddiBlendMode blendMode = PDDI_BLEND_ALPHA;
+                switch (semiTransMode & 3u) {
+                    case 1: blendMode = PDDI_BLEND_ADD; break;
+                    case 2: blendMode = PDDI_BLEND_SUBTRACT; break;
+                    case 3: blendMode = PDDI_BLEND_PSX_QUARTER; break;
+                    default: break;
+                }
+                p3d::context->SetBlendMode(blendMode);
+            }
+
+            p3d::context->DrawPrimBuffer(drawGeo->meshBuffer);
+
+            if (drawGeo->usesSemiTrans) {
+                p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+            }
+
+            if (useWord0) {
+                p3d::context->SetTexInfoOverride(false, 0);
+            }
+        }
+
+        if (word1Slot) {
+            *word1Slot = savedWord1;
         }
 
         p3d::context->SetWorldMatrix(savedWorld);
@@ -4459,18 +4523,6 @@ s32 WEffect::Update() {
                 continue;
             }
 
-            if (triggerFWHash == kChefNisPotHash) {
-                const char* thingName = thing->GetName() ? thing->GetName() : "null";
-                Log::Get().LogMessage(
-                    "[ChefPotNIS] WEffect trigger source=0x%08X trigger=0x%08X thing=%s thingCRC=0x%08X thingBlock=%u effectInList=%d",
-                    nameCRC,
-                    triggerFWHash,
-                    thingName,
-                    thing->nameCRC,
-                    thing->blockNum,
-                    triggerEffect->inEffectsList);
-            }
-
             if (triggerEffect->inEffectsList) {
                 thing->flags &= ~TF_NEEDS_ACTIVATION;
                 continue;
@@ -5051,48 +5103,26 @@ s32 FWEffect::Create2(u32 effectHash,
             continue;
         }
 
-        const s32 beforeInList = effect->inEffectsList;
-        static_cast<FWEffect*>(wEffect)->Create2(posOverride, scaleOverride, rotationOverride, flags);
+        FWEffect* spawnedFw = static_cast<FWEffect*>(wEffect);
+        spawnedFw->Create2(posOverride, scaleOverride, rotationOverride, flags);
+        const u16 runtimeFlags = spawnedFw->createFlags;
         g_wEffectPool.RemNode(effect);
-        Effects_AddEffect(effect, (flags & 4) ? 1 : 0);
-
-        if (effectHash == kChefNisPotHash) {
-            FWEffect* after = FWEffect::Find(effectHash);
-            Log::Get().LogMessage(
-                "[ChefPotNIS] FWEffect::Create2 pooled hash=0x%08X beforeInList=%d afterInList=%d active=%d block=%d flags=0x%X",
-                effectHash,
-                beforeInList,
-                after ? after->inEffectsList : 0,
-                after ? after->active : 0,
-                after ? after->blockNum : -1,
-                static_cast<u32>(flags));
-        }
+        Effects_AddEffect(effect, (runtimeFlags & 4u) ? 1 : 0);
 
         return 1;
     }
 
-    if (effectHash == kChefNisPotHash) {
-        Effects* activeEffect = Effects_Find(4, effectHash);
-        if (!activeEffect) {
-            activeEffect = Effects_Find(5, effectHash);
-        }
+    Effects* activeEffect = Effects_Find(4, effectHash);
+    if (!activeEffect) {
+        activeEffect = Effects_Find(5, effectHash);
+    }
 
-        if (activeEffect) {
-            FWEffect* activeFw = static_cast<FWEffect*>(activeEffect);
-            Log::Get().LogMessage(
-                "[ChefPotNIS] FWEffect::Create2 active-skip hash=0x%08X inList=%d active=%d block=%d flags=0x%X",
-                effectHash,
-                activeFw->inEffectsList,
-                activeFw->active,
-                activeFw->blockNum,
-                static_cast<u32>(flags));
-            return 0;
+    if (activeEffect) {
+        FWEffect* activeFw = static_cast<FWEffect*>(activeEffect);
+        // PSX parity: duplicate spawn requests for an already-active FW effect are no-op handled.
+        if (activeFw->isMentorTarget == 0 && activeFw->active != 0) {
+            return 1;
         }
-
-        Log::Get().LogMessage(
-            "[ChefPotNIS] FWEffect::Create2 miss hash=0x%08X flags=0x%X",
-            effectHash,
-            static_cast<u32>(flags));
     }
 
     return 0;
@@ -5116,7 +5146,7 @@ s32 FWEffect::Create2(const LVector* posOverride,
     overrideFlags = 0;
     pingPongReverse = 0;
     activatedOnce = 1;
-    createFlags = static_cast<u16>(flags);
+    createFlags = static_cast<u16>(templateCreateFlags | static_cast<u16>(flags));
     startDelayCounter = 0;
 
     if (posOverride) {
@@ -5861,6 +5891,11 @@ void WEffect_InitWorldEffects(DBPoint* firstPoint) {
                         fwEffect->createMode = 0;
                     }
 
+                    fwEffect->templateCreateFlags = 0;
+                    if (point->FindAttribValue(21, &value)) {
+                        fwEffect->templateCreateFlags = static_cast<u16>(value);
+                    }
+
                     u32 scaleValue = 0;
                     if (point->FindAttribValue(51, &scaleValue)) {
                         u32 rollValue = 0;
@@ -6059,14 +6094,6 @@ void WEffect_InitWorldEffects(DBPoint* firstPoint) {
             const char* triggerName = triggerAttrib->GetAttribString();
             if (triggerName) {
                 effect->triggerFWHash = p3dHash(triggerName);
-                if (effect->triggerFWHash == kChefNisPotHash) {
-                    Log::Get().LogMessage(
-                        "[ChefPotNIS] Init trigger source=0x%08X subType=%u triggerName=%s triggerHash=0x%08X",
-                        effect->nameCRC,
-                        subType,
-                        triggerName,
-                        effect->triggerFWHash);
-                }
             }
         }
 

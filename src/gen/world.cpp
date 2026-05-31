@@ -1915,22 +1915,6 @@ static pddiPrimBuffer* ParseDynGeoPrims(
         return nullptr;
     }
 
-    // Temp diagnostic: dump vertex stats
-    if (!vertBuf.empty()) {
-        f32 minX = vertBuf[0].x, maxX = vertBuf[0].x;
-        f32 minY = vertBuf[0].y, maxY = vertBuf[0].y;
-        f32 minZ = vertBuf[0].z, maxZ = vertBuf[0].z;
-        for (auto& v : vertBuf) {
-            if (v.x < minX) minX = v.x; if (v.x > maxX) maxX = v.x;
-            if (v.y < minY) minY = v.y; if (v.y > maxY) maxY = v.y;
-            if (v.z < minZ) minZ = v.z; if (v.z > maxZ) maxZ = v.z;
-        }
-        LOG("[ParseGeo] verts=%u idx=%u bbox=(%.0f,%.0f,%.0f)-(%.0f,%.0f,%.0f) v0=(%.0f,%.0f,%.0f) tpage=%.0f cba=%.0f",
-            (u32)vertBuf.size(), (u32)idxBuf.size(),
-            minX, minY, minZ, maxX, maxY, maxZ,
-            vertBuf[0].x, vertBuf[0].y, vertBuf[0].z, vertBuf[0].tpage, vertBuf[0].cba);
-    }
-
     u32 format = PDDI_V_POSITION | PDDI_V_COLOUR | PDDI_V_UV | PDDI_V_TEXINFO;
     pddiPrimBufferDesc desc(
         PDDI_PRIM_TRIANGLES,

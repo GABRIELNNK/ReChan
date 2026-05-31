@@ -1177,6 +1177,13 @@ void DrawableETree::Display(u32 /*flags*/) {
                 continue;
             }
 
+            if (original->skeleton
+                && original->skeleton->joints
+                && i < original->skeleton->numJoints
+                && ((original->skeleton->joints[i].flags & STF_HAS_MESH) == 0)) {
+                continue;
+            }
+
             OriginalGeo* geo = original->geoParts[i];
             if (!geo || !geo->meshBuffer) {
                 continue;

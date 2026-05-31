@@ -254,6 +254,7 @@ public:
     s32* scaleRoll = nullptr;
     u32 followHash = 0;
     u16 createFlags = 0;
+    u16 templateCreateFlags = 0;
     s16 pathMode = 5;
     s16 canDisplay = 1;
     s16 modeThreshold = 30;
