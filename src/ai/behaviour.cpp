@@ -181,6 +181,10 @@ static s32 wallCheck(Humanoid* humanoid, s32 angle) {
 }
 
 static void RestoreDeferredHandlerOrNDMS(Behaviour* self) {
+    if (!self) {
+        return;
+    }
+
     if (self->nextHandlerDispatch != 0) {
         self->handlerThisOffset = self->nextHandlerThisOffset;
         self->handlerDispatch = self->nextHandlerDispatch;
@@ -190,6 +194,84 @@ static void RestoreDeferredHandlerOrNDMS(Behaviour* self) {
         self->handlerThisOffset = 0;
         self->handlerDispatch = -1;
         self->handler = Behaviour::NDMS;
+    }
+
+    self->nextHandlerThisOffset = 0;
+    self->nextHandlerDispatch = 0;
+    self->nextHandler = nullptr;
+}
+
+// PSX: AiFollowPath__9Behaviour fallback (BEHAVE.CPP:1261..1285, 0x80074CCC..0x80074EB4)
+static void RestoreDeferredHandlerOrAiFollowPathFallback(Behaviour* self) {
+    if (!self) {
+        return;
+    }
+
+    if (self->nextHandlerDispatch != 0) {
+        self->handlerThisOffset = self->nextHandlerThisOffset;
+        self->handlerDispatch = self->nextHandlerDispatch;
+        self->handler = self->nextHandler;
+    }
+    else {
+        self->handlerThisOffset = 0;
+        self->handlerDispatch = -1;
+
+        switch (self->aiType) {
+        case AITypes::TT_BUTCH:
+            self->handler = Behaviour::ButchDMS;
+            break;
+        case AITypes::TT_GRONTAR:
+            self->handler = Behaviour::GrontarDMS;
+            break;
+        case AITypes::TT_DANTE:
+            self->handler = Behaviour::DanteDMS_Phase1;
+            break;
+        default:
+            self->handler = Behaviour::NDMS;
+            break;
+        }
+    }
+
+    self->nextHandlerThisOffset = 0;
+    self->nextHandlerDispatch = 0;
+    self->nextHandler = nullptr;
+}
+
+// PSX: Jumping__9Behaviour fallback (BEHAVE.CPP:4076..4099, 0x80077540..0x8007760C)
+static void RestoreDeferredHandlerOrJumpingFallback(Behaviour* self) {
+    if (!self) {
+        return;
+    }
+
+    if (self->nextHandlerDispatch != 0) {
+        self->handlerThisOffset = self->nextHandlerThisOffset;
+        self->handlerDispatch = self->nextHandlerDispatch;
+        self->handler = self->nextHandler;
+    }
+    else {
+        self->handlerThisOffset = 0;
+        self->handlerDispatch = -1;
+
+        switch (self->aiType) {
+        case AITypes::TT_BUTCH:
+            self->handler = Behaviour::ButchDMS;
+            break;
+        case AITypes::TT_GRONTAR:
+            self->handler = Behaviour::GrontarDMS;
+            break;
+        case AITypes::TT_PAUL:
+            self->handler = Behaviour::PaulDMS;
+            break;
+        case AITypes::TT_OSCAR:
+            self->handler = Behaviour::OscarDMS;
+            break;
+        case AITypes::TT_DANTE:
+            self->handler = Behaviour::DanteDMS_Phase1;
+            break;
+        default:
+            self->handler = Behaviour::NDMS;
+            break;
+        }
     }
 
     self->nextHandlerThisOffset = 0;
@@ -1921,14 +2003,14 @@ void Behaviour::AiFollowPath(Behaviour* self) {
     }
 
     if (self->BreakOffPathAndFight() != 0) {
-        RestoreDeferredHandlerOrNDMS(self);
+        RestoreDeferredHandlerOrAiFollowPathFallback(self);
         return;
     }
 
     ActiveZone* activeZone = self->owner->activeZone;
     LinearPath* path = self->currentPath;
     if (!activeZone || !path || self->currentPathNodeIndex >= (u32)path->numPoints) {
-        RestoreDeferredHandlerOrNDMS(self);
+        RestoreDeferredHandlerOrAiFollowPathFallback(self);
         return;
     }
 
@@ -1941,14 +2023,14 @@ void Behaviour::AiFollowPath(Behaviour* self) {
         self->currentPathNodeIndex = nodeIndex + 1;
         if (self->currentPathNodeIndex >= (u32)path->numPoints
             || activeZone->DoAICheck(path, (s32)self->currentPathNodeIndex, self->owner) == 0) {
-            RestoreDeferredHandlerOrNDMS(self);
+            RestoreDeferredHandlerOrAiFollowPathFallback(self);
             return;
         }
     }
     else {
         if (activeZone->AllowBreakoffOfDestinationNode(path, (s32)nodeIndex)
             && activeZone->DoAICheck(path, (s32)nodeIndex, self->owner) == 0) {
-            RestoreDeferredHandlerOrNDMS(self);
+            RestoreDeferredHandlerOrAiFollowPathFallback(self);
             return;
         }
     }
@@ -2103,9 +2185,7 @@ void Behaviour::GetBackIntoActiveZone(Behaviour* self) {
     }
 
     LVector center = {};
-    center.x = (activeZone->box.minX + activeZone->box.maxX) / 2;
-    center.y = (activeZone->box.minY + activeZone->box.maxY) / 2;
-    center.z = (activeZone->box.minZ + activeZone->box.maxZ) / 2;
+    activeZone->GetActiveZoneCenterPoint(center);
 
     if (self->InActiveZone()) {
         s32 testX = self->owner->pos.x;
@@ -2142,9 +2222,7 @@ void Behaviour::GetBackIntoActiveZone(Behaviour* self) {
     }
 
     self->owner->FacePointDesired(center);
-    if (self->animConfigPtr) {
-        self->owner->moveSpeed = (s16)self->animConfigPtr->runningSpeed;
-    }
+    self->owner->moveSpeed = (s16)self->animConfigPtr->strafingSpeed;
     self->owner->SetTarget(player);
     self->owner->RequestAction(6);
 }
@@ -2640,7 +2718,7 @@ void Behaviour::NDMS(Behaviour* b) {
     owner->SetTarget(player);
 
     if (!b->InActiveZone()) {
-        if (activeZone->subZoneList.tail) {
+        if (activeZone->specialFlag) {
             b->handlerThisOffset = 0;
             b->handlerDispatch = -1;
             b->handler = DieWhenWeHitTheGround;
@@ -2800,7 +2878,7 @@ void Behaviour::NDMS(Behaviour* b) {
         }
     }
     else if (distanceToPlayer > REJOIN_ACTIVE_ZONE_PLAYER_DIST_THRESHOLD) {
-        b->ndmsRangeBand = 3;
+        b->ndmsRangeBand = 2;
         b->field60 = 1;
 
         if (b->comboScriptIndex != -1) {
@@ -2870,7 +2948,7 @@ void Behaviour::NDMS(Behaviour* b) {
         }
     }
     else {
-        b->ndmsRangeBand = 2;
+        b->ndmsRangeBand = 3;
         b->field60 = 1;
 
         if (b->comboScriptIndex != -1) {
@@ -3357,7 +3435,7 @@ void Behaviour::Jumping(Behaviour* b) {
         return;
     }
 
-    RestoreDeferredHandlerOrNDMS(b);
+    RestoreDeferredHandlerOrJumpingFallback(b);
 }
 
 // PSX: DieWhenWeHitTheGround__9Behaviour (BEHAVE.CPP:4119, 0x8007762C)

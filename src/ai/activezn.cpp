@@ -158,14 +158,14 @@ bool ActiveZone::IsInActiveZone(Thing* thing) const {
 void ActiveZone::GetActiveZoneCenterPoint(LVector& outCenter) const {
     MARKFUNCTION(0x800A6B40);
 
-    // PSX performs arithmetic shift midpoint with sign correction.
-    const u32 sumX = (u32)box.minX + (u32)box.maxX;
-    const u32 sumY = (u32)box.minY + (u32)box.maxY;
-    const u32 sumZ = (u32)box.minZ + (u32)box.maxZ;
+    // PSX sequence: sum (addu), add sign bit (srl), then arithmetic half (sra).
+    const s32 sumX = (s32)((u32)box.minX + (u32)box.maxX);
+    const s32 sumY = (s32)((u32)box.minY + (u32)box.maxY);
+    const s32 sumZ = (s32)((u32)box.minZ + (u32)box.maxZ);
 
-    const s32 centerX = (s32)((sumX + (sumX >> 31)) >> 1);
-    const s32 centerY = (s32)((sumY + (sumY >> 31)) >> 1);
-    const s32 centerZ = (s32)((sumZ + (sumZ >> 31)) >> 1);
+    const s32 centerX = (sumX + (s32)((u32)sumX >> 31)) >> 1;
+    const s32 centerY = (sumY + (s32)((u32)sumY >> 31)) >> 1;
+    const s32 centerZ = (sumZ + (s32)((u32)sumZ >> 31)) >> 1;
 
     outCenter.x = centerX;
     outCenter.y = centerY;
@@ -320,7 +320,7 @@ s32 ActiveZone::DoAICheck(LinearPath* path, s32 nodeIndex, Humanoid* humanoid) {
                 pass = 0;
                 Thing* thing = g_ai ? g_ai->FindThing((u32)value) : nullptr;
                 if (thing) {
-                    pass = (thing->DistanceFromPoint(humanoid->pos) <= threshold);
+                    pass = (thing->DistanceFromPoint(humanoid->pos) >= threshold);
                 }
                 break;
             }
@@ -329,8 +329,8 @@ s32 ActiveZone::DoAICheck(LinearPath* path, s32 nodeIndex, Humanoid* humanoid) {
             {
                 s32 foundNearEnd = 0;
                 if (g_ai) {
-                    for (ccMinNode* moveNode = g_ai->moveList.head; moveNode; moveNode = moveNode->next) {
-                        Thing* thing = static_cast<Thing*>(moveNode);
+                    for (ccMinNode* node = g_ai->inactivePickupList.head; node; node = node->next) {
+                        Thing* thing = static_cast<Thing*>(node);
                         if (thing->DistanceFromPoint(endPos) < value) {
                             foundNearEnd = 1;
                             break;
@@ -499,8 +499,7 @@ s32 ActiveZone::DoActionsAtNode(LinearPath* path, s32 nodeIndex, Humanoid* human
 
             case 'o':
                 humanoid->SetTauntAnim(nodeAttrib->GetAttrib('o'));
-                if (humanoid->actionState != AS_TAUNT_PAUSE
-                    && humanoid->actionState != AS_TAUNT_ENTRY) {
+                if (humanoid->actionState != AS_TAUNT_PAUSE) {
                     humanoid->FaceThingDesired(Player::s_player);
                     humanoid->SetActionState(AS_TAUNT_ENTRY, 0);
                 }

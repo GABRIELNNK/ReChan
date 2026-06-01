@@ -1421,22 +1421,7 @@ PaletteData* WEffect::SetupPaletteData(u32 paletteHash, u32 clutMode, u32 flags)
         }                                                                                           \
                                                                                                     \
         if (_self->scaleBindings) {                                                                  \
-            for (u16 _i = 0; _i < _self->scaleBindingCount; _i++) {                                 \
-                ComEffectScaleBinding& _binding = _self->scaleBindings[_i];                         \
-                STreeJoint* _joint = _binding.joint;                                                \
-                if (!_joint) {                                                                      \
-                    continue;                                                                       \
-                }                                                                                   \
-                                                                                                    \
-                if (_joint->callbackData == &_binding) {                                            \
-                    _joint->callbackData = _binding.previousCallbackData;                           \
-                    _joint->preCallback = _binding.previousPreCallback;                             \
-                    _joint->flags = _binding.previousFlags;                                         \
-                    _joint->useOverrideMatrix = _binding.previousUseOverrideMatrix;                 \
-                    _joint->overrideMatrix = _binding.previousOverrideMatrix;                       \
-                }                                                                                   \
-            }                                                                                       \
-                                                                                                    \
+            /* Model is destroyed immediately below; cached joint pointers may already be stale. */ \
             delete[] _self->scaleBindings;                                                           \
             _self->scaleBindings = nullptr;                                                          \
         }                                                                                           \
@@ -1855,13 +1840,6 @@ ComEffect::ComEffect() {
 
 ComEffect::~ComEffect() {
     MARKFUNCTION(0x8004DC90);
-
-    if (miscAnimNode && g_animMgr) {
-        MiscAnimNode* liveNode = g_animMgr->GetMiscAnim(miscAnimHash);
-        if (liveNode == miscAnimNode && liveNode->compositeAnim) {
-            checkForAndFreeSequenceAnims__FP10tAnimation(liveNode);
-        }
-    }
 
     ComEffect_ResetModel(this);
 }
