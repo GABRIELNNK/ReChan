@@ -51,7 +51,9 @@ public:
     virtual void ExplosiveTrigger(s32 damage, const char* name);
     virtual const LVector* GetDeltaVelocity() const;
     virtual bool CareAboutAttack() const;
+    // Transitional ABI shim for stale incremental objects; forwards to 4-arg overload.
     virtual void HandleAttack(Humanoid* attacker, s32 damageType, s32 damage);
+    virtual void HandleAttack(Humanoid* attacker, s32 damageType, s32 attackMagnitude, s32 damage);
     virtual s32 GetFloorMaterial() const;
     virtual s32 GetObstacleFloorHeight(const LVector& pos) const;
     bool LedgeCheck(const tagCollisionBox& box, const LVector& normal, const LVector& correctionPos, Humanoid* hum) const;

@@ -8,6 +8,7 @@
 #include "gen/model.h"
 #include "ai/obstacle_shared.h"
 #include "snd/pushsnd.h"
+#include "snd/sndfact.h"
 #include "gen/scoremgr.h"
 
 Pushable::Pushable(const LVector* pos, u16 type)
@@ -48,11 +49,27 @@ void Pushable::AnalyzeMesh(DBRoot* root) {
 void Pushable::CreateModel(const char* name) {
     MARKFUNCTION(0x80017EE0);
     Obstacle::CreateModel(name);
+
+    if (!field168) {
+        CSound* created = nullptr;
+        const s32 result = CSoundFactory::CreateObject(0x2724, &created, modelHash);
+        if (result >= 0) {
+            CPushableSound* sound = static_cast<CPushableSound*>(created);
+            sound->Initialize(&pos);
+            field168 = reinterpret_cast<s32*>(sound);
+        }
+    }
 }
 
 void Pushable::DeleteModel() {
     MARKFUNCTION(0x80017F34);
     Obstacle::DeleteModel();
+
+    if (field168) {
+        CPushableSound* snd = reinterpret_cast<CPushableSound*>(field168);
+        snd->Release();
+        field168 = nullptr;
+    }
 }
 
 void Pushable::Reset() {
@@ -340,10 +357,11 @@ bool Pushable::CareAboutAttack() const {
     return true;
 }
 
-void Pushable::HandleAttack(Humanoid* attacker, s32 damageType, s32 damage) {
+void Pushable::HandleAttack(Humanoid* attacker, s32 damageType, s32 attackMagnitude, s32 damage) {
     MARKFUNCTION(0x80018928);
+    (void)damage;
 
-    if (field136) {
+    if (field128 || field136) {
         return;
     }
 
@@ -357,11 +375,17 @@ void Pushable::HandleAttack(Humanoid* attacker, s32 damageType, s32 damage) {
         return;
     }
 
-    // PSX divides incoming damage by pushable strength at +52.
+    if (field168) {
+        CPushableSound* sound = reinterpret_cast<CPushableSound*>(field168);
+        if (sound)
+            sound->Kick();
+    }
+
+    // PSX divides the attack force payload by pushable strength (+52).
     if (stateCounter == 0) {
         return;
     }
-    const s32 impulse = damage / stateCounter;
+    const s32 impulse = attackMagnitude / stateCounter;
 
     const s32 magXZ = (s32)rmMag2((f32)dx, (f32)dz);
     if (magXZ == 0) {
@@ -398,12 +422,6 @@ void Pushable::HandleAttack(Humanoid* attacker, s32 damageType, s32 damage) {
 
     field132 = 0;
     field144 = 0;
-
-    if (field168) {
-        CPushableSound* sound = reinterpret_cast<CPushableSound*>(field168);
-        if (sound) 
-            sound->Kick();
-    }
 }
 
 void Pushable::HandleHumanoidCollision(Humanoid* hum) {

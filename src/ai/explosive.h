@@ -32,7 +32,7 @@ public:
     void UpdatePosition() override;
     void HandlePickupCollision(Thing* pickup) override;
     void HandleHumanoidCollision(Humanoid* hum) override;
-    void HandleAttack(Humanoid* attacker, s32 damageType, s32 damage) override;
+    void HandleAttack(Humanoid* attacker, s32 damageType, s32 attackMagnitude, s32 damage) override;
 
     virtual void CheckObstacleCollisions();
     virtual void ExplodeThing();

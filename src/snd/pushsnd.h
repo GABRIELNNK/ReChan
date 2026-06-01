@@ -19,6 +19,7 @@ public:
     CPushableSound();
     ~CPushableSound() override;
 
+    s32 Load(const void* data);
     s32 Initialize(const LVector* pos);
     void Think();
     void BeginPush();

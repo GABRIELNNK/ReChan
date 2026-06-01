@@ -50,7 +50,7 @@ public:
     void UpdatePosition() override;
     void HandlePickupCollision(Thing* pickup) override;
     void HandleHumanoidCollision(Humanoid* hum) override;
-    void HandleAttack(Humanoid* attacker, s32 damageType, s32 damage) override;
+    void HandleAttack(Humanoid* attacker, s32 damageType, s32 attackMagnitude, s32 damage) override;
 
     virtual void Destroy();
     virtual void MovePassengers();
@@ -97,7 +97,7 @@ public:
     void UpdatePosition() override;
     void HandlePickupCollision(Thing* pickup) override;
     void HandleHumanoidCollision(Humanoid* hum) override;
-    void HandleAttack(Humanoid* attacker, s32 damageType, s32 damage) override;
+    void HandleAttack(Humanoid* attacker, s32 damageType, s32 attackMagnitude, s32 damage) override;
 
     virtual void UpdateCollisionBox();
 };
@@ -143,7 +143,7 @@ public:
     void UpdatePosition() override;
     void HandlePickupCollision(Thing* pickup) override;
     void HandleHumanoidCollision(Humanoid* hum) override;
-    void HandleAttack(Humanoid* attacker, s32 damageType, s32 damage) override;
+    void HandleAttack(Humanoid* attacker, s32 damageType, s32 attackMagnitude, s32 damage) override;
     bool CareAboutAttack() const override;
 
     virtual void Wobble();

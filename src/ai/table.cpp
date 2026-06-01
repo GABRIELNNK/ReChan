@@ -343,7 +343,7 @@ void DynamicObstacle::Destroy() {
     health = 0;
 }
 
-void DynamicObstacle::HandleAttack(Humanoid* attacker, s32 damageType, s32 damage) {
+void DynamicObstacle::HandleAttack(Humanoid* attacker, s32 damageType, s32 attackMagnitude, s32 damage) {
     MARKFUNCTION(0x80014CA8);
 }
 

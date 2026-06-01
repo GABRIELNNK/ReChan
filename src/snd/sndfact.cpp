@@ -7,6 +7,7 @@
 #include "snd/kndnsnd.h"
 #include "snd/dstrsnd.h"
 #include "snd/platsnd.h"
+#include "snd/pushsnd.h"
 #include "snd/wpnsnd.h"
 #include "snd/rsevent.h"
 
@@ -39,6 +40,16 @@ struct WorldEffectSoundLoadData {
 struct ParticleEffectSoundLoadData {
     u8 pad0;
     s8 persistentId;
+};
+
+struct PushableSoundLoadData {
+    u8 pad0;
+    u8 pad1;
+    s16 kickSfx;
+    s8 loopPersistentId;
+    s8 pad5;
+    u16 pad6;
+    s32 material;
 };
 
 struct DestructibleSoundLoadData {
@@ -140,6 +151,43 @@ static s32 IsBasicSoundLoaded(u32 packedSoundWord) {
     const u32 locationIndex = s_locInfoLoadIndex[g_currentSoundLocation];
     const u32 requiredMask = (1u << (locationIndex + 8));
     return (packedSoundWord & requiredMask) ? 0 : -5000;
+}
+
+// PSX: CreatePushableSound__21CSoundFactoryDatabaseP6CSoundUl (SNDFDB.CPP:299, 0x800AB234)
+static s32 FillPushableSoundLoadData(u32 soundId, PushableSoundLoadData& data) {
+    data = {};
+    data.kickSfx = -1;
+    data.loopPersistentId = -1;
+    data.material = 2;
+
+    switch (soundId) {
+        case 0x06922904:
+            data.loopPersistentId = 7;
+            data.kickSfx = 184;
+            return 0;
+        case 0x0C47AC72:
+            data.loopPersistentId = 5;
+            data.kickSfx = 183;
+            data.material = 4;
+            return 0;
+        case 0x096B8430:
+        case 0x0DAA3081:
+        case 0x003C2533:
+            data.loopPersistentId = 3;
+            data.kickSfx = 181;
+            data.material = 3;
+            return 0;
+        case 0x000483F5:
+            data.loopPersistentId = 4;
+            data.kickSfx = 185;
+            return 0;
+        case 0x00047674:
+            data.loopPersistentId = 6;
+            data.kickSfx = 182;
+            return 0;
+        default:
+            return -100;
+    }
 }
 
 // PSX: CreatePlatformSound__21CSoundFactoryDatabaseP6CSoundUl (SNDFDB.CPP:372)
@@ -700,6 +748,20 @@ s32 CSoundFactory::CreateObject(u32 typeId, CSound** outObj, u32 soundId) {
             CWorldEffectSound* obj = new CWorldEffectSound();
             WorldEffectSoundLoadData data = {};
             s32 loadResult = FillWorldEffectSoundLoadData(soundId, data);
+            if (loadResult < 0) {
+                delete obj;
+                return loadResult;
+            }
+
+            obj->Load(&data);
+            *outObj = obj;
+            break;
+        }
+        case 10020:
+        {
+            CPushableSound* obj = new CPushableSound();
+            PushableSoundLoadData data = {};
+            s32 loadResult = FillPushableSoundLoadData(soundId, data);
             if (loadResult < 0) {
                 delete obj;
                 return loadResult;

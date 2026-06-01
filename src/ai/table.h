@@ -58,7 +58,7 @@ public:
     void HandlePickupCollision(Thing* pickup) override;
     void HandleHumanoidCollision(Humanoid* hum) override;
     bool CareAboutAttack() const override;
-    void HandleAttack(Humanoid* attacker, s32 damageType, s32 damage) override;
+    void HandleAttack(Humanoid* attacker, s32 damageType, s32 attackMagnitude, s32 damage) override;
 
     virtual void HandleObjectInterAction(Humanoid* hum);
     virtual void Destroy();

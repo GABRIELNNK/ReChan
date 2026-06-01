@@ -104,7 +104,7 @@ void KickNRoll::HandleHumanoidCollision(Humanoid* hum) {
     MARKFUNCTION(0x8001D178);
 }
 
-void KickNRoll::HandleAttack(Humanoid* attacker, s32 damageType, s32 damage) {
+void KickNRoll::HandleAttack(Humanoid* attacker, s32 damageType, s32 attackMagnitude, s32 damage) {
     MARKFUNCTION(0x8001D45C);
 }
 
@@ -177,7 +177,7 @@ void KnockDown::HandleHumanoidCollision(Humanoid* hum) {
     MARKFUNCTION(0x8001E16C);
 }
 
-void KnockDown::HandleAttack(Humanoid* attacker, s32 damageType, s32 damage) {
+void KnockDown::HandleAttack(Humanoid* attacker, s32 damageType, s32 attackMagnitude, s32 damage) {
     MARKFUNCTION(0x8001E4EC);
 }
 
@@ -642,7 +642,7 @@ void Stack::HandleHumanoidCollision(Humanoid* hum) {
     FinishStack();
 }
 
-void Stack::HandleAttack(Humanoid* attacker, s32 damageType, s32 damage) {
+void Stack::HandleAttack(Humanoid* attacker, s32 damageType, s32 attackMagnitude, s32 damage) {
     MARKFUNCTION(0x8001F320);
 
     if (state == 0) {

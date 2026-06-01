@@ -6105,7 +6105,11 @@ s32 Humanoid::ProcessFightingMoveStrikeJoint(
         }
 
         if (!rightHandObj || ticketIssuer != static_cast<Thing*>(obstacle)) {
-            obstacle->HandleAttack(this, soundEvent, static_cast<s32>(joint->Damage()));
+            obstacle->HandleAttack(
+                this,
+                soundEvent,
+                static_cast<s32>(joint->ForceZ()),
+                static_cast<s32>(joint->Damage()));
         }
     }
 

@@ -80,7 +80,7 @@ void Explosive::HandleObstacleCollision(Obstacle* other) {
     MARKFUNCTION(0x80013E40);
 }
 
-void Explosive::HandleAttack(Humanoid* attacker, s32 damageType, s32 damage) {
+void Explosive::HandleAttack(Humanoid* attacker, s32 damageType, s32 attackMagnitude, s32 damage) {
     MARKFUNCTION(0x80013ECC);
 }
 

@@ -594,7 +594,11 @@ bool Obstacle::CareAboutAttack() const {
     return false;
 }
 
-void Obstacle::HandleAttack(Humanoid* attacker, s32 damageType, s32 damage) {}
+void Obstacle::HandleAttack(Humanoid* attacker, s32 damageType, s32 damage) {
+    HandleAttack(attacker, damageType, damage, damage);
+}
+
+void Obstacle::HandleAttack(Humanoid* attacker, s32 damageType, s32 attackMagnitude, s32 damage) {}
 
 s32 Obstacle::GetFloorMaterial() const {
     MARKFUNCTION(0x8007D0B4);

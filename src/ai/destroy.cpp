@@ -349,9 +349,10 @@ bool DestructibleThing::CareAboutAttack() const {
     return true;
 }
 
-void DestructibleThing::HandleAttack(Humanoid* attacker, s32 damageType, s32 damage) {
+void DestructibleThing::HandleAttack(Humanoid* attacker, s32 damageType, s32 attackMagnitude, s32 damage) {
     MARKFUNCTION(0x80010B6C);
     (void)damageType;
+    (void)attackMagnitude;
 
     const s16 hitDamage = static_cast<s16>(damage);
     if (field132 >= hitDamage) {

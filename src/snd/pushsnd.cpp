@@ -1,6 +1,7 @@
 #include "snd/pushsnd.h"
 #include "snd/basesnd.h"
 #include "gen/common.h"
+#include <cstring>
 
 CPushableSound::CPushableSound() : CSound() {
     MARKFUNCTION(0x800AC77C);
@@ -8,6 +9,13 @@ CPushableSound::CPushableSound() : CSound() {
 
 CPushableSound::~CPushableSound() {
     MARKFUNCTION(0x800AC7C8);
+    EndPush();
+}
+
+s32 CPushableSound::Load(const void* data) {
+    MARKFUNCTION(0x800AC824);
+    std::memcpy(&pad16, data, sizeof(u32) * 3);
+    return 0;
 }
 
 s32 CPushableSound::Initialize(const LVector* pos) {
