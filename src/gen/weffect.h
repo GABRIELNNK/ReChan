@@ -47,15 +47,17 @@ public:
 
     bool LoadETree(s32 resourceHash, s32 miscAnimHash);
     bool LoadSTree(s32 resourceHash, s32 miscAnimHash);
+    bool LoadGeo(s32 resourceHash, s32 miscAnimHash);
 
     void SetFrame(s32 frame);
     void SetFrameReal(s32 frameReal16);
     bool EndOfFrame(s32 frame) const;
+    bool HasAnimation() const;
     bool PointInView(const LVector& pos, s32 radius) const;
     OriginalGeo* SetUpFirstGeo();
 
     void Render(const Mat4& worldMatrix, u32 flags);
-    void Render(const LVector& pos, const LVector* scale, const u16* rotation, u32 flags);
+    void Render(const LVector& pos, const LVector* scale, const LVector* rotation, u32 flags);
     void InitFastRender(OriginalGeo* geo);
     void DoFastRender();
 
@@ -171,7 +173,7 @@ public:
     LVector pos = {};
     LVector spawnPos = {};
 
-    u16 rotation[3] = {};
+    LVector rotation = {};
     LVector scale = { 0x10000, 0x10000, 0x10000 };
     bool hasScale = false;
 
@@ -192,6 +194,7 @@ public:
     u32 mentorHash = 0;
     WEffect* mentor = nullptr;
     s16 isMentorTarget = 0;
+    s16 doneFlag = 0;
 
     u32 triggerFWHash = 0;
 
@@ -234,7 +237,7 @@ public:
     static s32 Create2(u32 effectHash,
                        const LVector* posOverride,
                        const LVector* scaleOverride,
-                       const u16* rotationOverride,
+                       const LVector* rotationOverride,
                        s32 flags);
 
     static FWEffect* Find(u32 effectHash);
@@ -242,7 +245,7 @@ public:
     s32 Create() override;
     s32 Create2(const LVector* posOverride,
                 const LVector* scaleOverride,
-                const u16* rotationOverride,
+                const LVector* rotationOverride,
                 s32 flags);
 
     s32 SetMentor();
@@ -272,7 +275,7 @@ public:
 
     LVector overridePos = {};
     LVector overrideScale = { 0x10000, 0x10000, 0x10000 };
-    u16 overrideRotation[3] = {};
+    LVector overrideRotation = {};
 };
 
 class LensFlare : public FWEffect {
@@ -284,6 +287,7 @@ public:
     s32 InitLensFlare(s32 mode, DBPath* path);
     s32 Update() override;
     void Display(s32 blockNum) override;
+    bool IsDirectorOverlay() const override;
     bool GetDebugWorldPos(LVector* outPos) const override;
 
 private:

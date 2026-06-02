@@ -3690,7 +3690,7 @@ void World::DrawEverythingHandler(const LVector* playerPos) {
 
     BeginModelShadowQueue();
 
-    // Render visible blocks
+    // Pass 1: render visible block entities + geometry.
     for (u32 i = 0; i < visibleCount; i++) {
         DrawEntry& entry = drawArray[i];
 
@@ -3714,13 +3714,6 @@ void World::DrawEverythingHandler(const LVector* playerPos) {
         // PSX: only draw entities + geometry if block is in draw list
         if (blockMgr.InDrawList(bn)) {
             const Mat4 blockBaseWorld = passBaseWorld;
-            Mat4 effectBaseWorld = blockBaseWorld;
-            const s32 seamOffsetX = localPos.x - entry.block->posX;
-            const s32 seamOffsetY = localPos.y - entry.block->posY;
-            const s32 seamOffsetZ = localPos.z - entry.block->posZ;
-            effectBaseWorld.m[12] += static_cast<f32>(seamOffsetX);
-            effectBaseWorld.m[13] += static_cast<f32>(seamOffsetY);
-            effectBaseWorld.m[14] += static_cast<f32>(seamOffsetZ);
 
             // PSX: DrawLoop for each entity list
             if (g_ai) {
@@ -3739,24 +3732,54 @@ void World::DrawEverythingHandler(const LVector* playerPos) {
             p3d::context->SetWorldMatrix(blockBaseWorld);
             entry.block->Draw(&localPos);
 
-            // PC immediate draw path: submit block geometry before per-block effects so
-            // depth-tested blended effects in front are not overwritten by later block draws.
-            p3d::context->SetVRAMHandle(vramHandle);
-            p3d::context->SetTexInfoOverride(false, 0);
-            p3d::context->SetBlendMode(PDDI_BLEND_NONE);
-            p3d::context->SetCullMode(PDDI_CULL_NONE);
-            p3d::context->SetWorldMatrix(effectBaseWorld);
-
-            ComEffect_SetSeamOffset(seamOffsetX, seamOffsetY, seamOffsetZ);
-            Effects_DrawEffects(static_cast<s32>(bn));
-            ComEffect_SetSeamOffset(0, 0, 0);
-
             // Flush queued model shadows after block geometry.
             FlushModelShadowQueue();
         }
     }
 
     EndModelShadowQueue();
+
+    // Pass 2: render per-block effects after all block geometry to prevent
+    // cross-block overdraw from clipping effects drawn earlier in the frame.
+    for (u32 i = 0; i < visibleCount; i++) {
+        DrawEntry& entry = drawArray[i];
+
+        LVector localPos;
+        localPos.x = entry.block->posX;
+        localPos.y = entry.block->posY;
+        localPos.z = entry.block->posZ;
+        OffsetToPreventSeams(localPos, *playerPos);
+
+        const u16 bn = entry.block->blockNum;
+
+        p3d::context->SetWorldMatrix(passBaseWorld);
+
+        p3d::context->SetVRAMHandle(vramHandle);
+        p3d::context->SetTexInfoOverride(false, 0);
+        p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+        p3d::context->SetCullMode(PDDI_CULL_NONE);
+
+        if (!blockMgr.InDrawList(bn)) {
+            continue;
+        }
+
+        const s32 seamOffsetX = localPos.x - entry.block->posX;
+        const s32 seamOffsetY = localPos.y - entry.block->posY;
+        const s32 seamOffsetZ = localPos.z - entry.block->posZ;
+
+        Mat4 effectBaseWorld = passBaseWorld;
+        effectBaseWorld.m[12] += static_cast<f32>(seamOffsetX);
+        effectBaseWorld.m[13] += static_cast<f32>(seamOffsetY);
+        effectBaseWorld.m[14] += static_cast<f32>(seamOffsetZ);
+        p3d::context->SetWorldMatrix(effectBaseWorld);
+
+        ComEffect_SetSeamOffset(seamOffsetX, seamOffsetY, seamOffsetZ);
+        Effects_DrawEffects(static_cast<s32>(bn));
+        ComEffect_SetSeamOffset(0, 0, 0);
+    }
+    p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+    p3d::context->EnableZBuffer(true);
+    p3d::context->SetDepthClamp(false);
 
     p3d::context->SetWorldMatrix(passBaseWorld);
 

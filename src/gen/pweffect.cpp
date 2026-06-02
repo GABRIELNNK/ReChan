@@ -61,10 +61,33 @@ static Mat4 BuildEffectWorldMatrix(const LVector& pos, const LVector* scale) {
     return world;
 }
 
-static s32 ResolveEffectBlockNumber(const LVector& pos) {
+static s32 ResolveEffectBlockNumber(const LVector& pos, s32 fallbackBlock = -1) {
     // PSX parity: PW/FPW use collision-sector block lookup for effect routing.
     const s32 collisionBlockNum = CollisionSector::GetBlockNumber(pos);
-    return (collisionBlockNum >= 0) ? collisionBlockNum : -1;
+    if (collisionBlockNum >= 0) {
+        return collisionBlockNum;
+    }
+
+    if (fallbackBlock >= 0) {
+        return fallbackBlock;
+    }
+
+    if (g_blockManager) {
+        const u16 loadedBlock = g_blockManager->GetBlockNumber(pos);
+        if (g_blockManager->IsValidBlockNumber(loadedBlock)) {
+            return static_cast<s32>(loadedBlock);
+        }
+    }
+
+    if (Player::s_player && Player::s_player->blockNum >= 0) {
+        return Player::s_player->blockNum;
+    }
+
+    return -1;
+}
+
+static s32 ResolveCollisionEffectBlockNumber(const LVector& pos) {
+    return CollisionSector::GetBlockNumber(pos);
 }
 
 class PWPathInfo {
@@ -469,7 +492,7 @@ s32 PWEffect::Create() {
             pos = *pathPos;
         }
 
-        blockNum = ResolveEffectBlockNumber(pos);
+        blockNum = ResolveEffectBlockNumber(pos, blockNum);
     }
 
     if (mentor) {
@@ -508,7 +531,7 @@ s32 PWEffect::Update() {
                 pos = *pathPos;
             }
 
-            blockNum = ResolveEffectBlockNumber(pos);
+            blockNum = ResolveEffectBlockNumber(pos, blockNum);
         }
 
         if (particleMgr) {
@@ -678,7 +701,7 @@ s32 FPWEffect::Create2(const LVector* inPos, const LVector* inDirection, s32 fol
         pos = { 0, 0, 0 };
     }
 
-    blockNum = ResolveEffectBlockNumber(pos);
+    blockNum = ResolveCollisionEffectBlockNumber(pos);
 
     if (inDirection && direction) {
         *direction = *inDirection;
@@ -697,8 +720,6 @@ s32 FPWEffect::Create2(const LVector* inPos, const LVector* inDirection, s32 fol
     else {
         mentorPosRef = nullptr;
     }
-
-    SetMentor();
 
     debugSpawnPos = pos;
     debugSpawnCaptured = 1;
@@ -1260,7 +1281,7 @@ s32 FPWEffect_Create2(u32 effectHash,
         return 0;
     }
 
-    if (ResolveEffectBlockNumber(*pos) == -1) {
+    if (ResolveCollisionEffectBlockNumber(*pos) == -1) {
         return 0;
     }
 

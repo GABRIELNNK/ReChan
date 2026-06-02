@@ -49,7 +49,7 @@ public:
     ParticleSystemMgr* particleMgr = nullptr;
 
     CWorldEffectSound* worldSound = nullptr;
-    CSound* particleSound = nullptr;
+    CParticleEffectSound* particleSound = nullptr;
 };
 
 static ComEffect** g_loadedComEffects = nullptr;
@@ -92,12 +92,6 @@ GEffect::~GEffect() {
 s32 GEffect::PutBackEffect() {
     MARKFUNCTION(0x8008E228);
 
-    if (particleMgr) {
-        particleMgr->PurgeParticles();
-        delete particleMgr;
-        particleMgr = nullptr;
-    }
-
     g_genericEffectPool.AddNode(g_genericEffectPool.tail, this);
     return ReleaseSound();
 }
@@ -125,42 +119,31 @@ s32 GEffect::Update() {
 
     frameCounter = 0;
 
-    if (comEffect) {
-        if (frame < lifeFrames || holdAlive) {
-            UpdateSound();
-            frame += 1;
-            return frame;
-        }
-
-        Effects_RemoveEffect(this);
-        g_genericEffectPool.AddNode(g_genericEffectPool.tail, this);
-        ReleaseSound();
-
-        frame += 1;
-        return frame;
-    }
-
-    if (particleMgr) {
+    const bool hasParticleSystem = (particleMgr && particleMgr->GetSystem());
+    if (hasParticleSystem) {
         const LVector localOrigin = { 0, 0, 0 };
 
         if (frame < lifeFrames || holdAlive) {
             particleMgr->CreateParticles(localOrigin, nullptr);
+            particleMgr->Update();
+            UpdateSound();
+
+            frame += 1;
+            return frame;
         }
 
-        particleMgr->Update();
-        UpdateSound();
+        if (particleMgr->ActiveParticles()) {
+            particleMgr->Update();
 
-        if (!holdAlive && frame >= lifeFrames && !particleMgr->ActiveParticles()) {
-            Effects_RemoveEffect(this);
-            g_genericEffectPool.AddNode(g_genericEffectPool.tail, this);
-            ReleaseSound();
+            frame += 1;
+            return frame;
         }
 
-        frame += 1;
-        return frame;
+        particleMgr->PurgeParticles();
+        particleMgr->ResetParticleDirection();
     }
 
-    if ((lifeFrames - frame) > 0 && !holdAlive) {
+    else if ((lifeFrames - frame) > 0 && !holdAlive) {
         frame += 1;
         return frame;
     }
@@ -206,24 +189,21 @@ void GEffect::Display(s32 inBlockNum) {
     if (comEffect) {
         comEffect->SetFrame(frame);
 
-        const u16 rotationWords[3] = {
-            static_cast<u16>(renderRotation.x),
-            static_cast<u16>(renderRotation.y),
-            static_cast<u16>(renderRotation.z),
-        };
-
-        comEffect->Render(renderPos, &renderScale, rotationWords, renderFlags);
+        comEffect->Render(renderPos, &renderScale, &renderRotation, renderFlags);
         return;
     }
 
-    if (!particleMgr || !p3d::context) {
+    const bool hasParticleSystem = (particleMgr && particleMgr->GetSystem());
+    if (!hasParticleSystem || !p3d::context) {
         return;
     }
 
     particleMgr->SetDisplayOffset(nullptr);
 
     const Mat4 savedWorld = p3d::context->GetWorldMatrix();
-    const Mat4 effectWorld = BuildEffectWorldMatrix(renderPos, &renderScale);
+    const Mat4 effectWorld = ((renderFlags & 4u) != 0u)
+        ? BuildEffectWorldMatrix(renderPos, &renderScale)
+        : BuildEffectWorldMatrix(renderPos, nullptr);
     p3d::context->SetWorldMatrix(savedWorld * effectWorld);
     particleMgr->Display();
     p3d::context->SetWorldMatrix(savedWorld);
@@ -232,19 +212,13 @@ void GEffect::Display(s32 inBlockNum) {
 s32 GEffect::CreateSound() {
     MARKFUNCTION(0x8008E608);
 
-    if (particleMgr) {
-        if (particleSound) {
-            return 0;
-        }
-
+    const bool hasParticleSystem = (particleMgr && particleMgr->GetSystem());
+    if (hasParticleSystem) {
         CSound* createdParticleSound = nullptr;
         s32 result = CSoundFactory::CreateObject(10000, &createdParticleSound);
         if (result >= 0 && createdParticleSound) {
-            particleSound = createdParticleSound;
-
-            const bool followPos = (createFlags & 1u) != 0u;
-            const LVector* soundPos = (followPos && posRef) ? posRef : &pos;
-            return particleSound->Initialize(const_cast<LVector*>(soundPos));
+            particleSound = static_cast<CParticleEffectSound*>(createdParticleSound);
+            return particleSound->Initialize(posRef);
         }
 
         return result;
@@ -254,17 +228,11 @@ s32 GEffect::CreateSound() {
         return 0;
     }
 
-    if (worldSound) {
-        return 0;
-    }
-
     CSound* createdSound = nullptr;
-    const s32 result = CSoundFactory::CreateObject(10010, &createdSound, comEffect->resourceHash);
+    const s32 result = CSoundFactory::CreateObject(10010, &createdSound);
     if (result >= 0 && createdSound) {
         worldSound = static_cast<CWorldEffectSound*>(createdSound);
-        const bool followPos = (createFlags & 1u) != 0u;
-        const LVector* soundPos = (followPos && posRef) ? posRef : &pos;
-        return worldSound->Initialize(soundPos);
+        return worldSound->Initialize(posRef);
     }
 
     return result;
@@ -277,8 +245,13 @@ s32 GEffect::UpdateSound() {
         worldSound->Update(static_cast<u32>(frame));
     }
 
-    if (particleMgr && particleSound) {
-        return 0;
+    const bool hasParticleSystem = (particleMgr && particleMgr->GetSystem());
+    if (hasParticleSystem) {
+        if (particleSound) {
+            return particleSound->StartAnimating();
+        }
+
+        return 1;
     }
 
     return 0;
@@ -383,6 +356,7 @@ void GEffect_LoadChunk(const u8* body, u32 bodySize) {
 
             for (u32 i = 0; i < genericCount; i++) {
                 GEffect* effect = new GEffect();
+                effect->particleMgr = new ParticleSystemMgr();
                 g_genericEffects[i] = effect;
                 g_genericEffectPool.AddNode(g_genericEffectPool.tail, effect);
             }
@@ -445,14 +419,7 @@ Effects* GEffect_Create(u32 effectHash,
 
     s32 fpwFollowPos = ((createFlags & 1u) != 0u) ? 1 : 0;
 
-    u16 rotationWords[3] = {};
-    const u16* fwRotation = nullptr;
-    if (rotation) {
-        rotationWords[0] = static_cast<u16>(rotation->x);
-        rotationWords[1] = static_cast<u16>(rotation->y);
-        rotationWords[2] = static_cast<u16>(rotation->z);
-        fwRotation = rotationWords;
-    }
+    const LVector* fwRotation = rotation;
 
     if (FWEffect::Create2(effectHash, pos, scale, fwRotation, fwFlags)) {
         createdByOtherEffect = 1;
@@ -483,27 +450,12 @@ Effects* GEffect_Create(u32 effectHash,
         }
     }
 
-    if (!pos) {
-        LOG("[GEffect_Create] null-pos create miss hash=0x%08X flags=0x%08X (FW/FPW/CBV dispatch miss)",
-            effectHash,
-            createFlags);
-        return nullptr;
-    }
-
     GEffect* effect = static_cast<GEffect*>(g_genericEffectPool.head);
-
-    if (effect->particleMgr) {
-        effect->particleMgr->PurgeParticles();
-        delete effect->particleMgr;
-        effect->particleMgr = nullptr;
-    }
+    effect->particleMgr->SetSystem(nullptr);
 
     effect->comEffect = comEffect;
     if (particleSystem) {
-        effect->particleMgr = new ParticleSystemMgr(particleSystem);
-        if (!effect->particleMgr) {
-            return nullptr;
-        }
+        effect->particleMgr->InitMgr(particleSystem);
     }
 
     effect->frameDelay = frameDelay;
@@ -511,14 +463,14 @@ Effects* GEffect_Create(u32 effectHash,
     effect->frameCounter = 0;
     effect->lifeFrames = comEffect
         ? ((lifeFrames != 0) ? lifeFrames : static_cast<s32>(comEffect->GetFrameCount()))
-        : ((lifeFrames != 0) ? lifeFrames : 1);
+        : lifeFrames;
 
     effect->createFlags = createFlags | 8u;
     effect->renderFlags = 0;
     effect->holdAlive = 0;
 
     effect->pos = *pos;
-    effect->posRef = ((createFlags & 1u) != 0u) ? pos : nullptr;
+    effect->posRef = pos;
 
     effect->scaleRef = nullptr;
     if (scale) {
@@ -533,23 +485,28 @@ Effects* GEffect_Create(u32 effectHash,
     }
 
     effect->rotationRef = nullptr;
-    if (rotation) {
-        if ((createFlags & 4u) != 0u) {
-            effect->rotationRef = rotation;
+    if (comEffect) {
+        if (rotation) {
+            if ((createFlags & 4u) != 0u) {
+                effect->rotationRef = rotation;
+            }
+            else {
+                effect->createFlags |= 0x20u;
+                effect->rotation = *rotation;
+            }
+            effect->renderFlags |= 0x118u;
         }
-        else {
-            effect->createFlags |= 0x20u;
-            effect->rotation = *rotation;
-        }
-        effect->renderFlags |= 0x118u;
+    }
+    else if (rotation && effect->particleMgr) {
+        effect->particleMgr->SetParticleDirection(rotation);
     }
 
-    if (static_cast<s32>(createFlags) < 0) {
+    if (comEffect && static_cast<s32>(createFlags) < 0) {
         effect->renderFlags |= 2u;
     }
 
     effect->nameCRC = effectHash;
-    effect->effectType = 4;
+    effect->effectType = comEffect ? 4 : 3;
 
     g_genericEffectPool.RemNode(effect);
     Effects_AddEffect(effect, 0);

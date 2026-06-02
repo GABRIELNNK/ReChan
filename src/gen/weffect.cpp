@@ -47,6 +47,68 @@ static bool IsFrontRenderFlags(u32 flags) {
     return (flags & 0x1000800u) != 0u;
 }
 
+static s32 PsxGetElementQ16(const Mat4& matrix, u32 col, u32 row) {
+    const u32 index = col * 4u + row;
+    const s32 elementQ12 = static_cast<s32>(matrix.m[index] * 4096.0f);
+    return elementQ12 << 4;
+}
+
+static s16 PsxSaturateS16(s32 value) {
+    if (value > 32767) {
+        return 32767;
+    }
+    if (value < -32768) {
+        return -32768;
+    }
+    return static_cast<s16>(value);
+}
+
+static u32 PsxP3DClipCode(u32 packedScreenXY, s32 depth, const ChanProjectionState& port) {
+    u32 code = 0;
+
+    const s32 nearClip = static_cast<s32>(static_cast<u16>(port.nearClip));
+    const s32 farClip = static_cast<s32>(static_cast<u16>(port.farClip));
+    if (depth < nearClip) {
+        code |= 0x00000002u;
+    }
+    if (depth > farClip) {
+        code |= 0x00000001u;
+    }
+
+    code |= (packedScreenXY & 0x80008000u) >> 1;
+
+    const u16 clipX = static_cast<u16>((port.width > 0) ? port.width : 0x7FFF);
+    const u16 clipY = static_cast<u16>((port.height > 0) ? port.height : 0x7FFF);
+    const u32 clipPacked = (static_cast<u32>(clipY) << 16) | static_cast<u32>(clipX);
+    code |= (clipPacked - packedScreenXY) & 0x80008000u;
+
+    return code;
+}
+
+static s32 ResolveStableEffectBlock(const LVector& pos, s32 fallbackBlock) {
+    const s32 collisionBlock = CollisionSector::GetBlockNumber(pos);
+    if (collisionBlock >= 0) {
+        return collisionBlock;
+    }
+
+    if (fallbackBlock >= 0) {
+        return fallbackBlock;
+    }
+
+    if (g_blockManager) {
+        const u16 loadedBlock = g_blockManager->GetBlockNumber(pos);
+        if (g_blockManager->IsValidBlockNumber(loadedBlock)) {
+            return static_cast<s32>(loadedBlock);
+        }
+    }
+
+    if (Player::s_player && Player::s_player->blockNum >= 0) {
+        return Player::s_player->blockNum;
+    }
+
+    return -1;
+}
+
 void ComEffect_SetSeamOffset(s32 x, s32 y, s32 z) {
     s_comEffectSeamOffset.x = x;
     s_comEffectSeamOffset.y = y;
@@ -418,6 +480,284 @@ static bool ResolveFirstGeoFastWord0(const OriginalGeo* geo, u32* outWord0) {
     }
 
     return false;
+}
+
+static bool PackWord0FromTexInfoFloats(f32 tpageValue, f32 cbaValue, u32* outWord0) {
+    if (outWord0) {
+        *outWord0 = 0;
+    }
+
+    if (tpageValue < 0.0f || tpageValue > 65535.0f
+        || cbaValue < 0.0f || cbaValue > 65535.0f) {
+        return false;
+    }
+
+    if (outWord0) {
+        const u16 tpage = static_cast<u16>(tpageValue);
+        const u16 cba = static_cast<u16>(cbaValue);
+        *outWord0 = (static_cast<u32>(tpage) << 16) | static_cast<u32>(cba);
+    }
+
+    return true;
+}
+
+static bool ResolveFirstGeoPacketWord0(const OriginalGeo* geo, u32* outWord0) {
+    if (outWord0) {
+        *outWord0 = 0;
+    }
+
+    if (!geo
+        || !geo->dynamicVerts
+        || geo->dynamicVertCount == 0
+        || !geo->dynamicPrimStart
+        || !geo->dynamicPrimVertCount
+        || !geo->dynamicPrimCmd
+        || geo->dynamicPrimCount == 0) {
+        return false;
+    }
+
+    auto resolveWord0FromPrim = [&](u32 primIndex, u32* outWord) -> bool {
+        if (primIndex >= geo->dynamicPrimCount) {
+            return false;
+        }
+
+        const u32 start = geo->dynamicPrimStart[primIndex];
+        const u32 count = static_cast<u32>(geo->dynamicPrimVertCount[primIndex]);
+        if (count == 0 || start >= geo->dynamicVertCount) {
+            return false;
+        }
+
+        if (geo->dynamicPrimPacketOffset) {
+            const u32 packetBase = geo->dynamicPrimPacketOffset[primIndex];
+
+            bool isCbaLane = false;
+            u32 cbaVertexIndex = 0;
+            if (ResolveWord0LaneVertexByPacketHalfOffset(
+                    geo,
+                    primIndex,
+                    packetBase + 14u,
+                    &isCbaLane,
+                    &cbaVertexIndex)
+                && isCbaLane)
+            {
+                bool isTpageCbaLane = false;
+                u32 tpageVertexIndex = 0;
+                if (ResolveWord0LaneVertexByPacketHalfOffset(
+                        geo,
+                        primIndex,
+                        packetBase + 26u,
+                        &isTpageCbaLane,
+                        &tpageVertexIndex)
+                    && !isTpageCbaLane)
+                {
+                    return PackWord0FromTexInfoFloats(
+                        geo->dynamicVerts[tpageVertexIndex].tpage,
+                        geo->dynamicVerts[cbaVertexIndex].cba,
+                        outWord);
+                }
+            }
+        }
+
+        // dynamicVerts are packed in reverse primitive order (see ParseDynGeoPrims).
+        // CBA lane maps to uv0 (last packed corner), TPAGE lane maps to uv1.
+        const u32 cbaCorner = count - 1u;
+        const u32 tpageCorner = (count > 1u) ? (count - 2u) : cbaCorner;
+        const u32 cbaVertexIndex = start + cbaCorner;
+        const u32 tpageVertexIndex = start + tpageCorner;
+        if (cbaVertexIndex >= geo->dynamicVertCount || tpageVertexIndex >= geo->dynamicVertCount) {
+            return false;
+        }
+
+        return PackWord0FromTexInfoFloats(
+            geo->dynamicVerts[tpageVertexIndex].tpage,
+            geo->dynamicVerts[cbaVertexIndex].cba,
+            outWord);
+    };
+
+    s32 firstTexturedPrim = -1;
+    u32 firstPacketOffset = 0xFFFFFFFFu;
+
+    for (u32 primIndex = 0; primIndex < geo->dynamicPrimCount; primIndex++) {
+        const u8 primCmd = static_cast<u8>(geo->dynamicPrimCmd[primIndex] & 0xFCu);
+        if (!IsTexturedDynPrimCmd(primCmd)) {
+            continue;
+        }
+
+        if (firstTexturedPrim < 0) {
+            firstTexturedPrim = static_cast<s32>(primIndex);
+            if (geo->dynamicPrimPacketOffset) {
+                firstPacketOffset = geo->dynamicPrimPacketOffset[primIndex];
+            }
+            continue;
+        }
+
+        if (geo->dynamicPrimPacketOffset) {
+            const u32 packetOffset = geo->dynamicPrimPacketOffset[primIndex];
+            if (packetOffset < firstPacketOffset) {
+                firstPacketOffset = packetOffset;
+                firstTexturedPrim = static_cast<s32>(primIndex);
+            }
+        }
+    }
+
+    if (firstTexturedPrim >= 0 && resolveWord0FromPrim(static_cast<u32>(firstTexturedPrim), outWord0)) {
+        return true;
+    }
+
+    for (u32 primIndex = 0; primIndex < geo->dynamicPrimCount; primIndex++) {
+        const u8 primCmd = static_cast<u8>(geo->dynamicPrimCmd[primIndex] & 0xFCu);
+        if (!IsTexturedDynPrimCmd(primCmd)) {
+            continue;
+        }
+
+        if (firstTexturedPrim >= 0 && primIndex == static_cast<u32>(firstTexturedPrim)) {
+            continue;
+        }
+
+        if (resolveWord0FromPrim(primIndex, outWord0)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool ResolveFirstSkinWord0(const SkinData* skin, u32* outWord0) {
+    if (outWord0) {
+        *outWord0 = 0;
+    }
+
+    if (!skin || !skin->verts || skin->numVerts == 0) {
+        return false;
+    }
+
+    if (skin->numPrims > 0 && skin->primStart && skin->primVertCount) {
+        auto resolveWord0FromPrim = [&](u32 primIndex, u32* outWord) -> bool {
+            if (primIndex >= skin->numPrims) {
+                return false;
+            }
+
+            const u32 start = skin->primStart[primIndex];
+            const u32 count = static_cast<u32>(skin->primVertCount[primIndex]);
+            if (count == 0 || start >= skin->numVerts) {
+                return false;
+            }
+
+            return PackWord0FromTexInfoFloats(skin->verts[start].tpage,
+                                              skin->verts[start].cba,
+                                              outWord);
+        };
+
+        s32 firstPrimIndex = 0;
+        if (skin->primPacketOffset) {
+            u32 firstPacketOffset = skin->primPacketOffset[0];
+            for (u32 primIndex = 1; primIndex < skin->numPrims; primIndex++) {
+                const u32 packetOffset = skin->primPacketOffset[primIndex];
+                if (packetOffset < firstPacketOffset) {
+                    firstPacketOffset = packetOffset;
+                    firstPrimIndex = static_cast<s32>(primIndex);
+                }
+            }
+        }
+
+        if (resolveWord0FromPrim(static_cast<u32>(firstPrimIndex), outWord0)) {
+            return true;
+        }
+
+        for (u32 primIndex = 0; primIndex < skin->numPrims; primIndex++) {
+            if (primIndex == static_cast<u32>(firstPrimIndex)) {
+                continue;
+            }
+
+            if (resolveWord0FromPrim(primIndex, outWord0)) {
+                return true;
+            }
+        }
+    }
+
+    return PackWord0FromTexInfoFloats(skin->verts[0].tpage,
+                                      skin->verts[0].cba,
+                                      outWord0);
+}
+
+static bool ResolveFirstModelWord0(const Model* model, u32* outWord0) {
+    if (outWord0) {
+        *outWord0 = 0;
+    }
+
+    if (!model || !model->drawable) {
+        return false;
+    }
+
+    if (model->drawableType == 2) {
+        OriginalSTree* active = GetActiveSTree(model->drawable);
+        if (!active) {
+            return false;
+        }
+
+        return ResolveFirstSkinWord0(active->skinData, outWord0);
+    }
+
+    if (model->drawableType == 1) {
+        const DrawableGeo* drawableGeo = static_cast<const DrawableGeo*>(model->drawable);
+        const OriginalGeo* geo = drawableGeo ? drawableGeo->original : nullptr;
+        return ResolveFirstGeoPacketWord0(geo, outWord0);
+    }
+
+    if (model->drawableType == 3) {
+        const DrawableETree* drawableETree = static_cast<const DrawableETree*>(model->drawable);
+        const OriginalETree* original = drawableETree ? drawableETree->original : nullptr;
+        if (!original || !original->geoParts || original->geoPartCount == 0) {
+            return false;
+        }
+
+        for (u16 i = 0; i < original->geoPartCount; i++) {
+            if (drawableETree->geoPartVisible && drawableETree->geoPartVisible[i] == 0) {
+                continue;
+            }
+
+            if (original->skeleton
+                && original->skeleton->joints
+                && i < original->skeleton->numJoints
+                && ((original->skeleton->joints[i].flags & STF_HAS_MESH) == 0)) {
+                continue;
+            }
+
+            const OriginalGeo* geo = original->geoParts[i];
+            if (!geo || !geo->meshBuffer) {
+                continue;
+            }
+
+            if (ResolveFirstGeoPacketWord0(geo, outWord0)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+static bool ResolveFirstModelTexInfo(const Model* model, u16* outTpage, u16* outCba) {
+    if (outTpage) {
+        *outTpage = 0;
+    }
+    if (outCba) {
+        *outCba = 0;
+    }
+
+    u32 word0 = 0;
+    if (!ResolveFirstModelWord0(model, &word0)) {
+        return false;
+    }
+
+    if (outTpage) {
+        *outTpage = static_cast<u16>((word0 >> 16) & 0xFFFFu);
+    }
+    if (outCba) {
+        *outCba = static_cast<u16>(word0 & 0xFFFFu);
+    }
+
+    return true;
 }
 
 static bool ResolveFirstGeoFastWord1(const OriginalGeo* geo, u32* outColorWord) {
@@ -996,6 +1336,25 @@ static const s32 kLensFlareClampValues[7] = {
     0x3FCA, 0x56D7, 0x8486, 0xEC3F, 0xA365, 0x6122, 0x3333,
 };
 
+static const s32 kLensFlareTrailScale = 0x46EE;
+static const s32 kLensFlarePrimaryInterp = 0x5950;
+static const s32 kLensFlareSecondaryInterp = 0xDF62;
+static const s32 kLensFlareClampColourLane = 4;
+static const s32 kLensFlareClampSpan = 3;
+static const s32 kLensFlareBigGlowDotThreshold = -0x10000;
+
+static const u8 kLensFlareMainColourR = 0x00;
+static const u8 kLensFlareMainColourG = 0x35;
+static const u8 kLensFlareMainColourB = 0x7B;
+
+static const u8 kLensFlareSecondaryColourR = 0x00;
+static const u8 kLensFlareSecondaryColourG = 0x2A;
+static const u8 kLensFlareSecondaryColourB = 0x64;
+
+static const u8 kLensFlareScreenGlowR = 0x0C;
+static const u8 kLensFlareScreenGlowG = 0x0F;
+static const u8 kLensFlareScreenGlowB = 0x25;
+
 static s32 BuildEffectFrameReal16(s16 frame, s16 frameCounter, s16 frameDelay) {
     s32 frameReal16 = static_cast<s32>(frame) << 16;
     if (frameDelay <= 0) {
@@ -1032,10 +1391,11 @@ private:
     Path* path = nullptr;
     LVector fallbackPosition = {};
     LVector rotation = {};
+    LVector rotationTarget = {};
     s32 moveSpeed = 5;
     s32 pathMode = 0;
     s32 state = 1;
-    s32 allowMove = 1;
+    s32 allowMove = 0;
     s32 lerpX = 0;
     s32 lerpY = 0;
     s32 lerpZ = 0;
@@ -1168,6 +1528,15 @@ s32 PathInfo::Update() {
         else {
             OnNewPathNode(0);
         }
+
+        rotation.z += static_cast<s32>(
+            (static_cast<s64>(lerpZ) * static_cast<s64>(rotationTarget.z - rotation.z)) >> 16);
+        rotation.x += static_cast<s32>(
+            (static_cast<s64>(lerpX) * static_cast<s64>(rotationTarget.x - rotation.x)) >> 16);
+        rotation.y += static_cast<s32>(
+            (static_cast<s64>(lerpY) * static_cast<s64>(rotationTarget.y - rotation.y)) >> 16);
+
+        return 0;
     }
 
     if (state == 2) {
@@ -1177,7 +1546,7 @@ s32 PathInfo::Update() {
     return 0;
 }
 
-s32 PathInfo::OnNewPathNode(s32 /*nodeChanged*/) {
+s32 PathInfo::OnNewPathNode(s32 nodeChanged) {
     MARKFUNCTION(0x800BEA44);
 
     if (!path || !path->nodeAttribs || path->numPoints <= 0) {
@@ -1189,25 +1558,40 @@ s32 PathInfo::OnNewPathNode(s32 /*nodeChanged*/) {
         return 0;
     }
 
+    const s32 lastSegment = path->numPoints - 1;
     const NodeAttribs& attribs = path->nodeAttribs[segment];
 
     const s32 speedAttrib = attribs.GetAttrib(7);
     moveSpeed = (speedAttrib == kPathAttribNotFound) ? 5 : speedAttrib;
 
-    const s32 rotZ = attribs.GetAttrib(8);
-    if (rotZ != kPathAttribNotFound) {
-        rotation.z = rotZ;
-    }
+    auto applyRotationAxis = [&](u32 attribId, s32& currentValue, s32& targetValue) {
+        const s32 nodeValue = attribs.GetAttrib(attribId);
+        if (nodeValue == kPathAttribNotFound) {
+            targetValue = 0;
+            currentValue = 0;
+            return;
+        }
 
-    const s32 rotX = attribs.GetAttrib(9);
-    if (rotX != kPathAttribNotFound) {
-        rotation.x = rotX;
-    }
+        s32 nextValue = kPathAttribNotFound;
+        const s32 nextSegment = segment + 1;
+        if (nextSegment < lastSegment) {
+            nextValue = path->nodeAttribs[nextSegment].GetAttrib(attribId);
+        }
 
-    const s32 rotY = attribs.GetAttrib(10);
-    if (rotY != kPathAttribNotFound) {
-        rotation.y = rotY;
-    }
+        if (nodeChanged != 0) {
+            if (nextValue != kPathAttribNotFound) {
+                targetValue = nextValue;
+            }
+        }
+        else {
+            currentValue = nodeValue;
+            targetValue = nextValue;
+        }
+    };
+
+    applyRotationAxis(8, rotation.z, rotationTarget.z);
+    applyRotationAxis(9, rotation.x, rotationTarget.x);
+    applyRotationAxis(10, rotation.y, rotationTarget.y);
 
     const s32 activeZoneHash = attribs.GetAttrib(11);
     if (activeZoneHash == kPathAttribNotFound) {
@@ -2302,110 +2686,13 @@ bool ComEffect::ApplyClutAnimFrame(ClutAnimData* clutAnimData, s32 frame) {
         }
     }
 
-    auto resolveFirstTexInfo = [&](u16* outTpage, u16* outCba) -> bool {
-        if (outTpage) {
-            *outTpage = 0;
-        }
-        if (outCba) {
-            *outCba = 0;
-        }
-
-        auto floatToTexInfoWord = [](f32 value, u16* outWord) -> bool {
-            if (value < 0.0f || value > 65535.0f) {
-                return false;
-            }
-
-            if (outWord) {
-                *outWord = static_cast<u16>(value);
-            }
-
-            return true;
-        };
-
-        auto resolveFromVertex = [&](const GeoRenderVertex& vertex) -> bool {
-            u16 tpage = 0;
-            u16 cba = 0;
-            if (!floatToTexInfoWord(vertex.tpage, &tpage) || !floatToTexInfoWord(vertex.cba, &cba)) {
-                return false;
-            }
-
-            if (outTpage) {
-                *outTpage = tpage;
-            }
-            if (outCba) {
-                *outCba = cba;
-            }
-            return true;
-        };
-
-        auto resolveFromSkinVertex = [&](const SkinVertex& vertex) -> bool {
-            u16 tpage = 0;
-            u16 cba = 0;
-            if (!floatToTexInfoWord(vertex.tpage, &tpage) || !floatToTexInfoWord(vertex.cba, &cba)) {
-                return false;
-            }
-
-            if (outTpage) {
-                *outTpage = tpage;
-            }
-            if (outCba) {
-                *outCba = cba;
-            }
-            return true;
-        };
-
-        if (!model || !model->drawable) {
-            return false;
-        }
-
-        if (model->drawableType == 2) {
-            OriginalSTree* active = GetActiveSTree(model->drawable);
-            if (active && active->skinData && active->skinData->verts && active->skinData->numVerts > 0) {
-                return resolveFromSkinVertex(active->skinData->verts[0]);
-            }
-
-            return false;
-        }
-
-        if (model->drawableType == 1) {
-            DrawableGeo* drawableGeo = static_cast<DrawableGeo*>(model->drawable);
-            OriginalGeo* geo = drawableGeo ? drawableGeo->original : nullptr;
-            if (geo && geo->dynamicVerts && geo->dynamicVertCount > 0) {
-                return resolveFromVertex(geo->dynamicVerts[0]);
-            }
-
-            return false;
-        }
-
-        if (model->drawableType == 3) {
-            DrawableETree* drawableETree = static_cast<DrawableETree*>(model->drawable);
-            OriginalETree* original = drawableETree ? drawableETree->original : nullptr;
-            if (!original || !original->geoParts || original->geoPartCount == 0) {
-                return false;
-            }
-
-            for (u16 i = 0; i < original->geoPartCount; i++) {
-                OriginalGeo* geo = original->geoParts[i];
-                if (!geo || !geo->dynamicVerts || geo->dynamicVertCount == 0) {
-                    continue;
-                }
-
-                if (resolveFromVertex(geo->dynamicVerts[0])) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    };
-
     u16 tpage = 0;
     if (geoWord0Slot != kFastWordInactive) {
         tpage = static_cast<u16>((geoWord0Slot >> 16) & 0xFFFFu);
     }
     else {
         u16 unusedCba = 0;
-        if (!resolveFirstTexInfo(&tpage, &unusedCba)) {
+        if (!ResolveFirstModelTexInfo(model, &tpage, &unusedCba)) {
             return false;
         }
     }
@@ -2643,6 +2930,38 @@ bool ComEffect::LoadSTree(s32 inResourceHash, s32 inMiscAnimHash) {
     return model && model->drawable;
 }
 
+bool ComEffect::LoadGeo(s32 inResourceHash, s32 inMiscAnimHash) {
+    if (!g_levelManager) {
+        return false;
+    }
+
+    OriginalBasic* found = g_levelManager->FindGeo(inResourceHash);
+    if (!found || found->GetType() != 0) {
+        return false;
+    }
+
+    OriginalGeo* original = static_cast<OriginalGeo*>(found);
+    if (!original) {
+        return false;
+    }
+
+    ComEffect_ResetModel(this);
+    ComEffect_BindCommonState(this, inResourceHash, inMiscAnimHash);
+
+    GModel* geoModel = new GModel();
+    geoModel->SetOriginalGeo(original);
+    model = geoModel;
+
+    if (miscAnimNode) {
+        ApplyMiscAnimFrame(miscAnimNode, 0, true);
+    }
+
+    SetUpFirstGeo();
+    ComEffect_BindScaleDataToModel(this);
+
+    return model && model->drawable;
+}
+
 void ComEffect::SetFrame(s32 frame) {
     MARKFUNCTION(0x8004E7F8);
 
@@ -2681,6 +3000,10 @@ bool ComEffect::EndOfFrame(s32 frame) const {
     return frame >= frameCount;
 }
 
+bool ComEffect::HasAnimation() const {
+    return miscAnim != nullptr;
+}
+
 bool ComEffect::PointInView(const LVector& pos, s32 radius) const {
     MARKFUNCTION(0x8004E8D4);
 
@@ -2713,79 +3036,65 @@ bool ComEffect::PointInView(const LVector& pos, s32 radius) const {
                        viewY,
                        viewZ);
 
-    const s32 vx = static_cast<s32>(viewX);
-    const s32 vy = static_cast<s32>(-viewY);
-    const s32 vz = static_cast<s32>(-viewZ);
+    const s32 vx = PsxTruncToS32(viewX);
+    const s32 vy = PsxTruncToS32(-viewY);
+    const s32 vz = PsxTruncToS32(-viewZ);
 
     const ChanProjectionState port = g_display->GetChanProjectionState();
 
-    // PSX PointInView path: TransMatrix(pos) + P3DClipCodeSphere(0,0,0,radius).
-    // Mirror that sphere acceptance behavior using screen clip bits plus
-    // overlap tests instead of early hard rejects.
-    const s32 safeVz = (vz == 0) ? 1 : vz;
-    const s32 sx = PsxProjectScreenCoord(port.centerX, vx, port.projectionDistanceX, safeVz);
-    const s32 sy = PsxProjectScreenCoord(port.centerY, vy, port.projectionDistanceY, safeVz);
+    const s32 projDepth = (vz == 0) ? 1 : vz;
+    const s32 sx = PsxProjectScreenCoord(port.centerX, vx, port.projectionDistanceX, projDepth);
+    const s32 sy = PsxProjectScreenCoord(port.centerY, vy, port.projectionDistanceY, projDepth);
+    const s16 sx16 = PsxSaturateS16(sx);
+    const s16 sy16 = PsxSaturateS16(sy);
+    const u32 packedScreenXY = static_cast<u32>(static_cast<u16>(sx16))
+        | (static_cast<u32>(static_cast<u16>(sy16)) << 16);
 
-    const s32 clipMaxX = (port.width > 0) ? port.width : 0x7FFF;
-    const s32 clipMaxY = (port.height > 0) ? port.height : 0x7FFF;
-
-    u32 clipCode = 0;
-    if (vz < static_cast<s32>(port.nearClip)) {
-        clipCode |= 0x00000002u;
-    }
-    if (vz > static_cast<s32>(port.farClip)) {
-        clipCode |= 0x00000001u;
-    }
-    if (sx < 0) {
-        clipCode |= 0x00004000u;
-    }
-    if (sx >= clipMaxX) {
-        clipCode |= 0x00008000u;
-    }
-    if (sy < 0) {
-        clipCode |= 0x40000000u;
-    }
-    if (sy >= clipMaxY) {
-        clipCode |= 0x80000000u;
-    }
-
-    if (clipCode == 0) {
+    const u32 clipCode = PsxP3DClipCode(packedScreenXY, vz, port);
+    if (clipCode == 0u) {
         return true;
     }
 
-    s32 marginX = 0;
-    s32 marginY = 0;
-    if (radius > 0 && safeVz != 0) {
-        marginX = static_cast<s32>((static_cast<f32>(radius) * port.projectionDistanceX)
-            / static_cast<f32>(safeVz));
-        marginY = static_cast<s32>((static_cast<f32>(radius) * port.projectionDistanceY)
-            / static_cast<f32>(safeVz));
+    const s32 projectionX = PsxTruncToS32(port.projectionDistanceX);
+    const s32 projectionY = PsxTruncToS32(port.projectionDistanceY);
+    const s32 marginXRaw = static_cast<s32>((static_cast<s64>(radius) * rmDiv16i(projectionX, vz)) >> 16);
+    const s32 marginYRaw = static_cast<s32>((static_cast<s64>(radius) * rmDiv16i(projectionY, vz)) >> 16);
+    const s32 marginX = static_cast<s32>(static_cast<u16>(marginXRaw));
+    const s32 marginY = static_cast<s32>(static_cast<u16>(marginYRaw));
+
+    const s32 clipMaxX = (port.width > 0) ? port.width : 0x7FFF;
+    const s32 clipMaxY = (port.height > 0) ? port.height : 0x7FFF;
+    const s32 screenX = static_cast<s32>(sx16);
+    const s32 screenY = static_cast<s32>(sy16);
+
+    if (screenX + marginX < 0) {
+        return false;
+    }
+    if (screenX - marginX >= clipMaxX) {
+        return false;
+    }
+    if (screenY + marginY < 0) {
+        return false;
+    }
+    if (screenY - marginY >= clipMaxY) {
+        return false;
     }
 
-    if (sx + marginX < 0) {
-        return false;
-    }
-    if (sx - marginX >= clipMaxX) {
-        return false;
-    }
-    if (sy + marginY < 0) {
-        return false;
-    }
-    if (sy - marginY >= clipMaxY) {
-        return false;
-    }
+    const s32 nearClip = static_cast<s32>(static_cast<u16>(port.nearClip));
+    const s32 farClip = static_cast<s32>(static_cast<u16>(port.farClip));
+    const s32 radiusU16 = static_cast<s32>(static_cast<u16>(radius));
 
-    if (vz + radius < static_cast<s32>(port.nearClip)) {
+    if (vz + radiusU16 < nearClip) {
         return false;
     }
-    if (vz - radius > static_cast<s32>(port.farClip)) {
+    if (farClip < (vz - radiusU16)) {
         return false;
     }
 
     return true;
 }
 
-void ComEffect::Render(const LVector& pos, const LVector* scale, const u16* rotation, u32 flags) {
+void ComEffect::Render(const LVector& pos, const LVector* scale, const LVector* rotation, u32 flags) {
     MARKFUNCTION(0x8004E950);
 
     if (!model || !model->drawable || !p3d::context) {
@@ -2810,33 +3119,49 @@ void ComEffect::Render(const LVector& pos, const LVector* scale, const u16* rota
         }
     }
 
-    Mat4 world;
+    Mat4 world = Mat4();
+
+    if ((flags & 0x38000u) != 0u) {
+        LVector flipScale = { 0x10000, 0x10000, 0x10000 };
+        if ((flags & 0x8000u) != 0u) {
+            flipScale.x = -flipScale.x;
+        }
+        if ((flags & 0x10000u) != 0u) {
+            flipScale.y = -flipScale.y;
+        }
+        if ((flags & 0x20000u) != 0u) {
+            flipScale.z = -flipScale.z;
+        }
+
+        const f32 sx = FIX16_TO_FLOAT(flipScale.x);
+        const f32 sy = FIX16_TO_FLOAT(flipScale.y);
+        const f32 sz = FIX16_TO_FLOAT(flipScale.z);
+
+        world.m[0] *= sx;
+        world.m[1] *= sx;
+        world.m[2] *= sx;
+
+        world.m[4] *= sy;
+        world.m[5] *= sy;
+        world.m[6] *= sy;
+
+        world.m[8] *= sz;
+        world.m[9] *= sz;
+        world.m[10] *= sz;
+    }
 
     const bool billboard = (flags & 0x202u) != 0u;
     if (billboard) {
-        if (!g_display || !g_display->GetCamera()) {
-            p3dFillTransMatrix(pos, world);
-        }
-        else {
-            const LVector& cameraPos = g_display->GetCamera()->GetPosition();
-            const Vec3 heading(
-                FIX16_TO_FLOAT(cameraPos.x - pos.x),
-                ((flags & 0x200u) != 0u) ? 0.0f : FIX16_TO_FLOAT(cameraPos.y - pos.y),
-                FIX16_TO_FLOAT(cameraPos.z - pos.z));
-
-            const Vec3 up(0.0f, 1.0f, 0.0f);
-            world = Mat4();
-            p3dFillHeadingMatrix(heading, up, world);
-            p3dFillTransMatrix(pos, world);
-        }
+        Mat4 billboardMatrix;
+        MakeBillboardMatrix(pos, billboardMatrix, ((flags & 0x200u) != 0u) ? 1 : 0);
 
         // PSX Render__9ComEffect billboard lane: when 0x100440 bits are set,
         // offset translation along billboard forward before applying rotations.
         if ((flags & 0x100440u) != 0u) {
             LVector forward = {
-                static_cast<s32>(world.m[8] * 65536.0f),
-                static_cast<s32>(world.m[9] * 65536.0f),
-                static_cast<s32>(world.m[10] * 65536.0f),
+                PsxGetElementQ16(billboardMatrix, 2, 0),
+                PsxGetElementQ16(billboardMatrix, 2, 1),
+                PsxGetElementQ16(billboardMatrix, 2, 2),
             };
 
             s32 offsetScale = 0;
@@ -2857,36 +3182,41 @@ void ComEffect::Render(const LVector& pos, const LVector* scale, const u16* rota
                     pos.y + forward.y,
                     pos.z + forward.z,
                 };
-                p3dFillTransMatrix(offsetPos, world);
+                p3dFillTransMatrix(offsetPos, billboardMatrix);
             }
         }
 
-        // PSX applies optional axis rotations after billboard setup.
-        if (rotation && (flags & 0x10u) != 0u) {
-            Mat4 rotY;
-            p3dBuildRotMatrixY(ANGLE2RAD(rotation[1] & 0xFFFF), rotY);
-            world = world * rotY;
-        }
-
-        if (rotation && (flags & 8u) != 0u) {
-            Mat4 rotZ;
-            p3dBuildRotMatrixZ(ANGLE2RAD(rotation[2] & 0xFFFF), rotZ);
-            world = world * rotZ;
-        }
-
-        if (rotation && (flags & 0x100u) != 0u) {
-            Mat4 rotX;
-            p3dBuildRotMatrixX(ANGLE2RAD(rotation[0] & 0xFFFF), rotX);
-            world = world * rotX;
-        }
+        world = world * billboardMatrix;
     }
     else {
-        const s32 rx = (rotation && (flags & 0x100u) != 0u) ? rotation[0] : 0;
-        const s32 ry = (rotation && (flags & 0x10u) != 0u) ? rotation[1] : 0;
-        const s32 rz = (rotation && (flags & 8u) != 0u) ? rotation[2] : 0;
+        Mat4 transMatrix;
+        p3dBuildTransMatrix(static_cast<f32>(pos.x), static_cast<f32>(pos.y), static_cast<f32>(pos.z), transMatrix);
+        world = world * transMatrix;
+    }
 
-        p3dBuildRotMatrixZYX(rx, ry, rz, world);
-        p3dFillTransMatrix(pos, world);
+    if ((flags & 0x80000000u) != 0u) {
+        Mat4 rotYNeg;
+        p3dBuildRotMatrixY(ANGLE2RAD(0x7FF8), rotYNeg);
+        world = world * rotYNeg;
+    }
+
+    // PSX applies optional axis rotations in Y -> Z -> X order.
+    if (rotation && (flags & 0x10u) != 0u) {
+        Mat4 rotY;
+        p3dBuildRotMatrixY(ANGLE2RAD(rotation->y & 0xFFFF), rotY);
+        world = world * rotY;
+    }
+
+    if (rotation && (flags & 8u) != 0u) {
+        Mat4 rotZ;
+        p3dBuildRotMatrixZ(ANGLE2RAD(rotation->z & 0xFFFF), rotZ);
+        world = world * rotZ;
+    }
+
+    if (rotation && (flags & 0x100u) != 0u) {
+        Mat4 rotX;
+        p3dBuildRotMatrixX(ANGLE2RAD(rotation->x & 0xFFFF), rotX);
+        world = world * rotX;
     }
 
     if ((flags & 4u) != 0u && scale) {
@@ -4104,109 +4434,12 @@ void ComEffect::SetVertexInfo(s16 frame, s16 speed) {
 u32 ComEffect::GetClut(s32 /*mode*/) {
     MARKFUNCTION(0x8004DE40);
 
-    auto resolveFirstTexInfo = [&](u16* outTpage, u16* outCba) -> bool {
-        if (outTpage) {
-            *outTpage = 0;
-        }
-        if (outCba) {
-            *outCba = 0;
-        }
-
-        auto floatToTexInfoWord = [](f32 value, u16* outWord) -> bool {
-            if (value < 0.0f || value > 65535.0f) {
-                return false;
-            }
-
-            if (outWord) {
-                *outWord = static_cast<u16>(value);
-            }
-
-            return true;
-        };
-
-        auto resolveFromVertex = [&](const GeoRenderVertex& vertex) -> bool {
-            u16 tpage = 0;
-            u16 cba = 0;
-            if (!floatToTexInfoWord(vertex.tpage, &tpage) || !floatToTexInfoWord(vertex.cba, &cba)) {
-                return false;
-            }
-
-            if (outTpage) {
-                *outTpage = tpage;
-            }
-            if (outCba) {
-                *outCba = cba;
-            }
-            return true;
-        };
-
-        auto resolveFromSkinVertex = [&](const SkinVertex& vertex) -> bool {
-            u16 tpage = 0;
-            u16 cba = 0;
-            if (!floatToTexInfoWord(vertex.tpage, &tpage) || !floatToTexInfoWord(vertex.cba, &cba)) {
-                return false;
-            }
-
-            if (outTpage) {
-                *outTpage = tpage;
-            }
-            if (outCba) {
-                *outCba = cba;
-            }
-            return true;
-        };
-
-        if (!model || !model->drawable) {
-            return false;
-        }
-
-        if (model->drawableType == 2) {
-            OriginalSTree* active = GetActiveSTree(model->drawable);
-            if (active && active->skinData && active->skinData->verts && active->skinData->numVerts > 0) {
-                return resolveFromSkinVertex(active->skinData->verts[0]);
-            }
-
-            return false;
-        }
-
-        if (model->drawableType == 1) {
-            DrawableGeo* drawableGeo = static_cast<DrawableGeo*>(model->drawable);
-            OriginalGeo* geo = drawableGeo ? drawableGeo->original : nullptr;
-            if (geo && geo->dynamicVerts && geo->dynamicVertCount > 0) {
-                return resolveFromVertex(geo->dynamicVerts[0]);
-            }
-
-            return false;
-        }
-
-        if (model->drawableType == 3) {
-            DrawableETree* drawableETree = static_cast<DrawableETree*>(model->drawable);
-            OriginalETree* original = drawableETree ? drawableETree->original : nullptr;
-            if (!original || !original->geoParts || original->geoPartCount == 0) {
-                return false;
-            }
-
-            for (u16 i = 0; i < original->geoPartCount; i++) {
-                OriginalGeo* geo = original->geoParts[i];
-                if (!geo || !geo->dynamicVerts || geo->dynamicVertCount == 0) {
-                    continue;
-                }
-
-                if (resolveFromVertex(geo->dynamicVerts[0])) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    };
-
     if (geoWord0Slot != kFastWordInactive) {
         return static_cast<u16>(geoWord0Slot & 0xFFFFu);
     }
 
     u16 cba = 0;
-    if (resolveFirstTexInfo(nullptr, &cba)) {
+    if (ResolveFirstModelTexInfo(model, nullptr, &cba)) {
         return cba;
     }
 
@@ -4464,12 +4697,10 @@ s32 WEffect::Create() {
 
         const LVector* pathRot = pathInfo->GetRotation();
         if (pathRot) {
-            rotation[0] = static_cast<u16>(pathRot->x);
-            rotation[1] = static_cast<u16>(pathRot->y);
-            rotation[2] = static_cast<u16>(pathRot->z);
+            rotation = *pathRot;
         }
 
-        blockNum = CollisionSector::GetBlockNumber(pos);
+        blockNum = ResolveStableEffectBlock(pos, blockNum);
     }
 
     CreateSound(nullptr);
@@ -4555,12 +4786,10 @@ s32 WEffect::Update() {
 
             const LVector* pathRot = pathInfo->GetRotation();
             if (pathRot) {
-                rotation[0] = static_cast<u16>(pathRot->x);
-                rotation[1] = static_cast<u16>(pathRot->y);
-                rotation[2] = static_cast<u16>(pathRot->z);
+                rotation = *pathRot;
             }
 
-            blockNum = CollisionSector::GetBlockNumber(pos);
+            blockNum = ResolveStableEffectBlock(pos, blockNum);
         }
 
         if (uvData) {
@@ -4597,10 +4826,10 @@ void WEffect::Display(s32 inBlockNum) {
         comEffect->SetVertexInfo(vertexFrame, vertexSpeed);
     }
 
-    comEffect->SetFrameReal(BuildEffectFrameReal16(frame, frameCounter, frameDelay));
+    comEffect->SetFrame(frame);
 
     const LVector* scalePtr = hasScale ? &scale : nullptr;
-    comEffect->Render(pos, scalePtr, rotation, renderFlags);
+    comEffect->Render(pos, scalePtr, &rotation, renderFlags);
 
     if (kDebugRenderUntexturedBillboard
         && (kDebugBillboardEffectHashFilter == 0u || nameCRC == kDebugBillboardEffectHashFilter)) {
@@ -4638,8 +4867,7 @@ s32 SpotLight::Create() {
     linkedEffect = WEffect::Find(linkedEffectHash);
 
     renderFlags &= ~0x10u;
-    rotation[1] = 0x8000;
-    rotation[2] = 0;
+    rotation.y = 0x8000;
 
     return linkedEffect ? 1 : 0;
 }
@@ -4712,13 +4940,13 @@ void SpotLight::Display(s32 inBlockNum) {
         comEffect->AddUV(uvData, uvData->accumU, uvData->accumV);
     }
 
-    comEffect->SetFrameReal(BuildEffectFrameReal16(frame, frameCounter, frameDelay));
+    comEffect->SetFrame(frame);
 
     LVector renderPos = pos;
     renderPos.z += zOffset;
 
     const LVector* scalePtr = hasScale ? &scale : nullptr;
-    comEffect->Render(renderPos, scalePtr, rotation, renderFlags);
+    comEffect->Render(renderPos, scalePtr, &rotation, renderFlags);
 }
 
 void SpotLight::SetUp(u32 effectHash, u32 range, u32 linkedHash) {
@@ -4743,17 +4971,27 @@ s32 LensFlare::InitLensFlare(s32 mode, DBPath* path) {
 
     if (mode == 0 && flareComEffects) {
         bool loaded = false;
-        if ((flareComEffects[0].LoadETree(362594, 0) || flareComEffects[0].LoadSTree(362594, 0))
-            && (flareComEffects[1].LoadETree(43500977, 0) || flareComEffects[1].LoadSTree(43500977, 0)))
-        {
-            loaded = flareComEffects[2].LoadETree(289117, 0) || flareComEffects[2].LoadSTree(289117, 0);
+        if (flareComEffects[0].LoadGeo(362594, 0)
+            && flareComEffects[1].LoadGeo(43500977, 0)) {
+            loaded = flareComEffects[2].LoadGeo(289117, 0);
         }
 
         if (loaded) {
             initResult = 1;
 
-            ComEffect* geo = &flareComEffects[1];
-            clampColourEntry = geo ? &colourPrimary : nullptr;
+            // PSX InitLensFlare stores (GetGeo(secondComEffect)+68) + 4*laneIndex,
+            // with laneIndex coming from gp+0xB98 (value 4 in this build).
+            OriginalGeo* clampGeo = flareComEffects[1].GetGeo();
+            if (!clampGeo) {
+                clampGeo = flareComEffects[1].SetUpFirstGeo();
+            }
+
+            if (clampGeo && clampGeo->dynamicColorList) {
+                clampColourEntry = clampGeo->dynamicColorList + kLensFlareClampColourLane;
+            }
+            else {
+                clampColourEntry = nullptr;
+            }
 
             frameScalePrimary = 0;
             frameScaleSecondary = 0;
@@ -4829,6 +5067,46 @@ s32 LensFlare::InitLensFlare(s32 mode, DBPath* path) {
 u32 LensFlare::BigScreenGlow() {
     MARKFUNCTION(0x800BF244);
 
+    if (!p3d::context) {
+        return 0;
+    }
+
+    // PSX BigScreenGlow scales fixed coefficients {0x0C,0x0F,0x25} by frameScaleSecondary.
+    const u8 glowR = static_cast<u8>((kLensFlareScreenGlowR * frameScaleSecondary) >> 16);
+    const u8 glowG = static_cast<u8>((kLensFlareScreenGlowG * frameScaleSecondary) >> 16);
+    const u8 glowB = static_cast<u8>((kLensFlareScreenGlowB * frameScaleSecondary) >> 16);
+
+    const f32 x0 = SCALE_AND_CENTER_X(0.0f);
+    const f32 y0 = 0.0f;
+    const f32 x1 = x0 + SCREEN_SCALE_X(DEFAULT_SCREEN_WIDTH);
+    const f32 y1 = SCREEN_SCALE_Y(256.0f);
+
+    const Mat4 savedProjection = p3d::context->GetProjectionMatrix();
+    const Mat4 savedWorld = p3d::context->GetWorldMatrix();
+
+    p3d::context->SetProjectionMatrix(Ortho(0.0f, SCREEN_WIDTH, SCREEN_HEIGHT, 0.0f, -1.0f, 1.0f));
+    p3d::context->SetWorldMatrix(Mat4());
+    p3d::context->EnableZBuffer(false);
+    p3d::context->SetCullMode(PDDI_CULL_NONE);
+    p3d::context->SetMultisampleEnabled(false);
+    p3d::context->SetBlendMode(PDDI_BLEND_ADD);
+
+    const f32 r = static_cast<f32>(glowR) / 255.0f;
+    const f32 g = static_cast<f32>(glowG) / 255.0f;
+    const f32 b = static_cast<f32>(glowB) / 255.0f;
+
+    p3d::context->DrawGouraudQuad(
+        x0, y0, r, g, b, 1.0f,
+        x1, y0, r, g, b, 1.0f,
+        x0, y1, r, g, b, 1.0f,
+        x1, y1, r, g, b, 1.0f);
+
+    p3d::context->SetProjectionMatrix(savedProjection);
+    p3d::context->SetWorldMatrix(savedWorld);
+    p3d::context->EnableZBuffer(true);
+    p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+    p3d::context->SetMultisampleEnabled(true);
+
     return 0;
 }
 
@@ -4876,7 +5154,7 @@ s32 SpotLight::PutBackEffect() {
 s32 WEffect::IsDone(s32& doneMask) {
     MARKFUNCTION(0x8008B9C4);
 
-    doneMask &= isMentorTarget;
+    doneMask &= doneFlag;
     if (mentor) {
         return mentor->IsDone(doneMask);
     }
@@ -4901,7 +5179,9 @@ void WEffect::NISRemoveEffect() {
 }
 
 bool WEffect::IsDirectorOverlay() const {
-    return (renderFlags & 0x800u) != 0;
+    // In PSX OT flow, both 0x800 and 0x1000000 render flags target front lanes.
+    // Route both through the host overlay pass to avoid per-block immediate overdraw.
+    return (renderFlags & 0x1000800u) != 0;
 }
 
 void WEffect_LoadChunk(const u8* body, u32 bodySize) {
@@ -5018,11 +5298,6 @@ s32 FWEffect::Create(s32 blockNum) {
         }
 
         FWEffect* fwEffect = static_cast<FWEffect*>(effect);
-        if (!fwEffect->active) {
-            node = next;
-            continue;
-        }
-
         result = fwEffect->Create();
 
         if (result) {
@@ -5039,22 +5314,12 @@ s32 FWEffect::Create(s32 blockNum) {
 s32 FWEffect::Create() {
     MARKFUNCTION(0x8008C024);
 
-    if (!active) {
+    overrideFlags = 0;
+    if (!SetMentor()) {
         return 0;
     }
 
     frameCounter = 0;
-    const s32 mentorResult = SetMentor();
-    if (followHash != 0) {
-        if (!mentorResult) {
-            return 0;
-        }
-    }
-    else if (!activatedOnce) {
-        // Mentor-less FW effects are trigger-driven; keep pooled until first Create2 activation.
-        return 0;
-    }
-
     frame = 0;
     startDelayCounter = startDelay;
     CreateSound(nullptr);
@@ -5065,14 +5330,14 @@ s32 FWEffect::Create() {
 s32 FWEffect::Create2(u32 effectHash,
                       const LVector* posOverride,
                       const LVector* scaleOverride,
-                      const u16* rotationOverride,
+                      const LVector* rotationOverride,
                       s32 flags)
 {
     MARKFUNCTION(0x8008C078);
 
     for (ccMinNode* node = g_wEffectPool.head; node; node = node->next) {
         Effects* effect = static_cast<Effects*>(static_cast<ccNode*>(node));
-        if ((effect->effectType != 4 && effect->effectType != 5) || effect->nameCRC != effectHash) {
+        if (effect->nameCRC != effectHash) {
             continue;
         }
 
@@ -5083,24 +5348,10 @@ s32 FWEffect::Create2(u32 effectHash,
 
         FWEffect* spawnedFw = static_cast<FWEffect*>(wEffect);
         spawnedFw->Create2(posOverride, scaleOverride, rotationOverride, flags);
-        const u16 runtimeFlags = spawnedFw->createFlags;
         g_wEffectPool.RemNode(effect);
-        Effects_AddEffect(effect, (runtimeFlags & 4u) ? 1 : 0);
+        Effects_AddEffect(effect, (flags & 4u) ? 1 : 0);
 
         return 1;
-    }
-
-    Effects* activeEffect = Effects_Find(4, effectHash);
-    if (!activeEffect) {
-        activeEffect = Effects_Find(5, effectHash);
-    }
-
-    if (activeEffect) {
-        FWEffect* activeFw = static_cast<FWEffect*>(activeEffect);
-        // PSX parity: duplicate spawn requests for an already-active FW effect are no-op handled.
-        if (activeFw->isMentorTarget == 0 && activeFw->active != 0) {
-            return 1;
-        }
     }
 
     return 0;
@@ -5108,12 +5359,11 @@ s32 FWEffect::Create2(u32 effectHash,
 
 s32 FWEffect::Create2(const LVector* posOverride,
                       const LVector* scaleOverride,
-                      const u16* rotationOverride,
+                      const LVector* rotationOverride,
                       s32 flags)
 {
     MARKFUNCTION(0x8008C13C);
 
-    active = 1;
     frameCounter = 0;
     frame = 0;
     canDisplay = 1;
@@ -5123,9 +5373,8 @@ s32 FWEffect::Create2(const LVector* posOverride,
 
     overrideFlags = 0;
     pingPongReverse = 0;
-    activatedOnce = 1;
-    createFlags = static_cast<u16>(templateCreateFlags | static_cast<u16>(flags));
-    startDelayCounter = 0;
+    createFlags = static_cast<u16>(flags);
+    startDelayCounter = startDelay;
 
     if (posOverride) {
         overridePos = *posOverride;
@@ -5143,7 +5392,7 @@ s32 FWEffect::Create2(const LVector* posOverride,
         }
     }
 
-    CreateSound(posOverride);
+    CreateSound(posOverride ? &overridePos : nullptr);
 
     if (scaleOverride) {
         overrideScale = *scaleOverride;
@@ -5151,15 +5400,11 @@ s32 FWEffect::Create2(const LVector* posOverride,
     }
 
     if (rotationOverride) {
-        overrideRotation[0] = rotationOverride[0];
-        overrideRotation[1] = rotationOverride[1];
-        overrideRotation[2] = rotationOverride[2];
+        overrideRotation = *rotationOverride;
         overrideFlags |= 4;
     }
     else {
-        overrideRotation[0] = rotation[0];
-        overrideRotation[1] = rotation[1];
-        overrideRotation[2] = rotation[2];
+        overrideRotation = rotation;
     }
 
     if (mentor) {
@@ -5172,39 +5417,26 @@ s32 FWEffect::Create2(const LVector* posOverride,
 s32 FWEffect::SetMentor() {
     MARKFUNCTION(0x8008C2F0);
 
-    if (!followHash) {
-        canDisplay = 1;
-        mentorLink = nullptr;
-        mentorPosRef = nullptr;
-        return 0;
-    }
+    if (followHash) {
+        ccNode* mentorNode = g_ai->moveList.FindNodeCRC(followHash, nullptr);
+        if (mentorNode) {
+            mentorLink = static_cast<Thing*>(mentorNode);
 
-    ccNode* mentorNode = g_ai->moveList.FindNodeCRC(followHash, nullptr);
-    if (!mentorNode) {
-        canDisplay = 1;
-        mentorLink = nullptr;
-        mentorPosRef = nullptr;
-        return 0;
-    }
+            if (pathMode != 5) {
+                mentorPosRef = &mentorLink->pos;
+                LVector* soundPos = mentorLink->GetSoundPosPtr();
+                mentorOffset.x = pos.x - soundPos->x;
+                mentorOffset.y = pos.y - soundPos->y;
+                mentorOffset.z = pos.z - soundPos->z;
+            }
 
-    mentorLink = static_cast<Thing*>(mentorNode);
-
-    if (pathMode != 5) {
-        mentorPosRef = &mentorLink->pos;
-
-        LVector* soundPos = mentorLink->GetSoundPosPtr();
-        if (!soundPos) {
-            soundPos = &mentorLink->pos;
+            canDisplay = 0;
+            return 1;
         }
-
-        mentorOffset.x = pos.x - soundPos->x;
-        mentorOffset.y = pos.y - soundPos->y;
-        mentorOffset.z = pos.z - soundPos->z;
     }
 
-    canDisplay = 0;
-
-    return 1;
+    canDisplay = 1;
+    return 0;
 }
 
 s32 FWEffect::Continue() {
@@ -5251,8 +5483,9 @@ s32 FWEffect::Update() {
     if (!mentorLink) {
         if (stepFrame()) {
             if ((createFlags & 2u) == 0u) {
+                s32 result = 1;
                 if (isMentorTarget) {
-                    canDisplay = 0;
+                    doneFlag = 1;
                 }
                 else {
                     s32 doneMask = 1;
@@ -5260,15 +5493,15 @@ s32 FWEffect::Update() {
                         mentor->IsDone(doneMask);
                     }
 
+                    result = doneMask;
                     if (doneMask) {
-                        active = 0;
                         Effects_RemoveEffect(this);
                         g_wEffectPool.AddNode(g_wEffectPool.tail, this);
                         ReleaseSound();
                     }
                 }
 
-                return 1;
+                return result;
             }
 
             frame = 1;
@@ -5346,7 +5579,6 @@ s32 FWEffect::Update() {
         }
         else if (pathMode == 99) {
             if (stepFrame()) {
-                active = 0;
                 Effects_RemoveEffect(this);
                 g_wEffectPool.AddNode(g_wEffectPool.tail, this);
                 ReleaseSound();
@@ -5370,19 +5602,17 @@ s32 FWEffect::Update() {
         scaleRoll[3] = sourceScale.y;
         scaleRoll[4] = sourceScale.z;
 
-        if (mentorLink) {
-            const s32 mentorScale = rmDiv16i(mentorLink->orientation.x, 0x10000);
-            const s32 absMentorScale = (mentorScale < 0) ? -mentorScale : mentorScale;
-            const s32 interpScale = static_cast<s32>(
-                ((static_cast<s64>(absMentorScale) * static_cast<s64>(scaleRoll[1] - scaleRoll[0])) >> 16)
-                + scaleRoll[0]);
+        const s32 mentorScale = rmDiv16i(mentorLink->orientation.x, 0x10000);
+        const s32 absMentorScale = (mentorScale < 0) ? -mentorScale : mentorScale;
+        const s32 interpScale = static_cast<s32>(
+            ((static_cast<s64>(absMentorScale) * static_cast<s64>(scaleRoll[1] - scaleRoll[0])) >> 16)
+            + scaleRoll[0]);
 
-            LVector scaled = {};
-            rmV3Scale(&scaled, &sourceScale, interpScale);
-            scaleRoll[2] = scaled.x;
-            scaleRoll[3] = scaled.y;
-            scaleRoll[4] = scaled.z;
-        }
+        LVector scaled = {};
+        rmV3Scale(&scaled, &sourceScale, interpScale);
+        scaleRoll[2] = scaled.x;
+        scaleRoll[3] = scaled.y;
+        scaleRoll[4] = scaled.z;
     }
 
     if (canDisplay) {
@@ -5407,11 +5637,16 @@ void FWEffect::Display(s32 inBlockNum) {
         mentor->Display(inBlockNum);
     }
 
-    if (comEffect->EndOfFrame(frame)) {
+    bool endOfFrame = false;
+    if (comEffect->HasAnimation()) {
+        endOfFrame = comEffect->EndOfFrame(frame);
+    }
+
+    if (endOfFrame) {
         return;
     }
 
-    comEffect->SetFrameReal(BuildEffectFrameReal16(frame, frameCounter, frameDelay));
+    comEffect->SetFrame(frame);
 
     LVector renderPos = pos;
     if (mentorPosRef) {
@@ -5444,9 +5679,7 @@ void FWEffect::Display(s32 inBlockNum) {
 
     u32 flags = renderFlags;
     const LVector* scalePtr = hasScale ? &scale : nullptr;
-
-    u16 rotationWords[3] = { rotation[0], rotation[1], rotation[2] };
-    const u16* rotationPtr = rotationWords;
+    const LVector* rotationPtr = &rotation;
 
     if (overrideFlags) {
         if ((overrideFlags & 1u) != 0u) {
@@ -5459,9 +5692,7 @@ void FWEffect::Display(s32 inBlockNum) {
         }
 
         if ((overrideFlags & 4u) != 0u) {
-            rotationWords[0] = overrideRotation[0];
-            rotationWords[1] = overrideRotation[1];
-            rotationWords[2] = overrideRotation[2];
+            rotationPtr = &overrideRotation;
             flags |= 0x118u;
         }
     }
@@ -5509,9 +5740,9 @@ s32 LensFlare::Create() {
     }
 
     targetEffect = found;
-    targetOffset.x = pos.x - found->pos.x;
-    targetOffset.y = pos.y - found->pos.y;
-    targetOffset.z = pos.z - found->pos.z;
+    targetOffset.x = spawnPos.x - found->spawnPos.x;
+    targetOffset.y = spawnPos.y - found->spawnPos.y;
+    targetOffset.z = spawnPos.z - found->spawnPos.z;
     return 1;
 }
 
@@ -5526,9 +5757,11 @@ s32 LensFlare::Update() {
     const Mat4& cameraMatrix = g_display->GetCamera()->GetP3DCamera()->GetCameraMatrix();
 
     LVector cameraForward = {};
-    cameraForward.x = static_cast<s32>(cameraMatrix.m[2] * 4096.0f);
-    cameraForward.y = static_cast<s32>(cameraMatrix.m[6] * 4096.0f);
-    cameraForward.z = static_cast<s32>(cameraMatrix.m[10] * 4096.0f);
+    // PSX p3dGetElement(2, row, matrix) reads MATRIX column 2 (row-major storage).
+    // Mat4 is column-major, so column 2 is m[8], m[9], m[10].
+    cameraForward.x = PsxGetElementQ16(cameraMatrix, 2, 0);
+    cameraForward.y = PsxGetElementQ16(cameraMatrix, 2, 1);
+    cameraForward.z = PsxGetElementQ16(cameraMatrix, 2, 2);
 
     LVector cameraPos = {};
     cameraPos.x = static_cast<s32>(cameraMatrix.m[12]);
@@ -5538,34 +5771,38 @@ s32 LensFlare::Update() {
     LVector sourceRot = {};
     LVector sourcePos = {};
 
-    if (targetEffect) {
-        sourceRot.x = targetEffect->rotation[0];
-        sourceRot.y = targetEffect->rotation[1];
-        sourceRot.z = targetEffect->rotation[2];
-        sourcePos = targetEffect->pos;
-        pos = targetEffect->pos;
+    if (mentorLink) {
+        sourceRot = mentorLink->orientation;
+        sourcePos = mentorLink->pos;
+        pos = mentorLink->pos;
     }
     else {
-        if (!mentorLink) {
+        if (!targetEffect) {
             flareVisible = 0;
             return 0;
         }
 
-        if ((mentorLink->flags2 & TF2_KILLED) != 0u) {
+        if (!targetEffect->inEffectsList) {
             Effects_RemoveEffect(this);
             g_wEffectPool.AddNode(g_wEffectPool.tail, this);
             return 0;
         }
 
-        sourceRot.x = -mentorLink->orientation.x;
-        sourceRot.y = mentorLink->orientation.y + 0x8000;
-        sourceRot.z = mentorLink->orientation.z;
-        sourcePos = mentorLink->pos;
-        pos = mentorLink->pos;
+        sourceRot.x = -targetEffect->rotation.x;
+        sourceRot.y = targetEffect->rotation.y + 0x8000;
+        sourceRot.z = targetEffect->rotation.z;
+        sourcePos = targetEffect->pos;
+        pos = targetEffect->pos;
     }
 
     Mat4 rotMatrix;
-    p3dBuildRotMatrixXYZ(sourceRot.x, sourceRot.y, sourceRot.z, rotMatrix);
+    // PSX stores sourceRot as 32-bit lanes but lhu-casts each lane before
+    // p3dBuildRotMatrixXYZ in LensFlare::Update.
+    p3dBuildRotMatrixXYZ(
+        static_cast<u16>(sourceRot.x),
+        static_cast<u16>(sourceRot.y),
+        static_cast<u16>(sourceRot.z),
+        rotMatrix);
 
     const Vec3 rotatedOffset = p3dVecTimesRotMatrix(
         Vec3(static_cast<f32>(targetOffset.x),
@@ -5584,39 +5821,33 @@ s32 LensFlare::Update() {
     }
 
     LVector effectForward = {};
-    effectForward.x = static_cast<s32>(rotMatrix.m[2] * 4096.0f);
-    effectForward.y = static_cast<s32>(rotMatrix.m[6] * 4096.0f);
-    effectForward.z = static_cast<s32>(rotMatrix.m[10] * 4096.0f);
+    effectForward.x = PsxGetElementQ16(rotMatrix, 2, 0);
+    effectForward.y = PsxGetElementQ16(rotMatrix, 2, 1);
+    effectForward.z = PsxGetElementQ16(rotMatrix, 2, 2);
 
     const s32 dot = rmV3Dot(&cameraForward, &effectForward);
     flareVisible = 0;
     if (dot < 0) {
-        bigScreenGlow = (dot < -0x6000) ? 1 : 0;
+        bigScreenGlow = (dot < kLensFlareBigGlowDotThreshold) ? 1 : 0;
 
-        s32 tableIndex = (-15 * dot) >> 16;
-        if (tableIndex < 0) {
-            tableIndex = 0;
-        }
-        if (tableIndex > 15) {
-            tableIndex = 15;
-        }
+        const s32 tableIndex = (-15 * dot) >> 16;
 
         const s32 targetPrimary = kLensFlareFrameScaleTable[tableIndex];
         frameScalePrimary += static_cast<s32>(
-            (static_cast<s64>(0x2000) * static_cast<s64>(targetPrimary - frameScalePrimary)) >> 16);
+            (static_cast<s64>(kLensFlarePrimaryInterp) * static_cast<s64>(targetPrimary - frameScalePrimary)) >> 16);
 
         const s32 targetSecondary = kLensFlareFrameScaleTable2[tableIndex];
         frameScaleSecondary += static_cast<s32>(
-            (static_cast<s64>(0x2000) * static_cast<s64>(targetSecondary - frameScaleSecondary)) >> 16);
+            (static_cast<s64>(kLensFlareSecondaryInterp) * static_cast<s64>(targetSecondary - frameScaleSecondary)) >> 16);
 
-        const u8 mainR = static_cast<u8>((255 * frameScalePrimary) >> 16);
-        const u8 mainG = static_cast<u8>((220 * frameScalePrimary) >> 16);
-        const u8 mainB = static_cast<u8>((170 * frameScalePrimary) >> 16);
+        const u8 mainR = static_cast<u8>((kLensFlareMainColourR * frameScalePrimary) >> 16);
+        const u8 mainG = static_cast<u8>((kLensFlareMainColourG * frameScalePrimary) >> 16);
+        const u8 mainB = static_cast<u8>((kLensFlareMainColourB * frameScalePrimary) >> 16);
         colourPrimary = static_cast<u32>(mainR | (mainG << 8) | (mainB << 16));
 
-        const u8 secR = static_cast<u8>((255 * frameScaleSecondary) >> 16);
-        const u8 secG = static_cast<u8>((176 * frameScaleSecondary) >> 16);
-        const u8 secB = static_cast<u8>((96 * frameScaleSecondary) >> 16);
+        const u8 secR = static_cast<u8>((kLensFlareSecondaryColourR * frameScaleSecondary) >> 16);
+        const u8 secG = static_cast<u8>((kLensFlareSecondaryColourG * frameScaleSecondary) >> 16);
+        const u8 secB = static_cast<u8>((kLensFlareSecondaryColourB * frameScaleSecondary) >> 16);
         colourSecondary = static_cast<u32>(secR | (secG << 8) | (secB << 16));
 
         streakPitch = static_cast<s32>((-20024LL * static_cast<s64>(effectForward.y)) >> 16);
@@ -5626,7 +5857,7 @@ s32 LensFlare::Update() {
 
         flareVisible = 1;
 
-        rmV3Scale(&flareTrailDir, &cameraForward, 0x10000);
+        rmV3Scale(&flareTrailDir, &cameraForward, kLensFlareTrailScale);
         flareTrailDir.x = flareTrailDir.x + cameraPos.x - flarePos.x;
         flareTrailDir.y = flareTrailDir.y + cameraPos.y - flarePos.y;
         flareTrailDir.z = flareTrailDir.z + cameraPos.z - flarePos.z;
@@ -5638,11 +5869,11 @@ s32 LensFlare::Update() {
 void LensFlare::Display(s32 inBlockNum) {
     MARKFUNCTION(0x800BFB34);
 
-    if (targetEffect && !targetEffect->active) {
+    if (targetEffect && !targetEffect->inEffectsList) {
         return;
     }
 
-    if (inBlockNum != 4096 && inBlockNum != CollisionSector::GetBlockNumber(flarePos)) {
+    if (inBlockNum != CollisionSector::GetBlockNumber(flarePos)) {
         return;
     }
 
@@ -5661,17 +5892,13 @@ void LensFlare::Display(s32 inBlockNum) {
         }
 
         LVector mainScale = { frameScalePrimary, frameScalePrimary, frameScalePrimary };
-        u16 mainRotation[3] = { 0, 0, 0 };
-        mainEffect->Render(flarePos, &mainScale, mainRotation, trackingFlags | 6u);
+        LVector mainRotation = {};
+        mainEffect->Render(flarePos, &mainScale, &mainRotation, trackingFlags | 6u);
 
         if (hasSecondaryGlow) {
             LVector glowScale = { 0x8000, 0x8000, 0x8000 };
-            u16 glowRotation[3] = {
-                static_cast<u16>(streakPitch & 0xFFFF),
-                static_cast<u16>(streakYaw & 0xFFFF),
-                0,
-            };
-            glowEffect->Render(flarePos, &glowScale, glowRotation, trackingFlags | 0x10Cu);
+            LVector glowRotation = { streakPitch, 0, streakYaw };
+            glowEffect->Render(flarePos, &glowScale, &glowRotation, trackingFlags | 0x10Cu);
         }
 
         s32 fadeScale = 0x10000 - frameScalePrimary;
@@ -5679,11 +5906,13 @@ void LensFlare::Display(s32 inBlockNum) {
             fadeScale = 6553;
         }
 
-        const s32 clampSpan = 3;
+        const s32 clampSpan = kLensFlareClampSpan;
         const s32 divStep = rmDiv16i(fadeScale, ((clampSpan * 2) + 1) << 16);
 
         s32 step = divStep * clampSpan;
-        const u32 oldColour = clampColourEntry ? *clampColourEntry : 0;
+        // PSX Display__9LensFlarei reads backup from *(clampPtr + lane), then
+        // writes active colour to *clampPtr in the streak loop.
+        const u32 oldColour = clampColourEntry ? clampColourEntry[kLensFlareClampColourLane] : 0;
 
         for (s32 i = -clampSpan; i < clampSpan; i++) {
             if (clampColourEntry) {
@@ -5701,7 +5930,7 @@ void LensFlare::Display(s32 inBlockNum) {
             streakPos.y += flarePos.y;
             streakPos.z += flarePos.z;
 
-            streakEffect->Render(streakPos, &streakScale, mainRotation, trackingFlags | 6u);
+            streakEffect->Render(streakPos, &streakScale, &mainRotation, trackingFlags | 6u);
         }
 
         if (clampColourEntry) {
@@ -5714,13 +5943,13 @@ void LensFlare::Display(s32 inBlockNum) {
     }
     else if (hasSecondaryGlow && inView) {
         LVector glowScale = { 0x8000, 0x8000, 0x8000 };
-        u16 glowRotation[3] = {
-            static_cast<u16>(streakPitch & 0xFFFF),
-            static_cast<u16>(streakYaw & 0xFFFF),
-            0,
-        };
-        glowEffect->Render(flarePos, &glowScale, glowRotation, 268u);
+        LVector glowRotation = { streakPitch, 0, streakYaw };
+        glowEffect->Render(flarePos, &glowScale, &glowRotation, 268u);
     }
+}
+
+bool LensFlare::IsDirectorOverlay() const {
+    return false;
 }
 
 bool LensFlare::GetDebugWorldPos(LVector* outPos) const {
@@ -5870,9 +6099,6 @@ void WEffect_InitWorldEffects(DBPoint* firstPoint) {
                     }
 
                     fwEffect->templateCreateFlags = 0;
-                    if (point->FindAttribValue(21, &value)) {
-                        fwEffect->templateCreateFlags = static_cast<u16>(value);
-                    }
 
                     u32 scaleValue = 0;
                     if (point->FindAttribValue(51, &scaleValue)) {
@@ -5925,9 +6151,9 @@ void WEffect_InitWorldEffects(DBPoint* firstPoint) {
             effect->renderFlags = (value == 1) ? 2u : 0x200u;
         }
         else {
-            effect->rotation[0] = static_cast<u16>(point->field40);
-            effect->rotation[1] = static_cast<u16>(point->field44);
-            effect->rotation[2] = static_cast<u16>(point->field48);
+            effect->rotation.x = point->field40;
+            effect->rotation.y = point->field44;
+            effect->rotation.z = point->field48;
             effect->renderFlags = 0x118u;
         }
 

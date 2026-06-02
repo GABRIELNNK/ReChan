@@ -1612,6 +1612,10 @@ void ParticleSystemMgr::InitMgr(ParticleSystem* inSystem) {
     BindSystemList();
 }
 
+void ParticleSystemMgr::SetSystem(ParticleSystem* inSystem) {
+    system = inSystem;
+}
+
 s32 ParticleSystemMgr::CreateParticles(const LVector& origin, ParticleStats* statsOverride) {
     MARKFUNCTION(0x80097E1C);
 

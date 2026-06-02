@@ -13,7 +13,7 @@ static bool IsDirectorOverlayRoute(const Effects* effect) {
     }
 
     const s32 type = effect->effectType;
-    if (type == 1 || type == 4 || type == 7 || type == 2 || type == 3) {
+    if (type == 1 || type == 4 || type == 7 || type == 2 || type == 3 || type == 5) {
         return effect->IsDirectorOverlay();
     }
 

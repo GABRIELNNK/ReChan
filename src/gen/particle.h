@@ -44,6 +44,7 @@ public:
     ~ParticleSystemMgr();
 
     void InitMgr(ParticleSystem* system);
+    void SetSystem(ParticleSystem* system);
     s32 CreateParticles(const LVector& origin, ParticleStats* statsOverride = nullptr);
     s32 SetParticleDirection(const LVector* direction);
     s32 ResetParticleDirection();
