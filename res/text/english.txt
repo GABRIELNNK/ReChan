@@ -1,0 +1,453 @@
+#
+# Frontend
+#
+[FE_BACK]
+Back
+
+[FE_TTL]
+Title Screen
+
+[FE_MNM]
+Main Menu
+
+[FE_XTG]
+Exit Game
+
+[FE_QUI]
+Quitting...
+
+[FE_NWG]
+New Game
+
+[FE_STG]
+Start Game
+
+[FE_PST]
+PRESS ANY BUTTON TO START
+
+[FE_TLC]
+Press <ACT:MENU_CONFIRM> to continue
+
+[FE_TLHD]
+Level Results
+
+[FE_TLFG]
+Fight
+
+[FE_TLCB]
+Combo
+
+[FE_TLSY]
+Style
+
+[FE_TLGD]
+Grade
+
+[FE_TLRD]
+Red Dragons
+
+[FE_TLGO]
+Gold Dragons
+
+[FE_TLBG]
+BONUS +1 GOLD DRAGON
+
+[FE_TLDB]
+DRAGON BONUS
+
+[FE_TLMB]
+MOVIE BONUS UNLOCKED
+
+[FE_RSM]
+Resume Game
+
+[FE_QTG]
+Quit Game
+
+[FE_LDG]
+Load Game
+
+[FE_SVG]
+Save Game
+
+[FE_DLG]
+Delete Game
+
+[FE_SLE]
+Save Slot %d Empty
+
+[FE_SLD]
+Save Slot %d - %s
+
+[FE_OPT]
+Options
+
+[FE_LNG]
+Language:
+
+[FE_LGEN]
+English
+
+[FE_LGER]
+German
+
+[FE_LFRE]
+French
+
+[FE_LITA]
+Italian
+
+[FE_LSPA]
+Spanish
+
+[FE_CTL]
+Controller Settings
+
+[FE_DIS]
+Display Settings
+
+[FE_SND]
+Sound Settings
+
+[FE_CRE]
+Credits
+
+[FE_BCK]
+Back
+
+[FE_CSH]
+Vibration:
+
+[FE_CCF]
+Configuration:
+
+[FE_CSD]
+STATUS DISPLAY
+
+[FE_CCT]
+COUNTER
+
+[FE_CMV]
+MOVE PLAYER
+
+[FE_CNU]
+UNUSED
+
+[FE_CMO]
+MENU
+
+[FE_CST]
+STRAFE
+
+[FE_CDR]
+DIVE ROLL
+
+[FE_CPN]
+PUNCH
+
+[FE_CKK]
+KICK
+
+[FE_CGR]
+GRAB
+
+[FE_CJP]
+JUMP
+
+[FE_CF1]
+1
+
+[FE_CF2]
+2
+
+[FE_CF3]
+3
+
+[FE_KBD]
+Key Bindings
+
+[FE_KBACT]
+Action
+
+[FE_KBBN1]
+Bind 1
+
+[FE_KBBN2]
+Bind 2
+
+[JUMP]
+Jump
+
+[PUNCH]
+Punch
+
+[KICK]
+Kick
+
+[GRAB]
+Grab
+
+[DIVE_ROLL]
+Dive Roll
+
+[STRAFE]
+Strafe
+
+[COUNTER]
+Counter
+
+[STATUS_DISPLAY]
+Status
+
+[MOVE_UP]
+Move Up
+
+[MOVE_DOWN]
+Move Down
+
+[MOVE_LEFT]
+Move Left
+
+[MOVE_RIGHT]
+Move Right
+
+[OPEN_CLOSE_MENU]
+Open/Close Menu
+
+[MENU_UP]
+Menu Up
+
+[MENU_DOWN]
+Menu Down
+
+[MENU_LEFT]
+Menu Left
+
+[MENU_RIGHT]
+Menu Right
+
+[MENU_CONFIRM]
+Confirm
+
+[MENU_BACK]
+Back
+
+[MENU_CLEAR]
+Clear
+
+[FE_KBPR]
+Press key or mouse
+
+[FE_KBNAV]
+<ACT:MENU_UP>/<ACT:MENU_DOWN> Action
+
+[FE_KBSLT]
+<ACT:MENU_LEFT>/<ACT:MENU_RIGHT> Slot
+
+[FE_KBBND]
+<ACT:MENU_CONFIRM> Bind
+
+[FE_KBCLR]
+<ACT:MENU_CLEAR> Unbind
+
+[FE_KBCAN]
+<ACT:MENU_BACK> Cancel
+
+[FE_KBBCK]
+<ACT:MENU_BACK> Back
+
+[FE_HPADJ]
+<ACT:MENU_LEFT>/<ACT:MENU_RIGHT> Adjust
+
+[FE_HPSET]
+<ACT:MENU_CONFIRM> Set
+
+[FE_HPTGL]
+<ACT:MENU_CONFIRM> Toggle
+
+[FE_HPSEL]
+<ACT:MENU_CONFIRM> Select
+
+[FE_HPBCK]
+<ACT:MENU_BACK> Back
+
+[FE_NTD]
+Not Used
+
+[FE_RES]
+Resolution:
+
+[FE_FSC]
+Screen Mode:
+
+[FE_SCW]
+Windowed
+
+[FE_SCB]
+Borderless
+
+[FE_SCF]
+Fullscreen
+
+[FE_VYS]
+V-Sync:
+
+[FE_FPS]
+Frame Rate:
+
+[FE_FR30]
+30
+
+[FE_FR60]
+60
+
+[FE_FR120]
+120
+
+[FE_MAX]
+Unlimited
+
+[FE_MSA]
+Anti-Aliasing:
+
+[FE_DSH]
+Dynamic Shadows:
+
+[FE_DSS]
+Shadow Softness:
+
+[FE_A2X]
+2X
+
+[FE_A4X]
+4X
+
+[FE_A8X]
+8X
+
+[FE_A16X]
+16X
+
+[FE_EFV]
+Effects Volume:
+
+[FE_MSV]
+Music Volume:
+
+[FE_VCV]
+Voice Volume:
+
+[FE_STR]
+Stereo:
+
+[FE_NGQ]
+Are you sure you want to start a new game? All current game progress will be lost. Proceed?
+
+[FE_SVQ]
+Are you sure you want to save to this slot?
+
+[FE_DLQ]
+Are you sure you want to delete this save slot?
+
+[FE_SVD]
+Game file successfully saved.
+
+[FE_DLD]
+Game file successfully deleted.
+
+[FE_LDQ]
+All unsaved progress in your current game will be lost. Proceed with loading?
+
+[FE_YS]
+Yes
+
+[FE_NO]
+No
+
+[FE_OK]
+OK
+
+[FE_OFF]
+Off
+
+[FE_LOW]
+Low
+
+[FE_MED]
+Medium
+
+[FE_HIG]
+High
+
+[FE_ON]
+On
+
+[FE_AUT]
+Auto
+
+[FE_XGM]
+Are you sure you want to exit the game?
+
+[FE_PSD]
+Paused
+
+[FE_RSG]
+Resume Game
+
+[FE_EXL]
+Exit Level
+
+[FE_EXLR]
+Are you sure you want to exit this level?
+
+[FE_GRD]
+GRADE:
+
+[FE_LVL]
+Level %d
+
+[FE_LOC_CHN]
+Chinatown
+
+[FE_LOC_WTR]
+Waterfront
+
+[FE_LOC_SWR]
+Sewer
+
+[FE_LOC_ROF]
+Roof Top
+
+[FE_LOC_FAC]
+Factory
+
+[FE_LOC_TMP]
+Shaolin Temple
+
+[FE_LOC_DST]
+Destination Select
+
+[FE_HPNM]
+JACKIE
+
+[FE_HBOS]
+BOSS
+
+[FE_DTG]
+TOTAL GOLD DRAGONS  %d
+
+[FE_DTRV]
+TRAVEL TO
+
+[FE_DCMP]
+COMPLETED
+
+[FE_DNCM]
+NOT COMPLETED
+
+#
+# PSX overrides
+#
+
+[0xC131692D]
+Press <ACT:OPEN_CLOSE_MENU> to open the main menu.

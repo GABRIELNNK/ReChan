@@ -1,0 +1,453 @@
+#
+# Frontend
+#
+[FE_BACK]
+Indietro
+
+[FE_TTL]
+Schermata Titolo
+
+[FE_MNM]
+Menu Principale
+
+[FE_XTG]
+Esci dal gioco
+
+[FE_QUI]
+Uscita...
+
+[FE_NWG]
+Nuova Partita
+
+[FE_STG]
+Avvia Gioco
+
+[FE_PST]
+PREMI UN PULSANTE QUALSIASI PER INIZIARE
+
+[FE_TLC]
+Premi <ACT:MENU_CONFIRM> per continuare
+
+[FE_TLHD]
+Risultati Livello
+
+[FE_TLFG]
+Combattimento
+
+[FE_TLCB]
+Combo
+
+[FE_TLSY]
+Stile
+
+[FE_TLGD]
+Grado
+
+[FE_TLRD]
+Draghi Rossi
+
+[FE_TLGO]
+Draghi Dorati
+
+[FE_TLBG]
+BONUS +1 DRAGO DORATO
+
+[FE_TLDB]
+BONUS DRAGO
+
+[FE_TLMB]
+BONUS FILM SBLOCCATO
+
+[FE_RSM]
+Riprendi Partita
+
+[FE_QTG]
+Esci dal gioco
+
+[FE_LDG]
+Carica Partita
+
+[FE_SVG]
+Salva Partita
+
+[FE_DLG]
+Elimina Partita
+
+[FE_SLE]
+Slot salvataggio %d vuoto
+
+[FE_SLD]
+Slot salvataggio %d - %s
+
+[FE_OPT]
+Opzioni
+
+[FE_LNG]
+Lingua:
+
+[FE_LGEN]
+Inglese
+
+[FE_LGER]
+Tedesco
+
+[FE_LFRE]
+Francese
+
+[FE_LITA]
+Italiano
+
+[FE_LSPA]
+Spagnolo
+
+[FE_CTL]
+Impostazioni Controller
+
+[FE_DIS]
+Impostazioni Video
+
+[FE_SND]
+Impostazioni Audio
+
+[FE_CRE]
+Crediti
+
+[FE_BCK]
+Indietro
+
+[FE_CSH]
+Vibrazione:
+
+[FE_CCF]
+Configurazione:
+
+[FE_CSD]
+DISPLAY STATO
+
+[FE_CCT]
+CONTATORE
+
+[FE_CMV]
+MUOVI GIOCATORE
+
+[FE_CNU]
+NON USATO
+
+[FE_CMO]
+MENU
+
+[FE_CST]
+SCHIVATA LATERALE
+
+[FE_CDR]
+CAPRIOLA
+
+[FE_CPN]
+PUGNO
+
+[FE_CKK]
+CALCIO
+
+[FE_CGR]
+AFFERRA
+
+[FE_CJP]
+SALTA
+
+[FE_CF1]
+1
+
+[FE_CF2]
+2
+
+[FE_CF3]
+3
+
+[FE_KBD]
+Assegnazione Tasti
+
+[FE_KBACT]
+Azione
+
+[FE_KBBN1]
+Tasto 1
+
+[FE_KBBN2]
+Tasto 2
+
+[JUMP]
+Salta
+
+[PUNCH]
+Pugno
+
+[KICK]
+Calcio
+
+[GRAB]
+Afferra
+
+[DIVE_ROLL]
+Tuffo rotolata
+
+[STRAFE]
+Movimento laterale
+
+[COUNTER]
+Contrattacco
+
+[STATUS_DISPLAY]
+Stato
+
+[MOVE_UP]
+Su
+
+[MOVE_DOWN]
+Giu
+
+[MOVE_LEFT]
+Sinistra
+
+[MOVE_RIGHT]
+Destra
+
+[OPEN_CLOSE_MENU]
+Apri/Chiudi menu
+
+[MENU_UP]
+Menu su
+
+[MENU_DOWN]
+Menu giu
+
+[MENU_LEFT]
+Menu sinistra
+
+[MENU_RIGHT]
+Menu destra
+
+[MENU_CONFIRM]
+Conferma
+
+[MENU_BACK]
+Indietro
+
+[MENU_CLEAR]
+Cancella
+
+[FE_KBPR]
+Premi un tasto o il mouse
+
+[FE_KBNAV]
+<ACT:MENU_UP>/<ACT:MENU_DOWN> Azione
+
+[FE_KBSLT]
+<ACT:MENU_LEFT>/<ACT:MENU_RIGHT> Slot
+
+[FE_KBBND]
+<ACT:MENU_CONFIRM> Assegna
+
+[FE_KBCLR]
+<ACT:MENU_CLEAR> Rimuovi
+
+[FE_KBCAN]
+<ACT:MENU_BACK> Annulla
+
+[FE_KBBCK]
+<ACT:MENU_BACK> Indietro
+
+[FE_HPADJ]
+<ACT:MENU_LEFT>/<ACT:MENU_RIGHT> Regola
+
+[FE_HPSET]
+<ACT:MENU_CONFIRM> Imposta
+
+[FE_HPTGL]
+<ACT:MENU_CONFIRM> Cambia
+
+[FE_HPSEL]
+<ACT:MENU_CONFIRM> Seleziona
+
+[FE_HPBCK]
+<ACT:MENU_BACK> Indietro
+
+[FE_NTD]
+Non usato
+
+[FE_RES]
+Risoluzione:
+
+[FE_FSC]
+Modalita schermo:
+
+[FE_SCW]
+Finestra
+
+[FE_SCB]
+Senza bordi
+
+[FE_SCF]
+Schermo intero
+
+[FE_VYS]
+V-Sync:
+
+[FE_FPS]
+Frame Rate:
+
+[FE_FR30]
+30
+
+[FE_FR60]
+60
+
+[FE_FR120]
+120
+
+[FE_MAX]
+Illimitato
+
+[FE_MSA]
+Anti-Aliasing:
+
+[FE_DSH]
+Ombre dinamiche:
+
+[FE_DSS]
+Morbidezza ombre:
+
+[FE_A2X]
+2X
+
+[FE_A4X]
+4X
+
+[FE_A8X]
+8X
+
+[FE_A16X]
+16X
+
+[FE_EFV]
+Volume Effetti:
+
+[FE_MSV]
+Volume Musica:
+
+[FE_VCV]
+Volume Voce:
+
+[FE_STR]
+Stereo:
+
+[FE_NGQ]
+Sei sicuro di voler iniziare una nuova partita? Tutti i progressi correnti andranno persi. Continuare?
+
+[FE_SVQ]
+Sei sicuro di voler salvare in questo slot?
+
+[FE_DLQ]
+Sei sicuro di voler eliminare questo slot di salvataggio?
+
+[FE_SVD]
+Partita salvata.
+
+[FE_DLD]
+Salvataggio eliminato.
+
+[FE_LDQ]
+Tutti i progressi non salvati andranno persi. Continuare con il caricamento?
+
+[FE_YS]
+Si
+
+[FE_NO]
+No
+
+[FE_OK]
+OK
+
+[FE_OFF]
+Off
+
+[FE_LOW]
+Bassa
+
+[FE_MED]
+Media
+
+[FE_HIG]
+Alta
+
+[FE_ON]
+On
+
+[FE_AUT]
+Auto
+
+[FE_XGM]
+Sei sicuro di voler uscire dal gioco?
+
+[FE_PSD]
+Pausa
+
+[FE_RSG]
+Riprendi Partita
+
+[FE_EXL]
+Esci dal livello
+
+[FE_EXLR]
+Sei sicuro di voler uscire da questo livello?
+
+[FE_GRD]
+VALUTAZIONE:
+
+[FE_LVL]
+Livello %d
+
+[FE_LOC_CHN]
+Chinatown
+
+[FE_LOC_WTR]
+Lungomare
+
+[FE_LOC_SWR]
+Fogne
+
+[FE_LOC_ROF]
+Tetti
+
+[FE_LOC_FAC]
+Fabbrica
+
+[FE_LOC_TMP]
+Tempio Shaolin
+
+[FE_LOC_DST]
+Selezione destinazione
+
+[FE_HPNM]
+JACKIE
+
+[FE_HBOS]
+BOSS
+
+[FE_DTG]
+DRAGHI DORATI TOTALI  %d
+
+[FE_DTRV]
+VAI A
+
+[FE_DCMP]
+COMPLETATO
+
+[FE_DNCM]
+NON COMPLETATO
+
+#
+# PSX overrides
+#
+
+[0xC131692D]
+Premi <ACT:OPEN_CLOSE_MENU> per aprire il menu principale.

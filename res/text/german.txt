@@ -1,0 +1,450 @@
+#
+# Frontend
+#
+[FE_BACK]
+Zurueck
+
+[FE_TTL]
+Titelseite
+
+[FE_MNM]
+Hauptmenue
+
+[FE_XTG]
+Spiel beenden
+
+[FE_QUI]
+Beenden...
+
+[FE_NWG]
+Neues Spiel
+
+[FE_STG]
+Spiel starten
+
+[FE_PST]
+DRUECKE EINE BELIEBIGE TASTE ZUM STARTEN
+
+[FE_TLC]
+Druecke <ACT:MENU_CONFIRM>, um fortzufahren
+
+[FE_TLHD]
+Level Ergebnisse
+
+[FE_TLFG]
+Kampf
+
+[FE_TLCB]
+Combo
+
+[FE_TLSY]
+Stil
+
+[FE_TLGD]
+Rang
+
+[FE_TLRD]
+Rote Drachen
+
+[FE_TLGO]
+Goldene Drachen
+
+[FE_TLBG]
+BONUS +1 GOLDENER DRACHE
+
+[FE_TLDB]
+DRACHEN BONUS
+
+[FE_TLMB]
+FILM BONUS FREIGESCHALTET
+
+[FE_RSM]
+Spiel fortsetzen
+
+[FE_QTG]
+Spiel beenden
+
+[FE_LDG]
+Spiel laden
+
+[FE_SVG]
+Spiel speichern
+
+[FE_DLG]
+Spiel loeschen
+
+[FE_SLE]
+Speicherplatz %d leer
+
+[FE_SLD]
+Speicherplatz %d - %s
+
+[FE_OPT]
+Optionen
+
+[FE_LNG]
+Sprache:
+
+[FE_LGEN]
+Englisch
+
+[FE_LGER]
+Deutsch
+
+[FE_LFRE]
+Franzoesisch
+
+[FE_LITA]
+Italienisch
+
+[FE_LSPA]
+Spanisch
+
+[FE_CTL]
+Controller-Einstellungen
+
+[FE_DIS]
+Anzeigeeinstellungen
+
+[FE_SND]
+Audioeinstellungen
+
+[FE_BCK]
+Zurueck
+
+[FE_CSH]
+Vibration:
+
+[FE_CCF]
+Konfiguration:
+
+[FE_CSD]
+STATUSANZEIGE
+
+[FE_CCT]
+ZAEHLER
+
+[FE_CMV]
+SPIELER BEWEGEN
+
+[FE_CNU]
+UNBENUTZT
+
+[FE_CMO]
+MENUE
+
+[FE_CST]
+SEITWAERTS
+
+[FE_CDR]
+HECHTROLLE
+
+[FE_CPN]
+SCHLAG
+
+[FE_CKK]
+TRITT
+
+[FE_CGR]
+GREIFEN
+
+[FE_CJP]
+SPRINGEN
+
+[FE_CF1]
+1
+
+[FE_CF2]
+2
+
+[FE_CF3]
+3
+
+[FE_KBD]
+Tastenbelegung
+
+[FE_KBACT]
+Aktion
+
+[FE_KBBN1]
+Belegung 1
+
+[FE_KBBN2]
+Belegung 2
+
+[JUMP]
+Springen
+
+[PUNCH]
+Schlag
+
+[KICK]
+Tritt
+
+[GRAB]
+Greifen
+
+[DIVE_ROLL]
+Hechtrolle
+
+[STRAFE]
+Seitwaerts
+
+[COUNTER]
+Konter
+
+[STATUS_DISPLAY]
+Status
+
+[MOVE_UP]
+Nach oben
+
+[MOVE_DOWN]
+Nach unten
+
+[MOVE_LEFT]
+Nach links
+
+[MOVE_RIGHT]
+Nach rechts
+
+[OPEN_CLOSE_MENU]
+Menue oeffnen/schliessen
+
+[MENU_UP]
+Menue hoch
+
+[MENU_DOWN]
+Menue runter
+
+[MENU_LEFT]
+Menue links
+
+[MENU_RIGHT]
+Menue rechts
+
+[MENU_CONFIRM]
+Bestaetigen
+
+[MENU_BACK]
+Zurueck
+
+[MENU_CLEAR]
+Loeschen
+
+[FE_KBPR]
+Taste oder Maus druecken
+
+[FE_KBNAV]
+<ACT:MENU_UP>/<ACT:MENU_DOWN> Aktion
+
+[FE_KBSLT]
+<ACT:MENU_LEFT>/<ACT:MENU_RIGHT> Platz
+
+[FE_KBBND]
+<ACT:MENU_CONFIRM> Belegen
+
+[FE_KBCLR]
+<ACT:MENU_CLEAR> Loeschen
+
+[FE_KBCAN]
+<ACT:MENU_BACK> Abbrechen
+
+[FE_KBBCK]
+<ACT:MENU_BACK> Zurueck
+
+[FE_HPADJ]
+<ACT:MENU_LEFT>/<ACT:MENU_RIGHT> Anpassen
+
+[FE_HPSET]
+<ACT:MENU_CONFIRM> Setzen
+
+[FE_HPTGL]
+<ACT:MENU_CONFIRM> Umschalten
+
+[FE_HPSEL]
+<ACT:MENU_CONFIRM> Auswaehlen
+
+[FE_HPBCK]
+<ACT:MENU_BACK> Zurueck
+
+[FE_NTD]
+Nicht benutzt
+
+[FE_RES]
+Aufloesung:
+
+[FE_FSC]
+Bildschirmmodus:
+
+[FE_SCW]
+Fenstermodus
+
+[FE_SCB]
+Randlos
+
+[FE_SCF]
+Vollbild
+
+[FE_VYS]
+V-Sync:
+
+[FE_FPS]
+Bildrate:
+
+[FE_FR30]
+30
+
+[FE_FR60]
+60
+
+[FE_FR120]
+120
+
+[FE_MAX]
+Unbegrenzt
+
+[FE_MSA]
+Anti-Aliasing:
+
+[FE_DSH]
+Dynamische Schatten:
+
+[FE_DSS]
+Schattenweichheit:
+
+[FE_A2X]
+2X
+
+[FE_A4X]
+4X
+
+[FE_A8X]
+8X
+
+[FE_A16X]
+16X
+
+[FE_EFV]
+Effektlautstaerke:
+
+[FE_MSV]
+Musiklautstaerke:
+
+[FE_VCV]
+Sprachlautstaerke:
+
+[FE_STR]
+Stereo:
+
+[FE_NGQ]
+Bist du sicher, dass du ein neues Spiel starten willst? Alle aktuellen Fortschritte gehen verloren. Fortfahren?
+
+[FE_SVQ]
+Willst du wirklich in diesem Speicherplatz speichern?
+
+[FE_DLQ]
+Willst du diesen Speicherplatz wirklich loeschen?
+
+[FE_SVD]
+Spiel gespeichert.
+
+[FE_DLD]
+Speicherstand geloescht.
+
+[FE_LDQ]
+Alle ungespeicherten Fortschritte gehen verloren. Laden fortsetzen?
+
+[FE_YS]
+Ja
+
+[FE_NO]
+Nein
+
+[FE_OK]
+OK
+
+[FE_OFF]
+Aus
+
+[FE_LOW]
+Niedrig
+
+[FE_MED]
+Mittel
+
+[FE_HIG]
+Hoch
+
+[FE_ON]
+Ein
+
+[FE_AUT]
+Automatisch
+
+[FE_XGM]
+Willst du das Spiel wirklich beenden?
+
+[FE_PSD]
+Pausiert
+
+[FE_RSG]
+Spiel fortsetzen
+
+[FE_EXL]
+Level verlassen
+
+[FE_EXLR]
+Willst du dieses Level wirklich verlassen?
+
+[FE_GRD]
+BEWERTUNG:
+
+[FE_LVL]
+Level %d
+
+[FE_LOC_CHN]
+Chinatown
+
+[FE_LOC_WTR]
+Hafenviertel
+
+[FE_LOC_SWR]
+Kanalisation
+
+[FE_LOC_ROF]
+Dach
+
+[FE_LOC_FAC]
+Fabrik
+
+[FE_LOC_TMP]
+Shaolin-Tempel
+
+[FE_LOC_DST]
+Zielauswahl
+
+[FE_HPNM]
+JACKIE
+
+[FE_HBOS]
+BOSS
+
+[FE_DTG]
+GOLDENE DRACHEN GESAMT  %d
+
+[FE_DTRV]
+REISE ZU
+
+[FE_DCMP]
+ABGESCHLOSSEN
+
+[FE_DNCM]
+NICHT ABGESCHLOSSEN
+
+#
+# PSX overrides
+#
+
+[0xC131692D]
+Druecke <ACT:OPEN_CLOSE_MENU>, um das Hauptmenue zu oeffnen.
