@@ -1547,16 +1547,25 @@ void feCustomMenuMgr::Confirm() {
             SetPage(MenuPage_Quitting);
             break;
         case EntryEvent_Credits:
-            rsEvent(RS_STOP_MUSIC, 0, 0, 0);
+        {
+            if (!g_game) break;
 
-            if (g_game)
-                g_game->PlayMovie("credits.str", 1, 1);
+            const bool onTitleScreen = (g_game->GetState() == GameState::TitleLoop);
+            const s32 savedLocation = g_currentSoundLocation;
+
+            rsEvent(RS_STOP_MUSIC, 0, 0, 0);
+            g_game->PlayMovie("credits.str", 1, 0);
 
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-            rsEvent(RS_SET_LOCATION, 22, 0, 0);
+            g_currentSoundLocation = savedLocation;
             rsEvent(RS_LEVEL_BEGIN, 0, 0, 0);
+
+            if (!onTitleScreen) {
+                rsEvent(RS_MUTE, 0, 0, 0);
+            }
             break;
+        }
         case EntryEvent_Load:
             if (m_currPage != MenuPage_LoadSlots) {
                 m_pages[MenuPage_LoadSlots].parentPage = m_currPage;
@@ -3468,8 +3477,8 @@ void feCustomMenuMgr::RenderControllerOverlay(s32 panelX, s32 panelY) const {
 
         { 1,  nullptr,  104.0f,   7.0f,  TextAlign_Left },
         { 3,  nullptr,  104.0f,   16.0f, TextAlign_Left },
-        { 4,  nullptr,  104.0f,   23.0f, TextAlign_Left },
-        { 7,  nullptr,  104.0f,   29.5f, TextAlign_Left },
+        { 7,  nullptr,  104.0f,   23.0f, TextAlign_Left },
+        { 4,  nullptr,  104.0f,   29.5f, TextAlign_Left },
         { 5,  nullptr,  104.0f,   36.5f, TextAlign_Left },
         { 6,  nullptr,  104.0f,   44.0f, TextAlign_Left },
         { -1, "FE_CNU", 104.0f,  54.0f, TextAlign_Left },
