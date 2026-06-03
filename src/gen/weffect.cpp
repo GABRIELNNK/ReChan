@@ -4685,6 +4685,12 @@ s32 WEffect::Create() {
 
     if (paletteData) {
         paletteData->InitPalette();
+        // Pre-initialize CLUT in vram.data so RefreshVRAMTexture captures the
+        // correct initial palette state after a petal reload (not stale values
+        // from the previous gameplay session).
+        if (paletteData->Update()) {
+            paletteData->TransferVram();
+        }
     }
 
     if (pathInfo) {

@@ -4228,9 +4228,6 @@ void World::LoadPetal(u32 petalIndex) {
         PWEffect_InitWorldEffects(g_database->GetFirstPoint());
         ParticleSystem_InitParticleInfoMemory();
 
-        // Refresh VRAM GL texture after Geo texture uploads
-        RefreshVRAMTexture();
-
         // Build block volumes
         std::vector<DBVolume*> blockVolumes;
         for (DBRoot* v = g_database->GetFirstBlock(); v; v = static_cast<DBRoot*>(v->next)) {
@@ -4259,6 +4256,8 @@ void World::LoadPetal(u32 petalIndex) {
     }
 
     WEffect_PopulateWEffects();
+
+    RefreshVRAMTexture();
 
     if (g_director) {
         g_director->Reset();
