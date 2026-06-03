@@ -78,8 +78,9 @@ bool g_destSelectReturnPosValid = false;
 u8 g_arrowInside = 0;
 
 // DynamicThing physics globals (PSX: gp+1740, gp+1744)
+// PSX: MAX_FALL_SPEED = 0x23 (0x800DD018), DYNAMIC_THING_OBSTACLE_VELOCITY_DECAY[0] = 0xFD70 (0x800DD01C)
 s32 g_maxFallSpeed = 0x4000;
-s32 g_dampingFactor = 0xCCCC;
+s32 g_dampingFactor = 0xFD70;
 
 // PSX: BLOCK_DRAW_SEAM_OFFSET_CODE (0x800DC9A8)
 // Layout in PSX data: { code, differenceFactor, max, reserved }
