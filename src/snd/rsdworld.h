@@ -25,6 +25,10 @@ namespace rsdWorld {
 
     void UpdateSpatialAudioState();
     void StopAllPersistentSounds();
+    // PSX: rsdPersistent::FadeOutAll(1500) -- mute all persistent sounds (keep them alive)
+    void MuteAllPersistentSounds();
+    // PSX: rsdPersistent::FadeInAll(1500) -- restore all persistent sounds from mute
+    void UnmuteAllPersistentSounds();
 
 } // namespace rsdWorld
 

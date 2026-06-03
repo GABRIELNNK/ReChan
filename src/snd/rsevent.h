@@ -47,6 +47,10 @@ void jcsFadeOutEngine(u32 flags);
 // Current sound location index (set by RS_SET_LOCATION event)
 extern s32 g_currentSoundLocation;
 
+// PSX: CInteractiveMusicController::Think (MSCCTRLR.CPP:56)
+// Runs per-frame during gameplay; switches FAG song section based on player block.
+void InteractiveMusicControllerThink();
+
 // Returns non-zero if the dialog handle is still valid.
 s32 jcsValidateHandle(s32 handle);
 

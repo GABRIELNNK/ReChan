@@ -1194,6 +1194,9 @@ bool Game::gsPlayState(Game* game) {
         g_display->GetCamera()->UpdateHighFPS();
     }
 
+    // PSX: CInteractiveMusicController::Think (MSCCTRLR.CPP:56) - per-frame FAG song switching.
+    InteractiveMusicControllerThink();
+
     ProcessHandlerList(game->handlerSet2.handlerList);
     return true;
 #else
@@ -1216,6 +1219,9 @@ bool Game::gsPlayState(Game* game) {
 
     // PSX: ProcessHandlers(game) - runs handlerSet1 (think) + handlerSet2 (draw)
     game->ProcessHandlers();
+
+    // PSX: CInteractiveMusicController::Think (MSCCTRLR.CPP:56) - per-frame FAG song switching.
+    InteractiveMusicControllerThink();
 
     // PSX: check state==Play AND director scriptState==0 for pause eligibility
     if (game->state == GameState::Play) {

@@ -151,6 +151,28 @@ AudioSample Sound::GetBankSample(u32 bankIndex, u32 sampleIndex) const {
 }
 
 // PC: music - decode FAG to PCM, load as AudioSample, play through the dedicated music mix
+bool Sound::PlayMusicTrackSong(const char* fagPath, u32 songIndex, f32 volume) {
+    u32 fileSize = 0;
+    u8* fileData = ReadFileBytes(fagPath, fileSize);
+    if (!fileData) { return false; }
+
+    RsdFormat::FagTrack track = RsdFormat::LoadFag(fileData, fileSize, songIndex);
+    delete[] fileData;
+    if (track.pcmData.empty()) return false;
+
+    StopMusic();
+    musicSample = AudioEngine::LoadSample(
+        track.pcmData.data(), track.numFrames, PSX_MUSIC_RATE, track.channels);
+    if (musicSample == AUDIO_SAMPLE_INVALID) return false;
+
+    musicVolume = volume;
+    f32 playVol = musicMuted ? 0.0f : volume;
+    musicVoice = AUDIO_VOICE_INVALID;
+    musicPlaying = AudioEngine::PlayMusicSample(musicSample, playVol, true);
+    LOG("Sound: playing '%s' song=%u (%u frames)", fagPath, songIndex, track.numFrames);
+    return musicPlaying;
+}
+
 bool Sound::PlayMusicTrack(const char* fagPath, f32 volume) {
     u32 fileSize = 0;
     u8* fileData = ReadFileBytes(fagPath, fileSize);

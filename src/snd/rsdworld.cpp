@@ -60,6 +60,26 @@ void rsdWorld::StopAllPersistentSounds() {
     g_persistentSounds.clear();
 }
 
+// PSX: rsdPersistent::FadeOutAll (RSDBACH.CPP) - mute all persistent sounds in place.
+void rsdWorld::MuteAllPersistentSounds() {
+    std::lock_guard<std::mutex> lock(g_persistentMutex);
+    for (rsdPersistent* snd : g_persistentSounds) {
+        if (snd) {
+            snd->SetVolume(0);
+        }
+    }
+}
+
+// PSX: rsdPersistent::FadeInAll (RSDBACH.CPP) - restore all persistent sounds from mute.
+void rsdWorld::UnmuteAllPersistentSounds() {
+    std::lock_guard<std::mutex> lock(g_persistentMutex);
+    for (rsdPersistent* snd : g_persistentSounds) {
+        if (snd) {
+            snd->SetVolume(snd->volume);
+        }
+    }
+}
+
 static void GetObjectVolumesPsx(u16 baseVol, const LVector* objPos, u16& outVolL, u16& outVolR, u32 extraRange) {
     // PSX defaults from rsd init globals.
     static constexpr s32 MIN_AUDIBLE_DIST = 0;

@@ -138,7 +138,7 @@ namespace RsdFormat {
     // PSX rsdStream dualVoice format: each 2048-block (32KB) chunk alternates channels.
     // Even chunks (0,2,4...) = Left channel, Odd chunks (1,3,5...) = Right channel.
     // Filter state resets at each chunk boundary (block 0 of each chunk has shift=0, filter=0).
-    inline FagTrack LoadFag(const u8* fileData, u32 fileSize) {
+    inline FagTrack LoadFag(const u8* fileData, u32 fileSize, u32 songIndex = 0) {
         FagTrack track;
         if (fileSize < 4) return track;
 
@@ -152,9 +152,9 @@ namespace RsdFormat {
         const u32* songStarts = (const u32*)(fileData + 4);
         const u32* songEnds = (const u32*)(fileData + 4 + numSongs * 4);
 
-        // Use first song
-        u32 dataOffset = songStarts[0];
-        u32 dataEnd = songEnds[0];
+        if (songIndex >= numSongs) songIndex = 0;
+        u32 dataOffset = songStarts[songIndex];
+        u32 dataEnd = songEnds[songIndex];
         if (dataOffset >= fileSize || dataEnd <= dataOffset) return track;
         if (dataEnd > fileSize) dataEnd = fileSize;
 

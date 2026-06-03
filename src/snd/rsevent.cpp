@@ -6,6 +6,8 @@
 #include "gen/time.h"
 #include "p3d/p3dmath.h"
 #include "xclib/xcfile.h"
+#include "gen/blockmgr.h"
+#include "ai/player.h"
 
 static constexpr u32 DIALOG_SECTOR_SIZE = 2048;
 static constexpr u32 DIALOG_RATE = 11025;
@@ -1265,6 +1267,9 @@ static s32 g_muteFlag = 0;
 // which determines which music track plays when RS_LEVEL_BEGIN fires.
 s32 g_currentSoundLocation = 0;
 
+// PSX: gp[0x2E8] - current ambience space (set by jcsSetAmbienceSpace)
+static s32 g_currentAmbienceSpace = 0;
+
 // PSX music file table indexed by sound location (LocInfo at 0x800D6588)
 // Matches PSX LocInfo[n][1] ordering exactly
 static const char* s_musicTable[] = {
@@ -1295,6 +1300,63 @@ static const char* s_musicTable[] = {
     nullptr,                      // 24: movie (no FAG)
 };
 static constexpr s32 MUSIC_TABLE_COUNT = 25;
+
+// PSX: CInteractiveMusicController::Think (MSCCTRLR.CPP:56, 0x80082960)
+// Block-based FAG song switching. Decoded from PSX binary: location 9 (SEWER2)
+// uses blocks 4-34 for song 1 (action), everything else song 0 (calm).
+// Other locations with interactive music decoded similarly.
+void InteractiveMusicControllerThink() {
+    if (!g_sound || !g_blockManager || !Player::s_player) return;
+
+    const s32 loc = g_currentSoundLocation;
+    if (loc < 0 || loc >= MUSIC_TABLE_COUNT) return;
+    const char* path = s_musicTable[loc];
+    if (!path) return;
+
+    const s32 block = static_cast<s32>(
+        g_blockManager->GetBlockNumber(Player::s_player->pos));
+    if (block < 0 || block == 0x1000) return;
+
+    // Determine desired song index from PSX MSCCTRLR.CPP block thresholds
+    s32 desired = 0;
+    if (loc == 9) {
+        // SEWER2: blocks 4-34 → song 1 (train action), others → song 0
+        desired = (block >= 4 && block < 35) ? 1 : 0;
+    }
+    else if (loc == 8) {
+        // SEWER1: blocks 24+ → song 1
+        desired = (block >= 24) ? 1 : 0;
+    }
+    else if (loc == 10) {
+        // SEWER3: blocks 22+ → song 1
+        desired = (block >= 22) ? 1 : 0;
+    }
+    else if (loc == 15) {
+        // ROOFB: blocks 3+ → song 1
+        desired = (block >= 3) ? 1 : 0;
+    }
+    else {
+        return; // No interactive music for this location
+    }
+
+    static s32 s_lastBlock = -1;
+    static s32 s_currentSong = 0;
+    static s32 s_lastLocation = -1;
+
+    if (loc != s_lastLocation) {
+        s_lastBlock = -1;
+        s_currentSong = 0;
+        s_lastLocation = loc;
+    }
+
+    if (block == s_lastBlock) return;
+    s_lastBlock = block;
+
+    if (desired == s_currentSong) return;
+    s_currentSong = desired;
+
+    g_sound->PlayMusicTrackSong(path, static_cast<u32>(desired), g_sound->musicVolume);
+}
 
 // PSX: rsEvent (RSEVENT.CPP:48, 0x800346B0)
 s32 rsEvent(s32 event, s32 param1, s32 param2, s32 param3) {
@@ -1461,6 +1523,10 @@ s32 jcsHandleControlEvent(s32 event, s32 param1, s32 param2, s32 param3) {
 
         case 20: // jcsSetAmbienceSpace + optional crossfade
             LOG("[rsEvent] SetAmbienceSpace(%d, crossfade=%d)", param1, param2);
+            // PSX: stores ambienceSpace to gp[0x2E8], then calls
+            // rsdAmbiance::SetSpace if sound state==2 and ambiance object exists.
+            // PC: store space for use by InteractiveMusicControllerThink.
+            g_currentAmbienceSpace = param1;
             break;
 
         case 21: // jcsSetListener(playerPos, cameraData) - 3D audio listener
@@ -1494,33 +1560,25 @@ s32 jcsHandleControlEvent(s32 event, s32 param1, s32 param2, s32 param3) {
 //   bit 2 (0x04): fade in ambiance
 //   bit 0 (0x01): resume dialog
 //   bit 3 (0x08): fade in persistent sounds + set reverb
-// PC: music is the primary concern; other subsystems are stubs.
 void jcsFadeInEngine(u32 flags) {
     MARKFUNCTION(0x8003582C);
 
     if (!g_sound) return;
 
-    // PSX: bit 1 -> rsdMusicPlayer::FadeIn
     if (flags & 0x02) {
-        LOG("[jcsFadeInEngine] FadeIn music (flags=0x%X)", flags);
         g_sound->UnmuteMusic();
     }
 
-    // PSX: bit 2 -> rsdAmbiance::FadeIn (1500ms)
-    if (flags & 0x04) {
-        LOG("[jcsFadeInEngine] FadeIn ambiance (flags=0x%X)", flags);
-    }
+    // PSX: bit 2 -> rsdAmbiance::FadeIn (1500ms) -- requires rsdAmbiance subsystem
 
-    // PSX: bit 0 -> jcsResumeDialog
     if (flags & 0x01) {
-        LOG("[jcsFadeInEngine] ResumeDialog (flags=0x%X)", flags);
         ResumeDialogTimeout(0);
         ResumeDialogTimeout(1);
     }
 
     // PSX: bit 3 -> rsdPersistent::FadeInAll(1500) + rsdSetReverb
     if (flags & 0x08) {
-        LOG("[jcsFadeInEngine] FadeIn persistent + reverb (flags=0x%X)", flags);
+        rsdWorld::UnmuteAllPersistentSounds();
     }
 }
 
@@ -1536,20 +1594,13 @@ void jcsFadeOutEngine(u32 flags) {
 
     if (!g_sound) return;
 
-    // PSX: bit 1 -> rsdMusicPlayer::FadeOut(0)
     if (flags & 0x02) {
-        LOG("[jcsFadeOutEngine] FadeOut music (flags=0x%X)", flags);
         g_sound->MuteMusic();
     }
 
-    // PSX: bit 2 -> rsdAmbiance::FadeOut(1500)
-    if (flags & 0x04) {
-        LOG("[jcsFadeOutEngine] FadeOut ambiance (flags=0x%X)", flags);
-    }
+    // PSX: bit 2 -> rsdAmbiance::FadeOut(1500) -- requires rsdAmbiance subsystem
 
-    // PSX: bit 0 -> jcsPauseDialog
     if (flags & 0x01) {
-        LOG("[jcsFadeOutEngine] PauseDialog (flags=0x%X)", flags);
         if (g_dialogStatus >= DialogStatus_PlayingPrimary
             && g_dialogStatus <= DialogStatus_PlayingPrimaryState14) {
             KillDialogByHandleInternal(0);
@@ -1560,8 +1611,7 @@ void jcsFadeOutEngine(u32 flags) {
 
     // PSX: bit 3 -> rsdPersistent::FadeOutAll(1500) + save reverb + set reverb(0)
     if (flags & 0x08) {
-        LOG("[jcsFadeOutEngine] FadeOut persistent + reverb (flags=0x%X)", flags);
-        rsdWorld::StopAllPersistentSounds();
+        rsdWorld::MuteAllPersistentSounds();
     }
 }
 
