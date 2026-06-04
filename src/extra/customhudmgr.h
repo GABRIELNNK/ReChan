@@ -33,6 +33,7 @@ private:
     tTexture* m_milkTex = nullptr;
     tTexture* m_noodleTex = nullptr;
     tTexture* m_ornamentTex = nullptr;
+    tTexture* m_clockTex = nullptr;
 
     bool m_assetsLoadTried = false;
     bool m_fontLoadTried = false;

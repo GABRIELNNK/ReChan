@@ -89,6 +89,9 @@ public:
     s32 fightingChainTimer;         // +496
     s32 drunkenMasterUnlocked;      // +500
 
+    // PC
+    float secondsPassed;
+
     ScoreManager();
     ~ScoreManager() override;
     void InternalOpen() override;

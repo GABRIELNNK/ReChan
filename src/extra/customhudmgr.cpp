@@ -31,6 +31,7 @@ static const char* kBowlTexturePath = "pc/textures/collectibles/bowl.png";
 static const char* kMilkTexturePath = "pc/textures/collectibles/milk.png";
 static const char* kNoodleTexturePath = "pc/textures/collectibles/noodlebox.png";
 static const char* kOrnamentTexturePath = "pc/textures/frontend/menu_ornament.png";
+static const char* kClockTexturePath = "pc/textures/frontend/clock.png";
 
 // Menu-matched palette for destination banner styling.
 static const u8 kMenuFrameR = 130;
@@ -969,6 +970,7 @@ void CustomHudMgr::EnsureAssetsLoaded() {
     m_milkTex = tTexture::LoadFromImagePath(kMilkTexturePath);
     m_noodleTex = tTexture::LoadFromImagePath(kNoodleTexturePath);
     m_ornamentTex = tTexture::LoadFromImagePath(kOrnamentTexturePath);
+    m_clockTex = tTexture::LoadFromImagePath(kClockTexturePath);
 
     if (m_takeTex && m_takeTex->GetTexture()) {
         m_takeTex->GetTexture()->SetFilterMode(PDDI_FILTER_BILINEAR);
@@ -993,6 +995,9 @@ void CustomHudMgr::EnsureAssetsLoaded() {
     }
     if (m_ornamentTex && m_ornamentTex->GetTexture()) {
         m_ornamentTex->GetTexture()->SetFilterMode(PDDI_FILTER_BILINEAR);
+    }
+    if (m_clockTex && m_clockTex->GetTexture()) {
+        m_clockTex->GetTexture()->SetFilterMode(PDDI_FILTER_BILINEAR);
     }
 }
 
@@ -1048,6 +1053,10 @@ void CustomHudMgr::Shutdown() {
     if (m_ornamentTex) {
         m_ornamentTex->Release();
         m_ornamentTex = nullptr;
+    }
+    if (m_clockTex ) {
+        m_clockTex->Release();
+        m_clockTex = nullptr;
     }
 
     m_playerHealthRatio = -1.0f;
@@ -1400,11 +1409,14 @@ void CustomHudMgr::DrawInventoryCard(const HUD& hud) {
     const f32 rightEdge = DEFAULT_SCREEN_WIDTH - 6.0f;
     const f32 panelPadX = 2.0f;
     const s32 slotCount = showRedDragonCounter ? 3 : 2;
-    const f32 panelW = slotW * (f32)slotCount + panelPadX * 2.0f;
+    const f32 timerW = showRedDragonCounter ? 28.0f : 0.0f;
+
+    const f32 panelW = (slotW * (f32)slotCount + panelPadX * 2.0f);
     const f32 panelX = rightEdge - panelW;
     const f32 dt = GetHudDeltaSeconds();
 
-    const f32 livesX = panelX + panelPadX + slotW * (f32)(slotCount - 1);
+    const f32 timerX = panelX + panelPadX + slotW * (f32)(slotCount - 1) - timerW;
+    const f32 livesX = timerX - timerW;
     const f32 goldX = livesX - slotW;
     const f32 redX = goldX - slotW;
 
@@ -1455,6 +1467,7 @@ void CustomHudMgr::DrawInventoryCard(const HUD& hud) {
     const f32 redCenterY = topY + iconSize * 0.5f - redPulse * kInventoryPulseIconLift + redIconShakeY;
     const f32 goldCenterY = topY + iconSize * 0.5f - goldPulse * kInventoryPulseIconLift + goldIconShakeY;
     const f32 livesCenterY = topY + iconSize * 0.5f - livesPulse * kInventoryPulseIconLift + livesIconShakeY;
+    const f32 clockCenterY = topY + iconSize * 0.5f;
 
     char redBuf[12] = {};
     char goldBuf[12] = {};
@@ -1484,6 +1497,15 @@ void CustomHudMgr::DrawInventoryCard(const HUD& hud) {
                         livesPulse,
                         livesIconShakeX,
                         livesIconShakeY);
+
+    if (showRedDragonCounter)
+        DrawPulsingIconQuad(m_clockTex,
+                            timerX,
+                            topY,
+                            iconSize,
+                            0.0f,
+                            0.0f,
+                            0.0f);
 
     if (showRedDragonCounter) {
         const s32 redBoost = (s32)(redPulse * kInventoryPulseTextColorBoost);
@@ -1533,6 +1555,34 @@ void CustomHudMgr::DrawInventoryCard(const HUD& hud) {
         g_textManager->PrintString(livesText,
                                    HudX(livesX + iconSize + kInventoryTextGapFromIcon + livesTextShakeX),
                                    HudY(livesCenterY - kInventoryTextCenterToPrintYOffset * livesTextScale));
+    }
+
+    // Timer
+    if (showRedDragonCounter) {
+        char timerBuf[32] = {};
+
+        f32 time = g_scoreManager ? g_scoreManager->secondsPassed : 0.0f;
+        int minutes = static_cast<int>(time) / 60;
+        int seconds = static_cast<int>(time) % 60;
+        int centis = static_cast<int>(time * 100.0f) % 100;
+
+        std::snprintf(timerBuf, sizeof(timerBuf), "%02d:%02d:%02d",
+                      minutes, seconds, centis);
+
+        const f32 timerTextScale = 1.0f + livesPulse * kInventoryPulseTextScale;
+        if (BeginHudText(GetHudTitleFontName(),
+            0.30f * timerTextScale,
+            TextAlign_Left,
+            255,
+            SaturatingAddU8(244, 0),
+            SaturatingAddU8(214, 0),
+            255,
+            true,
+            false)) {
+            g_textManager->PrintString(timerBuf,
+                                       HudX(timerX + iconSize + kInventoryTextGapFromIcon),
+                                       HudY(clockCenterY - kInventoryTextCenterToPrintYOffset));
+        }
     }
 }
 

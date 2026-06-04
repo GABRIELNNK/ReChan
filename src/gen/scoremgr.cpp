@@ -4,6 +4,8 @@
 #include "gen/handler.h"
 #include "gen/ai.h"
 #include "fe/hud.h"
+#include "gen/time.h"
+#include "gen/director.h"
 
 ScoreManager* g_scoreManager = nullptr;
 static Handler* s_scoreMgrHandler = nullptr;
@@ -157,6 +159,9 @@ void ScoreManager::InitLevelStats() {
     fightingChainTotal = 0;
     fightingChainLast = 0;
     fightingChainTimer = 0;
+
+    // PC
+    secondsPassed = 0.0f;
 }
 
 // PSX: SetPar__12ScoreManager (SCOREMGR.CPP:364, 0x8004CEA0)
@@ -225,6 +230,10 @@ void ScoreManager::GiveAllDragons() {
 void ScoreManager::Step() {
     MARKFUNCTION(0x8004CF84);
     StepFighting();
+
+    // PC
+    if (!g_directorActive)
+        secondsPassed += g_time->GetDeltaTime();
 }
 
 // PSX: HandleLevelBegin__12ScoreManager (SCOREMGR.CPP:429, 0x8004CFA4)

@@ -1447,8 +1447,11 @@ void Director::Process() {
             }
 
             case DirectorOpcode::Loop:
+                // PSX: Loop() is empty (8 bytes = jr $ra; nop) and scriptPtr is NOT
+                // advanced in the outer handler — the opcode loops back to itself every
+                // frame, keeping the script blocked indefinitely.
                 Loop();
-                scriptPtr += 1;
+                field68 = 1;
                 break;
 
             case DirectorOpcode::EnablePlayerInput:
@@ -2242,9 +2245,11 @@ void Director::Process() {
                 break;
 
             default:
-                // PSX: unknown opcodes are silently skipped (continue)
-                // PSX doesn't terminate on unknown opcodes.
-                scriptPtr += 1;
+                // PSX: unrecognised opcodes fall to the loop-top (def_8003C430) without
+                // advancing scriptPtr — the script blocks on the bad opcode each frame
+                // rather than desyncing by consuming one word.
+                LOG("[Director] unknown opcode 0x%02X at scriptPtr=%p", static_cast<u32>(opcode), static_cast<const void*>(scriptPtr));
+                field68 = 1;
                 break;
         }
     }
@@ -3375,6 +3380,9 @@ void Director::HandleWideScreen() {
             }
         }
     }
+    else {
+        wsAlphaCurrent = 0;
+    }
 }
 
 // PSX: DrawWideScreenPolys__8Director (DIRECTOR.CPP:4582, 0x8003ED90)
@@ -3449,7 +3457,14 @@ void Director::cleanUpTexAnim() {
     MARKFUNCTION(0x8003BBE0);
 
     if (flipbookA) {
-        delete reinterpret_cast<tFlipbook*>(flipbookA);
+        // Reset to frame 0 so the default face is shown when the NIS anim is removed.
+        // On PSX, VRAM texture deletion restores the underlying slot; on PC we must
+        // explicitly snap back to the first frame before removing the flipbook.
+        auto* fb = reinterpret_cast<tFlipbook*>(flipbookA);
+        fb->SetCycleCallback(nullptr);
+        fb->SetFrame(0);
+        fb->AdvanceFrame();
+        delete fb;
         flipbookA = 0;
     }
     if (texAnimA) {
@@ -3466,7 +3481,11 @@ void Director::cleanUpTexAnim() {
     }
 
     if (flipbookB) {
-        delete reinterpret_cast<tFlipbook*>(flipbookB);
+        auto* fb = reinterpret_cast<tFlipbook*>(flipbookB);
+        fb->SetCycleCallback(nullptr);
+        fb->SetFrame(0);
+        fb->AdvanceFrame();
+        delete fb;
         flipbookB = 0;
     }
     if (texAnimB) {
