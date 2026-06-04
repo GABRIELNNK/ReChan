@@ -952,7 +952,7 @@ bool CorrectThingPositionObstacle(
                 distY = (s32)box.minY - (localA.y + yMaxOffset);
                 targetY = (s32)box.minY - yMaxOffset;
             }
-            else if (localA.y < (s32)box.maxY + yMaxOffset + CORRECT_THING_POSITION_EXTRA) {
+            else if (((s32)box.maxY - OBSTACLE_YMAX_BUFFER) < localA.y) {
                 pushY = 1;
                 distY = 0xFFFF;
                 targetY = (s32)box.maxY - yMinOffset;

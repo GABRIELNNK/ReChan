@@ -48,7 +48,7 @@ static constexpr u32 MUSIC_CHANNELS = 2;
 
 static ma_device g_device;
 static bool g_initialized = false;
-static f32 g_masterVolume = 1.0f;
+static f32 g_masterVolume = 0.5f;
 static u32 g_deviceSampleRate = ENGINE_SAMPLE_RATE; // actual device sample rate
 static u32 g_outputChannels = DEFAULT_MIX_CHANNELS;
 static bool g_outputMono = false;
@@ -433,7 +433,7 @@ bool AudioEngine::Init() {
     memset(g_voices, 0, sizeof(g_voices));
     g_nextSampleId = 1;
     g_nextVoiceId = 1;
-    g_masterVolume = 1.0f;
+    g_masterVolume = 0.5f;
     g_outputMono = false;
     g_outputChannels = DEFAULT_MIX_CHANNELS;
     g_musicActive = false;
