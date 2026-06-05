@@ -4,7 +4,9 @@
 #include "gen/database.h"
 #include "gen/uvdata.h"
 #include "p3d/hash.h"
+#include "p3d/p3dmath.h"
 #include "ai/obstacle_shared.h"
+#include "snd/snddrct.h"
 
 Conveyor::Conveyor(const LVector* pos, u16 type)
     : Obstacle(pos, type) {
@@ -12,11 +14,11 @@ Conveyor::Conveyor(const LVector* pos, u16 type)
     field116 = 0;
     field120 = 0;
     beltSpeed = 10;
-    field128 = 0;
-    field132 = 0;
-    field136 = 0;
-    field140 = 0;
-    field144 = 0;
+    field128 = nullptr;
+    field132 = nullptr;
+    field136 = nullptr;
+    field140 = nullptr;
+    field144 = nullptr;
 }
 
 Conveyor::~Conveyor() {
@@ -26,6 +28,8 @@ Conveyor::~Conveyor() {
 void Conveyor::AnalyzeMesh(DBRoot* root) {
     MARKFUNCTION(0x8001BEE4);
 
+    // PSX: orientation is set from the root volume data (field40/44/48 = world orientation).
+    // Must be done before FillCollisionBox so the box is built in the right frame.
     orientation.x = root->field40;
     orientation.y = root->field44;
     orientation.z = root->field48;
@@ -76,10 +80,9 @@ void Conveyor::AnalyzeMesh(DBRoot* root) {
 
         const u8 firstChar = (u8)uvName[0];
         if (firstChar >= (u8)'0' && firstChar <= (u8)'9') {
-            UVPrimData* uvInfo = FindUVPrimInfo(p3dHash(uvName + 1));
-            field128 = (s32)(u64)uvInfo;
-            if (uvInfo) {
-                uvInfo->Init(a10Value, a11Value, a12Value, a13Value);
+            field128 = FindUVPrimInfo(p3dHash(uvName + 1));
+            if (field128) {
+                field128->Init(a10Value, a11Value, a12Value, a13Value);
             }
 
             s32 variantsLeft = (s32)firstChar - 49;
@@ -93,15 +96,14 @@ void Conveyor::AnalyzeMesh(DBRoot* root) {
                         uvVariant->Init(a10Value, a11Value, a12Value, a13Value);
 
                         if ((idx + 1) < 4) {
-                            const s32 variantPtr = (s32)(u64)uvVariant;
                             if (idx == 0) {
-                                field132 = variantPtr;
+                                field132 = uvVariant;
                             }
                             else if (idx == 1) {
-                                field136 = variantPtr;
+                                field136 = uvVariant;
                             }
                             else {
-                                field140 = variantPtr;
+                                field140 = uvVariant;
                             }
                         }
                     }
@@ -112,10 +114,9 @@ void Conveyor::AnalyzeMesh(DBRoot* root) {
             }
         }
         else {
-            UVPrimData* uvInfo = FindUVPrimInfo(p3dHash(uvName));
-            field128 = (s32)(u64)uvInfo;
-            if (uvInfo) {
-                uvInfo->Init(a10Value, a11Value, a12Value, a13Value);
+            field128 = FindUVPrimInfo(p3dHash(uvName));
+            if (field128) {
+                field128->Init(a10Value, a11Value, a12Value, a13Value);
             }
         }
     }
@@ -125,20 +126,30 @@ void Conveyor::AnalyzeMesh(DBRoot* root) {
 
 void Conveyor::CreateModel(const char* name) {
     MARKFUNCTION(0x8001C1DC);
-    Obstacle::CreateModel(name);
+    (void)name;
+    flags |= TF_MODEL_CREATED;
+    CSoundDirect::BeginPersistent(8, &field144, &pos);
 }
 
 void Conveyor::DeleteModel() {
     MARKFUNCTION(0x8001C214);
     Obstacle::DeleteModel();
+    Reset();
 }
 
 void Conveyor::Reset() {
     MARKFUNCTION(0x8001C240);
+    CSoundDirect::EndPersistent(&field144);
 }
 
 void Conveyor::Think() {
     MARKFUNCTION(0x8001C260);
+    UVPrimData* const uvSlots[4] = { field128, field132, field136, field140 };
+    for (s32 i = 0; i < 4; i++) {
+        if (uvSlots[i]) {
+            uvSlots[i]->Tick();
+        }
+    }
 }
 
 void Conveyor::UpdatePosition() {
@@ -147,8 +158,28 @@ void Conveyor::UpdatePosition() {
 
 void Conveyor::HandlePickupCollision(Thing* pickup) {
     MARKFUNCTION(0x8001C2C4);
+    (void)pickup;
 }
 
 void Conveyor::HandleHumanoidCollision(Humanoid* hum) {
     MARKFUNCTION(0x8001C2CC);
+
+    if (!hum) {
+        return;
+    }
+
+    if ((hum->flags & TF_ON_GROUND) == 0) {
+        if (hum->actionState == (s32)AS_LEDGE_LATCH) {
+            hum->LetGoOfLedge();
+        }
+        return;
+    }
+
+    if (hum->actionState == (s32)AS_LEDGE_LATCH) {
+        return;
+    }
+
+    hum->homePos.x += field116;
+    hum->homePos.y += field120;
+    hum->homePos.z += beltSpeed;
 }

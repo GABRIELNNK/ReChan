@@ -10,9 +10,13 @@
 #include "gen/geffect.h"
 #include "gen/model.h"
 #include "gen/scoremgr.h"
+#include "gen/colsect.h"
+#include "gen/blockmgr.h"
 #include "p3d/hash.h"
+#include "p3d/p3dmath.h"
 #include "ai/obstacle_shared.h"
 #include "snd/kndnsnd.h"
+#include "snd/kicksnd.h"
 #include "snd/rsevent.h"
 #include "snd/sndfact.h"
 #include "p3d/skeleton.h"
@@ -27,6 +31,11 @@ KickNRoll::KickNRoll(const LVector* pos, u16 type)
 
 KickNRoll::~KickNRoll() {
     MARKFUNCTION(0x8001C3DC);
+
+    if (sound) {
+        delete sound;
+        sound = nullptr;
+    }
 }
 
 void KickNRoll::AnalyzeMesh(DBRoot* root) {
@@ -35,19 +44,60 @@ void KickNRoll::AnalyzeMesh(DBRoot* root) {
     orientation.y = root->field44;
     orientation.z = root->field48;
     Obstacle::AnalyzeMesh(root);
-    tagCollisionBox localBox = { 0x7FFF, 0x7FFF, 0x7FFF, -0x7FFF, -0x7FFF, -0x7FFF, -0x7FFF, 0 };
+    tagCollisionBox localBox = INVALID_COLLISION_BOX;
     ObstacleFillCollisionBox(localBox, root, 5);
     SetCollisionBox(localBox);
+
+    // PSX rotates template {0,0,0x10000}, then scales by (attrib7 / 100) / halfHeight.
+    Mat4 rotMatrix;
+    p3dBuildRotMatrixXYZ((s32)orientation.x, (s32)orientation.y, (s32)orientation.z, rotMatrix);
+    Vec3 vel = p3dVecTimesRotMatrix(Vec3(0.0f, 0.0f, (f32)FIX16_ONE), rotMatrix);
+    field136 = (s32)vel.x;
+    field140 = (s32)vel.y;
+    field144 = (s32)vel.z;
+    if (const DBAttrib* a7 = root->FindAttrib(7)) {
+        field116 = rmDiv16i((s32)((u32)a7->GetAttribValue() << 16), 100 << 16);
+        const s32 halfHeight = Div2TowardZero((s32)localBox.maxY - (s32)localBox.minY);
+        if (halfHeight != 0) {
+            const s32 speedScale = rmDiv16i(field116, halfHeight << 16);
+            field136 = (s32)(((s64)field136 * (s64)speedScale) >> 16);
+            field140 = (s32)(((s64)field140 * (s64)speedScale) >> 16);
+            field144 = (s32)(((s64)field144 * (s64)speedScale) >> 16);
+        }
+    }
+
+    // Attrib 20: optional destruction particle effect
+    if (const DBAttrib* a = root->FindAttrib(20)) {
+        const char* name = a->GetAttribString();
+        if (name) {
+            effectHash = p3dHash(name);
+        }
+    }
 }
 
 void KickNRoll::CreateModel(const char* name) {
     MARKFUNCTION(0x8001C6FC);
     Obstacle::CreateModel(name);
+
+    if (!sound) {
+        CSound* soundObj = nullptr;
+        if (CSoundFactory::CreateObject(10030, &soundObj, modelHash) >= 0) {
+            sound = static_cast<CKickNRollSound*>(soundObj);
+            if (sound) {
+                sound->Initialize(&pos);
+            }
+        }
+    }
 }
 
 void KickNRoll::DeleteModel() {
     MARKFUNCTION(0x8001C750);
     Obstacle::DeleteModel();
+
+    if (sound) {
+        delete sound;
+        sound = nullptr;
+    }
 }
 
 void KickNRoll::Reset() {
@@ -62,10 +112,181 @@ void KickNRoll::Think() {
 
 void KickNRoll::Move() {
     MARKFUNCTION(0x8001C850);
+
+    // Capture old position before applying velocity
+    LVector oldPos = pos;
+
+    const s32 dirFlag = ((s16)rollTimer != 0) ? (field120 < 1) : field120;
+
+    if (!aliveFlag) {
+        return;
+    }
+
+    if (dirFlag) {
+        pos.x += velX;
+        pos.z += velZ;
+    }
+    else {
+        pos.x -= velX;
+        pos.z -= velZ;
+    }
+    pos.y += velY;
+
+    // Resolve environment collisions against the previous position.
+    if (HandleEnvironmentCollision(oldPos)) {
+        if (breakable) {
+            Destroy();
+            return;
+        }
+        rollTimer = 8;
+    }
+
+    // Update visual roll rotation when moving horizontally.
+    if (velX || velZ) {
+        const s32 mag = (s32)rmMag3((f32)(velX << 16), 0.0f, (f32)(velZ << 16));
+        const s32 height = (s32)collBox.maxY - (s32)collBox.minY;
+        const s32 halfHeightFp = Div2TowardZero(height) << 16;
+        if (halfHeightFp != 0) {
+            s32 rotDelta = (s32)(((s64)(rmDiv16i(mag, halfHeightFp) << 16)) / 411774);
+            if (rotDelta < 0) rotDelta = -rotDelta;
+            if (dirFlag) {
+                orientation.x += rotDelta;
+            } else {
+                orientation.x -= rotDelta;
+            }
+        }
+    }
+
+    // Stop rolling when the wall-bounce timer reaches 1.
+    if (rollTimer == 1) {
+        velZ = 0;
+        velX = 0;
+        if (sound) {
+            sound->EndRoll();
+        }
+    }
+    if ((s16)rollTimer > 0) {
+        rollTimer--;
+    }
+
+    velY -= 9;
+
+    if (g_blockManager) {
+        blockNum = (u16)g_blockManager->GetBlockNumber(pos);
+    }
+
+    if (sound) {
+        sound->Think();
+    }
 }
 
-void KickNRoll::HandleEnvironmentCollision(const LVector& normal) {
+bool KickNRoll::HandleEnvironmentCollision(LVector& prevPos) {
     MARKFUNCTION(0x8001CB60);
+
+    // Horizontal collision radius: half of the widest horizontal span.
+    const s32 xSpan = (s32)collBox.maxX - (s32)collBox.minX;
+    const s32 zSpan = (s32)collBox.maxZ - (s32)collBox.minZ;
+    const s32 maxSpan = (xSpan < zSpan) ? zSpan : xSpan;
+    const s32 radius = Div2TowardZero(maxSpan);
+
+    // Half-height used as the Y extent for wall/floor checks.
+    const s32 halfHeight = Div2TowardZero((s32)collBox.maxY - (s32)collBox.minY);
+
+    // Current position becomes the movement endpoint; prevPos is the start.
+    LVector newPos = pos;
+    bool hitWall = false;
+
+    // Iterate wall collision up to 2 times to resolve corner cases.
+    for (s32 iter = 0; iter < 2; ++iter) {
+        s32 wallRatio = 0;
+        LVector wallNormal = {};
+        LVector wallHitPoint = {};
+        s32 wallHorizontal = 0;
+        if (!CollisionSector::CheckWorldWallCollision(
+                prevPos, newPos, radius,
+                -halfHeight, halfHeight,
+                wallRatio, wallNormal, wallHitPoint, wallHorizontal)) {
+            break;
+        }
+
+        // CorrectCollision: find contact point and reflect new position off the wall.
+        // contact = lerp(prevPos, newPos, wallRatio)
+        LVector contact;
+        contact.x = prevPos.x + (s32)(((s64)wallRatio * (s64)(newPos.x - prevPos.x)) >> 16);
+        contact.y = prevPos.y + (s32)(((s64)wallRatio * (s64)(newPos.y - prevPos.y)) >> 16);
+        contact.z = prevPos.z + (s32)(((s64)wallRatio * (s64)(newPos.z - prevPos.z)) >> 16);
+
+        const s32 nx = wallNormal.x;
+        const s32 ny = wallNormal.y;
+        const s32 nz = wallNormal.z;
+
+        s32 projDist = (s32)(((s64)nx * (s64)(newPos.x - contact.x)) >> 16)
+                     + (s32)(((s64)ny * (s64)(newPos.y - contact.y)) >> 16)
+                     + (s32)(((s64)nz * (s64)(newPos.z - contact.z)) >> 16)
+                     - 2;
+
+        LVector reflected;
+        reflected.x = newPos.x - (s32)(((s64)nx * (s64)projDist) >> 16);
+        reflected.y = newPos.y - (s32)(((s64)ny * (s64)projDist) >> 16);
+        reflected.z = newPos.z - (s32)(((s64)nz * (s64)projDist) >> 16);
+
+        // Nudge contact point away from wall.
+        contact.x += (s32)((2LL * nx) >> 16);
+        contact.y += (s32)((2LL * ny) >> 16);
+        contact.z += (s32)((2LL * nz) >> 16);
+
+        // Update prevPos (x/z only) with the contact point and newPos with the reflected position.
+        prevPos.x = contact.x;
+        prevPos.z = contact.z;
+        newPos.x = reflected.x;
+        newPos.z = reflected.z;
+        hitWall = true;
+    }
+
+    // Floor collision at both old and new horizontal positions.
+    LVector floorNormalOld = {}, ceilNormalOld = {};
+    s32 floorHOld = 0, ceilHOld = 0;
+    LVector oldSearch = { prevPos.x, prevPos.y, prevPos.z };
+    CollisionSector::GetWorldFloorAndCeilingHeight(
+        floorHOld, ceilHOld, floorNormalOld, ceilNormalOld, oldSearch, radius / 2);
+
+    LVector floorNormalNew = {}, ceilNormalNew = {};
+    s32 floorHNew = 0, ceilHNew = 0;
+    LVector newSearch = { newPos.x, prevPos.y, newPos.z };
+    CollisionSector::GetWorldFloorAndCeilingHeight(
+        floorHNew, ceilHNew, floorNormalNew, ceilNormalNew, newSearch, radius / 2);
+
+    // Compute approach depth along the floor normal from velocity.
+    s32 approachOld = 0;
+    if (floorNormalOld.y != 0) {
+        approachOld = rmDiv16i(
+            (s32)(((s64)floorNormalOld.x * (s64)velX) >> 16) + (s32)(((s64)floorNormalOld.z * (s64)velZ) >> 16),
+            floorNormalOld.y) + 2;
+    }
+
+    s32 approachNew = 0;
+    if (floorNormalNew.y != 0) {
+        approachNew = rmDiv16i(
+            (s32)(((s64)floorNormalNew.x * (s64)velX) >> 16) + (s32)(((s64)floorNormalNew.z * (s64)velZ) >> 16),
+            floorNormalNew.y) + 2;
+    }
+
+    if (approachNew < approachOld) approachNew = approachOld;
+    if (approachNew < 0) approachNew = 0;
+
+    // PSX sentinel: floor height > 0x80000001 means a real floor was found.
+    const s32 floorSurface = floorHNew + halfHeight;
+    if (floorHNew > (s32)0x80000001 && prevPos.y >= floorSurface - 640 && pos.y < floorSurface + approachNew) {
+        newPos.y = floorSurface + 1;
+        if (velY < 0) {
+            velY = 0;
+        }
+    }
+
+    pos.x = newPos.x;
+    pos.y = newPos.y;
+    pos.z = newPos.z;
+    return hitWall;
 }
 
 void KickNRoll::Destroy() {
@@ -93,6 +314,9 @@ void KickNRoll::Draw() {
 
 void KickNRoll::HandlePickupCollision(Thing* pickup) {
     MARKFUNCTION(0x8001CFAC);
+    Pickup* p = static_cast<Pickup*>(pickup);
+    p->PlayEffect();
+    p->Kill();
 }
 
 void KickNRoll::MovePassengers() {
@@ -102,10 +326,91 @@ void KickNRoll::MovePassengers() {
 
 void KickNRoll::HandleHumanoidCollision(Humanoid* hum) {
     MARKFUNCTION(0x8001D178);
+
+    LVector correctedPos = {};
+    LVector correctionNormal = {};
+    LVector pushedPos = {};
+
+    CorrectThingPositionObstacle(
+        pos, pos,
+        orientation.y, orientation.y,
+        collBox,
+        hum->pos, hum->homePos,
+        hum->collBboxMin.x, hum->collBboxMin.y, hum->collBboxMin.z,
+        correctedPos, correctionNormal, pushedPos);
+
+    hum->homePos = correctedPos;
+
+    if (correctionNormal.y > 0) {
+        hum->SetFloorHeight(pos.y + (s32)collBox.maxY);
+        AddPassenger(hum);
+    } else {
+        const s32 directionSign = field120 ? 1 : -1;
+        const bool movingIntoHumanoid =
+            (((s64)velX * (s64)correctionNormal.x * (s64)directionSign) > 0)
+            || (((s64)velZ * (s64)correctionNormal.z * (s64)directionSign) > 0);
+
+        if (!movingIntoHumanoid) {
+            return;
+        }
+
+        hum->HandleCollision(this, 1,
+            static_cast<s32>(0x80000002u), 4,
+            static_cast<s32>(0x80000005u), 10000,
+            static_cast<s32>(0x80000003u), 15,
+            static_cast<s32>(0x80000007u), field160,
+            0);
+        if (sound) {
+            sound->HitHumanoid();
+        }
+    }
 }
 
 void KickNRoll::HandleAttack(Humanoid* attacker, s32 damageType, s32 attackMagnitude, s32 damage) {
     MARKFUNCTION(0x8001D45C);
+    (void)attackMagnitude;
+    (void)damage;
+
+    // Only kicks (damageType == 4) set this barrel rolling.
+    if (damageType != 4) {
+        return;
+    }
+
+    // PSX: compare normalized kick direction with the preset roll direction.
+    const s32 dx = pos.x - attacker->pos.x;
+    const s32 dz = pos.z - attacker->pos.z;
+    const s32 mag = (s32)rmMag2((f32)dx, (f32)dz);
+    const s32 speedMag = (s32)rmMag2((f32)field136, (f32)field144);
+
+    s32 dot = 0;
+    if (mag > 0 && speedMag > 0) {
+        const s32 ndx = rmDiv16i(dx, mag);
+        const s32 ndz = rmDiv16i(dz, mag);
+        const s32 normSx = rmDiv16i(field136, speedMag);
+        const s32 normSz = rmDiv16i(field144, speedMag);
+        dot = (s32)(((s64)ndx * (s64)normSx) >> 16) + (s32)(((s64)ndz * (s64)normSz) >> 16);
+        const s32 absDot = (dot < 0) ? -dot : dot;
+        if (absDot <= 0x7FFF) {
+            return;
+        }
+    }
+
+    const bool wasRolling = (velX || velZ);
+    velX = field136;
+    velY = field140;
+    velZ = field144;
+    field120 = (dot > 0) ? 1 : 0;
+    rollTimer = 0;
+
+    if (!wasRolling && sound) {
+        sound->Kick();
+        sound->BeginRoll();
+    }
+}
+
+bool KickNRoll::CareAboutAttack() const {
+    MARKFUNCTION(0x8001D454);
+    return true;
 }
 
 KnockDown::KnockDown(const LVector* pos, u16 type)
@@ -114,7 +419,7 @@ KnockDown::KnockDown(const LVector* pos, u16 type)
     field116 = 0;
     field168 = 0;
     field172 = 0;
-    field184 = 0;
+    field184 = nullptr;
     aliveFlag = 1;
 }
 
@@ -124,13 +429,21 @@ KnockDown::~KnockDown() {
 
 void KnockDown::AnalyzeMesh(DBRoot* root) {
     MARKFUNCTION(0x8001D6B8);
+    Obstacle::AnalyzeMesh(root);
+
     orientation.x = root->field40;
     orientation.y = root->field44;
     orientation.z = root->field48;
-    Obstacle::AnalyzeMesh(root);
-    tagCollisionBox localBox = { 0x7FFF, 0x7FFF, 0x7FFF, -0x7FFF, -0x7FFF, -0x7FFF, -0x7FFF, 0 };
+
+    // Save the initial orientation for Reset to restore.
+    field128 = orientation.x;
+    field132 = orientation.y;
+    field136 = orientation.z;
+
+    tagCollisionBox localBox = INVALID_COLLISION_BOX;
     ObstacleFillCollisionBox(localBox, root, 5);
     SetCollisionBox(localBox);
+    savedCollBox = localBox;
 }
 
 void KnockDown::CreateModel(const char* name) {
@@ -150,19 +463,73 @@ void KnockDown::DeleteModel() {
 
 void KnockDown::Reset() {
     MARKFUNCTION(0x8001D9F8);
+    field116 = 0;
+    field120 = 0;
+    // Restore the original orientation saved from AnalyzeMesh.
+    orientation.x = field128;
+    orientation.y = field132;
+    orientation.z = field136;
+    SetCollisionBox(savedCollBox);
+    aliveFlag = 1;
 }
 
 void KnockDown::Think() {
     MARKFUNCTION(0x8001DA48);
+
+    if (!aliveFlag) {
+        return;
+    }
+
+    const s32 state = field116;
+    if (state == 1) {
+        // Wobble: advance counter, transition to fall when wobble completes.
+        field120++;
+        const s32 wobbleDuration = (field144 != 0) ? field144 : 20;
+        if (field120 >= wobbleDuration) {
+            field116 = 2;
+            field120 = 0;
+
+            CKnockDownSound* snd = field184;
+            if (snd) {
+                snd->BeginFall();
+            }
+        }
+    } else if (state >= 2) {
+        // Falling: advance physics and reshape the collision box.
+        Move();
+        UpdateCollisionBox();
+    }
 }
 
 void KnockDown::Move() {
     MARKFUNCTION(0x8001DB8C);
-}
 
+    const s32 angVel = (field140 != 0) ? field140 : 0x100;
+    orientation.x += angVel;
+
+    if (orientation.x >= 0x4000) {
+        orientation.x = 0x4000;
+        if (field116 == 2) {
+            field116 = 3;
+            aliveFlag = 0;
+            SetCollisionBox(INVALID_COLLISION_BOX);
+
+            CKnockDownSound* snd = field184;
+            if (snd) {
+                snd->Impact();
+            }
+        }
+    }
+}
 
 void KnockDown::UpdateCollisionBox() {
     MARKFUNCTION(0x8001DCA0);
+
+    // Widen the collision box on the X/Z axis as the obstacle tilts.
+    tagCollisionBox box = savedCollBox;
+    const s32 extentY = (s32)box.maxY - (s32)box.minY;
+    box.maxX = (s16)((s32)box.maxX + extentY);
+    SetCollisionBox(box);
 }
 
 void KnockDown::UpdatePosition() {
@@ -171,14 +538,83 @@ void KnockDown::UpdatePosition() {
 
 void KnockDown::HandlePickupCollision(Thing* pickup) {
     MARKFUNCTION(0x8001E120);
+    (void)pickup;
+    if (!aliveFlag || field116 != 0) {
+        return;
+    }
+    field116 = 1;
+    field120 = 0;
+
+    CKnockDownSound* snd = field184;
+    if (snd) {
+        snd->Kick();
+    }
 }
 
 void KnockDown::HandleHumanoidCollision(Humanoid* hum) {
     MARKFUNCTION(0x8001E16C);
+
+    if (!aliveFlag) {
+        return;
+    }
+
+    LVector correctedPos = {};
+    LVector correctionNormal = {};
+    LVector pushedPos = {};
+
+    CorrectThingPositionObstacle(
+        pos, pos,
+        orientation.y, orientation.y,
+        collBox,
+        hum->pos, hum->homePos,
+        hum->collBboxMin.x, hum->collBboxMin.y, hum->collBboxMin.z,
+        correctedPos, correctionNormal, pushedPos);
+
+    hum->homePos = correctedPos;
+
+    if (correctionNormal.y > 0 && hum->velocity.y <= 0) {
+        hum->SetFloorHeight(pos.y + (s32)collBox.maxY);
+        hum->velocity.y = 0;
+        AddPassenger(hum);
+    }
+
+    if (field116 == 0) {
+        // Trigger wobble if the humanoid kicks from the side.
+        if (LedgeCheck(collBox, correctionNormal, pushedPos, hum) && hum->thingType != 0) {
+            field116 = 1;
+            field120 = 0;
+        }
+    } else if (field116 == 2) {
+        // Falling obstacle damages and stuns any humanoid it strikes.
+        const s32 dmg = (field148 != 0) ? field148 : 50;
+        hum->HandleCollision(this, 1, dmg, 0x80000007, 0);
+        hum->SetActionState(AS_COLLAPSE_STUN, 0);
+
+        CKnockDownSound* snd = field184;
+        if (snd) {
+            snd->HitHumanoid();
+        }
+    }
 }
 
 void KnockDown::HandleAttack(Humanoid* attacker, s32 damageType, s32 attackMagnitude, s32 damage) {
     MARKFUNCTION(0x8001E4EC);
+    (void)damageType;
+    (void)attackMagnitude;
+    (void)damage;
+
+    if (field116 != 0) {
+        return;
+    }
+
+    field116 = 1;
+    field120 = 0;
+
+    CKnockDownSound* snd = field184;
+    if (snd) {
+        snd->Kick();
+    }
+    (void)attacker;
 }
 
 static const u32 STACK_DEFAULT_EFFECT_HASH = 0x065C8E90;

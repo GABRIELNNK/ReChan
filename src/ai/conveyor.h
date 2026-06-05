@@ -1,16 +1,19 @@
 #pragma once
 #include "ai/obstacle.h"
 
+struct UVPrimData;
+class CGenericPersistentSound;
+
 class Conveyor : public Obstacle {
 public:
     s32 field116 = 0;
     s32 field120 = 0;
     s32 beltSpeed = 10;
-    s32 field128 = 0;
-    s32 field132 = 0;
-    s32 field136 = 0;
-    s32 field140 = 0;
-    s32 field144 = 0;
+    UVPrimData* field128 = nullptr;
+    UVPrimData* field132 = nullptr;
+    UVPrimData* field136 = nullptr;
+    UVPrimData* field140 = nullptr;
+    CGenericPersistentSound* field144 = nullptr;
 
     Conveyor(const LVector* pos, u16 type);
     ~Conveyor() override;

@@ -2,7 +2,9 @@
 #include "ai/obstacle.h"
 
 class AnimStructure;
+class CKickNRollSound;
 class CKnockDownSound;
+class CGenericPersistentSound;
 
 class KickNRoll : public Obstacle {
 public:
@@ -27,7 +29,7 @@ public:
     // PSX +150 (u16): unknown
     u16 field150 = 0;
     // PSX +152 (ptr): CKickNRollSound instance (set to null in ctor)
-    void* sound = nullptr;
+    CKickNRollSound* sound = nullptr;
     // PSX +156 (s32): breakable flag (if set, Destroy on collision)
     s32 breakable = 0;
     // PSX +160 (s32): unknown
@@ -51,10 +53,11 @@ public:
     void HandlePickupCollision(Thing* pickup) override;
     void HandleHumanoidCollision(Humanoid* hum) override;
     void HandleAttack(Humanoid* attacker, s32 damageType, s32 attackMagnitude, s32 damage) override;
+    bool CareAboutAttack() const override;
 
     virtual void Destroy();
     virtual void MovePassengers();
-    virtual void HandleEnvironmentCollision(const LVector& normal);
+    virtual bool HandleEnvironmentCollision(LVector& prevPos);
 };
 
 class KnockDown : public Obstacle {
@@ -79,8 +82,8 @@ public:
     // PSX +176..+183: unknown (2 dwords)
     s32 field176 = 0;
     s32 field180 = 0;
-    // PSX +184 (s32): unknown (init 0 in ctor)
-    s32 field184 = 0;
+    // PSX +184 (ptr): CKnockDownSound* (init nullptr in ctor)
+    CKnockDownSound* field184 = nullptr;
     // PSX +188..+191: unknown
     s32 field188 = 0;
 

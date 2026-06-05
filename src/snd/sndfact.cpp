@@ -5,6 +5,7 @@
 #include "snd/prstsnd.h"
 #include "snd/hmndsnd.h"
 #include "snd/kndnsnd.h"
+#include "snd/kicksnd.h"
 #include "snd/dstrsnd.h"
 #include "snd/platsnd.h"
 #include "snd/pushsnd.h"
@@ -128,6 +129,64 @@ s32 CKnockDownSound::Think() {
 s32 CKnockDownSound::Load(const void* data) {
     MARKFUNCTION(0x800AD578);
     std::memcpy(&pub, data, sizeof(pub));
+    return 0;
+}
+
+CKickNRollSound::CKickNRollSound() {
+    MARKFUNCTION(0x800AD2B4);
+    rollPersistent = nullptr;
+    kickCooldown = 0;
+}
+
+CKickNRollSound::~CKickNRollSound() {
+    MARKFUNCTION(0x800AD2F0);
+    EndRoll();
+}
+
+s32 CKickNRollSound::BeginRoll() {
+    MARKFUNCTION(0x800AD210);
+    return BeginPersistent(rollPersistentId, &rollPersistent);
+}
+
+s32 CKickNRollSound::EndRoll() {
+    MARKFUNCTION(0x800AD234);
+    EndPersistent(&rollPersistent);
+    return 0;
+}
+
+s32 CKickNRollSound::Kick() {
+    MARKFUNCTION(0x800AD254);
+
+    if (kickCooldown == 0) {
+        kickCooldown = 5;
+        return PlayTransient(kickSound, 8, 0);
+    }
+
+    return 100;
+}
+
+s32 CKickNRollSound::HitHumanoid() {
+    MARKFUNCTION(0x800AD294);
+    return Kick();
+}
+
+s32 CKickNRollSound::Load(const void* data) {
+    MARKFUNCTION(0x800AD34C);
+    std::memcpy(&pad16, data, sizeof(u32));
+    rollPersistentId = *(static_cast<const u8*>(data) + 4);
+    return 0;
+}
+
+s32 CKickNRollSound::Initialize(const LVector* pos) {
+    MARKFUNCTION(0x800AD36C);
+    return CSound::Initialize((void*)pos);
+}
+
+s32 CKickNRollSound::Think() {
+    MARKFUNCTION(0x800AD38C);
+    if (kickCooldown != 0) {
+        kickCooldown--;
+    }
     return 0;
 }
 
@@ -767,6 +826,21 @@ s32 CSoundFactory::CreateObject(u32 typeId, CSound** outObj, u32 soundId) {
                 return loadResult;
             }
 
+            obj->Load(&data);
+            *outObj = obj;
+            break;
+        }
+        case 10030:
+        {
+            CKickNRollSound* obj = new CKickNRollSound();
+            struct {
+                u8 pad[2];
+                s16 kickSfx;
+                s8 rollPersistentId;
+                s8 pad5;
+            } data = {};
+            data.kickSfx = 180;
+            data.rollPersistentId = 9;
             obj->Load(&data);
             *outObj = obj;
             break;
