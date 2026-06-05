@@ -4,6 +4,7 @@
 #include <vector>
 #include <mutex>
 #include <cmath>
+#include <chrono>
 
 // Internal sample storage
 struct InternalSample {
@@ -31,6 +32,7 @@ struct InternalVoice {
     bool applyDistanceAttenuation = true;
     bool loop = false;
     bool active = false;
+    f64 startTimeSec = 0.0;
 };
 
 struct ListenerState {
@@ -76,6 +78,12 @@ static f32 g_musicFadeTargetVolume = 1.0f;
 static u32 g_musicFadeFramesTotal = 0;
 static u32 g_musicFadeFramesRemaining = 0;
 static std::mutex g_musicMutex;
+
+static f64 AudioNowSeconds() {
+    using clock = std::chrono::steady_clock;
+    static const clock::time_point s_start = clock::now();
+    return std::chrono::duration<f64>(clock::now() - s_start).count();
+}
 
 static inline f32 clampf(f32 v, f32 lo, f32 hi) {
     if (v < lo) return lo;
@@ -556,6 +564,7 @@ AudioVoice AudioEngine::PlaySample(AudioSample sample, f32 volume, f32 pan, bool
             g_voices[i].applyDistanceAttenuation = false;
             g_voices[i].loop = loop;
             g_voices[i].active = true;
+            g_voices[i].startTimeSec = AudioNowSeconds();
             return i + 1; // 1-based handle
         }
     }
@@ -594,6 +603,7 @@ AudioVoice AudioEngine::PlaySample3D(
             g_voices[i].applyDistanceAttenuation = applyDistanceAttenuation;
             g_voices[i].loop = loop;
             g_voices[i].active = true;
+            g_voices[i].startTimeSec = AudioNowSeconds();
             return i + 1;
         }
     }
@@ -618,7 +628,27 @@ void AudioEngine::StopAllVoices() {
 bool AudioEngine::IsVoicePlaying(AudioVoice voice) {
     if (voice == AUDIO_VOICE_INVALID || voice > MAX_VOICES) return false;
     std::lock_guard<std::mutex> lock(g_voiceMutex);
-    return g_voices[voice - 1].active;
+    InternalVoice& v = g_voices[voice - 1];
+    if (!v.active) {
+        return false;
+    }
+
+    if (!v.loop && v.sample != AUDIO_SAMPLE_INVALID && v.sample <= MAX_SAMPLES) {
+        const InternalSample& smp = g_samples[v.sample - 1];
+        if (!smp.data || smp.numFrames == 0 || smp.sampleRate == 0) {
+            v.active = false;
+            return false;
+        }
+
+        const f64 elapsed = AudioNowSeconds() - v.startTimeSec;
+        const f64 playedFrames = elapsed * static_cast<f64>(smp.sampleRate) * static_cast<f64>(v.pitch);
+        if (playedFrames >= static_cast<f64>(smp.numFrames)) {
+            v.active = false;
+            return false;
+        }
+    }
+
+    return true;
 }
 
 void AudioEngine::SetVoiceVolume(AudioVoice voice, f32 volume) {
