@@ -2474,6 +2474,7 @@ void Player::_DoStand() {
     SetActionState(AS_STAND, 0);
     velocity = {};
 }
+
 // PSX: _HorizontalPoleSwing__6Player (PLAYER.CPP:3802, 0x80032F8C)
 // Pendulum swing physics on horizontal pole. Builds rotation matrix from
 // orientation, applies angular velocity driven by gravity torque,

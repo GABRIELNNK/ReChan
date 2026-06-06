@@ -61,6 +61,14 @@ static constexpr s32 TARGET_TRACK_MAX_FRAME = 5;
 static constexpr s32 DIVEROLLKICK_TARGET_TRACK_MAX_FRAME = 3;
 static constexpr s32 DIVEROLLPUNCH_TARGET_TRACK_MAX_FRAME = 4;
 static constexpr s32 CHARGEPUNCH_TARGET_TRACK_MAX_FRAME = 10;
+static constexpr u32 RISING_ATTACK_REMAP_BIT = 0x00800000u;
+static constexpr u32 RISING_ATTACK_CLEAR_MASK =
+    ~( (1u << GA_PUNCH)
+    | (1u << GA_KICK)
+    | (1u << GA_GRAB)
+    | (1u << GA_GRAB_FORWARD)
+    | (1u << GA_GRAB_HELD)
+    | (1u << GA_GRAB_FWD_HELD));
 static constexpr s32 WALL_KICK_TRACE_DISTANCE = 256;
 static constexpr s32 WALL_KICK_COLLISION_RADIUS = 16;
 static constexpr s32 WALL_KICK_COLLISION_HEIGHT = 500;
@@ -4673,8 +4681,16 @@ s32 Humanoid::TestAndSetRisingAttack() {
     s32 result = field488;
     if (result == 0) {
         const u32 requested = static_cast<u32>(commandBits);
-        if (((requested >> 9) & 1u) != 0) {
-            const u32 remapped = (requested & 0xFF797C7Fu) | 0x00800000u;
+        const bool wantsRisingAttack =
+            ((requested >> GA_PUNCH) & 1u) != 0
+            || ((requested >> GA_KICK) & 1u) != 0
+            || ((requested >> GA_GRAB) & 1u) != 0
+            || ((requested >> GA_GRAB_FORWARD) & 1u) != 0
+            || ((requested >> GA_GRAB_HELD) & 1u) != 0
+            || ((requested >> GA_GRAB_FWD_HELD) & 1u) != 0;
+
+        if (wantsRisingAttack) {
+            const u32 remapped = (requested & RISING_ATTACK_CLEAR_MASK) | RISING_ATTACK_REMAP_BIT;
             commandBits = static_cast<s32>(remapped);
             result = FindSiblingWithRequestedCommand(
                 static_cast<const FightingComboNode*>(defaultFightingSystem), remapped);
