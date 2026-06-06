@@ -1162,19 +1162,13 @@ void Obstacle::HandleHumanoidObstacleCollision(Humanoid* hum) {
                 s32 yHigh = (s32)obs->collBox.maxY - humCyl.lowerY;
                 bool yPass = (dy >= yLow && yHigh >= dy);
 
-                // When orientation.x or z is non-zero, collBox is a world-aligned AABB
-                // computed by OnXorZRot (already accounts for orientation.y). Using
-                // orientation.y here would double-rotate and give wrong XZ results.
-                const s32 obsOrientY = (obs->orientation.x != 0 || obs->orientation.z != 0)
-                    ? 0 : obs->orientation.y;
-
                 if (CheckXZStaticBoxCylinderCollision(
-                    obs->pos, obs->collBox, obsOrientY,
+                    obs->pos, obs->collBox, obs->orientation.y,
                     dt->homePos, humCyl)) {
                     // Floor height from physical obstacles
                     if (physical) {
                         if (CheckXZStaticBoxCylinderCollision(
-                            obs->pos, obs->collBox, obsOrientY,
+                            obs->pos, obs->collBox, obs->orientation.y,
                             bonePos, footCyl)) {
                             s32 floorH = obs->GetObstacleFloorHeight(bonePos);
                             if (bestFloorHeight < floorH &&
@@ -1187,7 +1181,7 @@ void Obstacle::HandleHumanoidObstacleCollision(Humanoid* hum) {
                     // Distance-sorted pair insertion for HandleHumanoidCollision
                     if (yPass) {
                         s32 sortDist = GetXZStaticBoxCylinderCollisionSortDistance(
-                            obs->pos, obs->collBox, obsOrientY,
+                            obs->pos, obs->collBox, obs->orientation.y,
                             hum->pos);
 
                         if (pairCount < 8) {
@@ -1221,10 +1215,8 @@ void Obstacle::HandleHumanoidObstacleCollision(Humanoid* hum) {
 
         for (s32 i = 1; i < pairCount; i++) {
             Obstacle* obs = pairArray[i].obstacle;
-            const s32 reOrientY = (obs->orientation.x != 0 || obs->orientation.z != 0)
-                ? 0 : obs->orientation.y;
             if (CheckStaticBoxCylinderCollision_Obstacle(
-                obs->pos, obs->collBox, reOrientY,
+                obs->pos, obs->collBox, obs->orientation.y,
                 dt->homePos, humCyl)) {
                 obs->HandleHumanoidCollision(hum);
             }

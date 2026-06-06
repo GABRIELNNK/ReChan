@@ -1964,6 +1964,35 @@ static pddiPrimBuffer* ParseDynGeoPrims(
     return buffer;
 }
 
+static tPrimGeom* CloneDynGeoVertexPrimGeom(const u8* geoData, u32 geoSize) {
+    if (!geoData || geoSize < 0x30) {
+        return nullptr;
+    }
+
+    const u32 vertListOff = p3dReadU32LE(geoData + 0x10) << 2;
+    const u16 numVerts = p3dReadU16LE(geoData + 0x14);
+    if (numVerts == 0 || vertListOff + static_cast<u32>(numVerts) * 8u > geoSize) {
+        return nullptr;
+    }
+
+    tPrimGeom* geom = new tPrimGeom();
+    geom->ownedRawData = new u8[geoSize];
+    geom->ownedRawSize = geoSize;
+    memcpy(geom->ownedRawData, geoData, geoSize);
+
+    const u8* raw = geom->ownedRawData;
+    geom->SetVertexList(raw + vertListOff);
+    geom->numVerts = numVerts;
+    geom->numPolys = p3dReadU16LE(raw + 0x16);
+    geom->bboxMinX = p3dReadS32LE(raw + 0x18);
+    geom->bboxMinY = p3dReadS32LE(raw + 0x1C);
+    geom->bboxMinZ = p3dReadS32LE(raw + 0x20);
+    geom->bboxMaxX = p3dReadS32LE(raw + 0x24);
+    geom->bboxMaxY = p3dReadS32LE(raw + 0x28);
+    geom->bboxMaxZ = p3dReadS32LE(raw + 0x2C);
+    return geom;
+}
+
 static void LoadGeoPair(
     World* world,
     const u8* permData,
@@ -2060,7 +2089,7 @@ static void LoadGeoPair(
                     }
                     else {
                         u32 modelHash = p3dReadU32LE(permData + permCursor + 0);
-                        if (!g_levelManager->FindModel(static_cast<s32>(modelHash))) {
+                        if (!g_levelManager->FindGeo(static_cast<s32>(modelHash))) {
                             bool usesSemiTrans = false;
                             u8 semiTransMode = 0;
                             std::vector<GeoRenderVertex> dynamicVerts;
@@ -2093,6 +2122,9 @@ static void LoadGeoPair(
                                 original->SetStoreID(static_cast<s8>(storeId));
                                 original->meshBuffer = buffer;
                                 original->primGeom = CloneRawPrimGeom(permData + permCursor, chunkPermSize);
+                                if (!original->primGeom) {
+                                    original->primGeom = CloneDynGeoVertexPrimGeom(permData + permCursor, chunkPermSize);
+                                }
                                 original->usesSemiTrans = usesSemiTrans;
                                 original->semiTransMode = semiTransMode;
                                 original->bboxMin[0] = p3dReadS32LE(permData + permCursor + 0x18);

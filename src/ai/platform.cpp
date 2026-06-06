@@ -897,43 +897,30 @@ void Platform::HandlePathNodeTransition() {
 void Platform::OnXorZRot() {
     MARKFUNCTION(0x800222F4);
 
-    tagCollisionBox rotated = INVALID_COLLISION_BOX;
-    bool first = true;
+    tagCollisionBox box = localCollBox;
 
-    const s16 xs[2] = { localCollBox.minX, localCollBox.maxX };
-    const s16 ys[2] = { localCollBox.minY, localCollBox.maxY };
-    const s16 zs[2] = { localCollBox.minZ, localCollBox.maxZ };
+    const SVector topCorners[4] = {
+        { localCollBox.minX, localCollBox.maxY, localCollBox.minZ },
+        { localCollBox.maxX, localCollBox.maxY, localCollBox.minZ },
+        { localCollBox.minX, localCollBox.maxY, localCollBox.maxZ },
+        { localCollBox.maxX, localCollBox.maxY, localCollBox.maxZ },
+    };
 
-    for (s32 ix = 0; ix < 2; ix++) {
-        for (s32 iy = 0; iy < 2; iy++) {
-            for (s32 iz = 0; iz < 2; iz++) {
-                SVector local = {};
-                local.x = xs[ix];
-                local.y = ys[iy];
-                local.z = zs[iz];
-
-                SVector world = {};
-                GetObjectToWorldSpaceVector(local, world);
-
-                if (first) {
-                    rotated.minX = rotated.maxX = world.x;
-                    rotated.minY = rotated.maxY = world.y;
-                    rotated.minZ = rotated.maxZ = world.z;
-                    first = false;
-                }
-                else {
-                    if (world.x < rotated.minX) rotated.minX = world.x;
-                    if (world.x > rotated.maxX) rotated.maxX = world.x;
-                    if (world.y < rotated.minY) rotated.minY = world.y;
-                    if (world.y > rotated.maxY) rotated.maxY = world.y;
-                    if (world.z < rotated.minZ) rotated.minZ = world.z;
-                    if (world.z > rotated.maxZ) rotated.maxZ = world.z;
-                }
-            }
+    s16 maxY = (s16)0x8000;
+    for (const SVector& local : topCorners) {
+        SVector world = {};
+        GetObjectToWorldSpaceVector(local, world);
+        if (world.y > maxY) {
+            maxY = world.y;
         }
     }
 
-    SetCollisionBox(rotated);
+    if ((platformFlags & 0x800000) && orientation.x != 0) {
+        maxY = (s16)((s32)maxY + 0x200);
+    }
+
+    box.maxY = maxY;
+    SetCollisionBox(box);
 }
 
 void Platform::Teeter() {
