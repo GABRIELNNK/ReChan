@@ -509,9 +509,11 @@ static s32 UpdateCombo(hdTally* tally, bool fastForward) {
         tally->frameCounter -= 1;
         tally->comboOvl.SetVisible(1);
         if (tally->frameCounter == 0 || fastForward) {
+#if !CUSTOM_MENU
             if (!s_hdTallyFastForward && g_frontEndSound) {
                 g_frontEndSound->ProcessSoundEvent(26);
             }
+#endif
 
             tally->currentScore = 0;
             tally->frameCounter = 0;
@@ -520,9 +522,11 @@ static s32 UpdateCombo(hdTally* tally, bool fastForward) {
     }
 
     if (tally->frameCounter == 0 && DoScoreTally(tally, tally->comboScoreBuf, (s32)sizeof(tally->comboScoreBuf), fastForward)) {
+#if !CUSTOM_MENU
         if (g_frontEndSound) {
             g_frontEndSound->ProcessSoundEvent(27);
         }
+#endif
         tally->state = 0;
         tally->frameCounter = 15;
     }
@@ -539,7 +543,9 @@ static s32 UpdateFight(hdTally* tally, bool fastForward) {
         tally->comboOvl.SetVisible(1);
         if (tally->frameCounter == 0 || fastForward) {
             if (!s_hdTallyFastForward && g_frontEndSound) {
+#if !CUSTOM_MENU
                 g_frontEndSound->ProcessSoundEvent(28);
+#endif
             }
 
             tally->currentScore = 0;
@@ -549,9 +555,11 @@ static s32 UpdateFight(hdTally* tally, bool fastForward) {
     }
 
     if (tally->frameCounter == 0 && DoScoreTally(tally, tally->fightScoreBuf, (s32)sizeof(tally->fightScoreBuf), fastForward)) {
+#if !CUSTOM_MENU
         if (g_frontEndSound) {
             g_frontEndSound->ProcessSoundEvent(29);
         }
+#endif
         tally->state = 2;
         tally->frameCounter = 15;
     }
@@ -567,9 +575,11 @@ static s32 UpdateStyle(hdTally* tally, bool fastForward) {
         tally->frameCounter -= 1;
         tally->comboOvl.SetVisible(1);
         if (tally->frameCounter == 0 || fastForward) {
+#if !CUSTOM_MENU
             if (!s_hdTallyFastForward && g_frontEndSound) {
                 g_frontEndSound->ProcessSoundEvent(30);
             }
+#endif
 
             tally->currentScore = 0;
             tally->frameCounter = 0;
@@ -579,9 +589,11 @@ static s32 UpdateStyle(hdTally* tally, bool fastForward) {
     }
 
     if (tally->frameCounter == 0 && DoScoreTally(tally, tally->styleScoreBuf, (s32)sizeof(tally->styleScoreBuf), fastForward)) {
+#if !CUSTOM_MENU
         if (tally->delayCounter == 15 && g_frontEndSound) {
             g_frontEndSound->ProcessSoundEvent(31);
         }
+#endif
 
         if (tally->delayCounter == 0) {
             tally->state = 3;
@@ -625,9 +637,11 @@ static s32 UpdateGrade(hdTally* tally, bool fastForward) {
             tally->frameCounter = 0;
             tally->delayCounter = 30;
 
+#if !CUSTOM_MENU
             if (!s_hdTallyFastForward && g_frontEndSound) {
                 g_frontEndSound->ProcessSoundEvent(22);
             }
+#endif
         }
     }
 
@@ -665,9 +679,11 @@ static s32 UpdateRdragon(hdTally* tally, bool fastForward) {
         tally->frameCounter -= 1;
         tally->rdragonOvl.SetVisible(1);
         if (tally->frameCounter == 0 || fastForward) {
+#if !CUSTOM_MENU
             if (!s_hdTallyFastForward && g_frontEndSound) {
                 g_frontEndSound->ProcessSoundEvent(23);
             }
+#endif
 
             tally->frameCounter = 0;
             const s32 collectCount = g_scoreManager ? g_scoreManager->currentCollectCount : 0;
@@ -698,9 +714,11 @@ static s32 UpdateRdragonBonus(hdTally* tally, bool fastForward) {
         tally->frameCounter -= 1;
         tally->rdragonOvl.SetVisible(1);
         if (tally->frameCounter == 0 || fastForward) {
+#if !CUSTOM_MENU
             if (!s_hdTallyFastForward && g_frontEndSound) {
                 g_frontEndSound->ProcessSoundEvent(25);
             }
+#endif
 
             tally->rdragonBonusOvl.SetVisible(1);
             tally->movieBonusOvl.SetVisible(1);
@@ -728,9 +746,11 @@ static s32 UpdateGdragon(hdTally* tally, bool fastForward) {
         tally->frameCounter -= 1;
         tally->gdragonOvl.SetVisible(1);
         if (tally->frameCounter == 0 || fastForward) {
+#if !CUSTOM_MENU
             if (!s_hdTallyFastForward && g_frontEndSound) {
                 g_frontEndSound->ProcessSoundEvent(24);
             }
+#endif
 
             tally->movieBonusOvl.SetVisible(0);
             const s32 totalGoldDragons = g_scoreManager ? g_scoreManager->GetTotalGoldDragon() : 0;
@@ -761,9 +781,11 @@ static s32 UpdateMovieBonus(hdTally* tally, bool fastForward) {
     if (tally->frameCounter != 0) {
         tally->frameCounter -= 1;
         if (tally->frameCounter == 0 || fastForward) {
+#if !CUSTOM_MENU
             if (!s_hdTallyFastForward && g_frontEndSound) {
                 g_frontEndSound->ProcessSoundEvent(25);
             }
+#endif
 
             tally->doneOvl.SetVisible(1);
             tally->delayCounter = 30;
@@ -884,7 +906,9 @@ void hdTally::Start(s32 tally) {
         }
 
         if (g_frontEndSound) {
+#if !CUSTOM_MENU
             g_frontEndSound->ProcessSoundEvent(21);
+#endif
         }
     } else {
         state = 9;

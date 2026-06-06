@@ -572,6 +572,10 @@ void HUD::ToggleShowAll() {
 void HUD::OnLoadLevel() {
     MARKFUNCTION(0x8004028C);
 
+#if CUSTOM_MENU
+    g_customHudMgr.OnLevelLoad();
+#endif
+
     u8* raw = section ? section->rawData : nullptr;
 #if FIX_ASPECT_RATIO
     if (raw) {
@@ -583,6 +587,10 @@ void HUD::OnLoadLevel() {
 // PSX: OnUnloadLevel__3HUD (HUD.CPP:891, 0x80040294)
 void HUD::OnUnloadLevel() {
     MARKFUNCTION(0x80040294);
+
+#if CUSTOM_MENU
+    g_customHudMgr.OnLevelUnload();
+#endif
 
     u8* raw = section ? section->rawData : nullptr;
 #if FIX_ASPECT_RATIO

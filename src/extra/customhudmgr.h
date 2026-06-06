@@ -13,6 +13,8 @@ public:
 
     void Render(const HUD& hud);
     void Shutdown();
+    void OnLevelLoad();
+    void OnLevelUnload();
 
     void SetDebugTallyPreviewEnabled(bool enabled);
     void SetDebugTallyPreviewValues(s32 fightScore,
@@ -37,6 +39,7 @@ private:
 
     bool m_assetsLoadTried = false;
     bool m_fontLoadTried = false;
+    bool m_levelLoaded = false;
 
     f32 m_playerHealthRatio = -1.0f;
     f32 m_playerHealthDamageRatio = -1.0f;
@@ -68,6 +71,8 @@ private:
     s32 m_tallyGDragonDisplay = 0;
     f32 m_tallyGradeDelayTimer = -1.0f;
     bool m_tallyGradeVisible = false;
+    f32 m_tallyRDragonDelayTimer = -1.0f;
+    bool m_tallyRDragonVisible = false;
     f32 m_tallyGoldBonusAnimTimer = 0.0f;
     f32 m_tallyGoldLeadInTimer = -1.0f;
     bool m_tallyGoldBonusTriggered = false;
@@ -86,6 +91,7 @@ private:
     s32 m_debugTallyGrade = 3;
     bool m_debugTallyShowMovieBonus = false;
     s32 m_debugTallySoundStage = 0;
+    s32 m_debugTallyPersistentRow = 0;
 
     void EnsureAssetsLoaded();
     void EnsureFontsLoaded();

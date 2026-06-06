@@ -5,6 +5,7 @@
 #include "ai/player.h"
 #include "ai/thing.h"
 #include "gen/common.h"
+#include "gen/ai.h"
 #include "gen/camera.h"
 #include "gen/display.h"
 #include "gen/game.h"
@@ -15,6 +16,8 @@
 #include "pc/textmgr.h"
 #include "pc/tim.h"
 #include "snd/fesnd.h"
+#include "snd/rsevent.h"
+#include "snd/soundid.h"
 #include "p3d/texture.h"
 #include "pddi/pdditex.h"
 #include "xclib/xclib.h"
@@ -220,6 +223,7 @@ static const u8 kTallyValueGoldB = 148;
 
 // Tally SFX events from hdTally state progression.
 static const s32 kTallySoundStart = 21;
+static const s32 kTallySoundStep = 28;
 static const s32 kTallySoundFightDone = 29;
 static const s32 kTallySoundComboDone = 27;
 static const s32 kTallySoundStyleDone = 31;
@@ -227,6 +231,8 @@ static const s32 kTallySoundGradeDone = 22;
 static const s32 kTallySoundRDragonDone = 23;
 static const s32 kTallySoundGoldBonus = 25;
 static const s32 kTallySoundGDragonDone = 24;
+static const f32 kTallyGradeRevealDelaySeconds = 0.50f;
+static const f32 kTallyRDragonRevealDelaySeconds = 0.50f;
 static const f32 kTallyGoldLeadInSeconds = 1.0f;
 static const f32 kTallyGoldBonusAnimSeconds = 1.20f;
 static const f32 kTallyGoldBonusAnimFrequency = 20.0f;
@@ -623,6 +629,97 @@ static s32 StepDisplayedCounter(s32 current, s32 target, f32 dt, f32 rate, s32 m
     return current + step;
 }
 
+static s32 TallyPersistentBeginEventForRow(s32 row) {
+    switch (row) {
+        case 1: return kTallySoundStep;
+        case 2: return 26;
+        case 3: return 30;
+        default: return 0;
+    }
+}
+
+static s32 TallyPersistentEndEventForRow(s32 row) {
+    switch (row) {
+        case 1: return kTallySoundFightDone;
+        case 2: return kTallySoundComboDone;
+        case 3: return kTallySoundStyleDone;
+        default: return 0;
+    }
+}
+
+static bool IsTallyPersistentEvent(s32 event) {
+    return event >= 26 && event <= 31;
+}
+
+static bool IsTallyPersistentSoundLocation(s32 location) {
+    switch (location) {
+        case SND_LOC_CHINA_1:
+        case SND_LOC_CHINA_2:
+        case SND_LOC_CHINA_3:
+        case SND_LOC_FACTORY_1:
+        case SND_LOC_FACTORY_2:
+        case SND_LOC_FACTORY_3:
+        case SND_LOC_ROOF_1:
+        case SND_LOC_ROOF_2:
+        case SND_LOC_ROOF_3:
+        case SND_LOC_SEWER_1:
+        case SND_LOC_SEWER_2:
+        case SND_LOC_SEWER_3:
+        case SND_LOC_WATER_1:
+        case SND_LOC_WATER_2:
+        case SND_LOC_WATER_3:
+        case SND_LOC_TEMPLE:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static s32 ResolveTallyPersistentSoundLocation(s32 location) {
+    if (IsTallyPersistentSoundLocation(location)) {
+        return location;
+    }
+
+    switch (location) {
+        case SND_LOC_CHINA_BOSS: return SND_LOC_CHINA_3;
+        case SND_LOC_FACTORY_BOSS: return SND_LOC_FACTORY_3;
+        case SND_LOC_ROOF_BOSS: return SND_LOC_ROOF_3;
+        case SND_LOC_SEWER_BOSS: return SND_LOC_SEWER_3;
+        case SND_LOC_WATER_BOSS: return SND_LOC_WATER_3;
+        default: return SND_LOC_TEMPLE;
+    }
+}
+
+static void ProcessCustomTallySoundEvent(s32 event) {
+    if (!g_frontEndSound || event == 0) {
+        return;
+    }
+
+    const s32 savedLocation = g_currentSoundLocation;
+    const s32 tallyLocation = IsTallyPersistentEvent(event)
+        ? ResolveTallyPersistentSoundLocation(savedLocation)
+        : savedLocation;
+
+    g_currentSoundLocation = tallyLocation;
+    g_frontEndSound->ProcessSoundEvent(event);
+    g_currentSoundLocation = savedLocation;
+}
+
+static void EndTallyPersistentRow(s32* row) {
+    if (!row || *row == 0 || !g_frontEndSound) {
+        if (row) {
+            *row = 0;
+        }
+        return;
+    }
+
+    const s32 endEvent = TallyPersistentEndEventForRow(*row);
+    if (endEvent != 0) {
+        ProcessCustomTallySoundEvent(endEvent);
+    }
+    *row = 0;
+}
+
 static u8 SaturatingAddU8(u8 base, s32 add) {
     s32 value = (s32)base + add;
     if (value < 0) {
@@ -829,6 +926,25 @@ static bool ProjectThingToScreen(const Thing* thing, s32 yOffset, f32* outX, f32
     return true;
 }
 
+static bool IsThingInList(const ccList& list, const Thing* thing) {
+    if (!thing) {
+        return false;
+    }
+
+    const ccMinNode* targetNode = static_cast<const ccMinNode*>(thing);
+    for (ccMinNode* node = list.head; node; node = node->next) {
+        if (node == targetNode) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool IsLiveHumanoidHudTarget(const Thing* thing) {
+    return g_ai && IsThingInList(g_ai->humanoidList, thing);
+}
+
 static void CopyUpperAscii(char* dst, s32 dstSize, const char* src) {
     if (!dst || dstSize <= 0) {
         return;
@@ -921,6 +1037,9 @@ CustomHudMgr::~CustomHudMgr() {
 
 void CustomHudMgr::SetDebugTallyPreviewEnabled(bool enabled) {
     if (m_debugTallyEnabled != enabled) {
+        if (!enabled) {
+            EndTallyPersistentRow(&m_debugTallyPersistentRow);
+        }
         m_debugTallyEnabled = enabled;
         m_debugTallyRestartRequested = enabled;
     }
@@ -953,6 +1072,25 @@ void CustomHudMgr::RestartDebugTallyPreview() {
     if (m_debugTallyEnabled) {
         m_debugTallyRestartRequested = true;
     }
+}
+
+void CustomHudMgr::OnLevelLoad() {
+    m_levelLoaded = true;
+}
+
+void CustomHudMgr::OnLevelUnload() {
+    m_levelLoaded = false;
+    EndTallyPersistentRow(&m_debugTallyPersistentRow);
+    m_enemyAnimTarget = nullptr;
+    m_enemyHealthRatio = -1.0f;
+    m_enemyHealthDamageRatio = -1.0f;
+    m_enemyDamageHoldTimer = 0.0f;
+    m_enemyHealthShakeTimer = 0.0f;
+    m_hitTextShakeTimer = 0.0f;
+    m_tallyGradeDelayTimer = -1.0f;
+    m_tallyGradeVisible = false;
+    m_tallyRDragonDelayTimer = -1.0f;
+    m_tallyRDragonVisible = false;
 }
 
 void CustomHudMgr::EnsureAssetsLoaded() {
@@ -1022,6 +1160,8 @@ void CustomHudMgr::EnsureFontsLoaded() {
 }
 
 void CustomHudMgr::Shutdown() {
+    EndTallyPersistentRow(&m_debugTallyPersistentRow);
+
     if (m_takeTex) {
         m_takeTex->Release();
         m_takeTex = nullptr;
@@ -1088,6 +1228,8 @@ void CustomHudMgr::Shutdown() {
     m_tallyGDragonDisplay = 0;
     m_tallyGradeDelayTimer = -1.0f;
     m_tallyGradeVisible = false;
+    m_tallyRDragonDelayTimer = -1.0f;
+    m_tallyRDragonVisible = false;
     m_tallyGoldBonusAnimTimer = 0.0f;
     m_tallyGoldLeadInTimer = -1.0f;
     m_tallyGoldBonusTriggered = false;
@@ -1106,9 +1248,11 @@ void CustomHudMgr::Shutdown() {
     m_debugTallyGrade = 3;
     m_debugTallyShowMovieBonus = false;
     m_debugTallySoundStage = 0;
+    m_debugTallyPersistentRow = 0;
 
     m_assetsLoadTried = false;
     m_fontLoadTried = false;
+    m_levelLoaded = false;
 }
 
 void CustomHudMgr::Render(const HUD& hud) {
@@ -1148,6 +1292,8 @@ void CustomHudMgr::Render(const HUD& hud) {
             m_tallyGDragonDisplay = 0;
             m_tallyGradeDelayTimer = -1.0f;
             m_tallyGradeVisible = false;
+            m_tallyRDragonDelayTimer = -1.0f;
+            m_tallyRDragonVisible = false;
             m_tallyGoldBonusAnimTimer = 0.0f;
             m_tallyGoldLeadInTimer = -1.0f;
             m_tallyGoldBonusTriggered = false;
@@ -1155,6 +1301,7 @@ void CustomHudMgr::Render(const HUD& hud) {
             m_tallyMovieBonusWasVisible = false;
             m_tallyMovieBonusShakePhase = 0.0f;
             m_tallyPromptPulse.Start();
+            EndTallyPersistentRow(&m_debugTallyPersistentRow);
             m_debugTallySoundStage = 0;
             m_debugTallyRestartRequested = false;
         }
@@ -1163,7 +1310,9 @@ void CustomHudMgr::Render(const HUD& hud) {
         DrawTallyOverlay(hud);
     }
     else {
+        EndTallyPersistentRow(&m_debugTallyPersistentRow);
         m_tallyVisible = false;
+        m_debugTallySoundStage = 0;
         SetHudDrawAlpha(m_gameplayHudAlpha);
         DrawGameplayHud(hud);
         SetHudDrawAlpha(1.0f);
@@ -1178,6 +1327,10 @@ void CustomHudMgr::Render(const HUD& hud) {
 }
 
 void CustomHudMgr::DrawGameplayHud(const HUD& hud) {
+    if (!m_levelLoaded) {
+        return;
+    }
+
     if (hud.playerHealth.IsVisible()) {
         DrawPlayerHealthCard(hud);
     }
@@ -1190,7 +1343,7 @@ void CustomHudMgr::DrawGameplayHud(const HUD& hud) {
 
     const bool enemyVisible = hud.foeHealth.IsVisible() || hud.bossHealth.IsVisible();
     const bool enemyHasData =
-        ((hud.currentFoe != nullptr) && (hud.foeHealth.maxHealth > 0) && (hud.foeHealth.lastValue > 0)) ||
+        (IsLiveHumanoidHudTarget(static_cast<const Thing*>(hud.currentFoe)) && (hud.foeHealth.maxHealth > 0) && (hud.foeHealth.lastValue > 0)) ||
         ((hud.bossHandle != nullptr) && (hud.bossHealth.maxHealth > 0) && (hud.bossHealth.lastValue > 0));
     if (enemyVisible || enemyHasData) {
         DrawEnemyHealthCards(hud);
@@ -1207,7 +1360,7 @@ void CustomHudMgr::DrawGameplayHud(const HUD& hud) {
         DrawInventoryCard(hud);
     }
 
-    if (hud.hits.hitCount >= 2) {
+    if (hud.hits.hitCount > 0) {
         DrawHitsCard(hud);
     }
     else {
@@ -1317,6 +1470,10 @@ void CustomHudMgr::DrawEnemyHealthCards(const HUD& hud) {
     }
 
     if (!target) {
+        return;
+    }
+
+    if (!IsLiveHumanoidHudTarget(target)) {
         return;
     }
 
@@ -1607,6 +1764,11 @@ void CustomHudMgr::DrawHitsCard(const HUD& hud) {
         anchor = static_cast<const Thing*>(hud.currentFoe);
     }
 
+    if (anchor && anchor != static_cast<const Thing*>(Player::s_player) && !IsLiveHumanoidHudTarget(anchor)) {
+        m_prevHitCount = hitCount;
+        return;
+    }
+
     f32 screenX = 0.0f;
     f32 screenY = 0.0f;
     if (!ProjectThingToScreen(anchor, 950, &screenX, &screenY)) {
@@ -1872,9 +2034,40 @@ void CustomHudMgr::DrawTallyOverlay(const HUD& hud) {
 
     const bool showGoldBonus = showGoldBonusStage && (gdragonTarget > 0);
 
-    if (useDebugPreview && m_debugTallySoundStage == 0 && g_frontEndSound) {
-        g_frontEndSound->ProcessSoundEvent(kTallySoundStart);
+    if (m_debugTallySoundStage == 0 && g_frontEndSound) {
+        ProcessCustomTallySoundEvent(kTallySoundStart);
         m_debugTallySoundStage = 1;
+    }
+
+    const s32 prevFightDisplay = m_tallyFightDisplay;
+    const s32 prevComboDisplay = m_tallyComboDisplay;
+    const s32 prevStyleDisplay = m_tallyStyleDisplay;
+
+    if (g_frontEndSound) {
+        s32 activePersistentRow = 0;
+        if (prevFightDisplay < fightTarget) {
+            activePersistentRow = 1;
+        }
+        else if (prevComboDisplay < comboTarget) {
+            activePersistentRow = 2;
+        }
+        else if (prevStyleDisplay < styleTarget) {
+            activePersistentRow = 3;
+        }
+
+        if (activePersistentRow != m_debugTallyPersistentRow) {
+            const s32 endEvent = TallyPersistentEndEventForRow(m_debugTallyPersistentRow);
+            if (endEvent != 0) {
+                ProcessCustomTallySoundEvent(endEvent);
+            }
+
+            const s32 beginEvent = TallyPersistentBeginEventForRow(activePersistentRow);
+            if (beginEvent != 0) {
+                ProcessCustomTallySoundEvent(beginEvent);
+            }
+
+            m_debugTallyPersistentRow = activePersistentRow;
+        }
     }
 
     m_tallyFightDisplay = StepDisplayedCounter(m_tallyFightDisplay, fightTarget, dt, kTallyScoreCountRate, kTallyScoreMinStep);
@@ -1897,25 +2090,45 @@ void CustomHudMgr::DrawTallyOverlay(const HUD& hud) {
         (m_tallyComboDisplay >= comboTarget) &&
         (m_tallyStyleDisplay >= styleTarget);
 
-    if (useDebugPreview) {
-        if (scoreRowsFilled) {
-            m_tallyGradeDelayTimer = 0.0f;
-            m_tallyGradeVisible = true;
+    const bool gradePhaseReady = scoreRowsFilled && (useDebugPreview || tallyState >= 3);
+    if (gradePhaseReady) {
+        if (m_tallyGradeDelayTimer < 0.0f) {
+            m_tallyGradeDelayTimer = kTallyGradeRevealDelaySeconds;
         }
-        else {
-            m_tallyGradeDelayTimer = -1.0f;
-            m_tallyGradeVisible = false;
+        else if (m_tallyGradeDelayTimer > 0.0f) {
+            m_tallyGradeDelayTimer -= dt;
+            if (m_tallyGradeDelayTimer < 0.0f) {
+                m_tallyGradeDelayTimer = 0.0f;
+            }
         }
+        m_tallyGradeVisible = m_tallyGradeDelayTimer <= 0.0f;
     }
     else {
-        m_tallyGradeDelayTimer = (tallyState >= 3) ? 0.0f : -1.0f;
-        m_tallyGradeVisible = tallyState >= 3;
+        m_tallyGradeDelayTimer = -1.0f;
+        m_tallyGradeVisible = false;
     }
 
     const bool gradeRevealed = m_tallyGradeVisible;
-    const bool canCountRDragons = useDebugPreview
-        ? (showRDragons && scoreRowsFilled && gradeRevealed)
-        : (showRDragons && gradeRevealed);
+    const bool rDragonPhaseReady = showRDragons && scoreRowsFilled && gradeRevealed;
+    if (rDragonPhaseReady) {
+        if (m_tallyRDragonDelayTimer < 0.0f) {
+            m_tallyRDragonDelayTimer = kTallyRDragonRevealDelaySeconds;
+        }
+        else if (m_tallyRDragonDelayTimer > 0.0f) {
+            m_tallyRDragonDelayTimer -= dt;
+            if (m_tallyRDragonDelayTimer < 0.0f) {
+                m_tallyRDragonDelayTimer = 0.0f;
+            }
+        }
+        m_tallyRDragonVisible = m_tallyRDragonDelayTimer <= 0.0f;
+    }
+    else {
+        m_tallyRDragonDelayTimer = -1.0f;
+        m_tallyRDragonVisible = false;
+    }
+
+    const bool redDragonsRevealed = m_tallyRDragonVisible;
+    const bool canCountRDragons = redDragonsRevealed;
 
     if (canCountRDragons) {
         m_tallyRDragonDisplay = StepDisplayedCounter(m_tallyRDragonDisplay, rdragonTarget, dt, kTallyDragonCountRate, kTallyDragonMinStep);
@@ -1926,7 +2139,7 @@ void CustomHudMgr::DrawTallyOverlay(const HUD& hud) {
 
     const bool redDragonsFinished =
         showGoldBonus &&
-        gradeRevealed &&
+        redDragonsRevealed &&
         (m_tallyRDragonDisplay >= rdragonTarget);
 
     if (redDragonsFinished) {
@@ -1984,7 +2197,7 @@ void CustomHudMgr::DrawTallyOverlay(const HUD& hud) {
     const bool movieBonusTimingReady =
         (gdragonTarget > 0)
             ? (goldDragonCountDone && goldBonusAnimDone)
-            : (showRDragons && (m_tallyRDragonDisplay >= rdragonTarget));
+            : (redDragonsRevealed && (m_tallyRDragonDisplay >= rdragonTarget));
     const bool rawMovieBonusVisible = useDebugPreview ? m_debugTallyShowMovieBonus : hud.tally.movieBonusOvl.IsVisible();
     const bool movieBonusVisible = rawMovieBonusVisible && movieBonusTimingReady;
     if (movieBonusVisible) {
@@ -2004,35 +2217,32 @@ void CustomHudMgr::DrawTallyOverlay(const HUD& hud) {
         m_tallyMovieBonusAnimTimer = 0.0f;
     }
 
-    if (useDebugPreview && g_frontEndSound) {
+    if (g_frontEndSound) {
         if (m_debugTallySoundStage == 1 && m_tallyFightDisplay >= fightTarget) {
-            g_frontEndSound->ProcessSoundEvent(kTallySoundFightDone);
             m_debugTallySoundStage = 2;
         }
         if (m_debugTallySoundStage == 2 && m_tallyComboDisplay >= comboTarget) {
-            g_frontEndSound->ProcessSoundEvent(kTallySoundComboDone);
             m_debugTallySoundStage = 3;
         }
         if (m_debugTallySoundStage == 3 && m_tallyStyleDisplay >= styleTarget) {
-            g_frontEndSound->ProcessSoundEvent(kTallySoundStyleDone);
             m_debugTallySoundStage = 4;
         }
         if (m_debugTallySoundStage == 4 && gradeRevealed) {
-            g_frontEndSound->ProcessSoundEvent(kTallySoundGradeDone);
+            ProcessCustomTallySoundEvent(kTallySoundGradeDone);
             m_debugTallySoundStage = 5;
         }
-        if (m_debugTallySoundStage == 5 && showRDragons && scoreRowsFilled && gradeRevealed) {
-            g_frontEndSound->ProcessSoundEvent(kTallySoundRDragonDone);
+        if (m_debugTallySoundStage == 5 && redDragonsRevealed) {
+            ProcessCustomTallySoundEvent(kTallySoundRDragonDone);
             m_debugTallySoundStage = showGoldBonus ? 6 : 9;
         }
 
         if (m_debugTallySoundStage == 6 && showGoldBonus && m_tallyGoldBonusTriggered) {
-            g_frontEndSound->ProcessSoundEvent(kTallySoundGoldBonus);
+            ProcessCustomTallySoundEvent(kTallySoundGoldBonus);
             m_debugTallySoundStage = 7;
         }
 
         if (m_debugTallySoundStage == 7 && showGoldBonus && m_tallyGDragonDisplay >= gdragonTarget) {
-            g_frontEndSound->ProcessSoundEvent(kTallySoundGDragonDone);
+            ProcessCustomTallySoundEvent(kTallySoundGDragonDone);
             m_debugTallySoundStage = 9;
         }
     }
@@ -2065,17 +2275,17 @@ void CustomHudMgr::DrawTallyOverlay(const HUD& hud) {
                  kTallyValueGoldR, kTallyValueGoldG, kTallyValueGoldB);
     rowY += kTallyRowSpacing;
 
-    if (showRDragons || showGoldBonus) {
+    if (redDragonsRevealed) {
         rowY += kTallyDragonRowsYOffset;
     }
 
-    if (showRDragons) {
+    if (redDragonsRevealed) {
         DrawTallyRow(x + 10.0f, rowY, w - 20.0f, redDragonsLabelText, rdragonBuf, m_redDragonTex,
                      kTallyValueGoldR, kTallyValueGoldG, kTallyValueGoldB);
         rowY += kTallyRowSpacing;
     }
 
-    if (showRDragons && gdragonTarget > 0) {
+    if (redDragonsRevealed && gdragonTarget > 0) {
         DrawTallyRow(x + 10.0f, rowY, w - 20.0f, goldDragonsLabelText, gdragonBuf, m_goldDragonTex,
                      kTallyValueGoldR, kTallyValueGoldG, kTallyValueGoldB);
         rowY += kTallyRowSpacing;
