@@ -374,6 +374,10 @@ void WEffect_UnPopulateWEffects(s32 blockNum);
 // (pos-based Render path only). Call symmetrically around Effects_DrawEffects so
 // direct-position effects depth-align with seam-shifted block geometry.
 void ComEffect_SetSeamOffset(s32 x, s32 y, s32 z);
+void ComEffect_ClearLateRenderQueue();
+void ComEffect_BeginLateRenderQueue(s32 blockNum);
+void ComEffect_EndLateRenderQueue();
+void ComEffect_FlushLateRenderQueue(s32 blockNum);
 
 // Debug helpers: expose resolved ComEffect identity for active world effects.
 u32 WEffect_DebugGetComEffectResourceHash(const Effects* effect);

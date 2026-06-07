@@ -53,7 +53,10 @@ public:
     s32 lastEffectFrame = 0;
     // PSX +208 (s32): render flags copied from the FWEffect.
     s32 effectRenderFlags = 0;
-    s32 field212 = 0;
+    // PSX +212 (ptr): optional 8-entry frame pair table from attrs 24..31.
+    s16* effectFrameTable = nullptr;
+    // PC render cache: FWEffect scale must stay separate from Thing::orientation.
+    LVector effectScale = { 0x10000, 0x10000, 0x10000 };
     // PSX +216 (s32): damage value passed through humanoid collision tags.
     s32 collisionDamage = 0;
     // PSX +220 (s32): frames between repeated humanoid damage hits.

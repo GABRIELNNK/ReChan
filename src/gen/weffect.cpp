@@ -33,6 +33,8 @@
 #include "snd/sndfact.h"
 #include "pc/log.h"
 
+#include <vector>
+
 static ComEffect* g_wEffectComEffects[64] = {};
 static ComEffect* g_wEffectOwnedEffects[64] = {};
 static s32 g_wEffectComEffectCount = 0;
@@ -42,6 +44,23 @@ static s32 g_wEffectOwnedCount = 0;
 // (WEffect, SpotLight, FWEffect, GEffect, LensFlare) depth-align with
 // block geometry that has already been shifted by OffsetToPreventSeams.
 static LVector s_comEffectSeamOffset = { 0, 0, 0 };
+
+struct LateComEffectRender {
+    s32 blockNum = -1;
+    ComEffect* effect = nullptr;
+    LVector pos = {};
+    LVector scale = {};
+    LVector rotation = {};
+    bool hasScale = false;
+    bool hasRotation = false;
+    u32 flags = 0;
+    s32 frame = 0;
+};
+
+static std::vector<LateComEffectRender> s_lateComEffectQueue;
+static bool s_lateComEffectQueueEnabled = false;
+static bool s_lateComEffectQueueFlushing = false;
+static s32 s_lateComEffectQueueBlock = -1;
 
 static bool IsFrontRenderFlags(u32 flags) {
     return (flags & 0x1000800u) != 0u;
@@ -113,6 +132,56 @@ void ComEffect_SetSeamOffset(s32 x, s32 y, s32 z) {
     s_comEffectSeamOffset.x = x;
     s_comEffectSeamOffset.y = y;
     s_comEffectSeamOffset.z = z;
+}
+
+void ComEffect_ClearLateRenderQueue() {
+    s_lateComEffectQueue.clear();
+    s_lateComEffectQueueEnabled = false;
+    s_lateComEffectQueueFlushing = false;
+    s_lateComEffectQueueBlock = -1;
+}
+
+void ComEffect_BeginLateRenderQueue(s32 blockNum) {
+    s_lateComEffectQueueEnabled = true;
+    s_lateComEffectQueueBlock = blockNum;
+}
+
+void ComEffect_EndLateRenderQueue() {
+    s_lateComEffectQueueEnabled = false;
+    s_lateComEffectQueueBlock = -1;
+}
+
+void ComEffect_FlushLateRenderQueue(s32 blockNum) {
+    if (s_lateComEffectQueue.empty()) {
+        return;
+    }
+
+    const bool savedEnabled = s_lateComEffectQueueEnabled;
+    const s32 savedBlock = s_lateComEffectQueueBlock;
+    s_lateComEffectQueueEnabled = false;
+    s_lateComEffectQueueFlushing = true;
+
+    std::vector<LateComEffectRender> remaining;
+    remaining.reserve(s_lateComEffectQueue.size());
+
+    for (const LateComEffectRender& queued : s_lateComEffectQueue) {
+        if (queued.blockNum != blockNum || !queued.effect) {
+            remaining.push_back(queued);
+            continue;
+        }
+
+        queued.effect->SetFrame(queued.frame);
+        queued.effect->Render(
+            queued.pos,
+            queued.hasScale ? &queued.scale : nullptr,
+            queued.hasRotation ? &queued.rotation : nullptr,
+            queued.flags);
+    }
+
+    s_lateComEffectQueue = std::move(remaining);
+    s_lateComEffectQueueFlushing = false;
+    s_lateComEffectQueueEnabled = savedEnabled;
+    s_lateComEffectQueueBlock = savedBlock;
 }
 
 static constexpr bool kDebugRenderUntexturedBillboard = false;
@@ -3101,6 +3170,25 @@ void ComEffect::Render(const LVector& pos, const LVector* scale, const LVector* 
         return;
     }
 
+    if (s_lateComEffectQueueEnabled && !s_lateComEffectQueueFlushing) {
+        LateComEffectRender queued = {};
+        queued.blockNum = s_lateComEffectQueueBlock;
+        queued.effect = this;
+        queued.pos = pos;
+        queued.hasScale = scale != nullptr;
+        queued.hasRotation = rotation != nullptr;
+        if (scale) {
+            queued.scale = *scale;
+        }
+        if (rotation) {
+            queued.rotation = *rotation;
+        }
+        queued.flags = flags;
+        queued.frame = currentFrame;
+        s_lateComEffectQueue.push_back(queued);
+        return;
+    }
+
     const bool frontRenderFlags = IsFrontRenderFlags(flags);
 
     if (kDebugForceQuadForAllComEffects) {
@@ -3239,17 +3327,9 @@ void ComEffect::Render(const LVector& pos, const LVector* scale, const LVector* 
 
     const Mat4 savedWorld = p3d::context->GetWorldMatrix();
     const bool useWord0 = (geoWord0Slot != kFastWordInactive);
-    // PSX Render__9ComEffect uses both 0x800 and 0x1000000 render flags
-    // to push effects into foreground OT behavior.
-    const bool forceFrontRender = frontRenderFlags;
 
     if (useWord0) {
         p3d::context->SetTexInfoOverride(true, geoWord0Slot);
-    }
-
-    if (forceFrontRender) {
-        p3d::context->EnableZBuffer(false);
-        p3d::context->SetDepthClamp(true);
     }
 
     if (!frontRenderFlags) {
@@ -3261,11 +3341,6 @@ void ComEffect::Render(const LVector& pos, const LVector* scale, const LVector* 
     p3d::context->SetWorldMatrix(world);
     model->drawable->Display(flags);
     p3d::context->SetWorldMatrix(savedWorld);
-
-    if (forceFrontRender) {
-        p3d::context->SetDepthClamp(false);
-        p3d::context->EnableZBuffer(true);
-    }
 
     if (useWord0) {
         p3d::context->SetTexInfoOverride(false, 0);
@@ -3322,26 +3397,15 @@ void ComEffect::Render(const Mat4& worldMatrix, u32 flags) {
     }
 
     const bool useWord0 = (geoWord0Slot != kFastWordInactive);
-    const bool forceFrontRender = frontRenderFlags;
 
     if (useWord0) {
         p3d::context->SetTexInfoOverride(true, geoWord0Slot);
-    }
-
-    if (forceFrontRender) {
-        p3d::context->EnableZBuffer(false);
-        p3d::context->SetDepthClamp(true);
     }
 
     const Mat4 composedWorld = savedWorld * worldMatrix;
     p3d::context->SetWorldMatrix(composedWorld);
     model->drawable->Display(flags);
     p3d::context->SetWorldMatrix(savedWorld);
-
-    if (forceFrontRender) {
-        p3d::context->SetDepthClamp(false);
-        p3d::context->EnableZBuffer(true);
-    }
 
     if (useWord0) {
         p3d::context->SetTexInfoOverride(false, 0);
@@ -3512,15 +3576,9 @@ bool ComEffect::RenderGeoByIndex(u32 geoIndex, const Mat4& worldMatrix, u32 flag
 
     bool rendered = false;
     const bool useWord0 = (geoWord0Slot != kFastWordInactive);
-    const bool forceFrontRender = frontRenderFlags;
 
     if (useWord0) {
         p3d::context->SetTexInfoOverride(true, geoWord0Slot);
-    }
-
-    if (forceFrontRender) {
-        p3d::context->EnableZBuffer(false);
-        p3d::context->SetDepthClamp(true);
     }
 
     Mat4 drawWorld = savedWorld * worldMatrix;
@@ -3558,11 +3616,6 @@ bool ComEffect::RenderGeoByIndex(u32 geoIndex, const Mat4& worldMatrix, u32 flag
     }
 
     p3d::context->SetWorldMatrix(savedWorld);
-
-    if (forceFrontRender) {
-        p3d::context->SetDepthClamp(false);
-        p3d::context->EnableZBuffer(true);
-    }
 
     if (useWord0) {
         p3d::context->SetTexInfoOverride(false, 0);

@@ -3719,6 +3719,7 @@ void World::DrawEverythingHandler(const LVector* playerPos) {
     const Mat4 passBaseWorld = p3d::context->GetWorldMatrix();
 
     BeginModelShadowQueue();
+    ComEffect_ClearLateRenderQueue();
 
     // Pass 1: render visible block entities + geometry.
     for (u32 i = 0; i < visibleCount; i++) {
@@ -3747,10 +3748,12 @@ void World::DrawEverythingHandler(const LVector* playerPos) {
 
             // PSX: DrawLoop for each entity list
             if (g_ai) {
+                ComEffect_BeginLateRenderQueue(static_cast<s32>(bn));
                 DrawEntityList(g_ai->humanoidList, bn, vramHandle);
                 DrawEntityList(g_ai->inactivePickupList, bn, vramHandle);
                 DrawEntityList(g_ai->pickupList, bn, vramHandle);
                 DrawEntityList(g_ai->moveList, bn, vramHandle);
+                ComEffect_EndLateRenderQueue();
             }
 
             // Block geometry pass for this block.
@@ -3804,9 +3807,11 @@ void World::DrawEverythingHandler(const LVector* playerPos) {
         p3d::context->SetWorldMatrix(effectBaseWorld);
 
         ComEffect_SetSeamOffset(seamOffsetX, seamOffsetY, seamOffsetZ);
+        ComEffect_FlushLateRenderQueue(static_cast<s32>(bn));
         Effects_DrawEffects(static_cast<s32>(bn));
         ComEffect_SetSeamOffset(0, 0, 0);
     }
+    ComEffect_ClearLateRenderQueue();
     p3d::context->SetBlendMode(PDDI_BLEND_NONE);
     p3d::context->EnableZBuffer(true);
     p3d::context->SetDepthClamp(false);

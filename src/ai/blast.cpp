@@ -5,6 +5,7 @@
 #include "gen/colvol.h"
 #include "gen/effects.h"
 #include "gen/geffect.h"
+#include "gen/psxmath_helpers.h"
 #include "gen/weffect.h"
 #include "ai/obstacle_shared.h"
 #include "p3d/hash.h"
@@ -12,14 +13,16 @@
 #include "snd/sndfact.h"
 #include "snd/snddrct.h"
 
-#include <cmath>
-
 static constexpr s32 COLLISION_TAG_HIT_TYPE = static_cast<s32>(0x80000003u);
 static constexpr s32 COLLISION_TAG_DAMAGE = static_cast<s32>(0x80000007u);
 static constexpr s32 COLLISION_TAG_END = 0;
 static constexpr s32 BLAST_HIT_TYPE_FIRE = 18;
-static constexpr s32 BLAST_DEFAULT_LENGTH = 512;
-static constexpr s32 BLAST_DEFAULT_HALF_WIDTH = 128;
+static constexpr s32 BLAST_FORCE_SCALE = 1000 << 16;
+static constexpr s32 BLAST_DEFAULT_HALF_WIDTH = 0;
+
+static s32 BlastSll16(s32 value) {
+    return static_cast<s32>(static_cast<u32>(value) << 16);
+}
 
 static s32 BlastAttribValue(const DBRoot* root, u32 id, s32 defaultValue = 0) {
     u32 value = 0;
@@ -36,49 +39,43 @@ static u32 BlastAttribStringHash(const DBRoot* root, u32 id) {
     return (str && str[0] != '\0') ? p3dHash(str) : 0;
 }
 
-static s32 AbsS32(s32 value) {
-    return value < 0 ? -value : value;
-}
-
 static bool BlastUsesFramedEffect(const Blast* blast) {
     return blast && blast->framedEffect != 0;
 }
 
-static s32 BlastDirX(const Blast* blast) {
-    return blast ? blast->endPosX - blast->pos.x : 0;
+static s16 BlastFrameTableValue(const Blast* blast, s32 index) {
+    if (!blast || !blast->effectFrameTable || index < 0 || index >= 8) {
+        return 0;
+    }
+
+    return blast->effectFrameTable[index];
 }
 
-static s32 BlastDirY(const Blast* blast) {
-    return blast ? blast->endPosY - blast->pos.y : 0;
-}
-
-static s32 BlastDirZ(const Blast* blast) {
-    return blast ? blast->endPosZ - blast->pos.z : 0;
-}
-
-static void NormalizeBlastDirection(const LVector& direction, LVector& out) {
-    const s64 x = static_cast<s64>(direction.x);
-    const s64 y = static_cast<s64>(direction.y);
-    const s64 z = static_cast<s64>(direction.z);
-    const s64 magSq = x * x + y * y + z * z;
-    if (magSq <= 0) {
-        out = {};
+static void SetBlastStateFrame(Blast* blast, s32 state) {
+    if (!blast || !blast->effectFrameTable) {
         return;
     }
 
-    const double mag = std::sqrt(static_cast<double>(magSq));
-    out.x = static_cast<s32>((static_cast<double>(direction.x) * 65536.0) / mag);
-    out.y = static_cast<s32>((static_cast<double>(direction.y) * 65536.0) / mag);
-    out.z = static_cast<s32>((static_cast<double>(direction.z) * 65536.0) / mag);
+    blast->effectFrame = BlastFrameTableValue(blast, state * 2);
 }
 
-static void SetBlastEffectFrame(Blast* blast, s32 state) {
-    if (!blast) {
+static void AdvanceBlastFrame(Blast* blast) {
+    if (!blast || !blast->effect || !blast->effectFrameTable) {
         return;
     }
 
-    (void)state;
-    blast->effectFrame = 0;
+    blast->effectFrame++;
+
+    s32 state = blast->blastState;
+    if (state < 0 || state > 3) {
+        return;
+    }
+
+    const s32 start = BlastFrameTableValue(blast, state * 2);
+    const s32 end = BlastFrameTableValue(blast, state * 2 + 1);
+    if (end < blast->effectFrame) {
+        blast->effectFrame = start;
+    }
 }
 
 static void StartBlastFire(Blast* blast) {
@@ -88,7 +85,6 @@ static void StartBlastFire(Blast* blast) {
 
     blast->blastState = 1;
     blast->stateTimer = 0;
-    SetBlastEffectFrame(blast, 1);
 
     const u32 effectHash = static_cast<u32>(blast->effectHash);
     if (effectHash && !BlastUsesFramedEffect(blast)) {
@@ -96,6 +92,7 @@ static void StartBlastFire(Blast* blast) {
         GEffect_Create(effectHash, &blast->pos, nullptr, nullptr, 0, lifeFrames, 0);
     }
 
+    SetBlastStateFrame(blast, 1);
     blast->CreateSound();
 }
 
@@ -104,51 +101,121 @@ static void BuildBlastCollisionBox(Blast* blast, s32 progress) {
         return;
     }
 
-    const s32 halfWidth = blast->halfWidth > 0 ? blast->halfWidth : BLAST_DEFAULT_HALF_WIDTH;
-    const s32 length = progress > 0 ? progress : 0;
+    const s32 halfWidth = blast->halfWidth;
+    const s32 length = progress;
 
     tagCollisionBox box = {};
-    box.minX = static_cast<s16>(-halfWidth);
-    box.maxX = static_cast<s16>(halfWidth);
-    box.minY = static_cast<s16>(-halfWidth);
-    box.maxY = static_cast<s16>(halfWidth);
     box.minZ = 0;
-    box.maxZ = static_cast<s16>(length);
+    box.maxZ = 0;
 
     switch (blast->majorAxis) {
         case 0:
-            if (BlastDirX(blast) < 0) {
-                box.minX = static_cast<s16>(-length);
-                box.maxX = 0;
-            }
-            else {
-                box.minX = 0;
-                box.maxX = static_cast<s16>(length);
-            }
+            box.minY = static_cast<s16>(-halfWidth);
+            box.maxY = static_cast<s16>(halfWidth);
             box.minZ = static_cast<s16>(-halfWidth);
             box.maxZ = static_cast<s16>(halfWidth);
-            break;
-        case 1:
-            if (BlastDirY(blast) < 0) {
-                box.minY = static_cast<s16>(-length);
-                box.maxY = 0;
+            if (length > 0) {
+                box.maxX = static_cast<s16>(length);
             }
             else {
+                box.minX = static_cast<s16>(length);
+            }
+            break;
+        case 1:
+            box.minX = static_cast<s16>(-halfWidth);
+            box.maxX = static_cast<s16>(halfWidth);
+            box.minZ = static_cast<s16>(-halfWidth);
+            box.maxZ = static_cast<s16>(halfWidth);
+            if (length > 0) {
                 box.minY = 0;
                 box.maxY = static_cast<s16>(length);
             }
-            box.minZ = static_cast<s16>(-halfWidth);
-            box.maxZ = static_cast<s16>(halfWidth);
+            else {
+                box.minY = static_cast<s16>(length);
+                box.maxY = 0;
+            }
             break;
         default:
-            if (BlastDirZ(blast) < 0) {
-                box.minZ = static_cast<s16>(-length);
+            box.minX = static_cast<s16>(-halfWidth);
+            box.maxX = static_cast<s16>(halfWidth);
+            box.minY = static_cast<s16>(-halfWidth);
+            box.maxY = static_cast<s16>(halfWidth);
+            if (length > 0) {
+                box.minZ = 0;
+                box.maxZ = static_cast<s16>(length);
+            }
+            else {
+                box.minZ = static_cast<s16>(length);
                 box.maxZ = 0;
             }
             break;
     }
 
     blast->SetCollisionBox(box);
+}
+
+static s32 ScaleBlastForce(s32 value) {
+    return PsxRmDiv16i(value, BLAST_FORCE_SCALE);
+}
+
+static LVector NormalizeBlastDirection(s32 x, s32 y, s32 z) {
+    const s32 sx = BlastSll16(x);
+    const s32 sy = BlastSll16(y);
+    const s32 sz = BlastSll16(z);
+    const s32 mag = rmMag3ff(sx, sy, sz);
+    if (mag == 0) {
+        return { FIX16_ONE, 0, 0 };
+    }
+
+    return {
+        PsxRmDiv16i(sx, mag),
+        PsxRmDiv16i(sy, mag),
+        PsxRmDiv16i(sz, mag),
+    };
+}
+
+static s32 ScaleBlastRatioByFrames(s32 ratio, s32 frames) {
+    return MulShift16(ratio, frames);
+}
+
+static void ApplyBlastWindForce(Blast* blast, Humanoid* hum) {
+    if (!blast || !hum) {
+        return;
+    }
+
+    const s32 blastLength = rmMag3ff(
+        blast->endPosX - blast->pos.x,
+        blast->endPosY - blast->pos.y,
+        blast->endPosZ - blast->pos.z);
+    if (blastLength <= 0) {
+        return;
+    }
+
+    const s32 humDistance = rmMag3ff(
+        hum->pos.x - blast->pos.x,
+        hum->pos.y - blast->pos.y,
+        hum->pos.z - blast->pos.z);
+
+    s32 t = PsxRmDiv16i(BlastSll16(humDistance), BlastSll16(blastLength));
+    if (t > FIX16_ONE) {
+        t = FIX16_ONE;
+    }
+
+    if (blast->blastState == 1 && blast->extendFrames != 0) {
+        t = PsxRmDiv16i(ScaleBlastRatioByFrames(t, static_cast<s16>(blast->stateTimer)), blast->extendFrames);
+    }
+    else if (blast->blastState == 3 && blast->retractFrames != 0) {
+        t = PsxRmDiv16i(ScaleBlastRatioByFrames(t, static_cast<s16>(blast->stateTimer)), blast->retractFrames);
+    }
+
+    const s32 invT = FIX16_ONE - t;
+    const s32 forceX = MulShift16(blast->minForceX, invT) + MulShift16(blast->maxForceX, t);
+    const s32 forceY = MulShift16(blast->minForceY, invT) + MulShift16(blast->maxForceY, t);
+    const s32 forceZ = MulShift16(blast->minForceZ, invT) + MulShift16(blast->maxForceZ, t);
+
+    hum->contactForce.x += forceX;
+    hum->contactForce.y += forceY;
+    hum->contactForce.z += forceZ;
 }
 
 Blast::Blast(const LVector* pos, u16 type)
@@ -159,14 +226,16 @@ Blast::Blast(const LVector* pos, u16 type)
 
 Blast::~Blast() {
     MARKFUNCTION(0x80015AF8);
+    delete[] effectFrameTable;
+    effectFrameTable = nullptr;
 }
 
 void Blast::AnalyzeMesh(DBRoot* root) {
     MARKFUNCTION(0x80015B54);
-    orientation.x = root->field40;
-    orientation.y = root->field44;
-    orientation.z = root->field48;
     Obstacle::AnalyzeMesh(root);
+
+    orientation = {};
+
     tagCollisionBox localBox = { 0x7FFF, 0x7FFF, 0x7FFF, -0x7FFF, -0x7FFF, -0x7FFF, -0x7FFF, 0 };
     ObstacleFillCollisionBox(localBox, root, 5);
     SetCollisionBox(localBox);
@@ -186,24 +255,24 @@ void Blast::AnalyzeMesh(DBRoot* root) {
     endPosY = pos.y + blastDirY;
     endPosZ = pos.z + blastDirZ;
 
-    majorAxis = 2;
-    s32 length = AbsS32(blastDirZ);
-    if (AbsS32(blastDirX) > length) {
+    if (blastDirX != 0) {
         majorAxis = 0;
-        length = AbsS32(blastDirX);
+        lengthPerFrame = extendFrames != 0 ? blastDirX / extendFrames : blastDirX;
     }
-    if (AbsS32(blastDirY) > length) {
+    else if (blastDirY != 0) {
         majorAxis = 1;
-        length = AbsS32(blastDirY);
+        lengthPerFrame = extendFrames != 0 ? blastDirY / extendFrames : blastDirY;
     }
-    if (length == 0) {
-        length = (collBox.extent > 0) ? collBox.extent : BLAST_DEFAULT_LENGTH;
+    else {
+        majorAxis = 2;
+        lengthPerFrame = extendFrames != 0 ? blastDirZ / extendFrames : blastDirZ;
     }
 
-    LVector normalizedDirection = {};
-    NormalizeBlastDirection({ blastDirX << 16, blastDirY << 16, blastDirZ << 16 }, normalizedDirection);
+    const LVector normalizedDirection = NormalizeBlastDirection(blastDirX, blastDirY, blastDirZ);
+
     const s32 forceMin = BlastAttribValue(root, 12);
     const s32 forceMax = BlastAttribValue(root, 13);
+
     minForceX = MulShift16(normalizedDirection.x, forceMin) << 16;
     minForceY = MulShift16(normalizedDirection.y, forceMin) << 16;
     minForceZ = MulShift16(normalizedDirection.z, forceMin) << 16;
@@ -211,15 +280,42 @@ void Blast::AnalyzeMesh(DBRoot* root) {
     maxForceY = MulShift16(normalizedDirection.y, forceMax) << 16;
     maxForceZ = MulShift16(normalizedDirection.z, forceMax) << 16;
 
-    lengthPerFrame = extendFrames > 0 ? length / extendFrames : length;
-    if (lengthPerFrame <= 0) {
-        lengthPerFrame = length;
+    if (const s32 value = BlastAttribValue(root, 16); value != 0) {
+        minForceX = BlastSll16(value);
+        maxForceX = BlastSll16(value);
     }
+    if (const s32 value = BlastAttribValue(root, 17); value != 0) {
+        minForceY = BlastSll16(value);
+        maxForceY = BlastSll16(value);
+    }
+    if (const s32 value = BlastAttribValue(root, 18); value != 0) {
+        minForceZ = BlastSll16(value);
+        maxForceZ = BlastSll16(value);
+    }
+
+    minForceX = ScaleBlastForce(minForceX);
+    minForceY = ScaleBlastForce(minForceY);
+    minForceZ = ScaleBlastForce(minForceZ);
+    maxForceX = ScaleBlastForce(maxForceX);
+    maxForceY = ScaleBlastForce(maxForceY);
+    maxForceZ = ScaleBlastForce(maxForceZ);
 
     effectHash = static_cast<s32>(BlastAttribStringHash(root, 20));
     framedEffect = (BlastAttribValue(root, 23) != 0 && effectHash != 0) ? 1 : 0;
 
-    retractFrames = BlastUsesFramedEffect(this) ? extendFrames : 0;
+    delete[] effectFrameTable;
+    effectFrameTable = nullptr;
+    if (BlastUsesFramedEffect(this)) {
+        effectFrameTable = new s16[8]();
+        for (s32 i = 0; i < 8; i++) {
+            effectFrameTable[i] = static_cast<s16>(BlastAttribValue(root, 24 + i));
+        }
+        retractFrames = extendFrames;
+    }
+    else {
+        retractFrames = 0;
+    }
+
     switch (damagePreset) {
         case 0:
             collisionDamage = 0;
@@ -244,7 +340,7 @@ void Blast::AnalyzeMesh(DBRoot* root) {
     hitCooldownTimer = hitCooldownFrames;
     stateTimer = cooldownFrames - initialTimerAdvance;
     blastState = 0;
-    SetBlastEffectFrame(this, 0);
+    SetBlastStateFrame(this, 0);
 }
 
 void Blast::CreateSound() {
@@ -291,8 +387,6 @@ void Blast::CreateModel(const char* name) {
 
 void Blast::DeleteModel() {
     MARKFUNCTION(0x8001639C);
-    framedEffect = 0;
-    effect = nullptr;
     flags &= ~TF_MODEL_CREATED;
     ReleaseSound();
 }
@@ -301,19 +395,24 @@ void Blast::Reset() {
     MARKFUNCTION(0x800163C8);
     blastState = 0;
     stateTimer = cooldownFrames - initialTimerAdvance;
-    effect = nullptr;
     if (BlastUsesFramedEffect(this) && effectHash) {
         FWEffect* fwEffect = FWEffect::Find(static_cast<u32>(effectHash));
         if (fwEffect) {
             effect = fwEffect->comEffect;
             effectRenderFlags = static_cast<s32>(fwEffect->renderFlags);
             orientation = fwEffect->rotation;
+            effectScale = fwEffect->scale;
         }
         else {
+            effect = nullptr;
             effectRenderFlags = 0;
+            orientation = {};
+            effectScale = { 0x10000, 0x10000, 0x10000 };
         }
+        effectHash = 0;
     }
-    SetBlastEffectFrame(this, 0);
+
+    SetBlastStateFrame(this, 0);
     lastEffectFrame = effectFrame;
     hitCooldownTimer = hitCooldownFrames;
     ReleaseSound();
@@ -340,44 +439,41 @@ void Blast::Think() {
         }
     }
     else if (blastState == 1) {
-        progress = lengthPerFrame * stateTimer;
-        if (extendFrames > 0 && stateTimer >= extendFrames) {
+        progress = lengthPerFrame * static_cast<s32>(stateTimer);
+        if (stateTimer >= extendFrames) {
             blastState = 2;
             stateTimer = 0;
-            SetBlastEffectFrame(this, 2);
+            SetBlastStateFrame(this, 2);
         }
     }
     else if (blastState == 2) {
-        progress = lengthPerFrame * (extendFrames > 0 ? extendFrames : 1);
-        if (holdFrames > 0 && stateTimer >= holdFrames) {
+        progress = lengthPerFrame * static_cast<s32>(extendFrames);
+        if (stateTimer >= holdFrames) {
             if (retractFrames > 0) {
                 blastState = 3;
                 stateTimer = 0;
-                SetBlastEffectFrame(this, 3);
+                SetBlastStateFrame(this, 3);
             }
             else {
                 blastState = 0;
                 stateTimer = 0;
-                SetBlastEffectFrame(this, 0);
+                SetBlastStateFrame(this, 0);
             }
         }
     }
     else if (blastState == 3) {
-        const s32 remaining = retractFrames - stateTimer;
-        progress = lengthPerFrame * (remaining > 0 ? remaining : 0);
+        progress = lengthPerFrame * (static_cast<s32>(retractFrames) - static_cast<s32>(stateTimer));
         if (stateTimer >= retractFrames) {
             blastState = 0;
             stateTimer = 0;
-            SetBlastEffectFrame(this, 0);
+            SetBlastStateFrame(this, 0);
         }
     }
 
     BuildBlastCollisionBox(this, progress);
     stateTimer++;
 
-    if (effect) {
-        effectFrame++;
-    }
+    AdvanceBlastFrame(this);
 
     if (hitCooldownTimer <= 0) {
         hitCooldownTimer = hitCooldownFrames;
@@ -403,7 +499,7 @@ void Blast::Draw() {
 
     UpdateSound();
     effect->SetFrame(effectFrame);
-    effect->Render(pos, &orientation, &orientation, static_cast<u32>(effectRenderFlags));
+    effect->Render(pos, &effectScale, &orientation, static_cast<u32>(effectRenderFlags));
     lastEffectFrame = effectFrame;
 }
 
@@ -418,6 +514,8 @@ void Blast::HandleHumanoidCollision(Humanoid* hum) {
     if (!blastState) {
         return;
     }
+
+    ApplyBlastWindForce(this, hum);
 
     if (hitCooldownTimer != 0) {
         return;
