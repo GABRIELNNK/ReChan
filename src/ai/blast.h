@@ -6,62 +6,62 @@ class ComEffect;
 
 class Blast : public Obstacle {
 public:
-    // Attribute 22: non-zero waits for an external trigger instead of auto-firing.
-    s32 field116 = 0;
-    // Attribute 10: expansion/opening duration.
-    s32 field120 = 0;
-    // Attribute 9: startup delay before auto-fire is allowed.
-    s32 field124 = 0;
-    // Runtime timer for delay/open/active/close phases.
-    s32 field128 = 0;
-    // Runtime phase: 0 idle, 1 expanding, 2 active, 3 retracting.
-    s32 field132 = 0;
-    // PSX +136/+140/+144: minimum blast force vector.
-    s32 field136 = 0;
-    s32 field140 = 0;
-    s32 field144 = 0;
-    // PSX +148/+152/+156: maximum blast force vector.
-    s32 field148 = 0;
-    s32 field152 = 0;
-    s32 field156 = 0;
-    // Attribute 14: collision half-width around the blast ray.
-    s32 field160 = 0;
-    // Length advanced per expansion frame.
-    s32 field164 = 0;
-    // Attribute 21: blast/fire type, also selects damage amount.
-    s32 field168 = 0;
-    // Endpoint derived from position plus the direction vector.
-    s32 field172 = 0;
-    s32 field176 = 0;
-    s32 field180 = 0;
-    // Dominant direction axis: 0 X, 1 Y, 2 Z.
-    s32 field184 = 0;
-    // Attribute 20: FW effect hash.
-    s32 field188 = 0;
-    s32 field192 = 0;
-    // PSX +196: linked ComEffect used by framed blasts.
-    ComEffect* field196 = nullptr;
-    // Current visual frame.
-    s32 field200 = 0;
-    s32 field204 = 0;
-    s32 field208 = 0;
+    // PSX +116 (s32): nonzero means the blast only starts from Trigger().
+    s32 requireTrigger = 0;
+    // PSX +120 (s16): frames spent extending from origin to full length.
+    s16 extendFrames = 0;
+    // PSX +122 (s16): frames spent retracting, used by framed effects.
+    s16 retractFrames = 0;
+    // PSX +124 (s16): inactive wait before an automatic blast may start.
+    s16 cooldownFrames = 0;
+    // PSX +126 (s16): frames held at full length.
+    s16 holdFrames = 0;
+    // PSX +128 (s16): timer for the current state.
+    s16 stateTimer = 0;
+    // PSX +130 (s16): initial timer advance subtracted from cooldownFrames.
+    s16 initialTimerAdvance = 0;
+    // PSX +132 (s32): current blast state.
+    s32 blastState = 0;
+    // PSX +136..+156 (s32): normalized push force ranges.
+    s32 minForceX = 0;
+    s32 minForceY = 0;
+    s32 minForceZ = 0;
+    s32 maxForceX = 0;
+    s32 maxForceY = 0;
+    s32 maxForceZ = 0;
+    // PSX +160 (s32): collision half-width perpendicular to the blast axis.
+    s32 halfWidth = 0;
+    // PSX +164 (s32): collision length added per extend/retract frame.
+    s32 lengthPerFrame = 0;
+    // PSX +168 (s32): DB damage preset, mapped to collisionDamage.
+    s32 damagePreset = 0;
+    // PSX +172..+180 (s32): endpoint used to derive direction.
+    s32 endPosX = 0;
+    s32 endPosY = 0;
+    s32 endPosZ = 0;
+    // PSX +184 (s32): dominant direction axis, 0 X, 1 Y, 2 Z.
+    s32 majorAxis = 0;
+    // PSX +188 (s32): hashed DB effect resource name.
+    s32 effectHash = 0;
+    // PSX +192 (s32): nonzero when using a loaded framed FWEffect.
+    s32 framedEffect = 0;
+    // PSX +196 (ptr): loaded effect instance used for framed rendering/sound.
+    ComEffect* effect = nullptr;
+    // PSX +200 (s32): current effect animation frame.
+    s32 effectFrame = 0;
+    // PSX +204 (s32): last rendered effect animation frame.
+    s32 lastEffectFrame = 0;
+    // PSX +208 (s32): render flags copied from the FWEffect.
+    s32 effectRenderFlags = 0;
     s32 field212 = 0;
-    // Damage value chosen from the blast/fire type.
-    s32 field216 = 0;
-    s32 field220 = 0;
-    s32 field224 = 0;
-    // PSX +228: CWorldEffectSound* (ambient blast sound)
-    CWorldEffectSound* field228 = nullptr;
-
-    // Temp unpacked fields for PSX halfword values/decoded frame table.
-    s32 field122 = 0;
-    s32 field126 = 0;
-    s32 field130 = 0;
-    s32 blastDirX = 0;
-    s32 blastDirY = 0;
-    s32 blastDirZ = 0;
-    s16 frameTable[8] = {};
-    bool field192Enabled = false;
+    // PSX +216 (s32): damage value passed through humanoid collision tags.
+    s32 collisionDamage = 0;
+    // PSX +220 (s32): frames between repeated humanoid damage hits.
+    s32 hitCooldownFrames = 0;
+    // PSX +224 (s32): repeated-hit countdown timer.
+    s32 hitCooldownTimer = 0;
+    // PSX +228 (ptr): persistent world effect sound.
+    CWorldEffectSound* sound = nullptr;
 
     Blast(const LVector* pos, u16 type);
     ~Blast() override;

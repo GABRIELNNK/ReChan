@@ -40,6 +40,22 @@ static s32 AbsS32(s32 value) {
     return value < 0 ? -value : value;
 }
 
+static bool BlastUsesFramedEffect(const Blast* blast) {
+    return blast && blast->framedEffect != 0;
+}
+
+static s32 BlastDirX(const Blast* blast) {
+    return blast ? blast->endPosX - blast->pos.x : 0;
+}
+
+static s32 BlastDirY(const Blast* blast) {
+    return blast ? blast->endPosY - blast->pos.y : 0;
+}
+
+static s32 BlastDirZ(const Blast* blast) {
+    return blast ? blast->endPosZ - blast->pos.z : 0;
+}
+
 static void NormalizeBlastDirection(const LVector& direction, LVector& out) {
     const s64 x = static_cast<s64>(direction.x);
     const s64 y = static_cast<s64>(direction.y);
@@ -61,27 +77,22 @@ static void SetBlastEffectFrame(Blast* blast, s32 state) {
         return;
     }
 
-    if (blast->field192Enabled) {
-        const s32 index = (state >= 0 && state < 4) ? state * 2 : 0;
-        blast->field200 = blast->frameTable[index];
-    }
-    else {
-        blast->field200 = 0;
-    }
+    (void)state;
+    blast->effectFrame = 0;
 }
 
 static void StartBlastFire(Blast* blast) {
-    if (!blast || blast->field132 != 0) {
+    if (!blast || blast->blastState != 0) {
         return;
     }
 
-    blast->field132 = 1;
-    blast->field128 = 0;
+    blast->blastState = 1;
+    blast->stateTimer = 0;
     SetBlastEffectFrame(blast, 1);
 
-    const u32 effectHash = static_cast<u32>(blast->field188);
-    if (effectHash && !blast->field192Enabled) {
-        const s32 lifeFrames = blast->field120 + blast->field126 + blast->field122;
+    const u32 effectHash = static_cast<u32>(blast->effectHash);
+    if (effectHash && !BlastUsesFramedEffect(blast)) {
+        const s32 lifeFrames = blast->extendFrames + blast->holdFrames + blast->retractFrames;
         GEffect_Create(effectHash, &blast->pos, nullptr, nullptr, 0, lifeFrames, 0);
     }
 
@@ -93,7 +104,7 @@ static void BuildBlastCollisionBox(Blast* blast, s32 progress) {
         return;
     }
 
-    const s32 halfWidth = blast->field160 > 0 ? blast->field160 : BLAST_DEFAULT_HALF_WIDTH;
+    const s32 halfWidth = blast->halfWidth > 0 ? blast->halfWidth : BLAST_DEFAULT_HALF_WIDTH;
     const s32 length = progress > 0 ? progress : 0;
 
     tagCollisionBox box = {};
@@ -104,9 +115,9 @@ static void BuildBlastCollisionBox(Blast* blast, s32 progress) {
     box.minZ = 0;
     box.maxZ = static_cast<s16>(length);
 
-    switch (blast->field184) {
+    switch (blast->majorAxis) {
         case 0:
-            if (blast->blastDirX < 0) {
+            if (BlastDirX(blast) < 0) {
                 box.minX = static_cast<s16>(-length);
                 box.maxX = 0;
             }
@@ -118,7 +129,7 @@ static void BuildBlastCollisionBox(Blast* blast, s32 progress) {
             box.maxZ = static_cast<s16>(halfWidth);
             break;
         case 1:
-            if (blast->blastDirY < 0) {
+            if (BlastDirY(blast) < 0) {
                 box.minY = static_cast<s16>(-length);
                 box.maxY = 0;
             }
@@ -130,7 +141,7 @@ static void BuildBlastCollisionBox(Blast* blast, s32 progress) {
             box.maxZ = static_cast<s16>(halfWidth);
             break;
         default:
-            if (blast->blastDirZ < 0) {
+            if (BlastDirZ(blast) < 0) {
                 box.minZ = static_cast<s16>(-length);
                 box.maxZ = 0;
             }
@@ -160,29 +171,29 @@ void Blast::AnalyzeMesh(DBRoot* root) {
     ObstacleFillCollisionBox(localBox, root, 5);
     SetCollisionBox(localBox);
 
-    field124 = BlastAttribValue(root, 9);
-    field120 = BlastAttribValue(root, 10);
-    field126 = BlastAttribValue(root, 11);
-    field160 = BlastAttribValue(root, 14, BLAST_DEFAULT_HALF_WIDTH);
-    field168 = BlastAttribValue(root, 21);
-    field116 = BlastAttribValue(root, 22);
-    field130 = BlastAttribValue(root, 32);
+    cooldownFrames = static_cast<s16>(BlastAttribValue(root, 9));
+    extendFrames = static_cast<s16>(BlastAttribValue(root, 10));
+    holdFrames = static_cast<s16>(BlastAttribValue(root, 11));
+    halfWidth = BlastAttribValue(root, 14, BLAST_DEFAULT_HALF_WIDTH);
+    damagePreset = BlastAttribValue(root, 21);
+    requireTrigger = BlastAttribValue(root, 22);
+    initialTimerAdvance = static_cast<s16>(BlastAttribValue(root, 32));
 
-    blastDirX = BlastAttribValue(root, 6);
-    blastDirY = BlastAttribValue(root, 7);
-    blastDirZ = BlastAttribValue(root, 8);
-    field172 = pos.x + blastDirX;
-    field176 = pos.y + blastDirY;
-    field180 = pos.z + blastDirZ;
+    const s32 blastDirX = BlastAttribValue(root, 6);
+    const s32 blastDirY = BlastAttribValue(root, 7);
+    const s32 blastDirZ = BlastAttribValue(root, 8);
+    endPosX = pos.x + blastDirX;
+    endPosY = pos.y + blastDirY;
+    endPosZ = pos.z + blastDirZ;
 
-    field184 = 2;
+    majorAxis = 2;
     s32 length = AbsS32(blastDirZ);
     if (AbsS32(blastDirX) > length) {
-        field184 = 0;
+        majorAxis = 0;
         length = AbsS32(blastDirX);
     }
     if (AbsS32(blastDirY) > length) {
-        field184 = 1;
+        majorAxis = 1;
         length = AbsS32(blastDirY);
     }
     if (length == 0) {
@@ -193,82 +204,79 @@ void Blast::AnalyzeMesh(DBRoot* root) {
     NormalizeBlastDirection({ blastDirX << 16, blastDirY << 16, blastDirZ << 16 }, normalizedDirection);
     const s32 forceMin = BlastAttribValue(root, 12);
     const s32 forceMax = BlastAttribValue(root, 13);
-    field136 = MulShift16(normalizedDirection.x, forceMin) << 16;
-    field140 = MulShift16(normalizedDirection.y, forceMin) << 16;
-    field144 = MulShift16(normalizedDirection.z, forceMin) << 16;
-    field148 = MulShift16(normalizedDirection.x, forceMax) << 16;
-    field152 = MulShift16(normalizedDirection.y, forceMax) << 16;
-    field156 = MulShift16(normalizedDirection.z, forceMax) << 16;
+    minForceX = MulShift16(normalizedDirection.x, forceMin) << 16;
+    minForceY = MulShift16(normalizedDirection.y, forceMin) << 16;
+    minForceZ = MulShift16(normalizedDirection.z, forceMin) << 16;
+    maxForceX = MulShift16(normalizedDirection.x, forceMax) << 16;
+    maxForceY = MulShift16(normalizedDirection.y, forceMax) << 16;
+    maxForceZ = MulShift16(normalizedDirection.z, forceMax) << 16;
 
-    field164 = field120 > 0 ? length / field120 : length;
-    if (field164 <= 0) {
-        field164 = length;
+    lengthPerFrame = extendFrames > 0 ? length / extendFrames : length;
+    if (lengthPerFrame <= 0) {
+        lengthPerFrame = length;
     }
 
-    field188 = static_cast<s32>(BlastAttribStringHash(root, 20));
-    field192Enabled = BlastAttribValue(root, 23) != 0 && field188 != 0;
-    for (s32 i = 0; i < 8; i++) {
-        frameTable[i] = static_cast<s16>(BlastAttribValue(root, static_cast<u32>(24 + i)));
-    }
+    effectHash = static_cast<s32>(BlastAttribStringHash(root, 20));
+    framedEffect = (BlastAttribValue(root, 23) != 0 && effectHash != 0) ? 1 : 0;
 
-    field122 = field192Enabled ? field120 : 0;
-    switch (field168) {
+    retractFrames = BlastUsesFramedEffect(this) ? extendFrames : 0;
+    switch (damagePreset) {
         case 0:
-            field216 = 0;
+            collisionDamage = 0;
             break;
         case 1:
-            field216 = 3;
+            collisionDamage = 3;
             break;
         case 2:
-            field216 = 6;
+            collisionDamage = 6;
             break;
         case 3:
-            field216 = 1;
+            collisionDamage = 1;
             break;
         case 4:
-            field216 = 4;
+            collisionDamage = 4;
             break;
         default:
-            field216 = 0;
+            collisionDamage = 0;
             break;
     }
-    field220 = 2;
-    field224 = field220;
-    field128 = field124 - field130;
-    field132 = 0;
+    hitCooldownFrames = 2;
+    hitCooldownTimer = hitCooldownFrames;
+    stateTimer = cooldownFrames - initialTimerAdvance;
+    blastState = 0;
     SetBlastEffectFrame(this, 0);
 }
 
 void Blast::CreateSound() {
     MARKFUNCTION(0x80016284);
-    if (field228) {
+    if (sound) {
         return;
     }
-    if (!field196) {
+    if (!effect) {
         return;
     }
     CSound* soundObj = nullptr;
-    const u32 soundId = field196 ? field196->resourceHash : 0;
+    const u32 soundId = effect ? effect->resourceHash : 0;
     if (CSoundFactory::CreateObject(10010, &soundObj, soundId) >= 0) {
-        field228 = static_cast<CWorldEffectSound*>(soundObj);
-        if (field228) {
-            field228->Initialize(&pos);
+        sound = static_cast<CWorldEffectSound*>(soundObj);
+        if (sound) {
+            sound->Initialize(&pos);
         }
     }
 }
 
 void Blast::UpdateSound() {
     MARKFUNCTION(0x800162E4);
-    if (field228) {
-        field228->Update((u32)field200);
+    if (sound) {
+        sound->Update((u32)effectFrame);
     }
 }
 
 void Blast::ReleaseSound() {
     MARKFUNCTION(0x8001631C);
-    if (field228) {
-        field228->Release();
-        field228 = nullptr;
+    if (sound) {
+        sound->Release();
+        sound = nullptr;
     }
 }
 
@@ -276,38 +284,38 @@ void Blast::CreateModel(const char* name) {
     MARKFUNCTION(0x80016368);
     flags |= TF_MODEL_CREATED;
     (void)name;
-    if (field192Enabled) {
+    if (BlastUsesFramedEffect(this)) {
         CreateSound();
     }
 }
 
 void Blast::DeleteModel() {
     MARKFUNCTION(0x8001639C);
-    field192 = 0;
-    field196 = nullptr;
+    framedEffect = 0;
+    effect = nullptr;
     flags &= ~TF_MODEL_CREATED;
     ReleaseSound();
 }
 
 void Blast::Reset() {
     MARKFUNCTION(0x800163C8);
-    field132 = 0;
-    field128 = field124 - field130;
-    field196 = nullptr;
-    if (field192Enabled && field188) {
-        FWEffect* effect = FWEffect::Find(static_cast<u32>(field188));
-        if (effect) {
-            field196 = effect->comEffect;
-            field208 = static_cast<s32>(effect->renderFlags);
-            orientation = effect->rotation;
+    blastState = 0;
+    stateTimer = cooldownFrames - initialTimerAdvance;
+    effect = nullptr;
+    if (BlastUsesFramedEffect(this) && effectHash) {
+        FWEffect* fwEffect = FWEffect::Find(static_cast<u32>(effectHash));
+        if (fwEffect) {
+            effect = fwEffect->comEffect;
+            effectRenderFlags = static_cast<s32>(fwEffect->renderFlags);
+            orientation = fwEffect->rotation;
         }
         else {
-            field208 = 0;
+            effectRenderFlags = 0;
         }
     }
     SetBlastEffectFrame(this, 0);
-    field204 = field200;
-    field224 = field220;
+    lastEffectFrame = effectFrame;
+    hitCooldownTimer = hitCooldownFrames;
     ReleaseSound();
 }
 
@@ -326,69 +334,61 @@ void Blast::Think() {
 
     s32 progress = 0;
 
-    if (field132 == 0) {
-        if (field128 >= field124 && field116 == 0) {
+    if (blastState == 0) {
+        if (stateTimer >= cooldownFrames && requireTrigger == 0) {
             StartBlastFire(this);
         }
     }
-    else if (field132 == 1) {
-        progress = field164 * field128;
-        if (field120 > 0 && field128 >= field120) {
-            field132 = 2;
-            field128 = 0;
+    else if (blastState == 1) {
+        progress = lengthPerFrame * stateTimer;
+        if (extendFrames > 0 && stateTimer >= extendFrames) {
+            blastState = 2;
+            stateTimer = 0;
             SetBlastEffectFrame(this, 2);
         }
     }
-    else if (field132 == 2) {
-        progress = field164 * (field120 > 0 ? field120 : 1);
-        if (field126 > 0 && field128 >= field126) {
-            if (field122 > 0) {
-                field132 = 3;
-                field128 = 0;
+    else if (blastState == 2) {
+        progress = lengthPerFrame * (extendFrames > 0 ? extendFrames : 1);
+        if (holdFrames > 0 && stateTimer >= holdFrames) {
+            if (retractFrames > 0) {
+                blastState = 3;
+                stateTimer = 0;
                 SetBlastEffectFrame(this, 3);
             }
             else {
-                field132 = 0;
-                field128 = 0;
+                blastState = 0;
+                stateTimer = 0;
                 SetBlastEffectFrame(this, 0);
             }
         }
     }
-    else if (field132 == 3) {
-        const s32 remaining = field122 - field128;
-        progress = field164 * (remaining > 0 ? remaining : 0);
-        if (field128 >= field122) {
-            field132 = 0;
-            field128 = 0;
+    else if (blastState == 3) {
+        const s32 remaining = retractFrames - stateTimer;
+        progress = lengthPerFrame * (remaining > 0 ? remaining : 0);
+        if (stateTimer >= retractFrames) {
+            blastState = 0;
+            stateTimer = 0;
             SetBlastEffectFrame(this, 0);
         }
     }
 
     BuildBlastCollisionBox(this, progress);
-    field128++;
+    stateTimer++;
 
-    if (field196) {
-        field200++;
-        if (field192Enabled) {
-            const s32 frameIndex = (field132 >= 0 && field132 < 4) ? field132 * 2 : 0;
-            const s32 startFrame = frameTable[frameIndex];
-            const s32 endFrame = frameTable[frameIndex + 1];
-            if (endFrame > startFrame && field200 > endFrame) {
-                field200 = startFrame;
-            }
-        }
+    if (effect) {
+        effectFrame++;
     }
 
-    if (field224 <= 0) {
-        field224 = field220;
+    if (hitCooldownTimer <= 0) {
+        hitCooldownTimer = hitCooldownFrames;
     }
-    field224--;
+    hitCooldownTimer--;
 }
 
 void Blast::Trigger() {
     MARKFUNCTION(0x80016A10);
 
-    if (field132 || field128 < field124) {
+    if (blastState || stateTimer < cooldownFrames) {
         return;
     }
 
@@ -397,14 +397,14 @@ void Blast::Trigger() {
 
 void Blast::Draw() {
     MARKFUNCTION(0x80016ACC);
-    if (!field196) {
+    if (!effect) {
         return;
     }
 
     UpdateSound();
-    field196->SetFrame(field200);
-    field196->Render(pos, &orientation, &orientation, static_cast<u32>(field208));
-    field204 = field200;
+    effect->SetFrame(effectFrame);
+    effect->Render(pos, &orientation, &orientation, static_cast<u32>(effectRenderFlags));
+    lastEffectFrame = effectFrame;
 }
 
 void Blast::HandlePickupCollision(Thing* pickup) {
@@ -415,15 +415,15 @@ void Blast::HandlePickupCollision(Thing* pickup) {
 void Blast::HandleHumanoidCollision(Humanoid* hum) {
     MARKFUNCTION(0x80016B44);
 
-    if (!field132) {
+    if (!blastState) {
         return;
     }
 
-    if (field224 != 0) {
+    if (hitCooldownTimer != 0) {
         return;
     }
 
-    if (field216 <= 0) {
+    if (collisionDamage <= 0) {
         return;
     }
 
@@ -433,6 +433,6 @@ void Blast::HandleHumanoidCollision(Humanoid* hum) {
         COLLISION_TAG_HIT_TYPE,
         BLAST_HIT_TYPE_FIRE,
         COLLISION_TAG_DAMAGE,
-        field216,
+        collisionDamage,
         COLLISION_TAG_END);
 }
