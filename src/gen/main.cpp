@@ -185,6 +185,7 @@ int main() {
             g_inputManager->ServiceHostPads(actionInputForGame, commitInputNow);
         }
 
+        const GameState stateBeforeStep = game.GetState();
         bool running = game.Step();
         if (!running) {
             // PC: If the game loop signals to stop, break out of the loop to shut down.
@@ -192,9 +193,14 @@ int main() {
                 break;
             }
 
-            // PSX: SetLivesLeft(g_player, savedLives)
-            Player::s_player->SetLivesLeft(4);
-            game.SetState(GameState::QueueLevelLoad);
+            if (stateBeforeStep == GameState::DetermineGameOverState) {
+                game.SetState(GameState::DetermineNextGameState);
+            }
+            else {
+                // PSX: SetLivesLeft(g_player, savedLives)
+                Player::s_player->SetLivesLeft(4);
+                game.SetState(GameState::QueueLevelLoad);
+            }
         }
         else {
             rDoTaskList(&rMainTaskList, 0);

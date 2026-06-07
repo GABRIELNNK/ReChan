@@ -485,6 +485,29 @@ static s32 MenuDraw(MenuMgr* menuMgr) {
     return result;
 }
 
+static bool PumpMenuFadeFrame(f64 frameStart) {
+    if (p3d::display) {
+        p3d::display->PollEvents();
+        if (p3d::display->ShouldClose()) {
+            return false;
+        }
+    }
+    if (p3d::input) {
+        p3d::input->ServiceInput();
+    }
+    if (g_actionInput) {
+        g_actionInput->Update(p3d::input);
+    }
+    if (g_time) {
+        g_time->Step();
+    }
+    rDoTaskList(&rMainTaskList, 0);
+    if (g_time) {
+        g_time->WaitForFrameEnd(frameStart);
+    }
+    return true;
+}
+
 // PSX: MenuFade__Fv (GAME.CPP:1757, 0x80029E34)
 // Blocks until dialog playback gate clears, then runs a blocking fade loop.
 void Game::MenuFade() {
@@ -492,14 +515,8 @@ void Game::MenuFade() {
 
     while (jcsIsPlaying()) {
         const f64 frameStart = Time::GetTimeInSeconds();
-        // Keep PSX-style frame-based dialog timeouts advancing while this
-        // blocking gate waits for jcsIsPlaying() to clear.
-        if (g_time) {
-            g_time->Step();
-        }
-        rDoTaskList(&rMainTaskList, 0);
-        if (g_time) {
-            g_time->WaitForFrameEnd(frameStart);
+        if (!PumpMenuFadeFrame(frameStart)) {
+            return;
         }
     }
 
@@ -510,9 +527,8 @@ void Game::MenuFade() {
         MenuRender(nullptr);
         FadeRender();
         g_display->EndFrame();
-        rDoTaskList(&rMainTaskList, 0);
-        if (g_time) {
-            g_time->WaitForFrameEnd(frameStart);
+        if (!PumpMenuFadeFrame(frameStart)) {
+            return;
         }
     }
     FadeEnd();
