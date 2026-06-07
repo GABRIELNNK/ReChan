@@ -15,6 +15,7 @@ class CSound;
 //   10080 = CGenericPersistentSound (24 bytes)
 //   10090 = CDestructibleSound (28 bytes)
 //   10130 = CKnockDownSound (32 bytes)
+//   10120 = CPendulumSound (24 bytes)
 class CSoundFactory {
 public:
     // Creates a sound object of the given type, sets soundId via Load.

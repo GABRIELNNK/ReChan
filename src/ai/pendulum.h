@@ -1,30 +1,39 @@
 #pragma once
 #include "ai/obstacle.h"
 
+class CPendulumSound;
+
 class Pendulum : public Obstacle {
 public:
-    // PSX +116 (s32): unknown (init 0 in ctor, a1[29])
-    s32 field116 = 0;
-    // PSX +120 (s32): unknown (init 0 in ctor, a1[30])
-    s32 field120 = 0;
-    // PSX +124..+159: unknown (9 dwords)
-    s32 field124 = 0;
-    s32 field128 = 0;
-    s32 field132 = 0;
-    s32 field136 = 0;
-    s32 field140 = 0;
-    s32 field144 = 0;
-    s32 field148 = 0;
-    s32 field152 = 0;
-    s32 field156 = 0;
-    // PSX +160 (s32): unknown (init 0 in ctor, a1[40])
-    s32 field160 = 0;
-    // PSX +164..+175: unknown (3 dwords)
-    s32 field164 = 0;
-    s32 field168 = 0;
-    s32 field172 = 0;
-    // PSX +176 (s32): unknown (init 0 in ctor, a1[44])
-    s32 field176 = 0;
+    // PSX +116/+120: 16.16 angular velocities for Z/X swing axes.
+    s32 swingVelocityZ = 0;
+    s32 swingVelocityX = 0;
+    // PSX +124: spring/gravity scale, attr 6.
+    s32 swingScale = 0;
+    // PSX +128: pendulum length from pivot to mesh bottom, 16.16.
+    s32 pendulumLength = 0;
+    // PSX +132/+134/+136: collision half extents around the heavy end.
+    s16 bulbHalfX = 0;
+    s16 bulbHalfY = 0;
+    s16 bulbHalfZ = 0;
+    s16 field138 = 0;
+    // PSX +140/+142: default box X/Z half extents.
+    s16 armHalfX = 0;
+    s16 armHalfZ = 0;
+    // PSX +144/+148/+152: collision damage tags/flags, attrs 10-12.
+    s32 impactRegionMode = 0;
+    s32 damageAmount = 0;
+    s32 strongHitMode = 0;
+    // PSX +156: impulse scale, attr 13.
+    s32 impulseScale = 0;
+    // PSX +160: nonzero if attrs 16/17/18 are present.
+    s32 hasImpulseChain = 0;
+    // PSX +164/+168/+172: chained impulse scales, attrs 16-18.
+    s32 impulseChainA = 0;
+    s32 impulseChainB = 0;
+    s32 impulseChainC = 0;
+    // PSX +176: CPendulumSound*.
+    CPendulumSound* pendulumSound = nullptr;
 
     Pendulum(const LVector* pos, u16 type);
     ~Pendulum() override;

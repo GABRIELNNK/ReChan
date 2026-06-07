@@ -8,6 +8,7 @@
 #include "snd/kicksnd.h"
 #include "snd/dstrsnd.h"
 #include "snd/platsnd.h"
+#include "snd/pendsnd.h"
 #include "snd/pushsnd.h"
 #include "snd/wpnsnd.h"
 #include "snd/rsevent.h"
@@ -57,6 +58,12 @@ struct DestructibleSoundLoadData {
     u16 pad16;
     u16 smashSfx;
     s32 material;
+};
+
+struct PendulumSoundLoadData {
+    u16 pad16;
+    s16 swingSfx;
+    s16 hitHumanoidSfx;
 };
 
 CKnockDownSound::CKnockDownSound() {
@@ -779,6 +786,36 @@ static void FillDestructibleSoundLoadData(u32 soundId, DestructibleSoundLoadData
     data.smashSfx = smashSfx;
 }
 
+// PSX: CreatePendulumSound__21CSoundFactoryDatabaseP6CSoundUl (SNDFDB.CPP:859, 0x800ABF54)
+static s32 FillPendulumSoundLoadData(u32 soundId, PendulumSoundLoadData& data) {
+    data.pad16 = 0;
+    data.swingSfx = -1;
+    data.hitHumanoidSfx = 192;
+
+    switch (soundId) {
+        case 0x0076F84F:
+            data.swingSfx = 190;
+            data.hitHumanoidSfx = 191;
+            return 0;
+        case 0x04BC3645:
+            data.swingSfx = 186;
+            return 0;
+        case 0x04BC3644:
+            data.swingSfx = 187;
+            return 0;
+        case 0x04BC3641:
+        case 0x0A4A4208:
+            data.swingSfx = 188;
+            return 0;
+        case 0x0329A5F1:
+        case 0x07329A54:
+            data.swingSfx = 189;
+            return 0;
+        default:
+            return -100;
+    }
+}
+
 // PSX: CreateObject__13CSoundFactoryUlPP6CSoundUl (SNDFACT.CPP:178, 0x8005759C)
 // Creates a CSound-derived object by type ID and loads the soundId into it.
 // PSX flow: switch(typeId) -> allocate -> construct -> LoadObject -> Load(soundId data)
@@ -881,6 +918,20 @@ s32 CSoundFactory::CreateObject(u32 typeId, CSound** outObj, u32 soundId) {
             CPlatformSound* obj = new CPlatformSound();
             PlatformSoundLoadData data = {};
             FillPlatformSoundLoadData(soundId, data);
+            obj->Load(&data);
+            *outObj = obj;
+            break;
+        }
+        case 10120:
+        {
+            CPendulumSound* obj = new CPendulumSound();
+            PendulumSoundLoadData data = {};
+            s32 loadResult = FillPendulumSoundLoadData(soundId, data);
+            if (loadResult < 0) {
+                delete obj;
+                return loadResult;
+            }
+
             obj->Load(&data);
             *outObj = obj;
             break;
