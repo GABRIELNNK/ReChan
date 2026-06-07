@@ -55,6 +55,8 @@ struct tPrimGeom : public tGeometry {
 };
 
 // PSX STree callback hooks installed by CharDataLoadCallback / stream STree load.
+void ComputePsxLitColourFromNormalIndex(u8 normalIndex, const Mat4* jointRotation, u8* outR, u8* outG, u8* outB);
+u8 ModulatePsxColourChannel(u8 base, u8 light);
 u32 RP_XformVertsLitCBF_CL(tPrimGeom* geometry, STreeJoint* joint, u32* fastCache, u16* scratch);
 u8* RP_FixUpPolysCBF_CL(tPrimGeom* geometry, void* view, u32 loopIndex, u32 polyIndex);
 

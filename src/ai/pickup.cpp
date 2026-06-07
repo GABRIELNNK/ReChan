@@ -511,6 +511,16 @@ void Pickup::CreateModel(const char* name) {
 
     Thing::CreateModel(name);
 
+    Model* modelPtr = static_cast<Model*>(model);
+    if (modelPtr) {
+        if (!modelPtr->hwLights) {
+            modelPtr->AllocateHardwareLights(3);
+        }
+        if (!modelPtr->ambientLight) {
+            modelPtr->AllocateAmbientLight();
+        }
+    }
+
     if (!weaponSound) {
         CSound* tmp = nullptr;
         if (CSoundFactory::CreateObject(10050, &tmp, thingType) >= 0) {

@@ -342,7 +342,7 @@ static u8 ClampLitChannelToByte(s32 value) {
     return static_cast<u8>(value);
 }
 
-static u8 ModulatePsxColourChannel(u8 base, u8 light) {
+u8 ModulatePsxColourChannel(u8 base, u8 light) {
     // Keep 128 as neutral multiplier and saturate to 255.
     u32 value = (static_cast<u32>(base) * static_cast<u32>(light) + 64u) >> 7;
     if (value > 255u) {
@@ -375,11 +375,11 @@ static s32 ComputeLightIntensity12(s32 normalX, s32 normalY, s32 normalZ, const 
     return static_cast<s32>(dot);
 }
 
-static void ComputeRPStreeLitColour(u8 normalIndex,
-                                    const Mat4* jointRotation,
-                                    u8* outR,
-                                    u8* outG,
-                                    u8* outB) {
+void ComputePsxLitColourFromNormalIndex(u8 normalIndex,
+                                        const Mat4* jointRotation,
+                                        u8* outR,
+                                        u8* outG,
+                                        u8* outB) {
     const u32 ambient = GetCurrentPortAmbientLightColour();
     const RPStreeNormal& normal = s_rpStreeNormals[normalIndex];
 
@@ -1341,7 +1341,7 @@ u32 RP_XformVertsLitCBF_CL(tPrimGeom* geometry, STreeJoint* joint, u32* fastCach
             u8 litR = 0;
             u8 litG = 0;
             u8 litB = 0;
-            ComputeRPStreeLitColour(normalIndex, jointRotation, &litR, &litG, &litB);
+            ComputePsxLitColourFromNormalIndex(normalIndex, jointRotation, &litR, &litG, &litB);
             scratch[vertexIndex * 2 + 0] = static_cast<u16>((litG << 8) | litR);
             scratch[vertexIndex * 2 + 1] = static_cast<u16>(litB);
         }

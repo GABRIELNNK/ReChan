@@ -33,6 +33,8 @@ static const u8 kStreeMirrorSwapPairs[] = {
     0, 0,
 };
 
+static constexpr u32 kDisplayFlagApplyGeoLighting = 0x40000000u;
+
 static std::vector<const OriginalSTree*> s_liveOriginalSTrees;
 
 static void RegisterLiveOriginalSTree(const OriginalSTree* tree) {
@@ -615,7 +617,69 @@ static const Mat4* FindJointWorldMatrixByHash(const STreeData* skeleton,
     return nullptr;
 }
 
-static void DrawGeoPartMesh(OriginalGeo* geo) {
+static bool BuildLitGeoVerts(OriginalGeo* geo, std::vector<GeoRenderVertex>& outVerts) {
+    if (!geo || !geo->dynamicVerts || geo->dynamicVertCount == 0 || !geo->dynamicVertSourceIndex
+        || !geo->primGeom || !geo->primGeom->GetVertexList()) {
+        return false;
+    }
+
+    const u8* sourceVerts = geo->primGeom->GetVertexList();
+    outVerts.assign(geo->dynamicVerts, geo->dynamicVerts + geo->dynamicVertCount);
+
+    const Mat4 world = p3d::context ? p3d::context->GetWorldMatrix() : Mat4();
+    Mat4 lightingWorld = world;
+    const f32 basisXLen = std::sqrt(
+        lightingWorld.m[0] * lightingWorld.m[0]
+        + lightingWorld.m[1] * lightingWorld.m[1]
+        + lightingWorld.m[2] * lightingWorld.m[2]);
+
+    if (basisXLen > 0.00001f) {
+        const f32 invScale = 1.0f / basisXLen;
+        lightingWorld.m[0] *= invScale;
+        lightingWorld.m[1] *= invScale;
+        lightingWorld.m[2] *= invScale;
+        lightingWorld.m[4] *= invScale;
+        lightingWorld.m[5] *= invScale;
+        lightingWorld.m[6] *= invScale;
+        lightingWorld.m[8] *= invScale;
+        lightingWorld.m[9] *= invScale;
+        lightingWorld.m[10] *= invScale;
+    }
+
+    for (u32 i = 0; i < geo->dynamicVertCount; i++) {
+        const u32 sourceIndex = static_cast<u32>(geo->dynamicVertSourceIndex[i]);
+        if (sourceIndex >= geo->primGeom->numVerts) {
+            continue;
+        }
+
+        const u8* sourceVertex = sourceVerts + sourceIndex * 8u;
+        const u8 normalIndex = static_cast<u8>((p3dReadU32LE(sourceVertex + 4u) >> 16) & 0xFFu);
+
+        u8 litR = 0;
+        u8 litG = 0;
+        u8 litB = 0;
+        ComputePsxLitColourFromNormalIndex(normalIndex, &lightingWorld, &litR, &litG, &litB);
+        const u8 litI = static_cast<u8>((static_cast<u32>(litR)
+            + static_cast<u32>(litG)
+            + static_cast<u32>(litB)
+            + 1u) / 3u);
+
+        u32 baseR = static_cast<u32>(outVerts[i].r * 128.0f + 0.5f);
+        u32 baseG = static_cast<u32>(outVerts[i].g * 128.0f + 0.5f);
+        u32 baseB = static_cast<u32>(outVerts[i].b * 128.0f + 0.5f);
+        if (baseR > 255u) baseR = 255u;
+        if (baseG > 255u) baseG = 255u;
+        if (baseB > 255u) baseB = 255u;
+
+        outVerts[i].r = static_cast<f32>(ModulatePsxColourChannel(static_cast<u8>(baseR), litI)) / 128.0f;
+        outVerts[i].g = static_cast<f32>(ModulatePsxColourChannel(static_cast<u8>(baseG), litI)) / 128.0f;
+        outVerts[i].b = static_cast<f32>(ModulatePsxColourChannel(static_cast<u8>(baseB), litI)) / 128.0f;
+    }
+
+    return true;
+}
+
+static void DrawGeoPartMesh(OriginalGeo* geo, bool applyLighting) {
     if (!geo || !geo->meshBuffer) {
         return;
     }
@@ -631,7 +695,16 @@ static void DrawGeoPartMesh(OriginalGeo* geo) {
         p3d::context->SetBlendMode(blendMode);
     }
 
+    std::vector<GeoRenderVertex> litVerts;
+    if (applyLighting && BuildLitGeoVerts(geo, litVerts)) {
+        geo->meshBuffer->SetVertexData(litVerts.data(), geo->dynamicVertCount);
+    }
+
     p3d::context->DrawPrimBuffer(geo->meshBuffer);
+
+    if (!litVerts.empty()) {
+        geo->meshBuffer->SetVertexData(geo->dynamicVerts, geo->dynamicVertCount);
+    }
 
     if (geo->usesSemiTrans) {
         p3d::context->SetBlendMode(PDDI_BLEND_NONE);
@@ -1110,12 +1183,12 @@ DrawableGeo::~DrawableGeo() {
     original = nullptr;
 }
 
-void DrawableGeo::Display(u32 /*flags*/) {
+void DrawableGeo::Display(u32 flags) {
     if (!original || !original->meshBuffer) {
         return;
     }
 
-    DrawGeoPartMesh(original);
+    DrawGeoPartMesh(original, (flags & kDisplayFlagApplyGeoLighting) != 0u);
 }
 
 DrawableETree::DrawableETree(OriginalETree* orig) {
@@ -1138,7 +1211,7 @@ DrawableETree::~DrawableETree() {
     original = nullptr;
 }
 
-void DrawableETree::Display(u32 /*flags*/) {
+void DrawableETree::Display(u32 flags) {
     if (!original) {
         return;
     }
@@ -1204,7 +1277,7 @@ void DrawableETree::Display(u32 /*flags*/) {
                 p3d::context->SetWorldMatrix(baseWorld);
             }
 
-            DrawGeoPartMesh(geo);
+            DrawGeoPartMesh(geo, (flags & kDisplayFlagApplyGeoLighting) != 0u);
         }
 
         p3d::context->SetWorldMatrix(baseWorld);
@@ -1868,7 +1941,9 @@ void GModel::Show(u32 flags) {
 
     const Mat4 savedWorld = p3d::context->GetWorldMatrix();
     p3d::context->SetWorldMatrix(world);
-    drawable->Display(flags);
+
+    const bool applyGeoLighting = ambientLight || (hwLights && hwLightCount > 0);
+    drawable->Display(applyGeoLighting ? (flags | kDisplayFlagApplyGeoLighting) : flags);
 
     if (ambientLight) {
         RestoreWorldAmbientLightToPort();
@@ -2005,7 +2080,9 @@ void EModel::Show(u32 flags) {
 
     const Mat4 savedWorld = p3d::context->GetWorldMatrix();
     p3d::context->SetWorldMatrix(world);
-    drawable->Display(flags);
+
+    const bool applyGeoLighting = ambientLight || (hwLights && hwLightCount > 0);
+    drawable->Display(applyGeoLighting ? (flags | kDisplayFlagApplyGeoLighting) : flags);
 
     if (ambientLight) {
         RestoreWorldAmbientLightToPort();
