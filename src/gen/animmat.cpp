@@ -241,6 +241,12 @@ static void BuildHeadTrackOverrideMatrix(const LVector& col0, const LVector& col
     overrideMatrix.SetTranslation((f32)joint->translationX, (f32)joint->translationY, (f32)joint->translationZ);
 }
 
+static void PsxVecTimesRotMatrixTrunc(const LVector& in, const Mat4& matrix, LVector& out) {
+    out.x = PsxTruncToS32((f32)in.x * matrix.m[0] + (f32)in.y * matrix.m[4] + (f32)in.z * matrix.m[8]);
+    out.y = PsxTruncToS32((f32)in.x * matrix.m[1] + (f32)in.y * matrix.m[5] + (f32)in.z * matrix.m[9]);
+    out.z = PsxTruncToS32((f32)in.x * matrix.m[2] + (f32)in.y * matrix.m[6] + (f32)in.z * matrix.m[10]);
+}
+
 static void HeadTrack(Humanoid* owner, STreeJoint* joint, const Mat4& currentMatrix) {
     if (!owner || !joint) {
         return;
@@ -310,15 +316,20 @@ static void HeadTrack(Humanoid* owner, STreeJoint* joint, const Mat4& currentMat
 
     LVector worldUpPoint = { 0, FIX16_ONE, 0 };
     LVector localUp = {};
-    PsxVecTimesMatrixTrunc(worldUpPoint, inverseCurrent, localUp);
+    PsxVecTimesRotMatrixTrunc(worldUpPoint, inverseCurrent, localUp);
 
     LVector col1 = {};
     PsxV3Cross16(&col1, &heading, &localUp);
+    if (rmMag3((f32)col1.x, (f32)col1.y, (f32)col1.z) < 0x100) {
+        const LVector fallbackUp = (PsxAbsS32(heading.y) < 0x7000)
+            ? LVector{ 0, FIX16_ONE, 0 }
+            : LVector{ FIX16_ONE, 0, 0 };
+        PsxV3Cross16(&col1, &heading, &fallbackUp);
+    }
+    rmV3Normalize(&col1, &col1);
 
     LVector col0 = {};
     PsxV3Cross16(&col0, &col1, &heading);
-
-    rmV3Normalize(&col1, &col1);
     rmV3Normalize(&col0, &col0);
 
     BuildHeadTrackOverrideMatrix(col0, col1, heading, joint, joint->overrideMatrix);

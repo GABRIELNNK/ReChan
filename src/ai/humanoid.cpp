@@ -1125,14 +1125,16 @@ void Humanoid::Think() {
             hm->attackFootRadius = 100;
         }
 
-        moveSpeed = 0;
         runSpeed = 0;
-        velocity = {};
-        contactForce = {};
-        maxFallDivisor = 0;
         flags &= ~TF_BIT1;
         flags2 &= ~TF2_BIT3;
+        commandBits = 0;
+
+        ProcessAction();
+        Move();
+
         field368 = 0;
+        thinkCounter++;
         return;
     }
 
