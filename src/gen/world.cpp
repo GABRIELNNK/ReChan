@@ -3170,6 +3170,13 @@ bool World::LoadLevelIndex(u32 levelIndex) {
     char levelPath[64];
     s32 levNum = (levelList && levelCount > 0) ? levelList[levelIndex * 2] : (s32)(levelIndex + 1);
     std::snprintf(levelPath, sizeof(levelPath), "RTARGET/LEV%02d.LCF", levNum);
+
+    // PSX sets the sound location before opening/loading the level stream.
+    if (petalSoundIDs && levelIndex < (u32)levelCount) {
+        s32 soundLocation = (s32)petalSoundIDs[levelIndex][targetPetalIndex] - 1;
+        rsEvent(RS_SET_LOCATION, soundLocation, 0, 0);
+    }
+
     if (!Load(levelPath)) {
         StopLogo();
         return false;
@@ -3184,12 +3191,6 @@ bool World::LoadLevelIndex(u32 levelIndex) {
 
     if (g_hud) {
         g_hud->OnLoadLevel();
-    }
-
-    // PSX: rsEvent(4, petalSoundIDs[levelIndex][targetPetalIndex] - 1, 0, 0)
-    if (petalSoundIDs && levelIndex < (u32)levelCount) {
-        s32 soundLocation = (s32)petalSoundIDs[levelIndex][targetPetalIndex] - 1;
-        rsEvent(RS_SET_LOCATION, soundLocation, 0, 0);
     }
 
     // PSX: ExecuteLoadCallbacks -> cameraLoadFunc -> SetupPaths

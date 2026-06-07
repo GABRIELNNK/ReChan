@@ -704,7 +704,7 @@ static void FillDestructibleSoundLoadData(u32 soundId, DestructibleSoundLoadData
             smashSfx = 169;
         }
         else if (soundId > 0x02FDFA44) {
-            if (soundId == 0x04C9F96C || soundId == 0x04D82842) {
+            if (soundId == 0x04C9F96C) {
                 data.material = 2;
                 smashSfx = 170;
             }
@@ -713,6 +713,9 @@ static void FillDestructibleSoundLoadData(u32 soundId, DestructibleSoundLoadData
                 if (soundId >= 0x04317272 && soundId <= 0x04317273) {
                     smashSfx = 161;
                 }
+            }
+            else if (soundId == 0x04D82842) {
+                smashSfx = 161;
             }
             else {
                 smashSfx = 177;
