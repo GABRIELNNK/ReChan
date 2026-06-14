@@ -76,27 +76,7 @@ void SlipperyFloor::HandleHumanoidCollision(Humanoid* hum) {
 
     hum->deltaTime = 0x3333;
     hum->gravity = 0xCCC;
-
-    s32 emitTrail = 0;
-    if (hum->velocity.x != 0 || hum->velocity.z != 0 || ((hum->commandBits >> 2) & 1) != 0) {
-        if (((hum->commandBits >> 2) & 1) != 0) {
-            const s32 dot = static_cast<s32>(
-                static_cast<s64>(hum->field148[0]) * static_cast<s64>(hum->velocity.x)
-                + static_cast<s64>(hum->field148[2]) * static_cast<s64>(hum->velocity.z));
-            if (dot > 0) {
-                if (rmMag3ff(hum->velocity.x, hum->velocity.y, hum->velocity.z) < 0x3D) {
-                    emitTrail = 1;
-                }
-            }
-        }
-    }
-    else {
-        emitTrail = 1;
-    }
-
-    if (emitTrail) {
-        DoTrailEffect(hum);
-    }
+    DoTrailEffect(hum);
 }
 
 void SlipperyFloor::DoTrailEffect(Humanoid* hum) {
