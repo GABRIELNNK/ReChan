@@ -33,6 +33,26 @@ static const u8 kStreeMirrorSwapPairs[] = {
     0, 0,
 };
 
+static const char* const kStreeMirrorNamePairs[][2] = {
+    { "Bip01 L Clavicle", "Bip01 R Clavicle" },
+    { "Bip01 L UpperArm", "Bip01 R UpperArm" },
+    { "Bip01 L Forearm", "Bip01 R Forearm" },
+    { "Bip01 L Hand", "Bip01 R Hand" },
+    { "Bip01 L Finger0", "Bip01 R Finger0" },
+    { "Bip01 L Finger01", "Bip01 R Finger01" },
+    { "Bip01 L Finger02", "Bip01 R Finger02" },
+    { "Bip01 L Finger1", "Bip01 R Finger1" },
+    { "Bip01 L Finger11", "Bip01 R Finger11" },
+    { "Bip01 L Finger12", "Bip01 R Finger12" },
+    { "Bip01 L Finger2", "Bip01 R Finger2" },
+    { "Bip01 L Finger21", "Bip01 R Finger21" },
+    { "Bip01 L Finger22", "Bip01 R Finger22" },
+    { "Bip01 L Thigh", "Bip01 R Thigh" },
+    { "Bip01 L Calf", "Bip01 R Calf" },
+    { "Bip01 L Foot", "Bip01 R Foot" },
+    { "Bip01 L Toe0", "Bip01 R Toe0" },
+};
+
 static constexpr u32 kDisplayFlagApplyGeoLighting = 0x40000000u;
 
 static std::vector<const OriginalSTree*> s_liveOriginalSTrees;
@@ -54,6 +74,45 @@ static void UnregisterLiveOriginalSTree(const OriginalSTree* tree) {
     if (it != s_liveOriginalSTrees.end()) {
         s_liveOriginalSTrees.erase(it);
     }
+}
+
+static bool FindMappedJointParamByName(const STreeData* skeleton, u32 nameHash, u32& outParam) {
+    if (!skeleton || !skeleton->joints || !skeleton->jointOrderMap) {
+        return false;
+    }
+
+    for (u32 param = 0; param < skeleton->numMapEntries; param++) {
+        const u32 jointIndex = skeleton->jointOrderMap[param];
+        if (jointIndex < skeleton->numJoints && skeleton->joints[jointIndex].nameUID == nameHash) {
+            outParam = param;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool SwapMirroredJointParamsByName(const STreeData* skeleton, u32* mirroredMap) {
+    if (!skeleton || !mirroredMap) {
+        return false;
+    }
+
+    bool swappedAny = false;
+    for (const auto& pair : kStreeMirrorNamePairs) {
+        u32 lhs = 0;
+        u32 rhs = 0;
+        if (!FindMappedJointParamByName(skeleton, p3dHash(pair[0]), lhs) ||
+            !FindMappedJointParamByName(skeleton, p3dHash(pair[1]), rhs)) {
+            continue;
+        }
+
+        const u32 temp = mirroredMap[lhs];
+        mirroredMap[lhs] = mirroredMap[rhs];
+        mirroredMap[rhs] = temp;
+        swappedAny = true;
+    }
+
+    return swappedAny;
 }
 
 static bool IsLiveOriginalSTree(const OriginalSTree* tree) {
@@ -386,6 +445,11 @@ static void UpdateFlipMirrorState(Model* model, AnimStructure* anim) {
 static TransformAnim* GetTransformAnimForModel(void* animation) {
     if (!animation || IsCameraParamAnim(animation)) {
         return nullptr;
+    }
+
+    if (IsCharSequenceAnim(animation)) {
+        CharSequenceAnim* seq = static_cast<CharSequenceAnim*>(animation);
+        return (seq->parts && seq->numParts > 0) ? seq->parts[0] : nullptr;
     }
 
     return static_cast<TransformAnim*>(animation);
@@ -870,6 +934,7 @@ DrawableSTree::~DrawableSTree() {
 
 // PSX: Display dispatches through vtable to OriginalSTree::Draw -> tPrimGeom::Display
 // PC: draws the skeleton mesh (per-joint transforms baked in) or flat fallback
+
 void DrawableSTree::Display(u32 /*flags*/) {
     OriginalSTree* active = GetActiveSTree(this);
     OriginalSTree* renderSource = original ? original : active;
@@ -1150,13 +1215,15 @@ s32 DrawableSTree::MirrorTree(SModel* model) {
             mirroredJointOrderMap[i] = skeleton->jointOrderMap[i];
         }
 
-        for (u32 pairIndex = 0; kStreeMirrorSwapPairs[pairIndex] != 0; pairIndex += 2) {
-            const u32 lhs = kStreeMirrorSwapPairs[pairIndex];
-            const u32 rhs = kStreeMirrorSwapPairs[pairIndex + 1];
-            if (lhs < skeleton->numMapEntries && rhs < skeleton->numMapEntries) {
-                const u32 temp = mirroredJointOrderMap[lhs];
-                mirroredJointOrderMap[lhs] = mirroredJointOrderMap[rhs];
-                mirroredJointOrderMap[rhs] = temp;
+        if (!SwapMirroredJointParamsByName(skeleton, mirroredJointOrderMap)) {
+            for (u32 pairIndex = 0; kStreeMirrorSwapPairs[pairIndex] != 0; pairIndex += 2) {
+                const u32 lhs = kStreeMirrorSwapPairs[pairIndex];
+                const u32 rhs = kStreeMirrorSwapPairs[pairIndex + 1];
+                if (lhs < skeleton->numMapEntries && rhs < skeleton->numMapEntries) {
+                    const u32 temp = mirroredJointOrderMap[lhs];
+                    mirroredJointOrderMap[lhs] = mirroredJointOrderMap[rhs];
+                    mirroredJointOrderMap[rhs] = temp;
+                }
             }
         }
     }
@@ -1165,7 +1232,7 @@ s32 DrawableSTree::MirrorTree(SModel* model) {
 
     AnimStructure* anim = static_cast<AnimStructure*>(model->animStructure);
     if (anim && anim->animation) {
-        model->ApplyAnimToModelBasic(anim->animation);
+        model->ApplyAnimToModelBasic(anim->rawAnimation ? anim->rawAnimation : anim->animation);
         if (anim->flip) {
             anim->flip->Reset();
         }
@@ -1730,7 +1797,7 @@ void SModel::ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 p4,
     }
 
     if (!animStructure) {
-        animStructure = new AnimStructure(0, animation, loopType, this, drawable);
+        animStructure = new AnimStructure(0, rawAnimation, loopType, this, drawable);
     }
 
     AnimStructure* as = (AnimStructure*)animStructure;
@@ -1752,7 +1819,7 @@ void SModel::ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 p4,
         }
     }
 
-    ApplyAnimToModelBasic(animation);
+    ApplyAnimToModelBasic(rawAnimation);
 
     as = (AnimStructure*)animStructure;
     if (!as) {
@@ -1767,9 +1834,10 @@ void SModel::ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 p4,
     as->humanoidCB = {};
 }
 
-void SModel::ApplyAnimToModelBasic(TransformAnim* animation) {
+void SModel::ApplyAnimToModelBasic(void* rawAnimation) {
     MARKFUNCTION(0x8006F068);
 
+    TransformAnim* animation = GetTransformAnimForModel(rawAnimation);
     if (!animation) {
         return;
     }
@@ -1777,7 +1845,7 @@ void SModel::ApplyAnimToModelBasic(TransformAnim* animation) {
     AnimStructure* anim = static_cast<AnimStructure*>(animStructure);
     if (!anim || anim->mode != 0 || !anim->flip) {
         delete anim;
-        anim = new AnimStructure(0, animation, 0, this, drawable);
+        anim = new AnimStructure(0, rawAnimation, 0, this, drawable);
         animStructure = anim;
     }
 
@@ -1785,7 +1853,18 @@ void SModel::ApplyAnimToModelBasic(TransformAnim* animation) {
         return;
     }
 
-    anim->animation = animation;
+    // Sequence: update sequence pointer and keep animation = part 0.
+    if (IsCharSequenceAnim(rawAnimation)) {
+        anim->rawAnimation = rawAnimation;
+        anim->sequence = static_cast<CharSequenceAnim*>(rawAnimation);
+        anim->animation = animation;
+    }
+    else {
+        anim->rawAnimation = rawAnimation;
+        anim->sequence = nullptr;
+        anim->animation = animation;
+    }
+
     SyncFlipTreeWithDrawable(this, anim);
     anim->flip->anim = animation;
     UpdateFlipMirrorState(this, anim);
@@ -1793,15 +1872,12 @@ void SModel::ApplyAnimToModelBasic(TransformAnim* animation) {
 
     anim->startFrame = 0;
     anim->currentFrame = 0;
-    anim->endFrame = (animation->numFrames > 0) ? ((animation->numFrames - 1) << 16) : 0;
+    const s32 totalFrames = anim->sequence ? anim->sequence->numFrames : animation->numFrames;
+    anim->endFrame = (totalFrames > 0) ? ((totalFrames - 1) << 16) : 0;
     anim->prevFrame = 0;
     anim->loopCount = 0;
     anim->speed = FIX16_ONE;
 
-    if (anim->animEnum == 361 || animation->numFrames <= 1) {
-        LOG("[ApplyAnimBasic] animEnum=%d numFrames=%d endFrame=0x%X loopCount=%d",
-            anim->animEnum, animation->numFrames, anim->endFrame, anim->loopCount);
-    }
 }
 
 // PSX: SetOriginalSTree__6SModelP13OriginalSTreeP10tAnimation (MODEL.CPP:1026, 0x8006EDD4)
@@ -2109,7 +2185,7 @@ void HumanoidModel::SetAnim(s32 animEnum, s32 a3, s32 force, s32 extra) {
     MARKFUNCTION(0x8006E1B0);
 
     AnimStructure* as = (AnimStructure*)animStructure;
-    // Early exit: if not forcing and anim already matches, no-op
+    // PSX: early-exit if not forcing and anim already matches
     if (!force && as && as->animEnum == animEnum) {
         return;
     }

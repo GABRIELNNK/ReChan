@@ -230,11 +230,15 @@ static s32 CheckWallConstraintForJump(
     return 1;
 }
 
-static bool EnsurePlayerAnimationLoaded(s32 animEnum) {
+static bool EnsurePlayerAnimationLoaded(s32 animEnum, u32 charType = 0) {
     if (!g_characterManager || animEnum < 0) {
         return false;
     }
-    return g_characterManager->GetAnimation(0, animEnum) != nullptr;
+    if (g_characterManager->GetAnimation(charType, animEnum)) {
+        return true;
+    }
+    g_characterManager->LoadAnimationBatch(charType, animEnum, nullptr);
+    return g_characterManager->GetAnimation(charType, animEnum) != nullptr;
 }
 
 Player* Player::s_player = nullptr;
@@ -472,6 +476,8 @@ void Player::SetActionState(u32 state, s32 param) {
             turnAroundFlag = 0;
             field348 = 8;
             SetIdleAnimation(param, 1);
+            // Keep the drawable mirror state sticky so subsequent animation players
+            // inherit the same facing after a flipped one-shot completes.
             field616 = 0;
             idleTimer = 0;
             field420 = nullptr;
@@ -544,8 +550,10 @@ void Player::SetActionState(u32 state, s32 param) {
             // PSX case 6: running jump (from _Run context).
             // stateDispatch=28(SD_JUMP), DoJump with combined base+running force,
             // field704=1 (hold flag), runJumpHold table, AddForce initial burst.
-            if (!rightHandObj && !leftHandObj) {
-                // PSX: model->ClearSemiTransMode() if no pickups
+            // PSX case 6: model->MirrorTree() (vtable+80) when carrying no pickups —
+            // the running jump TOGGLES the model mirror (PSX facing-flip system).
+            if (!rightHandObj && !leftHandObj && model) {
+                static_cast<SModel*>(model)->MirrorTree();
             }
             field344 = 0;
             stateDispatch = SD_JUMP;
@@ -658,6 +666,7 @@ void Player::SetActionState(u32 state, s32 param) {
             if (model) {
                 Model* m = static_cast<Model*>(model);
                 m->SetAnim(PLAYER_ANIM_STRAFE, param, 1, 0);
+                // Preserve mirrored animation state across chained roll/stand anims.
             }
             field488 = 0;
             actionState = (s32)state;
@@ -1082,16 +1091,6 @@ void Player::GetViewSpot(LVector* outPos, LVector* outTarget) {
             outTarget->y += 450;
         }
     }
-}
-
-void Player::Teleport(const LVector& newPos) {
-    pos = newPos;
-    homePos = newPos;
-    velocity = {};
-    contactForce = {};
-    UpdatePosition();
-    g_blockManager->DemandLoading();
-    g_game->GetWorld()->CheckThingSwitches(this);
 }
 
 // PSX: SignalEnemyGetUp__6Player (PLAYER.CPP:1382)
@@ -2978,7 +2977,7 @@ void Player::Debug_ApplyForcedAnimation() {
     if (anim->animEnum != debugAnimOverrideEnum ||
         anim->loopTypeField != debugAnimOverrideLoopType) {
         debugAnimOverrideApplying = true;
-        m->ApplyAnimToModel(0, debugAnimOverrideEnum, debugAnimOverrideLoopType, 0, 0);
+        m->ApplyAnimToModel((s32)debugModelCharType, debugAnimOverrideEnum, debugAnimOverrideLoopType, 0, 0);
         debugAnimOverrideApplying = false;
 
         anim = static_cast<AnimStructure*>(m->animStructure);
@@ -2999,7 +2998,7 @@ bool Player::Debug_PlayAnimation(s32 animEnum, s32 loopType) {
     if (loopType < ANIM_LOOP || loopType > ANIM_STOP) {
         loopType = ANIM_LOOP;
     }
-    if (!EnsurePlayerAnimationLoaded(animEnum)) {
+    if (!EnsurePlayerAnimationLoaded(animEnum, debugModelCharType)) {
         return false;
     }
 
@@ -3012,7 +3011,7 @@ bool Player::Debug_PlayAnimation(s32 animEnum, s32 loopType) {
 
     debugAnimOverrideApplying = true;
 
-    m->ApplyAnimToModel(0, animEnum, loopType, 0, 0);
+    m->ApplyAnimToModel((s32)debugModelCharType, animEnum, loopType, 0, 0);
     debugAnimOverrideApplying = false;
 
     AnimStructure* anim = static_cast<AnimStructure*>(m->animStructure);

@@ -40,6 +40,9 @@ public:
     // Iterates loaded blocks, returns block->blockNum if pos is inside.
     u16 GetBlockNumber(const LVector& pos) const;
 
+    // PC: searches all blocks (including unloaded) by bounding box.
+    u16 GetBlockNumberAllBlocks(const LVector& pos) const;
+
     // PSX: InActiveList (BLKMGR.CPP:825, 0x80050D44)
     // Checks alreadyLoadedList for blockNum.
     bool InActiveList(u32 blockNum) const;

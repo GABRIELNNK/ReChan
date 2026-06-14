@@ -915,19 +915,12 @@ s32 Humanoid::FindChildWithRequestedCommand(
     return FindSiblingWithRequestedCommand(root->child, requestedBits, frame);
 }
 
+// PSX reads the root joint via tSTree::GetJoint(0) (vtable+0x14 @0x80085A10),
+// which resolves through the tree's joint-order map, not by joint name.
 static const STreeJoint* GetBip01Joint(const STreeData* skeleton) {
-    if (!skeleton || !skeleton->joints || skeleton->numJoints == 0) {
+    if (!skeleton) {
         return nullptr;
     }
-
-    static const u32 s_bip01Hash = p3dHash("Bip01");
-    for (u32 jointIndex = 0; jointIndex < skeleton->numJoints; jointIndex++) {
-        const STreeJoint* joint = &skeleton->joints[jointIndex];
-        if (joint->nameUID == s_bip01Hash) {
-            return joint;
-        }
-    }
-
     return skeleton->GetJoint(0);
 }
 
@@ -997,7 +990,6 @@ s32 Humanoid::HandleAnimationControl() {
     }
 
     homePos = nextHome;
-
     return 1;
 }
 
@@ -2215,6 +2207,22 @@ void Humanoid::AnalyzeMesh(DBRoot* root) {
             behaviourNameHash,
             field384);
     }
+}
+
+
+void Humanoid::Teleport(const LVector& newPos) {
+    u16 bn = g_blockManager->GetBlockNumberAllBlocks(newPos);
+    if (bn != BLOCK_UNASSIGNED) {
+        blockNum = bn;
+    }
+
+    pos = newPos;
+    homePos = newPos;
+    velocity = {};
+    contactForce = {};
+    UpdatePosition();
+    g_blockManager->DemandLoading();
+    g_game->GetWorld()->CheckThingSwitches(this);
 }
 
 // PSX: SubtractHitPoints__8HumanoidUs (HUMANOID.CPP:9388, 0x8006CEB4)

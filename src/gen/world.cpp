@@ -251,8 +251,9 @@ static SequenceAnim* ParseSequenceAnimRaw(const u8* rawData, u32 rawSize) {
     sequence->nameUID = p3dReadU32LE(rawData + 0);
     const u32 packedFrames = p3dReadU32LE(rawData + 12);
     sequence->numFrames = static_cast<s32>(packedFrames);
+    sequence->frameBits = 16;
 
-    const u32 numParts = (packedFrames >> 8) + 1u;
+    const u32 numParts = (packedFrames >> sequence->frameBits) + 1u;
 
     if (16u + numParts * 4u > rawSize) {
         delete sequence;
@@ -356,7 +357,7 @@ static ParamAnimData* ParseParamAnimChunkBody(const u8* body, u32 bodySize) {
     cursor += 4;
     cursor += 4; // expected param count
 
-    std::vector<u8> keyTimes;
+    std::vector<u16> keyTimes;
     std::vector<s32> keyValues;
 
     while (cursor + 6 <= bodySize) {
@@ -385,7 +386,7 @@ static ParamAnimData* ParseParamAnimChunkBody(const u8* body, u32 bodySize) {
                 continue;
             }
 
-            std::vector<u8> candidateTimes;
+            std::vector<u16> candidateTimes;
             std::vector<s32> candidateValues;
 
             while (paramCursor + 6 <= paramBodySize) {
@@ -403,7 +404,7 @@ static ParamAnimData* ParseParamAnimChunkBody(const u8* body, u32 bodySize) {
                     if (count > 0 && 4u + count * 2u <= valueBodySize) {
                         candidateTimes.resize(count);
                         for (u32 i = 0; i < count; i++) {
-                            candidateTimes[i] = static_cast<u8>(p3dReadU16LE(valueBody + 4 + i * 2u));
+                            candidateTimes[i] = p3dReadU16LE(valueBody + 4 + i * 2u);
                         }
                     }
                 }
@@ -451,7 +452,7 @@ static ParamAnimData* ParseParamAnimChunkBody(const u8* body, u32 bodySize) {
     paramAnim->animType = animType;
     paramAnim->numFrames = numFrames;
     paramAnim->keyCount = static_cast<u32>(keyTimes.size());
-    paramAnim->keyTimes = new u8[paramAnim->keyCount];
+    paramAnim->keyTimes = new u16[paramAnim->keyCount];
     paramAnim->keyValues = new s32[paramAnim->keyCount];
     for (u32 i = 0; i < paramAnim->keyCount; i++) {
         paramAnim->keyTimes[i] = keyTimes[i];
@@ -1593,6 +1594,24 @@ static s32 SwitchExitTest(Thing* /*thing*/, u32 /*argc*/, const char** /*argv*/)
     return 1;
 }
 
+static s32 SwitchDeathState(Thing* /*thing*/, u32 argc, const char** argv) {
+    MARKFUNCTION(0x80094238);
+
+    if (!Player::s_player) {
+        return 1;
+    }
+
+    s32 deathStateIdx = 0;
+    if (argc > 0 && argv && argv[0]) {
+        deathStateIdx = atoi(argv[0]);
+    }
+
+    static constexpr s32 COLLISION_TAG_HIT_TYPE = static_cast<s32>(0x80000003u);
+    Player::s_player->HandleCollision(Player::s_player, 0,
+        -1, COLLISION_TAG_HIT_TYPE, 20, 0x80000004, deathStateIdx, 0);
+    return 1;
+}
+
 struct SwitchGameFuncEntry {
     const char* name;
     SwitchGameFunc func;
@@ -1606,7 +1625,6 @@ struct SwitchGameFuncEntry {
 // AsyncLoadNISGOTO, AsyncLoadGroup, LevelComplete, Checkpoint,
 // CharacterModelLoad, BossVol, PlayerLoadDialog, PlayerPlayDialog,
 // EnemyLoadDialog, EnemyPlayDialog.
-// Missing host handlers: DeathState.
 static const SwitchGameFuncEntry kSwitchGameFuncs[] = {
     { "SoundAmbiantSpace", SwitchSoundAmbiantSpace, 1 },
     { "SwitchEntryTest", SwitchPlayerDeathVol, 1 },
@@ -1616,6 +1634,7 @@ static const SwitchGameFuncEntry kSwitchGameFuncs[] = {
     { "GoToVol", SwitchGoToVol, 1 },
     { "SwitchExitTest", SwitchExitTest, 1 },
     { "ResetPlayer", SwitchResetPlayer, 1 },
+    { "DeathState", SwitchDeathState, 1 },
     { "BehaviorTrigger", SwitchBehaviorTrigger, 1 },
     { "ProximityEvent", SwitchBehaviorTrigger, 1 },
     { "GateCleanupVol", SwitchGateCleanupVol, 1 },

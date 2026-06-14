@@ -45,7 +45,39 @@ struct TransformAnim {
     // Parse a raw tTransformAnim binary blob into a usable structure.
     // The rawData pointer must remain valid for the lifetime of this object.
     static TransformAnim* Parse(const u8* rawData, u32 rawSize);
+
+    // Parse a blob that may contain multiple concatenated tTransformAnim blocks
+    // (sequential nameUIDs).  Returns a CharSequenceAnim* when >1 block is found,
+    // a TransformAnim* when exactly 1 block exists, or nullptr on failure.
+    // The raw data is owned by the returned object(s) via ownedRawData.
+    static void* ParseMulti(u8* rawData, u32 rawSize);
 };
+
+// Magic used to identify a CharSequenceAnim in the animPtrs table.
+constexpr u32 CHAR_SEQUENCE_ANIM_MAGIC = 0x53455143; // "CSEQ"
+
+// Multiple concatenated tTransformAnim blocks packed into a single .RR resource.
+// PSX tSequenceAnim equivalent for character animations.  Each part is one
+// independently-parseable tTransformAnim covering up to 256 frames.  The total
+// frame range is the sum of all parts' numFrames.
+struct CharSequenceAnim {
+    u32 magic = CHAR_SEQUENCE_ANIM_MAGIC;
+    s32 numFrames = 0;          // sum of all parts
+    u32 numParts = 0;
+    TransformAnim** parts = nullptr; // owned, numParts entries
+
+    CharSequenceAnim() = default;
+    ~CharSequenceAnim();
+
+    // Resolve which part owns globalFrame and return the local frame within it.
+    // Returns nullptr if out of range.
+    TransformAnim* ResolvePart(s32 globalFrame, s32& outLocalFrame) const;
+};
+
+inline bool IsCharSequenceAnim(const void* p) {
+    if (!p) return false;
+    return reinterpret_cast<const CharSequenceAnim*>(p)->magic == CHAR_SEQUENCE_ANIM_MAGIC;
+}
 
 // TransformFlip - evaluates animation channels and writes to STree joints.
 // Combines tFlipbook + tTransformFlip2 + tTreeFlip
@@ -77,14 +109,11 @@ struct TransformFlip {
     // PSX: UpdateJoints__15tTransformFlip2P5tTree (CHANNEL.CPP:778)
     void UpdateJoints();
 
+    // PSX: UpdateJointsMirrored__15tTransformFlip2P5tTree (CHANNEL.CPP:832)
+    void UpdateJointsMirrored();
+
 private:
-    // Evaluate a rotation channel at current frame and write to joint
     void EvalRotChannel(const TransformAnim::Channel& ch, STreeJoint& joint);
-
-    // Evaluate a translation channel at current frame and write to joint
     void EvalTransChannel(const TransformAnim::Channel& ch, STreeJoint& joint);
-
-    // Find bracket keyframe index for the given 16.16 frame value.
-    // Returns the index of the keyframe at or just before the frame.
     static s32 FindBracket(const u8* rawBase, u32 keyTimesOff, s32 numKeys, s32 frameReal);
 };

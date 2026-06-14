@@ -400,7 +400,7 @@ public:
 
     void Animate() override;
     void ApplyAnimToModel(s32 thingType, s32 animEnum, s32 loopType, s32 p4, s32 p5) override;
-    void ApplyAnimToModelBasic(TransformAnim* animation);
+    void ApplyAnimToModelBasic(void* rawAnimation);
     BlendPoseState* InitBlendPose();
     AnimStructure* ApplyBlending(TransformAnim* animation, s32 blendFrames, s32 startFrame);
     void SetOriginalSTree(OriginalSTree* original);

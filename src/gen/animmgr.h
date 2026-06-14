@@ -14,10 +14,11 @@ struct SequenceAnimPart {
 
 // PSX tSequenceAnim-equivalent runtime object loaded from chunk 0x6040.
 // numFrames is the packed sequence frame range used by tSequenceFlip
-// (hi8 = part index, lo8 = frame within that part).
+// (hi16 = part index, lo16 = frame within that part).
 struct SequenceAnim {
     u32 nameUID = 0;
     s32 numFrames = 0;
+    u32 frameBits = 16;
     u32 numParts = 0;
     SequenceAnimPart* parts = nullptr;
 
@@ -72,7 +73,7 @@ struct ParamAnimData {
     s32 animType = 0;
     s32 numFrames = 0;
     u32 keyCount = 0;
-    u8* keyTimes = nullptr;
+    u16* keyTimes = nullptr;
     s32* keyValues = nullptr;
 
     ParamAnimData() = default;

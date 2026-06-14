@@ -5,6 +5,8 @@
 #include "gen/geometry.h"
 #include "gen/skeleton.h"
 #include "gen/game.h"
+#include "gen/ai.h"
+#include "gen/animstruct.h"
 #include "gen/scoremgr.h"
 #include "gen/world.h"
 #include "p3d/hash.h"
@@ -386,8 +388,54 @@ const char* g_charNameTable[] = {
 // (UpdateJoints) when DynamicAnimUnload fires during handlerSet1 of the same frame.
 // Deferring the actual delete until EndFrameHandler (after AnimateEverythingHandler)
 // restores the PSX allocator's same-frame-safe-read guarantee.
-static void* s_pendingFreeAnims[CHAR_MAX_ANIMS] = {};
-static s32   s_pendingFreeCount = 0;
+struct PendingFreeAnim {
+    void* ptr = nullptr;
+    bool isSequence = false;
+};
+
+static PendingFreeAnim s_pendingFreeAnims[CHAR_MAX_ANIMS] = {};
+static s32 s_pendingFreeCount = 0;
+
+static bool IsAnimResourceReferencedByAnimStructure(const AnimStructure* anim, const PendingFreeAnim& pending) {
+    if (!anim || !pending.ptr) {
+        return false;
+    }
+
+    if (pending.isSequence) {
+        return anim->sequence == pending.ptr;
+    }
+
+    return anim->animation == pending.ptr ||
+           (anim->flip && anim->flip->anim == pending.ptr);
+}
+
+static bool IsAnimResourceReferencedByThingList(ccList& list, const PendingFreeAnim& pending) {
+    for (ccMinNode* node = list.head; node; node = node->next) {
+        Thing* thing = static_cast<Thing*>(node);
+        if (!thing || !thing->model) {
+            continue;
+        }
+
+        Model* model = static_cast<Model*>(thing->model);
+        AnimStructure* anim = static_cast<AnimStructure*>(model->animStructure);
+        if (IsAnimResourceReferencedByAnimStructure(anim, pending)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool IsAnimResourceStillReferenced(const PendingFreeAnim& pending) {
+    if (!g_ai) {
+        return false;
+    }
+
+    return IsAnimResourceReferencedByThingList(g_ai->humanoidList, pending) ||
+           IsAnimResourceReferencedByThingList(g_ai->pickupList, pending) ||
+           IsAnimResourceReferencedByThingList(g_ai->inactivePickupList, pending) ||
+           IsAnimResourceReferencedByThingList(g_ai->moveList, pending);
+}
 
 // Free functions
 // PSX: FreeAnimMemory (CHARMGR.CPP:201, 0x800395F8)
@@ -397,25 +445,62 @@ void FreeAnimMemory(void* ptr) {
         delete static_cast<CameraParamAnim*>(ptr);
         return;
     }
-    // Defer TransformAnim deletion until FlushPendingFree() to prevent same-frame UAF.
+
+    const bool isSequence = IsCharSequenceAnim(ptr);
+
+    // Defer deletion until FlushPendingFree() to prevent same-frame UAF.
+    // Remember the type now while the resource is known-live; stale sequence
+    // memory must not be probed later to decide how to delete it.
+    PendingFreeAnim pending = { ptr, isSequence };
     if (s_pendingFreeCount < CHAR_MAX_ANIMS) {
-        s_pendingFreeAnims[s_pendingFreeCount++] = ptr;
+        s_pendingFreeAnims[s_pendingFreeCount++] = pending;
     } else {
-        delete static_cast<TransformAnim*>(ptr);
+        if (IsAnimResourceStillReferenced(pending)) {
+            LOG("[CharMgr] pending animation free queue full; leaking still-referenced anim %p", ptr);
+            return;
+        }
+        if (isSequence)
+            delete static_cast<CharSequenceAnim*>(ptr);
+        else
+            delete static_cast<TransformAnim*>(ptr);
     }
 }
 
 void CharacterManager::FlushPendingFree() {
+    s32 writeIndex = 0;
     for (s32 i = 0; i < s_pendingFreeCount; ++i) {
-        delete static_cast<TransformAnim*>(s_pendingFreeAnims[i]);
-        s_pendingFreeAnims[i] = nullptr;
+        PendingFreeAnim pending = s_pendingFreeAnims[i];
+        if (!pending.ptr) {
+            continue;
+        }
+
+        if (IsAnimResourceStillReferenced(pending)) {
+            s_pendingFreeAnims[writeIndex++] = pending;
+            continue;
+        }
+
+        if (pending.isSequence)
+            delete static_cast<CharSequenceAnim*>(pending.ptr);
+        else
+            delete static_cast<TransformAnim*>(pending.ptr);
+
+        s_pendingFreeAnims[i] = {};
     }
-    s_pendingFreeCount = 0;
+
+    for (s32 i = writeIndex; i < s_pendingFreeCount; ++i) {
+        s_pendingFreeAnims[i] = {};
+    }
+    s_pendingFreeCount = writeIndex;
 }
 
 static u32 GetLoadedAnimationNameUID(const void* animation) {
     if (!animation) {
         return 0;
+    }
+
+    if (IsCharSequenceAnim(animation)) {
+        const CharSequenceAnim* sequence = static_cast<const CharSequenceAnim*>(animation);
+        return (sequence->parts && sequence->parts[0]) ? sequence->parts[0]->nameUID : 0;
     }
 
     return *reinterpret_cast<const u32*>(animation);
@@ -1351,13 +1436,14 @@ void CharacterManager::LoadAnimationBatch(u32 type, s32 animEnum, CharMgrCallbac
     // character animation payloads resolve to TransformAnim or CameraParamAnim.
 
     if (animBuf && animSize > 0) {
-        TransformAnim* ta = TransformAnim::Parse(animBuf, (u32)animSize);
-        if (ta) {
-            ta->ownedRawData = animBuf;
-            animPtrs[handleIdx] = ta;
+        // ParseMulti handles single and multi-block (tSequenceAnim) payloads.
+        // It takes ownership of animBuf on success; free it only on failure.
+        void* parsed = TransformAnim::ParseMulti(animBuf, (u32)animSize);
+        if (parsed) {
+            animPtrs[handleIdx] = parsed;
         }
         else {
-            LOG("[LoadAnimBatch] TransformAnim::Parse FAILED for type=%u animEnum=%d size=%d - stored as CameraParamAnim", type, animEnum, animSize);
+            LOG("[LoadAnimBatch] TransformAnim::ParseMulti FAILED for type=%u animEnum=%d size=%d - stored as CameraParamAnim", type, animEnum, animSize);
             CameraParamAnim* cameraAnim = ParseCameraParamAnim(animBuf, (u32)animSize, p3dBuf, (u32)p3dSize);
             std::free(animBuf);
             if (cameraAnim && cameraAnim->nameUID == 0) {

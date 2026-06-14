@@ -11,6 +11,7 @@
 #include "gen/weffect.h"
 #include "gen/pweffect.h"
 #include "gen/charmgr.h"
+#include "gen/director.h"
 #include "gen/scoremgr.h"
 #include "gen/time.h"
 #include "ai/player.h"
@@ -23,6 +24,7 @@
 #include "gen/ai.h"
 #include "ai/obstacle.h"
 #include "gen/levelmgr.h"
+#include "gen/blockmgr.h"
 #include "gen/display.h"
 #include "extra/fecustommenumgr.h"
 #include "extra/customhudmgr.h"
@@ -94,6 +96,8 @@ static bool sDebugShowDetailedEffectNames3D = true;
 static bool sDebugShowThingLabelHoverTooltip = true;
 static u16 sDebugSelectedThingUniqueID = INVALID_HANDLE;
 static bool sDisableHumanoidDamage = false;
+static s32 sDebugHumanoidSwitcherIndex = 0;
+static u32 sDebugHumanoidLoadedType = 0;    // type the switcher loaded into an NPC slot (0 = none)
 static bool sDebugTallyPreviewEnabled = false;
 static s32 sDebugTallyFightScore = 4000;
 static s32 sDebugTallyComboScore = 5500;
@@ -1470,6 +1474,11 @@ void DebugUI::Draw() {
         sEnabled = !sEnabled;
     }
 
+    if (ImGui::IsKeyPressed(ImGuiKey_F1, false)) {
+        const LVector dest = {-54444, 513, -11106};
+        Player::s_player->Teleport(dest);
+    }
+
     ApplyCursorPolicy();
 
     if (ImGui::IsKeyPressed(ImGuiKey_B, false) && ImGui::GetIO().KeyCtrl) {
@@ -1871,6 +1880,105 @@ void DebugUI::Draw() {
                 else {
                     ImGui::Text("AnimStructure: null");
                 }
+
+                ImGui::SeparatorText("Humanoid Model Switcher");
+                {
+                    // If a level reload cleared the NPC slot under us, reset stale state
+                    if (p->debugModelCharType != 0 && g_characterManager) {
+                        bool slotStillExists = false;
+                        for (s32 si = 1; si < CHAR_MAX_SLOTS; si++) {
+                            if (g_characterManager->slots[si].thingType == p->debugModelCharType) {
+                                slotStillExists = true;
+                                break;
+                            }
+                        }
+                        if (!slotStillExists) {
+                            p->debugModelCharType = 0;
+                            sDebugHumanoidLoadedType = 0;
+                        }
+                    }
+
+                    // Dropdown over all 28 humanoid types (indices 1..28 in g_charNameTable)
+                    static constexpr s32 kHumanoidTypeCount = (s32)(AITypes::TT_HUMANOID_LAST - AITypes::TT_HUMANOID_FIRST + 1);
+                    if (sDebugHumanoidSwitcherIndex < 0 || sDebugHumanoidSwitcherIndex >= kHumanoidTypeCount) {
+                        sDebugHumanoidSwitcherIndex = 0;
+                    }
+
+                    const u32 selectedType = (u32)(AITypes::TT_HUMANOID_FIRST + sDebugHumanoidSwitcherIndex);
+                    const char* selectedName = g_charNameTable[selectedType];
+
+                    if (ImGui::BeginCombo("Humanoid Type", selectedName)) {
+                        for (s32 i = 0; i < kHumanoidTypeCount; i++) {
+                            const u32 t = (u32)(AITypes::TT_HUMANOID_FIRST + i);
+                            const bool isSel = (i == sDebugHumanoidSwitcherIndex);
+                            char itemBuf[48] = {};
+                            std::snprintf(itemBuf, sizeof(itemBuf), "[%u] %s", t, g_charNameTable[t]);
+                            if (ImGui::Selectable(itemBuf, isSel)) {
+                                sDebugHumanoidSwitcherIndex = i;
+                            }
+                            if (isSel) {
+                                ImGui::SetItemDefaultFocus();
+                            }
+                        }
+                        ImGui::EndCombo();
+                    }
+
+                    if (ImGui::Button("Apply Model") && g_characterManager && g_levelManager) {
+                        // Unload previously debug-loaded type to free its NPC slot.
+                        // Restore Jackie drawable+anims first so nothing points at freed memory.
+                        if (sDebugHumanoidLoadedType != 0 && sDebugHumanoidLoadedType != selectedType) {
+                            OriginalSTree* jackieOriginal = static_cast<OriginalSTree*>(g_characterManager->slots[0].model);
+                            SModel* sm = static_cast<SModel*>(p->model);
+                            if (sm && jackieOriginal) {
+                                p->debugModelCharType = 0;
+                                sm->SetOriginalSTree(jackieOriginal);
+                                sm->ApplyAnimToModel(0, 0, ANIM_LOOP, 0, 0);
+                            }
+                            g_characterManager->UnloadCharacter(sDebugHumanoidLoadedType);
+                            g_characterManager->CloseCharacter(sDebugHumanoidLoadedType);
+                            sDebugHumanoidLoadedType = 0;
+                        }
+
+                        // Load if not already in a slot
+                        bool inSlot = false;
+                        for (s32 si = 1; si < CHAR_MAX_SLOTS; si++) {
+                            if (g_characterManager->slots[si].thingType == selectedType &&
+                                g_characterManager->slots[si].model) {
+                                inSlot = true;
+                                break;
+                            }
+                        }
+                        if (!inSlot) {
+                            g_characterManager->OpenCharacter(selectedType);
+                            g_characterManager->LoadCharacter(selectedType, nullptr);
+                            sDebugHumanoidLoadedType = selectedType;
+                        }
+
+                        // Grab the OriginalSTree from the NPC slot
+                        OriginalSTree* original = nullptr;
+                        for (s32 si = 1; si < CHAR_MAX_SLOTS; si++) {
+                            if (g_characterManager->slots[si].thingType == selectedType) {
+                                original = static_cast<OriginalSTree*>(g_characterManager->slots[si].model);
+                                break;
+                            }
+                        }
+
+                        if (original) {
+                            SModel* sm = static_cast<SModel*>(p->model);
+                            if (sm) {
+                                p->debugModelCharType = selectedType;
+                                sm->SetOriginalSTree(original);
+                                sm->ApplyAnimToModel((s32)selectedType, 0, ANIM_LOOP, 0, 0);
+                                LOG("[DebugUI] Switched player model+anims to humanoid type %u (%s)",
+                                    selectedType, selectedName);
+                            }
+                        }
+                        else {
+                            LOG("[DebugUI] Could not find loaded OriginalSTree for humanoid type %u (%s) - all NPC slots may be full",
+                                selectedType, selectedName);
+                        }
+                    }
+                }
             }
             else {
                 ImGui::Text("No player");
@@ -2051,7 +2159,7 @@ void DebugUI::Draw() {
 
                 if (ImGui::Button("Load")) {
                     if (g_characterManager) {
-                        g_characterManager->LoadAnimationBatch(0, sAnimSelectedEnum, nullptr);
+                        g_characterManager->LoadAnimationBatch(p->debugModelCharType, sAnimSelectedEnum, nullptr);
                     }
                 }
                 ImGui::SameLine();
@@ -2071,19 +2179,20 @@ void DebugUI::Draw() {
                     p->Debug_StopAnimation();
                 }
 
-                CharSlot* playerSlot = nullptr;
+                const u32 animCharType = p->debugModelCharType;
+                CharSlot* animSlot = nullptr;
                 if (g_characterManager) {
                     for (s32 i = 0; i < CHAR_MAX_SLOTS; i++) {
-                        if (g_characterManager->slots[i].thingType == 0) {
-                            playerSlot = &g_characterManager->slots[i];
+                        if (g_characterManager->slots[i].thingType == animCharType) {
+                            animSlot = &g_characterManager->slots[i];
                             break;
                         }
                     }
                 }
 
                 s32 maxAnimEnum = (s32)CharSlot::ANIM_TABLE_SIZE - 1;
-                if (playerSlot && playerSlot->charFile && playerSlot->charFile->rrHeaderEntries >= 10) {
-                    s32 rrMax = (playerSlot->charFile->rrHeaderEntries - 10) / 2;
+                if (animSlot && animSlot->charFile && animSlot->charFile->rrHeaderEntries >= 10) {
+                    s32 rrMax = (animSlot->charFile->rrHeaderEntries - 10) / 2;
                     if (rrMax < maxAnimEnum) {
                         maxAnimEnum = rrMax;
                     }
@@ -2093,9 +2202,9 @@ void DebugUI::Draw() {
                 }
 
                 s32 loadedCount = 0;
-                if (playerSlot && g_characterManager) {
+                if (animSlot && g_characterManager) {
                     for (s32 e = 0; e <= maxAnimEnum; e++) {
-                        u8 handle = playerSlot->animIndexTable[e];
+                        u8 handle = animSlot->animIndexTable[e];
                         if (handle != 0xFF && handle < CHAR_MAX_ANIMS && g_characterManager->animPtrs[handle]) {
                             loadedCount++;
                         }
@@ -2103,6 +2212,9 @@ void DebugUI::Draw() {
                 }
 
                 ImGui::SeparatorText("Available Animations");
+                if (animCharType != 0) {
+                    ImGui::Text("Character: %s (type %u)", g_charNameTable[animCharType], animCharType);
+                }
                 ImGui::Text("Available enums: 0..%d", maxAnimEnum);
                 ImGui::Text("Loaded animations: %d", loadedCount);
 
@@ -2113,8 +2225,8 @@ void DebugUI::Draw() {
                         for (s32 e = clipper.DisplayStart; e < clipper.DisplayEnd; e++) {
                             bool loaded = false;
                             u8 handle = 0xFF;
-                            if (playerSlot && g_characterManager) {
-                                handle = playerSlot->animIndexTable[e];
+                            if (animSlot && g_characterManager) {
+                                handle = animSlot->animIndexTable[e];
                                 loaded = (handle != 0xFF && handle < CHAR_MAX_ANIMS && g_characterManager->animPtrs[handle] != nullptr);
                             }
 
@@ -2136,6 +2248,7 @@ void DebugUI::Draw() {
                 if (anim) {
                     ImGui::Text("Frame: %d (0x%X)", anim->currentFrame >> 16, anim->currentFrame);
                     ImGui::Text("Start/End: %d / %d", anim->startFrame >> 16, anim->endFrame >> 16);
+                    ImGui::Text("Anim Frames: %d", anim->animation ? anim->animation->numFrames : 0);
                     ImGui::Text("Prev Frame: %d", anim->prevFrame >> 16);
                     ImGui::Text("Speed: %d (%.2fx)", anim->speed, anim->speed / 65536.0f);
                     ImGui::Text("Mode: %d", anim->mode);

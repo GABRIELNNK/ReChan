@@ -298,6 +298,15 @@ s32 PlayerModel::LoadNIS(u32 argc, const char** argv, s32 /*a4*/, s32 /*a5*/) {
         pairCount++;
     }
 
+    for (s32 i = 0; i < pairCount; i++) {
+        const u32 thingType = thingTypes[i];
+        if (thingType != AITypes::TT_PLAYER && thingType <= AITypes::TT_HUMANOID_LAST
+            && !g_characterManager->IsCharacterLoaded(thingType)) {
+            g_characterManager->OpenCharacter(thingType);
+            g_characterManager->LoadCharacter(thingType, nullptr);
+        }
+    }
+
     if (g_nisCharMgrCallback) {
         delete g_nisCharMgrCallback;
         g_nisCharMgrCallback = nullptr;

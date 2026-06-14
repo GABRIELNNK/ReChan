@@ -51,6 +51,13 @@ void Teleporter::AnalyzeMesh(DBRoot* root) {
     if (a7) {
         killThings = 1;
     }
+
+    LOG("[Teleporter] setup name=%s pos=(%d,%d,%d) target=(%d,%d,%d) angle=%d kill=%d",
+        root->GetName() ? root->GetName() : "<unnamed>",
+        pos.x, pos.y, pos.z,
+        targetPos.x, targetPos.y, targetPos.z,
+        targetAngle,
+        killThings);
 }
 
 void Teleporter::CreateModel(const char* name) {
@@ -88,7 +95,9 @@ void Teleporter::HandleHumanoidCollision(Humanoid* hum) {
     }
 
     if (g_blockManager && g_blockManager->GetBlockNumber(targetPos) == BLOCK_UNASSIGNED) {
-        LOG("[Teleporter::HandleHumanoidCollision] targetPos block UNASSIGNED, skipping teleport");
+        LOG("[Teleporter::HandleHumanoidCollision] targetPos block UNASSIGNED, skipping teleport from (%d,%d,%d) to (%d,%d,%d)",
+            hum->pos.x, hum->pos.y, hum->pos.z,
+            targetPos.x, targetPos.y, targetPos.z);
         return;
     }
 

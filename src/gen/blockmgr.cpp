@@ -332,6 +332,18 @@ u16 BlockManager::GetBlockNumber(const LVector& pos) const {
     return 0x1000;
 }
 
+u16 BlockManager::GetBlockNumberAllBlocks(const LVector& pos) const {
+    for (u32 i = 0; i < blocks.size(); i++) {
+        const Block& b = blocks[i];
+        if (pos.x >= b.posX + b.halfExtNegX && pos.x <= b.posX + b.halfExtPosX &&
+            pos.y >= b.posY + b.halfExtNegY && pos.y <= b.posY + b.halfExtPosY &&
+            pos.z >= b.posZ + b.halfExtNegZ && pos.z <= b.posZ + b.halfExtPosZ) {
+            return b.blockNum;
+        }
+    }
+    return BLOCK_UNASSIGNED;
+}
+
 // InActiveList__C12BlockManagerUl (BLKMGR.CPP:825, 0x80050D44)
 // PSX: checks alreadyLoadedList u16 array for blockNum.
 bool BlockManager::InActiveList(u32 blockNum) const {

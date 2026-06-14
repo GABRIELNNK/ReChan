@@ -1424,8 +1424,8 @@ static const u8 kLensFlareScreenGlowR = 0x0C;
 static const u8 kLensFlareScreenGlowG = 0x0F;
 static const u8 kLensFlareScreenGlowB = 0x25;
 
-static s32 BuildEffectFrameReal16(s16 frame, s16 frameCounter, s16 frameDelay) {
-    s32 frameReal16 = static_cast<s32>(frame) << 16;
+static s32 BuildEffectFrameReal16(s32 frame, s16 frameCounter, s16 frameDelay) {
+    s32 frameReal16 = frame << 16;
     if (frameDelay <= 0) {
         return frameReal16;
     }
@@ -1733,12 +1733,14 @@ static bool ResolveSequenceAnimFrame(SequenceAnim* sequence,
             return false;
         }
 
-        const s32 partIndex = sequenceFrame >> 8;
+        const u32 frameBits = sequence->frameBits;
+        const u32 frameMask = (frameBits >= 31u) ? 0x7FFFFFFFu : ((1u << frameBits) - 1u);
+        const s32 partIndex = sequenceFrame >> frameBits;
         if (partIndex < 0 || static_cast<u32>(partIndex) >= sequence->numParts) {
             return false;
         }
 
-        const s32 partFrame = sequenceFrame & 0xFF;
+        const s32 partFrame = sequenceFrame & static_cast<s32>(frameMask);
         SequenceAnimPart& part = sequence->parts[partIndex];
 
         if (part.animHash != 0) {
@@ -1968,7 +1970,7 @@ PaletteData* WEffect::SetupPaletteData(u32 paletteHash, u32 clutMode, u32 flags)
                                                                                                      \
                 const s32 _resolvedFrameCount = GetMiscAnimFrameCount(_self->miscAnimNode);         \
                 if (_resolvedFrameCount > 0) {                                                       \
-                    _self->frameCount = static_cast<s16>(_resolvedFrameCount);                      \
+                    _self->frameCount = _resolvedFrameCount;                                        \
                 }                                                                                    \
             }                                                                                        \
         }                                                                                            \
@@ -2001,7 +2003,7 @@ PaletteData* WEffect::SetupPaletteData(u32 paletteHash, u32 clutMode, u32 flags)
             _self->vizAnim = _liveNode ? _liveNode->vizAnim : nullptr;                              \
                                                                                                      \
             const s32 _resolvedFrameCount = GetMiscAnimFrameCount(_liveNode);                       \
-            _self->frameCount = (_resolvedFrameCount > 0) ? static_cast<s16>(_resolvedFrameCount) : 0; \
+            _self->frameCount = (_resolvedFrameCount > 0) ? _resolvedFrameCount : 0;                \
         }                                                                                            \
                                                                                                      \
         return _liveNode;                                                                            \
@@ -4806,7 +4808,7 @@ s32 WEffect::Update() {
 
     if (previousCounter == frameDelay) {
         frameCounter = 0;
-        frame = static_cast<s16>(frame + 1);
+        frame = frame + 1;
 
         if (comEffect && comEffect->EndOfFrame(frame)) {
             frame = 0;
@@ -5533,7 +5535,7 @@ s32 FWEffect::Update() {
             frame = 0;
         }
         else {
-            frame = static_cast<s16>(frame + 1);
+            frame = frame + 1;
         }
 
         return comEffect ? comEffect->EndOfFrame(frame) : false;
@@ -5620,12 +5622,12 @@ s32 FWEffect::Update() {
 
                     if (previousCounter == frameDelay) {
                         frameCounter = 0;
-                        frame = static_cast<s16>(oscillationMode ? (frame - 1) : (frame + 1));
+                        frame = oscillationMode ? (frame - 1) : (frame + 1);
 
                         if (!oscillationMode) {
                             if (comEffect && comEffect->EndOfFrame(frame)) {
                                 oscillationMode = 1;
-                                frame = static_cast<s16>(frame - 1);
+                                frame = frame - 1;
                             }
                         }
 

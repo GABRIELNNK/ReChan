@@ -1,11 +1,13 @@
 #include "gen/animstruct.h"
 #include "gen/paramanim.h"
+#include "gen/animmgr.h"
 #include "gen/model.h"
 #include "gen/levelmgr.h"
 #include "gen/time.h"
 #include "gen/charmgr.h"
 #include "ai/humanoid.h"
 #include "p3d/p3dmath.h"
+#include "pc/log.h"
 
 static void BlendTreePose(s32 weight, const BlendPoseState* blendPose, STreeData* tree) {
     if (!blendPose || !blendPose->joints || !tree || !tree->joints) {
@@ -103,13 +105,22 @@ static STreeData* ResolveTransformAnimPuppetTree(const TransformAnim* animation)
 AnimStructure::AnimStructure(s32 m, void* anim, s32 lt, Model* mdl, void* drawableBasic) {
     MARKFUNCTION(0x80070740);
 
-    animation = (TransformAnim*)anim;
     mode = m;
     model = mdl;
     flip = nullptr;
     blendPose = nullptr;
     speed = FIX16_ONE;
     loopCount = 0;
+    sequence = nullptr;
+
+    rawAnimation = anim;
+    if (IsCharSequenceAnim(rawAnimation)) {
+        sequence = static_cast<CharSequenceAnim*>(rawAnimation);
+        animation = sequence->parts ? sequence->parts[0] : nullptr;
+    }
+    else {
+        animation = static_cast<TransformAnim*>(rawAnimation);
+    }
 
     // PSX: mode 0 creates tTransformFlip2 + tTreeFlip, attaches to tree + animation
     if (mode == 0 && animation && mdl) {
@@ -161,13 +172,15 @@ AnimStructure::~AnimStructure() {
 void AnimStructure::ResetCountsToAnim() {
     MARKFUNCTION(0x80070D30);
 
-    if (!animation) {
+    const s32 totalFrames = sequence ? sequence->numFrames
+                          : (animation ? animation->numFrames : 0);
+    if (totalFrames <= 0) {
         return;
     }
 
     // PSX: endFrame = (GetNumFrames(animation) - 1) << 16
-    if (animation->numFrames > 0) {
-        endFrame = (animation->numFrames - 1) << 16;
+    if (totalFrames > 0) {
+        endFrame = (totalFrames - 1) << 16;
     }
     startFrame = 0;
     currentFrame = 0;
@@ -267,9 +280,11 @@ void AnimStructure::ExecuteHandler(s32 doFlip) {
     else {
         elapsed = (s32)((((s64)(tick - prevTick)) << 16) * (s64)speed >> 16);
     }
-
     // Advance frame based on loop type
-    if (loopTypeField == 1) {
+    if (loopTypeField == ANIM_RUN_TO_LAST && loopCount != 0 && currentFrame >= endFrame) {
+        currentFrame = endFrame;
+    }
+    else if (loopTypeField == 1) {
         // Reverse: subtract
         currentFrame = currentFrame - elapsed;
     }
@@ -316,6 +331,25 @@ void AnimStructure::ExecuteHandler(s32 doFlip) {
     if (doFlip && flip) {
         if (currentFrame < 0) {
             currentFrame = 0;
+        }
+
+        // For multi-part (sequence) animations, resolve which TransformAnim part
+        // owns the current frame and re-attach the flip to it with a local frame.
+        if (sequence) {
+            s32 localFrame = 0;
+            TransformAnim* part = sequence->ResolvePart(currentFrame >> 16, localFrame);
+            if (part && part != flip->anim) {
+                flip->anim = part;
+                flip->dirty = 1;
+            }
+            if (part) {
+                const s32 localFrameReal = localFrame << 16 | (currentFrame & 0xFFFF);
+                flip->SetFrameReal(localFrameReal);
+                flip->UpdateJoints();
+                prevFrame = currentFrame;
+                prevTick = currentTick;
+                return;
+            }
         }
 
         if (mode == 0 && loopTypeField == ANIM_BLEND2) {
@@ -387,8 +421,10 @@ void AnimStructure::HoldLast() {
 void AnimStructure::RunToLast() {
     if (currentFrame > endFrame) {
         currentFrame = endFrame;
-        loopCount++;
-        ProcessHumanoidCB();
+        if (loopCount == 0) {
+            loopCount = 1;
+            ProcessHumanoidCB();
+        }
     }
 }
 
@@ -438,7 +474,7 @@ void AnimStructure::RunToLastBlend() {
             return;
         }
 
-        sModel->ApplyAnimToModelBasic(animation);
+        sModel->ApplyAnimToModelBasic(rawAnimation ? rawAnimation : animation);
         if (flip) {
             flip->Reset();
         }
@@ -505,17 +541,25 @@ void AnimStructure::ReAttachTree(s32 type, s32 animEnum) {
     if (!g_characterManager) {
         return;
     }
-    TransformAnim* newAnim = (TransformAnim*)g_characterManager->GetAnimation((u32)type, animEnum);
-    if (!newAnim) {
+    void* raw = g_characterManager->GetAnimation((u32)type, animEnum);
+    if (!raw) {
         return;
     }
-    if (IsCameraParamAnim(newAnim)) {
+    if (IsCameraParamAnim(raw)) {
         return;
+    }
+    rawAnimation = raw;
+    if (IsCharSequenceAnim(rawAnimation)) {
+        sequence = static_cast<CharSequenceAnim*>(raw);
+        animation = sequence->parts ? sequence->parts[0] : nullptr;
+    }
+    else {
+        sequence = nullptr;
+        animation = static_cast<TransformAnim*>(raw);
     }
     // PSX: reattaches flip to new animation
-    animation = newAnim;
-    if (flip) {
-        flip->anim = newAnim;
+    if (flip && animation) {
+        flip->anim = animation;
         flip->dirty = 1;
     }
     ResetCountsToAnim();

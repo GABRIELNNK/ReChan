@@ -1057,10 +1057,6 @@ void AI::Populate() {
 
     // PSX: iterate meshes list - passes mesh->fileName (+60) as modelName
     for (DBMesh* mesh = g_database->GetFirstMesh(); mesh; mesh = static_cast<DBMesh*>(mesh->next)) {
-        LOG("[AI::Populate] mesh: type=%u subType=%u name=%s crc=0x%08X pos=(%d,%d,%d) model=%s",
-            mesh->type, mesh->subType, mesh->GetName() ? mesh->GetName() : "null",
-            mesh->GetNameCRC(), mesh->pos.x, mesh->pos.y, mesh->pos.z,
-            mesh->fileName ? mesh->fileName : "null");
         if (mesh->type != 6)
             continue;
         AddThingNoTagList(mesh->GetName(), mesh->subType, &mesh->pos,
@@ -1076,12 +1072,7 @@ void AI::Populate() {
     }
 
     // PSX: iterate volumes list
-    s32 volCount = 0;
     for (DBVolume* vol = g_database->GetFirstVolume(); vol; vol = static_cast<DBVolume*>(vol->next)) {
-        LOG("[AI::Populate] volume: type=%u subType=%u name=%s pos=(%d,%d,%d)",
-            vol->type, vol->subType, vol->GetName() ? vol->GetName() : "null",
-            vol->pos.x, vol->pos.y, vol->pos.z);
-        volCount++;
         if (vol->type != 6)
             continue;
         if ((vol->subType == AITypes::TT_DOOR || vol->subType == AITypes::TT_TELEPORTER) &&
@@ -1091,7 +1082,6 @@ void AI::Populate() {
         AddThingNoTagList(vol->GetName(), vol->subType, &vol->pos,
                           nullptr, nullptr, vol);
     }
-    LOG("[AI::Populate] total volumes: %d", volCount);
 }
 
 // PSX: UnPopulate__2AIs (AI.CPP:1906, 0x800567CC)

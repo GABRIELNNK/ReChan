@@ -152,6 +152,7 @@ public:
     bool debugAnimOverrideApplying = false;
     s32 debugAnimOverrideEnum = -1;
     s32 debugAnimOverrideLoopType = 0;
+    u32 debugModelCharType = 0; // char type used for anim lookups; 0 = Jackie
 
     // Global player pointer - PSX: gp+3432
     static Player* s_player;
@@ -204,8 +205,6 @@ public:
     void SetLivesLeft(s32 lives);
 
     s32 GetLivesLeft() const { return livesLeft; }
-
-    void Teleport(const LVector& newPos);
 
     void SignalEnemyGetUp();
     void SignalEnemyDead(Humanoid* enemy);

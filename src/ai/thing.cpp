@@ -216,8 +216,14 @@ void Thing::Activate() {
 // PSX: checks flags and InActiveList before clearing activated.
 void Thing::Deactivate() {
     MARKFUNCTION(0x8006182C);
-    bool wasActivated = (flags & TF_ACTIVATED) != 0;
-    bool hasBit5 = (flags & TF_BIT5) != 0;
+    // PSX THING.CPP:546. v5 = original TF_ACTIVATED (bit 4) BEFORE it may be
+    // cleared below. The model is deleted only when v5 was already 0, i.e. the
+    // thing was *already* deactivated on entry (and stays deactivated with a
+    // model). A still-active thing that is being deactivated this call keeps its
+    // model. (The host previously inverted this to `wasActivated`, which deleted
+    // NIS actors' models the instant their block left the active set.)
+    const bool wasInactiveOnEntry = (flags & TF_ACTIVATED) == 0;
+    const bool hasBit5 = (flags & TF_BIT5) != 0;
 
     if (!hasBit5) {
         if (g_blockManager && !g_blockManager->InActiveList(blockNum)) {
@@ -225,7 +231,7 @@ void Thing::Deactivate() {
         }
     }
 
-    if (wasActivated) {
+    if (wasInactiveOnEntry) {
         if (!(flags & TF_ACTIVATED)) {
             if (flags & TF_MODEL_CREATED) {
                 DeleteModel();

@@ -78,7 +78,7 @@ public:
     u32 GetClut(s32 mode);
     void SetZFar();
     MiscAnimNode* GetMiscAnimNode() const { return miscAnimNode; }
-    s16 GetFrameCount() const { return frameCount; }
+    s32 GetFrameCount() const { return frameCount; }
 
     u32 resourceHash = 0;
     u32 miscAnimHash = 0;
@@ -112,8 +112,8 @@ private:
     ComEffectScaleBinding* scaleBindings = nullptr;
     u16 scaleBindingCount = 0;
     u16 scaleBindingCapacity = 0;
-    s16 frameCount = 0;
-    s16 currentFrame = 0;
+    s32 frameCount = 0;
+    s32 currentFrame = 0;
     s32 currentFrameReal16 = 0;
 
     u16* uvBaseWords = nullptr;
@@ -179,7 +179,7 @@ public:
 
     u32 renderFlags = 0;
 
-    s16 frame = 0;
+    s32 frame = 0;
     s16 frameDelay = 0;
     s16 frameCounter = 0;
     s16 active = 1;

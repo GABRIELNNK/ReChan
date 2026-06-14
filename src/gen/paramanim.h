@@ -21,7 +21,7 @@ struct CameraParamKey {
     s32 paramId = 0;
     s32 outputIndex = 0;
     CameraParamKeyKind kind = CameraParamKeyKind::None;
-    std::vector<u8> times;
+    std::vector<u16> times;
     std::vector<s32> scalarValues;
     std::vector<LVector> vectorValues;
     std::vector<u16> angleValues;
@@ -84,7 +84,7 @@ inline bool ParseCameraParamKey(tChunkFile& file, CameraParamKey& key) {
                 if (count > 0) {
                     key.times.resize(static_cast<size_t>(count));
                     for (s32 index = 0; index < count; index++) {
-                        key.times[static_cast<size_t>(index)] = static_cast<u8>(file.GetUShort());
+                        key.times[static_cast<size_t>(index)] = file.GetUShort();
                     }
                 }
                 break;
@@ -268,7 +268,7 @@ inline constexpr u16 CAMERA_PARAM_OO_TABLE[64] = {
     1170, 1149, 1129, 1110, 1092, 1074, 1057, 1040,
 };
 
-inline s32 FindCameraParamKeyIndex(const std::vector<u8>& times, s32 frameReal) {
+inline s32 FindCameraParamKeyIndex(const std::vector<u16>& times, s32 frameReal) {
     if (times.empty()) {
         return -1;
     }

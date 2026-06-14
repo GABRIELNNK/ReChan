@@ -9,6 +9,77 @@ static s16 LerpAngle16(s16 a0, s16 a1, s32 frac16) {
     return (s16)(a0 + (s16)(((s32)delta * (s64)frac16) >> 16));
 }
 
+static s32 GetUnwrappedTime(const u8* times, s32 index) {
+    if (index <= 0) {
+        return times[0];
+    }
+    s32 currentWrap = 0;
+    s32 prevRaw = times[0];
+    for (s32 k = 1; k <= index; k++) {
+        s32 currRaw = times[k];
+        if (currRaw < prevRaw) {
+            currentWrap += 256;
+        }
+        prevRaw = currRaw;
+    }
+    return times[index] + currentWrap;
+}
+
+static s32 InferChannelLastFrame(const u8* rawData, u32 rawSize, const TransformAnim::Channel& ch) {
+    if (!ch.chData) {
+        return 0;
+    }
+
+    if (ch.keyType != KEY_JOINT_1DOF_ANGLE &&
+        ch.keyType != KEY_JOINT_3DOF_ANGLE &&
+        ch.keyType != KEY_JOINT_3DOF_LP_PSX) {
+        return 0;
+    }
+
+    if ((u32)(ch.chData - rawData) + 16 > rawSize) {
+        return 0;
+    }
+
+    const u32 numKeys = p3dReadU32LE(ch.chData + 8);
+    const u32 keyTimesOff = p3dReadU32LE(ch.chData + 12);
+    const u32 keyTimesByteOff = keyTimesOff * 4;
+    if (numKeys == 0 || keyTimesByteOff + numKeys > rawSize) {
+        return 0;
+    }
+
+    return GetUnwrappedTime(rawData + keyTimesByteOff, (s32)numKeys - 1);
+}
+
+// CharSequenceAnim
+
+CharSequenceAnim::~CharSequenceAnim() {
+    if (parts) {
+        for (u32 i = 0; i < numParts; i++) {
+            delete parts[i];
+        }
+        delete[] parts;
+        parts = nullptr;
+    }
+}
+
+TransformAnim* CharSequenceAnim::ResolvePart(s32 globalFrame, s32& outLocalFrame) const {
+    if (!parts || numParts == 0 || globalFrame < 0) {
+        return nullptr;
+    }
+    s32 remaining = globalFrame;
+    for (u32 i = 0; i < numParts; i++) {
+        TransformAnim* part = parts[i];
+        if (!part || part->numFrames <= 0) continue;
+        const s32 partFrames = part->numFrames;
+        if (remaining < partFrames || i == numParts - 1) {
+            outLocalFrame = remaining;
+            return part;
+        }
+        remaining -= partFrames;
+    }
+    return nullptr;
+}
+
 // TransformAnim
 
 TransformAnim::TransformAnim()
@@ -100,7 +171,163 @@ TransformAnim* TransformAnim::Parse(const u8* rawData, u32 rawSize) {
         }
     }
 
+    s32 inferredFrames = ta->numFrames;
+    for (s32 i = 0; i < ta->numRotChannels; i++) {
+        const s32 lastFrame = InferChannelLastFrame(rawData, rawSize, ta->rotChannels[i]);
+        if (lastFrame + 1 > inferredFrames) {
+            inferredFrames = lastFrame + 1;
+        }
+    }
+    for (s32 i = 0; i < ta->numTransChannels; i++) {
+        const s32 lastFrame = InferChannelLastFrame(rawData, rawSize, ta->transChannels[i]);
+        if (lastFrame + 1 > inferredFrames) {
+            inferredFrames = lastFrame + 1;
+        }
+    }
+    ta->numFrames = inferredFrames;
+
     return ta;
+}
+
+// Detect a tTransformAnim header at rawData+offset: vtable==0, plausible field ranges.
+static bool IsValidTransformAnimHeader(const u8* rawData, u32 rawSize, u32 offset) {
+    if (offset + 40 > rawSize) return false;
+    const u32 vtable    = p3dReadU32LE(rawData + offset + 8);
+    const s32 numFrames = (s32)p3dReadU32LE(rawData + offset + 12);
+    const s32 targetType = (s32)p3dReadU32LE(rawData + offset + 16);
+    const s32 numRot    = (s32)p3dReadU32LE(rawData + offset + 24);
+    const s32 numTrans  = (s32)p3dReadU32LE(rawData + offset + 28);
+    return vtable == 0
+        && numFrames >= 1 && numFrames <= 512
+        && targetType >= 0 && targetType <= 3
+        && numRot >= 1 && numRot <= 100
+        && numTrans >= 0 && numTrans <= 10;
+}
+
+void* TransformAnim::ParseMulti(u8* rawData, u32 rawSize) {
+    if (!rawData || rawSize < 40) {
+        return nullptr;
+    }
+
+    if (!IsValidTransformAnimHeader(rawData, rawSize, 0)) {
+        return nullptr;
+    }
+
+    const u32 baseUID = p3dReadU32LE(rawData + 0);
+
+    // Estimate the byte extent of a tTransformAnim block so we know where the next
+    // block could start.  We find the highest byte offset referenced by any channel's
+    // key-time or key-value arrays, relative to blockStart.
+    auto EstimateBlockEnd = [](const u8* raw, u32 rawSz, u32 blockStart) -> u32 {
+        if (blockStart + 40 > rawSz) return blockStart + 40;
+        const s32 numRot   = (s32)p3dReadU32LE(raw + blockStart + 24);
+        const s32 numTrans = (s32)p3dReadU32LE(raw + blockStart + 28);
+        const u32 rotOff   = p3dReadU32LE(raw + blockStart + 32) * 4;
+        const u32 transOff = p3dReadU32LE(raw + blockStart + 36) * 4;
+        u32 maxEnd = blockStart + 40;
+
+        auto chkOff = [&](u32 o) { if (o < rawSz && o > maxEnd) maxEnd = o; };
+
+        // Rot channel array
+        if (rotOff < rawSz && numRot > 0 && numRot <= 100) {
+            chkOff(blockStart + rotOff + (u32)numRot * 4);
+            for (s32 i = 0; i < numRot; i++) {
+                u32 ao = blockStart + rotOff + (u32)i * 4;
+                if (ao + 4 > rawSz) break;
+                u32 chOff = p3dReadU32LE(raw + ao) * 4 + blockStart;
+                if (chOff + 24 > rawSz) break;
+                u32 nk = p3dReadU32LE(raw + chOff + 8);
+                if (nk == 0 || nk > 4096) continue;
+                u32 kt = p3dReadU32LE(raw + chOff + 12) * 4 + blockStart;
+                u32 kv = p3dReadU32LE(raw + chOff + 16) * 4 + blockStart;
+                chkOff(kt + nk);        // u8 times
+                chkOff(kv + nk * 4);   // worst-case value size
+            }
+        }
+        // Trans channel array
+        if (transOff < rawSz && numTrans > 0 && numTrans <= 10) {
+            chkOff(blockStart + transOff + (u32)numTrans * 4);
+            for (s32 i = 0; i < numTrans; i++) {
+                u32 ao = blockStart + transOff + (u32)i * 4;
+                if (ao + 4 > rawSz) break;
+                u32 chOff = p3dReadU32LE(raw + ao) * 4 + blockStart;
+                if (chOff + 20 > rawSz) break;
+                u32 nk = p3dReadU32LE(raw + chOff + 8);
+                if (nk == 0 || nk > 4096) continue;
+                u32 kt = p3dReadU32LE(raw + chOff + 12) * 4 + blockStart;
+                u32 kv = p3dReadU32LE(raw + chOff + 16) * 4 + blockStart;
+                chkOff(kt + nk);
+                chkOff(kv + nk * 6);   // 3DOF s16 * 3 = 6 bytes each
+            }
+        }
+        return maxEnd;
+    };
+
+    // Find all consecutive blocks: nameUID must be baseUID+0, +1, +2, ...
+    // Each next block must start within a small window after the previous one ends
+    // to avoid false-positive matches in the middle of channel data.
+    static constexpr u32 kBlockSearchWindow = 64; // bytes of padding/alignment slack
+    u32 blockOffsets[16];
+    u32 numBlocks = 1;
+    blockOffsets[0] = 0;
+
+    u32 nextUID = baseUID + 1;
+    u32 searchFrom = EstimateBlockEnd(rawData, rawSize, 0);
+    while (numBlocks < 16) {
+        // Round up to 4-byte alignment and search within kBlockSearchWindow
+        u32 searchStart = (searchFrom + 3u) & ~3u;
+        u32 searchEnd = searchStart + kBlockSearchWindow;
+        if (searchEnd > rawSize) searchEnd = rawSize;
+        bool found = false;
+        for (u32 off = searchStart; off + 40 <= searchEnd; off += 4) {
+            const u32 uid = p3dReadU32LE(rawData + off);
+            if (uid == nextUID && IsValidTransformAnimHeader(rawData, rawSize, off)) {
+                blockOffsets[numBlocks++] = off;
+                nextUID++;
+                searchFrom = EstimateBlockEnd(rawData, rawSize, off);
+                found = true;
+                break;
+            }
+        }
+        if (!found) break;
+    }
+
+    if (numBlocks == 1) {
+        // Single block – normal path; caller uses Parse() directly.
+        TransformAnim* ta = TransformAnim::Parse(rawData, rawSize);
+        if (ta) {
+            ta->ownedRawData = rawData;
+        }
+        return ta;
+    }
+
+    // Multiple blocks: build a CharSequenceAnim owning one TransformAnim per block.
+    // Each block's Parse() gets a view into rawData but does NOT own the data;
+    // the CharSequenceAnim takes ownership of rawData via the first part.
+    CharSequenceAnim* seq = new CharSequenceAnim();
+    seq->numParts = numBlocks;
+    seq->parts = new TransformAnim*[numBlocks];
+
+    for (u32 i = 0; i < numBlocks; i++) {
+        const u32 blockStart = blockOffsets[i];
+        const u32 blockSize = rawSize - blockStart; // view to end; Parse stops at what it needs
+        TransformAnim* part = TransformAnim::Parse(rawData + blockStart, blockSize);
+        if (!part) {
+            // Abort: free what we built so far
+            for (u32 j = 0; j < i; j++) delete seq->parts[j];
+            delete[] seq->parts;
+            delete seq;
+            std::free(rawData);
+            return nullptr;
+        }
+        seq->parts[i] = part;
+        seq->numFrames += part->numFrames;
+    }
+
+    // First part takes ownership of the raw buffer.
+    seq->parts[0]->ownedRawData = rawData;
+
+    return seq;
 }
 
 // TransformFlip
@@ -145,47 +372,141 @@ void TransformFlip::UpdateJoints() {
         return;
     }
 
-    const u32* jointOrderMap = (mirrored && mirroredJointOrderMap)
-        ? mirroredJointOrderMap
-        : tree->jointOrderMap;
-
-    // Process translation channels
-    for (s32 i = 0; i < anim->numTransChannels; i++) {
-        const TransformAnim::Channel& ch = anim->transChannels[i];
-        if (!ch.chData) {
-            continue;
-        }
-
-        // Map animation parameter to joint index
-        u32 jointParam = ch.jointParam;
-        if (jointParam >= tree->numMapEntries || !jointOrderMap) {
-            continue;
-        }
-        u32 jointIdx = jointOrderMap[jointParam];
-        if (jointIdx >= tree->numJoints) {
-            continue;
-        }
-
-        EvalTransChannel(ch, tree->joints[jointIdx]);
+    if (mirrored) {
+        UpdateJointsMirrored();
+        return;
     }
 
-    // Process rotation channels
-    for (s32 i = 0; i < anim->numRotChannels; i++) {
-        const TransformAnim::Channel& ch = anim->rotChannels[i];
-        if (!ch.chData) {
-            continue;
-        }
+    const u32* jointOrderMap = tree->jointOrderMap;
 
-        u32 jointParam = ch.jointParam;
-        if (jointParam >= tree->numMapEntries || !jointOrderMap) {
-            continue;
+    if (anim->transChannels) {
+        for (s32 i = 0; i < anim->numTransChannels; i++) {
+            const TransformAnim::Channel& ch = anim->transChannels[i];
+            if (!ch.chData) {
+                continue;
+            }
+            u32 jointParam = ch.jointParam;
+            if (!jointOrderMap || jointParam >= tree->numMapEntries) {
+                continue;
+            }
+            u32 jointIdx = jointOrderMap[jointParam];
+            if (jointIdx >= tree->numJoints) {
+                continue;
+            }
+            EvalTransChannel(ch, tree->joints[jointIdx]);
         }
-        u32 jointIdx = jointOrderMap[jointParam];
-        if (jointIdx >= tree->numJoints) {
-            continue;
-        }
+    }
 
-        EvalRotChannel(ch, tree->joints[jointIdx]);
+    if (anim->rotChannels) {
+        for (s32 i = 0; i < anim->numRotChannels; i++) {
+            const TransformAnim::Channel& ch = anim->rotChannels[i];
+            if (!ch.chData) {
+                continue;
+            }
+            u32 jointParam = ch.jointParam;
+            if (!jointOrderMap || jointParam >= tree->numMapEntries) {
+                continue;
+            }
+            u32 jointIdx = jointOrderMap[jointParam];
+            if (jointIdx >= tree->numJoints) {
+                continue;
+            }
+            EvalRotChannel(ch, tree->joints[jointIdx]);
+        }
+    }
+
+    dirty = 0;
+}
+
+// PSX: UpdateJointsMirrored__15tTransformFlip2P5tTree (CHANNEL.CPP:832)
+// PSX passes a stack triple (tx,ty,tz) / (rx,ry,rz) by pointer to the eval function,
+// which fills them; reflection is then applied to those temps before writing to joint.
+void TransformFlip::UpdateJointsMirrored() {
+    const u32* jointOrderMap = mirroredJointOrderMap ? mirroredJointOrderMap : tree->jointOrderMap;
+
+    if (anim->transChannels) {
+        for (s32 i = 0; i < anim->numTransChannels; i++) {
+            const TransformAnim::Channel& ch = anim->transChannels[i];
+            if (!ch.chData) {
+                continue;
+            }
+            u32 jointParam = ch.jointParam;
+            if (!jointOrderMap || jointParam >= tree->numMapEntries) {
+                continue;
+            }
+            u32 jointIdx = jointOrderMap[jointParam];
+            if (jointIdx >= tree->numJoints) {
+                continue;
+            }
+            STreeJoint& joint = tree->joints[jointIdx];
+            STreeJoint tmp = joint;
+            EvalTransChannel(ch, tmp);
+
+            const bool lastOfParam = (i + 1 >= anim->numTransChannels)
+                || (anim->transChannels[i + 1].jointParam != jointParam);
+            if (lastOfParam) {
+                if (jointParam == 0) {
+                    tmp.translationX = -tmp.translationX;
+                }
+                else if (jointParam == 1) {
+                    tmp.translationZ = -tmp.translationZ;
+                }
+                else {
+                    tmp.translationY = -tmp.translationY;
+                }
+                joint.translationX = tmp.translationX;
+                joint.translationY = tmp.translationY;
+                joint.translationZ = tmp.translationZ;
+            } else {
+                joint.translationX = tmp.translationX;
+                joint.translationY = tmp.translationY;
+                joint.translationZ = tmp.translationZ;
+            }
+        }
+    }
+
+    if (anim->rotChannels) {
+        for (s32 i = 0; i < anim->numRotChannels; i++) {
+            const TransformAnim::Channel& ch = anim->rotChannels[i];
+            if (!ch.chData) {
+                continue;
+            }
+            u32 jointParam = ch.jointParam;
+            if (!jointOrderMap || jointParam >= tree->numMapEntries) {
+                continue;
+            }
+            u32 jointIdx = jointOrderMap[jointParam];
+            if (jointIdx >= tree->numJoints) {
+                continue;
+            }
+            STreeJoint& joint = tree->joints[jointIdx];
+            STreeJoint tmp = joint;
+            EvalRotChannel(ch, tmp);
+
+            const bool lastOfParam = (i + 1 >= anim->numRotChannels)
+                || (anim->rotChannels[i + 1].jointParam != jointParam);
+            if (lastOfParam) {
+                if (jointParam == 0) {
+                    tmp.rotationY = (s16)(2 * (u16)joint.restPoseRotY - (u16)tmp.rotationY);
+                    tmp.rotationZ = (s16)(2 * (u16)joint.restPoseRotZ - (u16)tmp.rotationZ);
+                }
+                else if (jointParam == 1) {
+                    tmp.rotationX = (s16)(2 * (u16)joint.restPoseRotX - (u16)tmp.rotationX);
+                    tmp.rotationY = (s16)(2 * (u16)joint.restPoseRotY - (u16)tmp.rotationY);
+                }
+                else {
+                    tmp.rotationX = (s16)-tmp.rotationX;
+                    tmp.rotationZ = (s16)-tmp.rotationZ;
+                }
+                joint.rotationX = tmp.rotationX;
+                joint.rotationY = tmp.rotationY;
+                joint.rotationZ = tmp.rotationZ;
+            } else {
+                joint.rotationX = tmp.rotationX;
+                joint.rotationY = tmp.rotationY;
+                joint.rotationZ = tmp.rotationZ;
+            }
+        }
     }
 
     dirty = 0;
@@ -199,12 +520,12 @@ s32 TransformFlip::FindBracket(const u8* rawBase, u32 keyTimesOff, s32 numKeys, 
     const u8* times = rawBase + byteOff;
 
     // Check bounds
-    s32 firstTimeReal = ((s32)times[0]) << 16;
+    s32 firstTimeReal = GetUnwrappedTime(times, 0) << 16;
     if (frameReal <= firstTimeReal) {
         return 0;
     }
 
-    s32 lastTimeReal = ((s32)times[numKeys - 1]) << 16;
+    s32 lastTimeReal = GetUnwrappedTime(times, numKeys - 1) << 16;
     if (frameReal >= lastTimeReal) {
         return numKeys - 1;
     }
@@ -212,8 +533,8 @@ s32 TransformFlip::FindBracket(const u8* rawBase, u32 keyTimesOff, s32 numKeys, 
     // Linear search for bracket (numKeys is typically small).
     // Match PSX edge handling: exact key boundary advances to next key.
     for (s32 i = 0; i < numKeys - 1; i++) {
-        s32 t0Real = ((s32)times[i]) << 16;
-        s32 t1Real = ((s32)times[i + 1]) << 16;
+        s32 t0Real = GetUnwrappedTime(times, i) << 16;
+        s32 t1Real = GetUnwrappedTime(times, i + 1) << 16;
         if (frameReal >= t0Real && frameReal < t1Real) {
             return i;
         }
@@ -289,8 +610,9 @@ void TransformFlip::EvalRotChannel(const TransformAnim::Channel& ch, STreeJoint&
 
         // Get bracket key times for interpolation fraction
         u32 timesByteOff = keyTimesOff * 4;
-        s32 t0 = (s32)*(raw + timesByteOff + bracket);
-        s32 t1 = (s32)*(raw + timesByteOff + (bracket + 1));
+        const u8* times = raw + timesByteOff;
+        s32 t0 = GetUnwrappedTime(times, bracket);
+        s32 t1 = GetUnwrappedTime(times, bracket + 1);
         s32 timeDelta = t1 - t0;
         if (timeDelta <= 0) {
             joint.rotationX = (s16)rx0;
@@ -328,8 +650,8 @@ void TransformFlip::EvalRotChannel(const TransformAnim::Channel& ch, STreeJoint&
         if (numKeys == 1 || bracket >= (s32)numKeys - 1) {
             val = p3dReadS16LE(raw + keyValsByteOff + bracket * 2);
         } else {
-            s32 t0 = (s32)times[bracket];
-            s32 t1 = (s32)times[bracket + 1];
+            s32 t0 = GetUnwrappedTime(times, bracket);
+            s32 t1 = GetUnwrappedTime(times, bracket + 1);
             s32 timeDelta = t1 - t0;
             if (timeDelta <= 0) {
                 val = p3dReadS16LE(raw + keyValsByteOff + bracket * 2);
@@ -422,8 +744,9 @@ void TransformFlip::EvalTransChannel(const TransformAnim::Channel& ch, STreeJoin
         s32 z1 = (s32)p3dReadS16LE(raw + vOff1 + 4);
 
         u32 timesByteOff = keyTimesOff * 4;
-        s32 t0 = (s32)*(raw + timesByteOff + bracket);
-        s32 t1 = (s32)*(raw + timesByteOff + (bracket + 1));
+        const u8* times = raw + timesByteOff;
+        s32 t0 = GetUnwrappedTime(times, bracket);
+        s32 t1 = GetUnwrappedTime(times, bracket + 1);
         s32 timeDelta = t1 - t0;
         if (timeDelta <= 0) {
             writeTranslation(x0, y0, z0);

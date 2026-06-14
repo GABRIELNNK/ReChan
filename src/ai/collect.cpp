@@ -83,8 +83,10 @@ static bool Collectible_ResolveSequenceAnimFrame(SequenceAnim* sequence,
 
     s32 sequenceFrame = frame;
     for (s32 depth = 0; depth < COLLECT_MISC_ANIM_MAX_DEPTH; depth++) {
-        const u32 partIndex = (static_cast<u32>(sequenceFrame) >> 8) & 0xFFu;
-        const s32 partFrame = sequenceFrame & 0xFF;
+        const u32 frameBits = sequence->frameBits;
+        const u32 frameMask = (frameBits >= 31u) ? 0x7FFFFFFFu : ((1u << frameBits) - 1u);
+        const u32 partIndex = static_cast<u32>(sequenceFrame) >> frameBits;
+        const s32 partFrame = sequenceFrame & static_cast<s32>(frameMask);
         if (partIndex >= sequence->numParts) {
             return false;
         }

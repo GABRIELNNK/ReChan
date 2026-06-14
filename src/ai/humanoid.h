@@ -416,6 +416,8 @@ public:
     void HandleCollisionSound(s32 hitType);
     void AnalyzeMesh(DBRoot* root) override;
 
+    void Teleport(const LVector& newPos);
+
     virtual void SetActionState(u32 state, s32 param);
     virtual void ProcessAction();
     virtual void ProcessControl();

@@ -1,4 +1,5 @@
 #include "gen/colsect.h"
+#include "pc/log.h"
 #include "gen/blockmgr.h"
 #include "gen/colwall.h"
 #include "gen/colfloor.h"

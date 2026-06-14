@@ -12,6 +12,7 @@
 #include "gen/director.h"
 #include "gen/game.h"
 #include "gen/camera.h"
+#include "gen/animstruct.h"
 #include "gen/model.h"
 #include "gen/path.h"
 #include "gen/weffect.h"
@@ -984,9 +985,9 @@ void Behaviour::PaulDMS(Behaviour* self) {
         bool atAnimEnd = false;
         Model* model = owner->model ? static_cast<Model*>(owner->model) : nullptr;
         if (model && model->animStructure) {
-            const u8* animBytes = reinterpret_cast<const u8*>(model->animStructure);
-            const s16 currentFrameHi = *reinterpret_cast<const s16*>(animBytes + 0x3E);
-            const s16 endFrameHi = *reinterpret_cast<const s16*>(animBytes + 0x46);
+            AnimStructure* anim = static_cast<AnimStructure*>(model->animStructure);
+            const s16 currentFrameHi = static_cast<s16>(static_cast<u32>(anim->currentFrame) >> 16);
+            const s16 endFrameHi = static_cast<s16>(static_cast<u32>(anim->endFrame) >> 16);
             atAnimEnd = (currentFrameHi == endFrameHi);
         }
 

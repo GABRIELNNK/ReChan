@@ -84,6 +84,9 @@ public:
 
     // +24
     TransformAnim* animation = nullptr;
+    void* rawAnimation = nullptr;
+    // Non-null when the animation resource contains multiple concatenated blocks.
+    CharSequenceAnim* sequence = nullptr;
     // +28
     TransformFlip* flip = nullptr;
     // +32

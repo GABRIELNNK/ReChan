@@ -59,6 +59,8 @@ public:
     void DeleteAsyncAnim();
     LVector GetCameraVector() const;
     bool HasAsyncAnimLoaded() const { return asyncAnim != nullptr; }
+    bool HasActiveCameraAnim() const { return cameraAnim != nullptr; }
+    bool IsCameraAnimComplete() const;
 
     // Accessors
     tMatrixCamera* GetP3DCamera() { return &p3dCamera; }
@@ -208,6 +210,7 @@ private:
 
     // +468: camera anim (AnimStructure*, nullptr = use angle-based path in Update)
     AnimStructure* cameraAnim = nullptr;
+    bool pendingDeleteAsyncAnim = false;
 
     // +472: flags bitfield
     // bit 0: path-follow position mode (1 = skip position interpolation in Move)

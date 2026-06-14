@@ -1388,7 +1388,9 @@ void Director::Process() {
                 break;
 
             case DirectorOpcode::EndScript:
-                // PSX: if scriptState==SetScript (534), mark level as visited
+                // PSX Process case 2 (0x8003C298): only the visitedLevels bit is gated on
+                // scriptState==SetScript (534); the teardown itself is unconditional, so
+                // EndScript also terminates SetCodeSnip (537) NIS/volume scripts.
                 if (scriptState == ToScriptStateValue(DirectorScriptState::SetScript) && g_game && g_game->GetWorld()) {
                     const s32 levelID = GetCurrentWorldLevelID();
                     if (levelID >= 0 && levelID < 31) {
@@ -1397,9 +1399,7 @@ void Director::Process() {
                 }
                 scriptPtr = nullptr;
                 scriptState = ToScriptStateValue(DirectorScriptState::Idle);
-                // PSX: clear director-active flags on all move-list things
                 ClearDirectorFlagsOnMoveList();
-                // PSX: destroy directorSound if present
                 if (directorSound) {
                     delete directorSound;
                     directorSound = nullptr;
@@ -1505,10 +1505,6 @@ void Director::Process() {
                 Humanoid* humanoid = FindHumanoidInHumanoidListByScriptRef(thingRef);
                 if (humanoid) {
                     humanoid->SetActionState(static_cast<u32>(requestedState), 0);
-                }
-                else {
-                    // PSX: logs "Can't find thing to face" if lookup fails.
-                    LOG("[Director] SetHumanoidAction unresolved ref=0x%08X state=%d", thingRef, requestedState);
                 }
 
                 scriptPtr += 1;
@@ -1684,8 +1680,16 @@ void Director::Process() {
             }
 
             case DirectorOpcode::SetCheckpointData:
-                // PSX: dword_800D6F90 = scriptPtr[1] (checkpoint data value)
+                // PSX: dword_800D6F90 = scriptPtr[1]. On PSX 0x800D6F90 is BOTH a
+                // variable and the argument word of the shared cleanup script's
+                // SetCheckpointByUid at 0x800D6F8C (self-modifying script!). Levels
+                // poke their landing-checkpoint CRC here, call the cleanup, then
+                // restore the default. Write through to the blob word so the
+                // cleanup consumes the live value like PSX does.
                 g_checkpointDataValue = scriptPtr[1];
+                if (s32* liveWord = ResolveDirectorScriptVA(0x800D6F90u)) {
+                    *liveWord = scriptPtr[1];
+                }
                 scriptPtr += 2;
                 break;
 
@@ -1841,10 +1845,11 @@ void Director::Process() {
 
             case DirectorOpcode::ClearGlobalEffectRef:
                 scriptPtr += 1;
-                // PSX writes player ground stand height to 0x80000001 here.
-                if (Player::s_player) {
-                    Player::s_player->groundStandHeight = static_cast<s32>(0x80000001u);
-                }
+                // PSX case 0x29 writes 0x80000001 to gp+0xB8 = nisPointY (the same
+                // global trio gfGoToVol fills), invalidating the NIS point Y. The
+                // previous host translation wrote the player's groundStandHeight
+                // instead, corrupting fall-damage ground tracking mid-NIS.
+                nisPointY = static_cast<s32>(0x80000001u);
                 break;
 
             case DirectorOpcode::DropPickup:
@@ -2169,6 +2174,9 @@ void Director::Process() {
                     if (Player::s_player) {
                         Player::s_player->pos = wpn->pos;
                         Player::s_player->homePos = wpn->pos;
+                        if (wpn->parValue != 9999) {
+                            Player::s_player->blockNum = static_cast<u16>(wpn->parValue);
+                        }
                     }
                 }
                 else {
@@ -2292,7 +2300,6 @@ s32 Director::TimerStep() {
 
     const s32 duration = scriptPtr[1];
     if (duration == -1) {
-        // Reset timer - records current frame as start
         timerTarget = 0;
         timerStart = GetDirectorFrameCounter();
         scriptPtr += 2;
@@ -2489,6 +2496,10 @@ void Director::ProcessCameraFunc() {
         case DirectorCameraCmd::DeleteAsyncAnim:
             if (camera) {
                 camera->DeleteAsyncAnim();
+                if (camera->HasActiveCameraAnim() && !camera->IsCameraAnimComplete()) {
+                    scriptPtr -= 2;
+                    field68 = 1;
+                }
             }
             break;
 
@@ -2715,6 +2726,7 @@ void Director::ProcessHumanoidFunc() {
 
             case DirectorHumanoidCmd::StandFacingZero:
                 if (humanoid) {
+                    humanoid->flags2 &= ~0x70u;
                     humanoid->SetActionState(AS_NIS_MODE, 0);
                     humanoid->flags &= ~0x800u;
                     humanoid->orientation.y = 0;
@@ -2763,6 +2775,9 @@ void Director::ProcessHumanoidFunc() {
                 break;
 
             case DirectorHumanoidCmd::SetPositionByCurrent:
+                // PSX DIRECTOR.CPP:3987 writes pos/homePos directly (pos.y - 400).
+                // It does NOT reset velocity or re-run CheckThingSwitches, so this
+                // must not call Teleport (which would re-fire death volumes mid-NIS).
                 if (humanoid) {
                     LVector position = humanoid->pos;
                     position.y -= 400;
@@ -3223,24 +3238,7 @@ s32 Director::WaitAnimationDoneStep() {
         const s32 loopCount = anim ? anim->loopCount : 0;
         const s32 done = (loopCount != 0) ? 1 : 0;
 
-        // Diagnostic: log once on first block, and always on fire
-        static s32* s_lastWaitPtr = nullptr;
-        if (scriptPtr != s_lastWaitPtr) {
-            s_lastWaitPtr = scriptPtr;
-            LOG("[WaitAnimDone] BEGIN thingRef=0x%08X animEnum=%d loopCount=%d currentFrame=0x%X endFrame=0x%X",
-                thingRef,
-                anim ? anim->animEnum : -1,
-                loopCount,
-                anim ? anim->currentFrame : -1,
-                anim ? anim->endFrame : -1);
-        }
         if (done) {
-            LOG("[WaitAnimDone] FIRE  thingRef=0x%08X animEnum=%d loopCount=%d currentFrame=0x%X endFrame=0x%X",
-                thingRef,
-                anim ? anim->animEnum : -1,
-                loopCount,
-                anim ? anim->currentFrame : -1,
-                anim ? anim->endFrame : -1);
             scriptPtr += 2;
             return 1;
         }
@@ -3271,9 +3269,6 @@ void Director::ProcessDynamicAnimFunc() {
         const bool hasAnim =
             (g_characterManager && (g_characterManager->GetAnimation(thingType, animEnum) != nullptr));
         if (hasAnim) {
-            if (animEnum == 361) {
-                LOG("[DynamicAnimWaitLoaded] PASSED type=%u anim=361", thingType);
-            }
             field68 = 0;
         }
         else {
@@ -3289,15 +3284,7 @@ void Director::ProcessDynamicAnimFunc() {
         const s32 animEnum = cmd[2];
         scriptPtr = cmd + 3;
         if (g_characterManager) {
-            if (animEnum == 361) {
-                LOG("[DynamicAnimLoad] type=%u anim=361 (before)", thingType);
-            }
             g_characterManager->LoadAnimationBatch(thingType, animEnum, nullptr);
-            if (animEnum == 361) {
-                LOG("[DynamicAnimLoad] type=%u anim=361 loaded=%d",
-                    thingType,
-                    g_characterManager->GetAnimation(thingType, animEnum) ? 1 : 0);
-            }
         }
         return;
     }
@@ -3321,6 +3308,8 @@ void Director::ProcessDynamicAnimFunc() {
     }
 
     if (opcode == DirectorOpcode::DynamicAnimUnload) {
+        // PSX ProcessDynamicAnimFunc case 22 only calls UnloadAnimation(0, type, anim).
+        // It does NOT touch humanoid flip state.
         const u32 thingType = static_cast<u32>(cmd[1]);
         const s32 animEnum = cmd[2];
         scriptPtr = cmd + 3;
@@ -3577,5 +3566,3 @@ void DrawDirectorOverlays(Handler* h) {
         }
     }
 }
-
-
