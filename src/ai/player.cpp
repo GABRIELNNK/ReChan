@@ -69,6 +69,14 @@ static constexpr s32 g_hardFallThreshold = -8192;
 
 static s32 GetWeaponPickupDialog(s32 weaponType);
 
+static void RemovePlayerMirrorFlag(Model* model) {
+    SModel* sm = static_cast<SModel*>(model);
+    DrawableSTree* drawable = sm && sm->drawable ? static_cast<DrawableSTree*>(sm->drawable) : nullptr;
+    if (drawable && (drawable->mirrorFlags & 1u)) {
+        sm->MirrorTree();
+    }
+}
+
 // PSX: playerStraif animation data at 0x800D91E0
 // Array of [animIndex, loopType] pairs for strafe animations based on movement direction
 // Angle difference = ClipAngle360(orientation.y - faceAngle) determines which animation plays
@@ -476,8 +484,10 @@ void Player::SetActionState(u32 state, s32 param) {
             turnAroundFlag = 0;
             field348 = 8;
             SetIdleAnimation(param, 1);
-            // Keep the drawable mirror state sticky so subsequent animation players
-            // inherit the same facing after a flipped one-shot completes.
+            if (model) {
+                // PSX: if drawable->mirrorFlags bit 0 is set, MirrorTree toggles it off.
+                RemovePlayerMirrorFlag(static_cast<Model*>(model));
+            }
             field616 = 0;
             idleTimer = 0;
             field420 = nullptr;
@@ -666,7 +676,8 @@ void Player::SetActionState(u32 state, s32 param) {
             if (model) {
                 Model* m = static_cast<Model*>(model);
                 m->SetAnim(PLAYER_ANIM_STRAFE, param, 1, 0);
-                // Preserve mirrored animation state across chained roll/stand anims.
+                // PSX case 12: un-mirror if mirrored (model->MirrorTree via vtable+80).
+                RemovePlayerMirrorFlag(m);
             }
             field488 = 0;
             actionState = (s32)state;
