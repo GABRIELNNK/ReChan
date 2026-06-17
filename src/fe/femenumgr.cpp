@@ -508,12 +508,9 @@ void feMenuMgr::QueryInput(bool processInput) {
     buttons = FilterHostMenuButtons(buttons);
 
     if ((buttons & PsxPad::Start) != 0) {
-        hdMenu* levelMenu = FindMenu(HASH_LEVEL_SCREEN);
-        if (curMenu != levelMenu) {
-            state = 8;
-            if (curMenu) {
-                // PSX: calls curMenu vtable+36 (deselect)
-            }
+        state = 8;
+        if (curMenu) {
+            // PSX: calls curMenu vtable+36 (deselect)
         }
     }
 
