@@ -3,6 +3,11 @@
 #include "snd/rsdformat.h"
 #include "snd/hmndsnd.h"
 #include "xclib/xcfile.h"
+#ifdef MOD_LOADER
+#include "extra/modloader.h"
+#include <cctype>
+#include <string>
+#endif
 
 // PSX: gp-relative global
 Sound* g_sound = nullptr;
@@ -21,6 +26,18 @@ static u8* ReadFileBytes(const char* path, u32& outSize) {
     }
     return data;
 }
+
+#ifdef MOD_LOADER
+static std::string FagPathToOverrideName(const char* fagPath) {
+    std::string name = fagPath;
+    const size_t slash = name.find_last_of("/\\");
+    if (slash != std::string::npos) name.erase(0, slash + 1);
+    const size_t dot = name.rfind('.');
+    if (dot != std::string::npos) name.erase(dot);
+    for (char& c : name) c = (char)std::tolower((unsigned char)c);
+    return name;
+}
+#endif
 
 // PSX: __5Sound (SOUND.CPP, 0x80059794)
 Sound::Sound() {
@@ -81,6 +98,32 @@ void Sound::SetupSound() {
             if (j < bank.sampleDescs.size()) {
                 banks[i].descriptorWord2[j] = bank.sampleDescs[j].flags;
             }
+
+#ifdef MOD_LOADER
+            // Mod override layout matches the asset exporter's own output:
+            // sounds/rs0000/sample00.wav -> scope "rs0000", name "sample00".
+            // Checked before the empty-sample skip below so a mod can also
+            // add a sound at a slot the original bank left empty.
+            {
+                char bankName[16];
+                snprintf(bankName, sizeof(bankName), "rs%04x", i);
+                char sampleName[16];
+                snprintf(sampleName, sizeof(sampleName), "sample%02u", j);
+
+                std::vector<s16> overridePcm;
+                u32 overrideRate = 0, overrideChannels = 0;
+                if (ModLoader::Instance().GetSoundOverridePCM(
+                        bankName, sampleName, overridePcm, overrideRate, overrideChannels)) {
+                    const u32 overrideFrames = (u32)overridePcm.size() / overrideChannels;
+                    banks[i].samples[j] = AudioEngine::LoadSample(
+                        overridePcm.data(), overrideFrames, overrideRate, overrideChannels);
+                    if (banks[i].samples[j] != AUDIO_SAMPLE_INVALID) {
+                        totalSamples++;
+                    }
+                    continue;
+                }
+            }
+#endif
 
             if (bank.pcmSamples[j].empty()) continue;
             u32 numFrames = (u32)bank.pcmSamples[j].size();
@@ -150,8 +193,40 @@ AudioSample Sound::GetBankSample(u32 bankIndex, u32 sampleIndex) const {
     return banks[bankIndex].samples[sampleIndex];
 }
 
+#ifdef MOD_LOADER
+// Shared by both PlayMusicTrack variants: looks up a mod override WAV named
+// after the FAG's filename stem (matches the asset exporter's own output,
+// e.g. "title.wav" for SOUND/MUSIC/TITLE.FAG) and, if found, loads and plays
+// it directly through the dedicated music mix. Returns true if it played.
+bool Sound::TryPlayMusicOverride(const char* fagPath, f32 volume) {
+    std::vector<s16> overridePcm;
+    u32 overrideRate = 0, overrideChannels = 0;
+    const std::string overrideName = FagPathToOverrideName(fagPath);
+    if (!ModLoader::Instance().GetSoundOverridePCM(
+            nullptr, overrideName.c_str(), overridePcm, overrideRate, overrideChannels)) {
+        return false;
+    }
+
+    StopMusic();
+    const u32 overrideFrames = (u32)overridePcm.size() / overrideChannels;
+    musicSample = AudioEngine::LoadSample(overridePcm.data(), overrideFrames, overrideRate, overrideChannels);
+    if (musicSample == AUDIO_SAMPLE_INVALID) return false;
+
+    musicVolume = volume;
+    f32 playVol = musicMuted ? 0.0f : volume;
+    musicVoice = AUDIO_VOICE_INVALID;
+    musicPlaying = AudioEngine::PlayMusicSample(musicSample, playVol, true);
+    LOG("Sound: playing mod override '%s' for '%s' (%u frames)", overrideName.c_str(), fagPath, overrideFrames);
+    return musicPlaying;
+}
+#endif
+
 // PC: music - decode FAG to PCM, load as AudioSample, play through the dedicated music mix
 bool Sound::PlayMusicTrackSong(const char* fagPath, u32 songIndex, f32 volume) {
+#ifdef MOD_LOADER
+    if (TryPlayMusicOverride(fagPath, volume)) return true;
+#endif
+
     u32 fileSize = 0;
     u8* fileData = ReadFileBytes(fagPath, fileSize);
     if (!fileData) { return false; }
@@ -174,6 +249,10 @@ bool Sound::PlayMusicTrackSong(const char* fagPath, u32 songIndex, f32 volume) {
 }
 
 bool Sound::PlayMusicTrack(const char* fagPath, f32 volume) {
+#ifdef MOD_LOADER
+    if (TryPlayMusicOverride(fagPath, volume)) return true;
+#endif
+
     u32 fileSize = 0;
     u8* fileData = ReadFileBytes(fagPath, fileSize);
     if (!fileData) {

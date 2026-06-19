@@ -22,6 +22,7 @@ project "rechan"
     files {
         "src/**.h",
         "src/**.cpp",
+        "vendor/cgltf/cgltf.h",
     }
 
     filter "system:windows"
@@ -33,6 +34,7 @@ project "rechan"
         "vendor/libp3d",
         "vendor/libp3d/vendor/imgui",
         "vendor/miniaudio",
+        "vendor/cgltf",
     }
 
     links {

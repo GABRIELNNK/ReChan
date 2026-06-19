@@ -109,6 +109,9 @@ Anzeigeeinstellungen
 [FE_SND]
 Audioeinstellungen
 
+[FE_CRE]
+Mitwirkende
+
 [FE_BCK]
 Zurueck
 
@@ -255,6 +258,9 @@ Taste oder Maus druecken
 
 [FE_HPADJ]
 <ACT:MENU_LEFT>/<ACT:MENU_RIGHT> Anpassen
+
+[FE_HPSCR]
+<ACT:MENU_UP>/<ACT:MENU_DOWN> Scrollen
 
 [FE_HPSET]
 <ACT:MENU_CONFIRM> Setzen
@@ -441,6 +447,120 @@ ABGESCHLOSSEN
 
 [FE_DNCM]
 NICHT ABGESCHLOSSEN
+
+#
+# Auto Updater
+#
+[FE_UPD]
+Spiel-Update
+
+[FE_UPD_CHK]
+Suche nach Updates...
+
+[FE_UPD_UTD]
+Du bist auf dem neuesten Stand!
+
+[FE_UPD_ERR]
+Update-Pruefung fehlgeschlagen: %s
+
+[FE_UPD_CUR]
+Aktuelle Version: %s
+
+[FE_UPD_LAT]
+Neue Version verfuegbar: %s
+
+[FE_UPD_NOTES]
+Neuigkeiten
+
+[FE_UPD_NOCHANGE]
+Kein Changelog verfuegbar.
+
+[FE_UPD_DL]
+Update herunterladen
+
+[FE_UPD_RMD]
+Spaeter erinnern
+
+[FE_UPD_CHKNOW]
+Nach Updates suchen
+
+[FE_UPD_PRG]
+Wird heruntergeladen... %d%%
+
+[FE_UPD_CNL]
+Abbrechen
+
+[FE_UPD_RDY]
+Update heruntergeladen und bereit zur Installation.
+
+[FE_UPD_INST]
+Installieren & Neustart
+
+[FE_UPD_INSTG]
+Update wird installiert...
+
+[FE_UPD_AVAIL]
+Update verfuegbar
+
+#
+# Asset Extraction
+#
+[FE_ASSET_TITLE]
+Spieldateien
+
+[FE_ASSET_MISS]
+PSX-Spieldateien wurden nicht gefunden. Lege dein Original-Disc-Image (.bin oder .iso) in den Ordner "discimage" und klicke dann auf Dateien extrahieren.
+
+[FE_ASSET_EXT]
+Dateien extrahieren
+
+[FE_ASSET_RESCAN]
+Erneut suchen
+
+[FE_ASSET_SCAN]
+Suche nach Disc-Image...
+
+[FE_ASSET_NONE]
+Keine .bin- oder .iso-Datei im Ordner "discimage" gefunden. Lege dein Disc-Image dort ab und versuche es erneut.
+
+[FE_ASSET_MULTI]
+Mehrere .bin/.iso-Dateien in "discimage" gefunden. Bitte nur eine Datei behalten und erneut versuchen.
+
+[FE_ASSET_ONE]
+Disc-Image gefunden. Bereit zum Extrahieren.
+
+[FE_ASSET_EXTG]
+Spieldateien werden extrahiert...
+
+[FE_ASSET_ERR]
+Extraktion fehlgeschlagen: %s
+
+#
+# Mods und Cheats
+#
+[FE_MODS]
+Mods
+
+[FE_MOD_NONE]
+Keine Mods installiert
+
+[FE_CHEATS]
+Cheats
+
+[FE_CH_DRAG]
+Alle Drachen:
+
+[FE_CH_LEVL]
+Alle Level:
+
+[FE_CH_GOD]
+Gottmodus:
+
+[FE_CH_PNCH]
+One Punch Man:
+
+[FE_CH_HVN]
+Himmelfahrt:
 
 #
 # PSX overrides

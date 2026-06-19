@@ -5,6 +5,9 @@
 #include "gen/world.h"
 #include "gen/scoremgr.h"
 #include "ai/player.h"
+#if NEW_CHEATS
+#include "extra/cheats.h"
+#endif
 #include <filesystem>
 #include <ctime>
 #include <cstdio>
@@ -257,6 +260,9 @@ bool SaveGameLoadSlot(s32 slotIndex) {
         return false;
     }
 
+#if NEW_CHEATS
+    ResetCheats();
+#endif
     ApplyLoadedScoreState(blob);
 
     s_pendingLevelIndex = blob.levelIndex;

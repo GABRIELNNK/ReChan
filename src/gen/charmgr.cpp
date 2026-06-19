@@ -1,4 +1,4 @@
-#include "common.h"
+﻿#include "common.h"
 #include "gen/charmgr.h"
 #include "gen/model.h"
 #include "gen/levelmgr.h"
@@ -18,12 +18,54 @@
 #include "p3d/ramtexanim.h"
 #include "gen/ccfile.h"
 #include "gen/paramanim.h"
+#include "extra/modloader.h"
+#include "extra/gltfloader.h"
+#include "extra/realtexture.h"
+#include "pc/log.h"
 #include <algorithm>
+
+#ifdef REAL_TEXTURE_RENDERING
+// Registers a real-texture entry for a named VRAM-rect texture, preferring a
+// ModLoader override (at its own native resolution) and falling back to
+// decoding the original data already uploaded into world's VRAM (native PSX
+// resolution -- no quality gain, just routed through the same pipeline).
+static void RegisterRealTexture(World* world, const char* scope, const char* name,
+                                 u16 tpage, u16 cba,
+                                 float offsetX, float offsetY, float sizeX, float sizeY) {
+    if (!world) return;
+
+#ifdef MOD_LOADER
+    std::vector<u8> overrideRgba;
+    int overrideW = 0, overrideH = 0;
+    if (ModLoader::Instance().GetTextureOverrideRGBA(scope, name, overrideRgba, overrideW, overrideH)) {
+        RealTextureRegistry::Instance().Register(tpage, cba, overrideRgba.data(), overrideW, overrideH,
+                                                  offsetX, offsetY, sizeX, sizeY);
+        return;
+    }
+#endif
+
+    const int w = static_cast<int>(sizeX);
+    const int h = static_cast<int>(sizeY);
+    const int px0 = static_cast<int>(offsetX);
+    const int py0 = static_cast<int>(offsetY);
+    if (w <= 0 || h <= 0 || w > 256 || h > 256 || px0 < 0 || py0 < 0 || px0 + w > 256 || py0 + h > 256) return;
+
+    std::vector<u8> page(256 * 256 * 4);
+    world->GetVRAM().DecodePage(tpage, cba, page.data());
+    std::vector<u8> crop(static_cast<size_t>(w) * h * 4);
+    for (int row = 0; row < h; row++) {
+        memcpy(crop.data() + static_cast<size_t>(row) * w * 4,
+               page.data() + static_cast<size_t>(py0 + row) * 256 * 4 + static_cast<size_t>(px0) * 4,
+               static_cast<size_t>(w) * 4);
+    }
+    RealTextureRegistry::Instance().Register(tpage, cba, crop.data(), w, h, offsetX, offsetY, sizeX, sizeY);
+}
+#endif // REAL_TEXTURE_RENDERING
 
 // PSX: CharDataLoadCallback loads character textures into PSX VRAM via P3DLoad.
 // PC: parse the 0xFF04/0x6008 chunks and upload raw u16 data to the World's
 // PsxVRAM, matching PSX behavior (textures go into VRAM for tpage/cba lookup).
-static void P3DLoadTextures(const u8* data, u32 size) {
+static void P3DLoadTextures(const u8* data, u32 size, const char* textureScope = nullptr) {
     if (!data || size < 6) return;
 
     World* world = g_game ? g_game->GetWorld() : nullptr;
@@ -36,6 +78,16 @@ static void P3DLoadTextures(const u8* data, u32 size) {
 
     u32 cpos = 6;
     u32 cend = (rootSize < size) ? rootSize : size;
+
+#if defined(MOD_LOADER) || defined(REAL_TEXTURE_RENDERING)
+    // CLUT chunks (e.g. "jeans5 CLUT") always precede their indexed data chunk
+    // (e.g. "jeans5") within the stream. Remember each CLUT's VRAM rect by base
+    // name so the matching data chunk can re-quantize+repaint (or register a
+    // real-texture entry for) both as a pair.
+    struct PendingClutRect { s16 rx, ry, rw, rh; };
+    std::unordered_map<std::string, PendingClutRect> pendingCluts;
+#endif
+
     while (cpos + 6 <= cend) {
         u16 chunkId = data[cpos] | (data[cpos + 1] << 8);
         u32 chunkSize = data[cpos + 2] | (data[cpos + 3] << 8) |
@@ -49,7 +101,11 @@ static void P3DLoadTextures(const u8* data, u32 size) {
             // PString: u8 len + chars
             if (p >= dend) { cpos += chunkSize; continue; }
             u8 nameLen = data[p++];
+            std::string texName(reinterpret_cast<const char*>(data + p), nameLen);
             p += nameLen;
+            // PStrings may be padded with trailing nulls/spaces for alignment.
+            while (!texName.empty() && (texName.back() == ' ' || texName.back() == '\0'))
+                texName.pop_back();
 
             // RECT16: s16 x, y, w, h + u32 type
             if (p + 12 > dend) { cpos += chunkSize; continue; }
@@ -59,10 +115,72 @@ static void P3DLoadTextures(const u8* data, u32 size) {
             s16 rh = (s16)(data[p] | (data[p + 1] << 8)); p += 2;
             p += 4; // skip type
 
-            // Upload raw pixel data to VRAM
+            // Upload raw pixel data to VRAM, then repaint if a mod overrides this named texture
             if (rw > 0 && rh > 0 && rw <= 1024 && rh <= 512 &&
                 p + (u32)(rw * rh * 2) <= dend) {
                 world->UploadToVRAM(rx, ry, rw, rh, data + p);
+
+#if defined(MOD_LOADER) || defined(REAL_TEXTURE_RENDERING)
+                static constexpr const char* kClutSuffix = " CLUT";
+                const size_t suffixPos = texName.size() >= 5 ? texName.size() - 5 : std::string::npos;
+                const bool isClut = suffixPos != std::string::npos && texName.compare(suffixPos, 5, kClutSuffix) == 0;
+
+                if (isClut) {
+                    pendingCluts[texName.substr(0, suffixPos)] = PendingClutRect{ rx, ry, rw, rh };
+                }
+                else {
+                    auto clutIt = pendingCluts.find(texName);
+                    if (clutIt != pendingCluts.end()) {
+                        const PendingClutRect& clutRect = clutIt->second;
+                        const s16 paletteColorCount = clutRect.rw * clutRect.rh;
+#ifdef MOD_LOADER
+                        std::vector<u16> clutOverride, indexOverride;
+                        if (ModLoader::Instance().GetIndexedTextureOverride(
+                                textureScope, texName.c_str(), rw, rh, paletteColorCount,
+                                clutOverride, indexOverride)) {
+                            world->UploadToVRAM(clutRect.rx, clutRect.ry, clutRect.rw, clutRect.rh,
+                                                 reinterpret_cast<const u8*>(clutOverride.data()));
+                            world->UploadToVRAM(rx, ry, rw, rh, reinterpret_cast<const u8*>(indexOverride.data()));
+                            LOG("[ModLoader] Character texture override: %s", texName.c_str());
+                        }
+#endif
+#ifdef REAL_TEXTURE_RENDERING
+                        {
+                            const u8 ttx = static_cast<u8>(rx / 64), tty = static_cast<u8>(ry / 256);
+                            const int dep = (paletteColorCount == 256) ? 1 : 0;
+                            const u16 tpage = static_cast<u16>(ttx | (tty << 4) | (dep << 7));
+                            const u16 cba = static_cast<u16>((clutRect.rx / 16) | (clutRect.ry << 6));
+                            const int bppDiv = (paletteColorCount == 256) ? 2 : 4;
+                            RegisterRealTexture(world, textureScope, texName.c_str(), tpage, cba,
+                                                 static_cast<float>(rx - ttx * 64) * bppDiv,
+                                                 static_cast<float>(ry - tty * 256),
+                                                 static_cast<float>(rw) * bppDiv,
+                                                 static_cast<float>(rh));
+                        }
+#endif
+                    }
+                    else {
+#ifdef MOD_LOADER
+                        std::vector<u16> overridePixels;
+                        if (ModLoader::Instance().GetTextureOverridePixels(textureScope, texName.c_str(), rw, rh, overridePixels)) {
+                            world->UploadToVRAM(rx, ry, rw, rh, reinterpret_cast<const u8*>(overridePixels.data()));
+                            LOG("[ModLoader] Character texture override: %s", texName.c_str());
+                        }
+#endif
+#ifdef REAL_TEXTURE_RENDERING
+                        {
+                            const u8 ttx = static_cast<u8>(rx / 64), tty = static_cast<u8>(ry / 256);
+                            const u16 tpage = static_cast<u16>(ttx | (tty << 4) | (2 << 7));
+                            RegisterRealTexture(world, textureScope, texName.c_str(), tpage, 0,
+                                                 static_cast<float>(rx - ttx * 64),
+                                                 static_cast<float>(ry - tty * 256),
+                                                 static_cast<float>(rw),
+                                                 static_cast<float>(rh));
+                        }
+#endif
+                    }
+                }
+#endif
             }
         }
         cpos += chunkSize;
@@ -209,7 +327,8 @@ static bool PopulateCharacterOriginal(OriginalSTree* original, CharFile* cf, u32
     }
 
     CompositeAnimData* compositeAnim = nullptr;
-    STreeData* skeleton = ParseP3DStreamFull(dataBuf, dataSize, &compositeAnim, expectedCompositeNameUID);
+    STreeData* skeleton = ParseP3DStreamFull(dataBuf, dataSize, &compositeAnim, expectedCompositeNameUID,
+                                              g_charNameTable[type]);
 
     u32 primGeomSize = 0;
     u32 primGeomOffset = 0;
@@ -254,7 +373,13 @@ static bool PopulateCharacterOriginal(OriginalSTree* original, CharFile* cf, u32
             type, original->nameCRC, original->skeleton->numJoints);
     }
     else {
-        original->meshBuffer = primGeomData ? BuildPrimBufferFromRawPrimGeom(primGeomData, primGeomSize) : nullptr;
+        original->meshBuffer = primGeomData
+            ? BuildPrimBufferFromRawPrimGeom(primGeomData, primGeomSize
+#ifdef REAL_TEXTURE_RENDERING
+                                              , &original->realTexGroups
+#endif
+                                              )
+            : nullptr;
 
         LOG("[CharMgr] Populated OriginalSTree (flat) for type %u (hash 0x%08X)",
             type, original->nameCRC);
@@ -814,6 +939,39 @@ void CharacterManager::CloseCharacter(u32 type) {
 // PSX: Full async CD pipeline. PC: synchronous file read from .RR.
 // Reuses an existing NPC slot, while player type 0 still reloads slot 0 to refresh Jackie resources.
 void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
+#ifdef MOD_LOADER
+    {
+        const char* characterName = g_charNameTable[type];
+        std::string scope = characterName ? characterName : "";
+        std::transform(scope.begin(), scope.end(), scope.begin(),
+            [](char c) { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); });
+        const std::string* modPath = ModLoader::Instance().FindModelOverridePath(
+            scope.c_str(), scope.c_str());
+        if (modPath) {
+            OriginalSTree* modded = GLTFLoader::LoadSTree(modPath->c_str());
+            if (modded && modded->meshBuffer) {
+                LOG("[ModLoader] Using modded model for %s: %s", characterName, modPath->c_str());
+                s32 slotIdx = (type == 0) ? 0 : FindEmptySlot();
+                if (slotIdx >= 0) {
+                    slots[slotIdx].thingType = type;
+                    slots[slotIdx].charFile = CharFile::Find(type);
+                    if (slots[slotIdx].charFile) slots[slotIdx].charFile->AddRef();
+                    slots[slotIdx].model = modded;
+                    memset(slots[slotIdx].animIndexTable, 0xFF, CharSlot::ANIM_TABLE_SIZE);
+                    if (g_levelManager) {
+                        modded->nameCRC = p3dHash(characterName);
+                        modded->SetStoreID(type == 0 ? 0 : 2);
+                        g_levelManager->AddOriginal(modded, 0);
+                    }
+                    if (callback) callback->Callback();
+                    return;
+                }
+            }
+            delete modded;
+            LOG("[ModLoader] Character GLB rejected; using original: %s", modPath->c_str());
+        }
+    }
+#endif
     MARKFUNCTION(0x80039830);
 
     CharFile* cf = CharFile::Find(type);
@@ -1004,7 +1162,8 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
     // character's 0x4007 composite animation definition for future suit work.
     const u32 compositeNameUID = GetCompositeAnimationNameHash(g_charNameTable[type]);
     CompositeAnimData* compositeAnim = nullptr;
-    STreeData* skeleton = ParseP3DStreamFull(dataBuf, dataSize, &compositeAnim, compositeNameUID);
+    STreeData* skeleton = ParseP3DStreamFull(dataBuf, dataSize, &compositeAnim, compositeNameUID,
+                                              g_charNameTable[type]);
     std::free(dataBuf);
 
     // PSX: CharDataLoadCallback post-processing:
@@ -1067,7 +1226,11 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
                 // Fallback: flat mesh without skeleton
                 pddiPrimBuffer* meshBuf = nullptr;
                 if (primGeomData) {
-                    meshBuf = BuildPrimBufferFromRawPrimGeom(primGeomData, primGeomSize);
+                    meshBuf = BuildPrimBufferFromRawPrimGeom(primGeomData, primGeomSize
+#ifdef REAL_TEXTURE_RENDERING
+                                                              , &original->realTexGroups
+#endif
+                                                              );
                 }
                 original->meshBuffer = meshBuf;
 
@@ -1193,7 +1356,7 @@ void CharacterManager::ReloadCharacter(u32 type, s32 meshType, CharMgrCallback* 
     }
 
     // PSX: CharDataLoadCallback processes the TexturePage via P3DLoad
-    P3DLoadTextures(dataBuf, dataSize);
+    P3DLoadTextures(dataBuf, dataSize, g_charNameTable[type]);
 
     if (g_levelManager) {
         u32 nameHash = 0;
@@ -1257,7 +1420,7 @@ void CharacterManager::LoadCharTexture(u32 type) {
 
     // PSX: creates tTexLoader on stack, calls P3DLoad(loaders, texBuf, 0)
     // PC: use tP3DFileHandler to load the TexturePage resource
-    P3DLoadTextures(texBuf, texSize);
+    P3DLoadTextures(texBuf, texSize, g_charNameTable[type]);
     std::free(texBuf);
 }
 
@@ -1429,7 +1592,7 @@ void CharacterManager::LoadAnimationBatch(u32 type, s32 animEnum, CharMgrCallbac
     u8* p3dBuf = cf->ReadResource(p3dIdx, &p3dSize);
     if (p3dBuf) {
         // PSX: AnimLoadCallback creates loaders, calls P3DLoad for textures
-        P3DLoadTextures(p3dBuf, p3dSize);
+        P3DLoadTextures(p3dBuf, p3dSize, g_charNameTable[type]);
     }
 
     // PSX decodes additional animation classes here; on the current host path,

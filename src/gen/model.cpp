@@ -20,10 +20,50 @@
 #include "pddi/pddidev.h"
 #include "snd/hmndsnd.h"
 #include "pc/log.h"
+#ifdef REAL_TEXTURE_RENDERING
+#include "extra/realtexture.h"
+#endif
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
 #include <vector>
+
+// Draws a mesh buffer, using the real-texture rendering path (one bound real
+// 2D texture per material, sub-range draws) when it's enabled and the mesh
+// has grouped index ranges; otherwise falls back to the single legacy draw
+// that samples the shared PSX VRAM atlas, unchanged from before this feature.
+static void DrawTexturedMesh(pddiPrimBuffer* buffer
+#ifdef REAL_TEXTURE_RENDERING
+                              , const std::vector<RealTextureGroup>* groups
+#endif
+                              ) {
+    if (!buffer) return;
+
+#ifdef REAL_TEXTURE_RENDERING
+    // realTextureModeEnabled is the persistent user toggle (set only by the
+    // debug UI) -- never flip it here, just gate on it and manage the
+    // per-draw texture binding, clearing it afterward so unrelated draws
+    // (weffect/trail/shadows/etc, which never call SetTexture themselves)
+    // don't pick up a stale real texture left bound from this mesh.
+    if (groups && !groups->empty() && p3d::context->IsRealTextureModeEnabled()) {
+        for (const RealTextureGroup& group : *groups) {
+            const RealTextureEntry* entry = RealTextureRegistry::Instance().Find(group.tpage, group.cba);
+            if (entry && entry->texture) {
+                p3d::context->SetTexture(entry->texture);
+                p3d::context->SetRealTextureRect(entry->offsetX, entry->offsetY, entry->sizeX, entry->sizeY);
+            }
+            else {
+                p3d::context->SetTexture(nullptr);
+            }
+            p3d::context->DrawPrimBuffer(buffer, group.startIndex, group.indexCount);
+        }
+        p3d::context->SetTexture(nullptr);
+        return;
+    }
+#endif
+
+    p3d::context->DrawPrimBuffer(buffer);
+}
 
 static const u8 kStreeMirrorSwapPairs[] = {
     2, 6,
@@ -764,7 +804,11 @@ static void DrawGeoPartMesh(OriginalGeo* geo, bool applyLighting) {
         geo->meshBuffer->SetVertexData(litVerts.data(), geo->dynamicVertCount);
     }
 
-    p3d::context->DrawPrimBuffer(geo->meshBuffer);
+    DrawTexturedMesh(geo->meshBuffer
+#ifdef REAL_TEXTURE_RENDERING
+                      , &geo->realTexGroups
+#endif
+                      );
 
     if (!litVerts.empty()) {
         geo->meshBuffer->SetVertexData(geo->dynamicVerts, geo->dynamicVertCount);
@@ -1142,7 +1186,11 @@ void DrawableSTree::Display(u32 /*flags*/) {
 
         skinnedBuffer->SetVertexData(vertData.data(), skin->numVerts);
         const bool skinBlendApplied = applySkinBlendState(skin);
-        p3d::context->DrawPrimBuffer(skinnedBuffer);
+        DrawTexturedMesh(skinnedBuffer
+#ifdef REAL_TEXTURE_RENDERING
+                          , &renderSource->realTexGroups
+#endif
+                          );
         if (skinBlendApplied) {
             p3d::context->SetBlendMode(PDDI_BLEND_NONE);
         }
@@ -1161,7 +1209,11 @@ void DrawableSTree::Display(u32 /*flags*/) {
     }
     else if (renderSource->meshBuffer) {
         const bool skinBlendApplied = applySkinBlendState(renderSource->skinData);
-        p3d::context->DrawPrimBuffer(renderSource->meshBuffer);
+        DrawTexturedMesh(renderSource->meshBuffer
+#ifdef REAL_TEXTURE_RENDERING
+                          , &renderSource->realTexGroups
+#endif
+                          );
         if (skinBlendApplied) {
             p3d::context->SetBlendMode(PDDI_BLEND_NONE);
         }

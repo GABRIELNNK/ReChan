@@ -259,6 +259,9 @@ Press key or mouse
 [FE_HPADJ]
 <ACT:MENU_LEFT>/<ACT:MENU_RIGHT> Adjust
 
+[FE_HPSCR]
+<ACT:MENU_UP>/<ACT:MENU_DOWN> Scroll
+
 [FE_HPSET]
 <ACT:MENU_CONFIRM> Set
 
@@ -444,6 +447,120 @@ COMPLETED
 
 [FE_DNCM]
 NOT COMPLETED
+
+#
+# Auto Updater
+#
+[FE_UPD]
+Game Update
+
+[FE_UPD_CHK]
+Checking for updates...
+
+[FE_UPD_UTD]
+You're up to date!
+
+[FE_UPD_ERR]
+Update check failed: %s
+
+[FE_UPD_CUR]
+Current Version: %s
+
+[FE_UPD_LAT]
+New Version Available: %s
+
+[FE_UPD_NOTES]
+What's New
+
+[FE_UPD_NOCHANGE]
+No changelog available.
+
+[FE_UPD_DL]
+Download Update
+
+[FE_UPD_RMD]
+Remind Me Later
+
+[FE_UPD_CHKNOW]
+Check for Updates
+
+[FE_UPD_PRG]
+Downloading... %d%%
+
+[FE_UPD_CNL]
+Cancel
+
+[FE_UPD_RDY]
+Update downloaded and ready to install.
+
+[FE_UPD_INST]
+Install & Restart
+
+[FE_UPD_INSTG]
+Installing update...
+
+[FE_UPD_AVAIL]
+Update available
+
+#
+# Asset Extraction
+#
+[FE_ASSET_TITLE]
+Game Assets
+
+[FE_ASSET_MISS]
+PSX game assets were not found. Place your original game disc image (.bin or .iso) in the "discimage" folder, then click Extract Assets.
+
+[FE_ASSET_EXT]
+Extract Assets
+
+[FE_ASSET_RESCAN]
+Scan Again
+
+[FE_ASSET_SCAN]
+Scanning for disc image...
+
+[FE_ASSET_NONE]
+No .bin or .iso file found in the "discimage" folder. Add your disc image there and try again.
+
+[FE_ASSET_MULTI]
+Multiple .bin/.iso files found in "discimage". Please keep only one and try again.
+
+[FE_ASSET_ONE]
+Disc image found. Ready to extract.
+
+[FE_ASSET_EXTG]
+Extracting game assets...
+
+[FE_ASSET_ERR]
+Extraction failed: %s
+
+#
+# Mods and Cheats
+#
+[FE_MODS]
+Mods
+
+[FE_MOD_NONE]
+No mods installed
+
+[FE_CHEATS]
+Cheats
+
+[FE_CH_DRAG]
+All Dragons:
+
+[FE_CH_LEVL]
+All Levels:
+
+[FE_CH_GOD]
+God Mode:
+
+[FE_CH_PNCH]
+One Punch Man:
+
+[FE_CH_HVN]
+Heaven Bound:
 
 #
 # PSX overrides

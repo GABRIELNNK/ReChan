@@ -3,6 +3,11 @@
 #include "p3d/p3dmath.h"
 #include "gen/cclist.h"
 #include "gen/shadows.h"
+#include "gen/config.h"
+#ifdef REAL_TEXTURE_RENDERING
+#include "extra/realtexture.h"
+#include <vector>
+#endif
 
 // Original hierarchy (data containers stored in LevelManager):
 //   OriginalBasic -> OriginalTree -> OriginalSTree / OriginalGeo / OriginalETree
@@ -147,6 +152,11 @@ struct OriginalSTree : public OriginalBasic {
     pddiPrimBuffer* meshBuffer = nullptr;
     u32 meshVertCount = 0;
     u32 meshTriCount = 0;
+#ifdef REAL_TEXTURE_RENDERING
+    // Index-buffer ranges grouped by (tpage, cba), built once alongside
+    // meshBuffer, for the real-texture rendering path's sub-range draws.
+    std::vector<RealTextureGroup> realTexGroups;
+#endif
 
     // Skeleton data (parsed from P3D 0x6122/0x6121 chunks)
     STreeData* skeleton = nullptr;
@@ -176,6 +186,11 @@ struct OriginalSTree : public OriginalBasic {
 // PC: stores a PC-ready prim buffer built from tDynGeom polygon data.
 struct OriginalGeo : public OriginalBasic {
     pddiPrimBuffer* meshBuffer = nullptr;
+#ifdef REAL_TEXTURE_RENDERING
+    // Index-buffer ranges grouped by (tpage, cba), built once alongside
+    // meshBuffer, for the real-texture rendering path's sub-range draws.
+    std::vector<RealTextureGroup> realTexGroups;
+#endif
     tPrimGeom* primGeom = nullptr;
     s32 bboxMin[3] = {};
     s32 bboxMax[3] = {};

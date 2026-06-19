@@ -20,6 +20,9 @@
 #include "gen/scoremgr.h"
 #include "gen/game.h"
 #include "gen/world.h"
+#if NEW_CHEATS
+#include "extra/cheats.h"
+#endif
 
 // Command bit masks - derived from GameAction enum bit positions.
 // RequestAction does: commandBits |= (1 << actionID)
@@ -312,6 +315,9 @@ Player::~Player() {
 // PSX: Think__6Player (PLAYER.CPP:1155)
 void Player::Think() {
     MARKFUNCTION(0x8002FE30);
+#if NEW_CHEATS
+    if (IsCheatEnabled(CheatOption::GodMode)) health = maxHealth;
+#endif
     // PSX: CHumanoidSound think, encounter check, behaviour process,
     // ProcessAction, Move, combo tracking, input read
     if (humanoidSound) {

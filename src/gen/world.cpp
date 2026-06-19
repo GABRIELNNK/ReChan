@@ -55,6 +55,16 @@ static void UploadRawTextureToWorldVRAM(s16 x, s16 y, s16 w, s16 h, const u8* ra
 }
 #include "ai/colfight.h"
 #include "pc/log.h"
+#include "gen/config.h"
+#ifdef MOD_LOADER
+#include "extra/modloader.h"
+#include "extra/gltfloader.h"
+#include "extra/parameterdata.h"
+#include "vendor/stb/stb_image.h"
+#endif
+#ifdef REAL_TEXTURE_RENDERING
+#include "extra/realtexture.h"
+#endif
 
 #include "gen/uvdata.h"
 #include "ai/obstacle.h"
@@ -92,9 +102,12 @@ static u32 g_particleSystemChunkCount = 0;
 
 // PSX BGR555 to RGBA8
 static void PsxToRGBA(u16 c, u8& r, u8& g, u8& b, u8& a) {
-    r = static_cast<u8>((c & 0x1F) << 3);
-    g = static_cast<u8>(((c >> 5) & 0x1F) << 3);
-    b = static_cast<u8>(((c >> 10) & 0x1F) << 3);
+    const u8 r5 = static_cast<u8>(c & 0x1F);
+    const u8 g5 = static_cast<u8>((c >> 5) & 0x1F);
+    const u8 b5 = static_cast<u8>((c >> 10) & 0x1F);
+    r = static_cast<u8>((r5 << 3) | (r5 >> 2));
+    g = static_cast<u8>((g5 << 3) | (g5 >> 2));
+    b = static_cast<u8>((b5 << 3) | (b5 >> 2));
     a = (c == 0) ? 0 : 255;
 }
 
@@ -2012,6 +2025,46 @@ static tPrimGeom* CloneDynGeoVertexPrimGeom(const u8* geoData, u32 geoSize) {
     return geom;
 }
 
+#ifdef REAL_TEXTURE_RENDERING
+// Registers a real-texture entry for a named VRAM-rect geo texture, preferring
+// a ModLoader override (at its own native resolution) and falling back to
+// decoding the original data already uploaded into world's VRAM (native PSX
+// resolution -- no quality gain, just routed through the same pipeline).
+static void RegisterRealTexture(World* world, const char* name,
+                                 u16 tpage, u16 cba,
+                                 float offsetX, float offsetY, float sizeX, float sizeY) {
+    if (!world) return;
+
+#ifdef MOD_LOADER
+    std::vector<u8> overrideRgba;
+    int overrideW = 0, overrideH = 0;
+    char levelScope[16];
+    std::snprintf(levelScope, sizeof(levelScope), "lev%02d", world->GetCurLevelID());
+    if (ModLoader::Instance().GetTextureOverrideRGBA(levelScope, name, overrideRgba, overrideW, overrideH)) {
+        RealTextureRegistry::Instance().Register(tpage, cba, overrideRgba.data(), overrideW, overrideH,
+                                                  offsetX, offsetY, sizeX, sizeY);
+        return;
+    }
+#endif
+
+    const int w = static_cast<int>(sizeX);
+    const int h = static_cast<int>(sizeY);
+    const int px0 = static_cast<int>(offsetX);
+    const int py0 = static_cast<int>(offsetY);
+    if (w <= 0 || h <= 0 || w > 256 || h > 256 || px0 < 0 || py0 < 0 || px0 + w > 256 || py0 + h > 256) return;
+
+    std::vector<u8> page(256 * 256 * 4);
+    world->GetVRAM().DecodePage(tpage, cba, page.data());
+    std::vector<u8> crop(static_cast<size_t>(w) * h * 4);
+    for (int row = 0; row < h; row++) {
+        memcpy(crop.data() + static_cast<size_t>(row) * w * 4,
+               page.data() + static_cast<size_t>(py0 + row) * 256 * 4 + static_cast<size_t>(px0) * 4,
+               static_cast<size_t>(w) * 4);
+    }
+    RealTextureRegistry::Instance().Register(tpage, cba, crop.data(), w, h, offsetX, offsetY, sizeX, sizeY);
+}
+#endif // REAL_TEXTURE_RENDERING
+
 static void LoadGeoPair(
     World* world,
     const u8* permData,
@@ -2033,6 +2086,15 @@ static void LoadGeoPair(
         // Track PRM (tPrimGeom) perm locations from 0x6009 chunks for STree lookup
         struct PrmInfo { u32 permOffset; u32 permSize; };
         std::unordered_map<u32, PrmInfo> prmMap; // nameHash → perm location
+
+#if defined(MOD_LOADER) || defined(REAL_TEXTURE_RENDERING)
+        // CLUT chunks (e.g. "name CLUT") always precede their indexed data chunk
+        // within the stream. Remember each CLUT's VRAM rect by base name so the
+        // matching data chunk can re-quantize+repaint (or register a real-texture
+        // entry for) both as a pair.
+        struct PendingClutRect { s16 rx, ry, rw, rh; };
+        std::unordered_map<std::string, PendingClutRect> pendingGeoCluts;
+#endif
 
         u32 rootSize = p3dReadU32LE(p3dData + 2);
         u32 chunkEnd = (rootSize < p3dSize) ? rootSize : p3dSize;
@@ -2109,6 +2171,25 @@ static void LoadGeoPair(
                     else {
                         u32 modelHash = p3dReadU32LE(permData + permCursor + 0);
                         if (!g_levelManager->FindGeo(static_cast<s32>(modelHash))) {
+#ifdef MOD_LOADER
+                            u32 lookupCrc = modelHash ? modelHash : p3dHash(names[0].c_str());
+                            char levelScope[16];
+                            std::snprintf(levelScope, sizeof(levelScope), "lev%02d", world->GetCurLevelID());
+                            const std::string* glbPath = ModLoader::Instance().FindModelOverridePath(
+                                levelScope, names[0].c_str());
+                            if (glbPath) {
+                                    OriginalGeo* modGeo = GLTFLoader::LoadGeo(glbPath->c_str());
+                                    if (modGeo) {
+                                        modGeo->nameCRC = lookupCrc;
+                                        modGeo->SetStoreID(static_cast<s8>(storeId));
+                                        g_levelManager->AddOriginal(modGeo, 0);
+                                        LOG("[ModLoader] Level geo override: '%s' (hash 0x%08X)", names[0].c_str(), lookupCrc);
+                                        permCursor += chunkPermSize;
+                                        chunkPos += chunkSize;
+                                        goto next_chunk;
+                                    }
+                            }
+#endif
                             bool usesSemiTrans = false;
                             u8 semiTransMode = 0;
                             std::vector<GeoRenderVertex> dynamicVerts;
@@ -2529,7 +2610,11 @@ static void LoadGeoPair(
                 u32 bodyLen = chunkSize - 6;
                 if (bodyLen < 1) { chunkPos += chunkSize; continue; }
                 u8 nameLen = chunkBody[p++];
+                std::string geoTexName(reinterpret_cast<const char*>(chunkBody + p), nameLen);
                 p += nameLen;
+                // PStrings may be padded with trailing nulls/spaces for alignment.
+                while (!geoTexName.empty() && (geoTexName.back() == ' ' || geoTexName.back() == '\0'))
+                    geoTexName.pop_back();
                 if (p + 12 > bodyLen) { chunkPos += chunkSize; continue; }
                 s16 rx = p3dReadS16LE(chunkBody + p); p += 2;
                 s16 ry = p3dReadS16LE(chunkBody + p); p += 2;
@@ -2540,6 +2625,72 @@ static void LoadGeoPair(
                     p + (u32)(rw * rh * 2) <= bodyLen) {
                     world->UploadToVRAM(rx, ry, rw, rh, chunkBody + p);
                     LOG("[GeoTex] VRAM upload: x=%d y=%d w=%d h=%d", rx, ry, rw, rh);
+
+#if defined(MOD_LOADER) || defined(REAL_TEXTURE_RENDERING)
+                    static constexpr const char* kClutSuffix = " CLUT";
+                    const size_t suffixPos = geoTexName.size() >= 5 ? geoTexName.size() - 5 : std::string::npos;
+                    const bool isClut = suffixPos != std::string::npos && geoTexName.compare(suffixPos, 5, kClutSuffix) == 0;
+
+                    if (isClut) {
+                        pendingGeoCluts[geoTexName.substr(0, suffixPos)] = PendingClutRect{ rx, ry, rw, rh };
+                    }
+                    else {
+                        auto clutIt = pendingGeoCluts.find(geoTexName);
+                        if (clutIt != pendingGeoCluts.end()) {
+                            const PendingClutRect& clutRect = clutIt->second;
+                            const s16 paletteColorCount = clutRect.rw * clutRect.rh;
+#ifdef MOD_LOADER
+                            std::vector<u16> clutOverride, indexOverride;
+                            char levelScope[16];
+                            std::snprintf(levelScope, sizeof(levelScope), "lev%02d", world->GetCurLevelID());
+                            if (ModLoader::Instance().GetIndexedTextureOverride(
+                                    levelScope, geoTexName.c_str(), rw, rh, paletteColorCount,
+                                    clutOverride, indexOverride)) {
+                                world->UploadToVRAM(clutRect.rx, clutRect.ry, clutRect.rw, clutRect.rh,
+                                                     reinterpret_cast<const u8*>(clutOverride.data()));
+                                world->UploadToVRAM(rx, ry, rw, rh, reinterpret_cast<const u8*>(indexOverride.data()));
+                                LOG("[ModLoader] Geo texture override: %s", geoTexName.c_str());
+                            }
+#endif
+#ifdef REAL_TEXTURE_RENDERING
+                            {
+                                const u8 ttx = static_cast<u8>(rx / 64), tty = static_cast<u8>(ry / 256);
+                                const int dep = (paletteColorCount == 256) ? 1 : 0;
+                                const u16 tpage = static_cast<u16>(ttx | (tty << 4) | (dep << 7));
+                                const u16 cba = static_cast<u16>((clutRect.rx / 16) | (clutRect.ry << 6));
+                                const int bppDiv = (paletteColorCount == 256) ? 2 : 4;
+                                RegisterRealTexture(world, geoTexName.c_str(), tpage, cba,
+                                                     static_cast<float>(rx - ttx * 64) * bppDiv,
+                                                     static_cast<float>(ry - tty * 256),
+                                                     static_cast<float>(rw) * bppDiv,
+                                                     static_cast<float>(rh));
+                            }
+#endif
+                        }
+                        else {
+#ifdef MOD_LOADER
+                            std::vector<u16> overridePixels;
+                            char levelScope[16];
+                            std::snprintf(levelScope, sizeof(levelScope), "lev%02d", world->GetCurLevelID());
+                            if (ModLoader::Instance().GetTextureOverridePixels(levelScope, geoTexName.c_str(), rw, rh, overridePixels)) {
+                                world->UploadToVRAM(rx, ry, rw, rh, reinterpret_cast<const u8*>(overridePixels.data()));
+                                LOG("[ModLoader] Geo texture override: %s", geoTexName.c_str());
+                            }
+#endif
+#ifdef REAL_TEXTURE_RENDERING
+                            {
+                                const u8 ttx = static_cast<u8>(rx / 64), tty = static_cast<u8>(ry / 256);
+                                const u16 tpage = static_cast<u16>(ttx | (tty << 4) | (2 << 7));
+                                RegisterRealTexture(world, geoTexName.c_str(), tpage, 0,
+                                                     static_cast<float>(rx - ttx * 64),
+                                                     static_cast<float>(ry - tty * 256),
+                                                     static_cast<float>(rw),
+                                                     static_cast<float>(rh));
+                            }
+#endif
+                        }
+                    }
+#endif
                 }
             }
 
@@ -2638,7 +2789,11 @@ static void LoadGeoPair(
                                 }
                                 else {
                                     pddiPrimBuffer* meshBuf = BuildPrimBufferFromRawPrimGeom(
-                                        permData + prm.permOffset, prm.permSize);
+                                        permData + prm.permOffset, prm.permSize
+#ifdef REAL_TEXTURE_RENDERING
+                                        , &original->realTexGroups
+#endif
+                                        );
                                     if (meshBuf) {
                                         original->meshBuffer = meshBuf;
                                         LOG("[World] STree '%s' mesh built from PRM '%s' (%u verts)",
@@ -2675,6 +2830,7 @@ static void LoadGeoPair(
                     permCursor);
             }
 
+            next_chunk:
             chunkPos += chunkSize;
         }
     }
@@ -2784,6 +2940,43 @@ static bool LoadBlocksForPetalFromStream(
     return true;
 }
 // Database::Scan handles WDB parsing now (see database.cpp).
+
+#ifdef MOD_LOADER
+// Upload a PNG file as a PSX texture page into the VRAM simulation.
+// tpage encodes: tx = bits 0-3 (64-word column), ty = bit 4 (256-row band).
+// A texture page is 256x256 pixels; in 15-bit mode each pixel = 1 word at (tx*64+x, ty*256+y).
+static void UploadPngToVRAMPage(PsxVRAM& vram, u16 tpage, const char* pngPath) {
+    int w, h, ch;
+    unsigned char* px = stbi_load(pngPath, &w, &h, &ch, 4);
+    if (!px) {
+        LOG("[ModLoader] Failed to load PNG for VRAM page: %s", pngPath);
+        return;
+    }
+
+    const int pageX = (tpage & 0xF) * 64;
+    const int pageY = ((tpage >> 4) & 1) * 256;
+    const int imgW = (w < 256) ? w : 256;
+    const int imgH = (h < 256) ? h : 256;
+
+    for (int y = 0; y < imgH; y++) {
+        for (int x = 0; x < imgW; x++) {
+            const unsigned char* src = px + (y * w + x) * 4;
+            const u8 r = src[0], g = src[1], b = src[2], a = src[3];
+            const u16 abgr1555 = static_cast<u16>(
+                ((a > 127 ? 1u : 0u) << 15) |
+                (((u16)(b >> 3)) << 10) |
+                (((u16)(g >> 3)) << 5) |
+                ((u16)(r >> 3)));
+            const int vx = pageX + x;
+            const int vy = pageY + y;
+            if (vx >= 0 && vx < 1024 && vy >= 0 && vy < 512)
+                vram.Set(vx, vy, abgr1555);
+        }
+    }
+    stbi_image_free(px);
+    LOG("[ModLoader] Level texture override: tpg=%04x <- %s", tpage, pngPath);
+}
+#endif
 
 void World::LoadTPGTextures(const u8* lcfData, u32 lcfSize) {
     vram.Clear();
@@ -3468,6 +3661,36 @@ bool World::Load(const std::string& lcfPath) {
     // Load TPG textures into VRAM (PSX HandleTPGChunk)
     LoadTPGTextures(data, dataSize);
 
+#ifdef MOD_LOADER
+    // After base VRAM load, let mods paint over individual texture pages.
+    // Mod files are named "{levelname}_tpg{tpage:04x}.png" in mods/<mod>/textures/.
+    {
+        std::string levelStem = std::filesystem::path(lcfPath).stem().string();
+        for (char& c : levelStem) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+        // tpage field: bits[3:0]=tx (64-word columns), bit[4]=ty (256-row band), bits[8:7]=depth.
+        // 15-bit pages use depth=2; tx can be 0-15, ty 0 or 1 → 32 possible page slots.
+        for (int ty = 0; ty <= 1; ty++) {
+            for (int tx = 0; tx <= 15; tx++) {
+                u16 tpageKey = static_cast<u16>((2u << 7) | (ty << 4) | tx);
+                char assetName[64];
+                snprintf(assetName, sizeof(assetName), "%s_tpg%04x", levelStem.c_str(), tpageKey);
+                u32 crc = p3dHash(assetName);
+                if (ModLoader::Instance().HasTexture(crc)) {
+                    const std::string* pngPath = ModLoader::Instance().GetTexturePath(crc);
+                    if (pngPath)
+                        UploadPngToVRAMPage(vram, tpageKey, pngPath->c_str());
+                }
+            }
+        }
+        if (vramHandle) {
+            p3d::context->DestroyVRAMTexture(vramHandle);
+            vramHandle = 0;
+        }
+        vramHandle = p3d::context->CreateVRAMTexture(1024, 512, vram.data);
+    }
+#endif
+
     // RCI/RCP resources are level-wide and survive petal reloads until PurgeLevel.
     LoadGeoPairsInRange(this, entries, data, dataSize, 0, (u32)entries.size(), ".RCI", ".RCP", 1);
 
@@ -3519,6 +3742,16 @@ bool World::Load(const std::string& lcfPath) {
         if (entries[i].offset + entries[i].size > dataSize) continue;
         g_database->Scan(data + entries[i].offset, entries[i].size);
     }
+#ifdef MOD_LOADER
+    {
+        char levelScope[16], parameterName[32];
+        std::snprintf(levelScope, sizeof(levelScope), "lev%02d", GetCurLevelID());
+        std::snprintf(parameterName, sizeof(parameterName), "parameters_petal%02u", petalIdx);
+        const std::string* path = ModLoader::Instance().FindDataOverridePath(levelScope, parameterName);
+        if (!path) path = ModLoader::Instance().FindDataOverridePath(levelScope, "parameters");
+        if (path) ApplyWDBParameterOverrides(g_database, path->c_str());
+    }
+#endif
 
     LoadGeoPairsInRange(this, entries, data, dataSize, petalStart, petalEnd, ".PCI", ".PCP", 2);
 
@@ -4274,6 +4507,16 @@ void World::LoadPetal(u32 petalIndex) {
             if (entries[i].offset + entries[i].size > dataSize) continue;
             g_database->Scan(data + entries[i].offset, entries[i].size);
         }
+#ifdef MOD_LOADER
+        {
+            char levelScope[16], parameterName[32];
+            std::snprintf(levelScope, sizeof(levelScope), "lev%02d", GetCurLevelID());
+            std::snprintf(parameterName, sizeof(parameterName), "parameters_petal%02u", pi);
+            const std::string* path = ModLoader::Instance().FindDataOverridePath(levelScope, parameterName);
+            if (!path) path = ModLoader::Instance().FindDataOverridePath(levelScope, "parameters");
+            if (path) ApplyWDBParameterOverrides(g_database, path->c_str());
+        }
+#endif
 
         LoadGeoPairsInRange(this, entries, data, dataSize, petalStart, petalEnd, ".PCI", ".PCP", 2);
 

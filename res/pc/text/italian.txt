@@ -259,6 +259,9 @@ Premi un tasto o il mouse
 [FE_HPADJ]
 <ACT:MENU_LEFT>/<ACT:MENU_RIGHT> Regola
 
+[FE_HPSCR]
+<ACT:MENU_UP>/<ACT:MENU_DOWN> Scorri
+
 [FE_HPSET]
 <ACT:MENU_CONFIRM> Imposta
 
@@ -444,6 +447,120 @@ COMPLETATO
 
 [FE_DNCM]
 NON COMPLETATO
+
+#
+# Auto Updater
+#
+[FE_UPD]
+Aggiornamento Gioco
+
+[FE_UPD_CHK]
+Ricerca aggiornamenti in corso...
+
+[FE_UPD_UTD]
+Sei aggiornato!
+
+[FE_UPD_ERR]
+Controllo aggiornamenti non riuscito: %s
+
+[FE_UPD_CUR]
+Versione attuale: %s
+
+[FE_UPD_LAT]
+Nuova versione disponibile: %s
+
+[FE_UPD_NOTES]
+Novita
+
+[FE_UPD_NOCHANGE]
+Nessun changelog disponibile.
+
+[FE_UPD_DL]
+Scarica aggiornamento
+
+[FE_UPD_RMD]
+Ricordamelo piu tardi
+
+[FE_UPD_CHKNOW]
+Controlla aggiornamenti
+
+[FE_UPD_PRG]
+Download in corso... %d%%
+
+[FE_UPD_CNL]
+Annulla
+
+[FE_UPD_RDY]
+Aggiornamento scaricato e pronto per l'installazione.
+
+[FE_UPD_INST]
+Installa e riavvia
+
+[FE_UPD_INSTG]
+Installazione in corso...
+
+[FE_UPD_AVAIL]
+Aggiornamento disponibile
+
+#
+# Asset Extraction
+#
+[FE_ASSET_TITLE]
+File di gioco
+
+[FE_ASSET_MISS]
+I file di gioco PSX non sono stati trovati. Posiziona l'immagine disco originale (.bin o .iso) nella cartella "discimage", poi clicca su Estrai file.
+
+[FE_ASSET_EXT]
+Estrai file
+
+[FE_ASSET_RESCAN]
+Cerca di nuovo
+
+[FE_ASSET_SCAN]
+Ricerca immagine disco...
+
+[FE_ASSET_NONE]
+Nessun file .bin o .iso trovato nella cartella "discimage". Aggiungi la tua immagine disco e riprova.
+
+[FE_ASSET_MULTI]
+Trovati piu file .bin/.iso in "discimage". Mantieni solo un file e riprova.
+
+[FE_ASSET_ONE]
+Immagine disco trovata. Pronta per l'estrazione.
+
+[FE_ASSET_EXTG]
+Estrazione dei file di gioco in corso...
+
+[FE_ASSET_ERR]
+Estrazione non riuscita: %s
+
+#
+# Mod e trucchi
+#
+[FE_MODS]
+Mod
+
+[FE_MOD_NONE]
+Nessuna mod installata
+
+[FE_CHEATS]
+Trucchi
+
+[FE_CH_DRAG]
+Tutti i draghi:
+
+[FE_CH_LEVL]
+Tutti i livelli:
+
+[FE_CH_GOD]
+Modalita dio:
+
+[FE_CH_PNCH]
+One Punch Man:
+
+[FE_CH_HVN]
+Verso il paradiso:
 
 #
 # PSX overrides

@@ -109,6 +109,9 @@ Parametres Affichage
 [FE_SND]
 Parametres Audio
 
+[FE_CRE]
+Credits
+
 [FE_BCK]
 Retour
 
@@ -255,6 +258,9 @@ Appuyez sur une touche ou la souris
 
 [FE_HPADJ]
 <ACT:MENU_LEFT>/<ACT:MENU_RIGHT> Ajuster
+
+[FE_HPSCR]
+<ACT:MENU_UP>/<ACT:MENU_DOWN> Defiler
 
 [FE_HPSET]
 <ACT:MENU_CONFIRM> Definir
@@ -441,6 +447,120 @@ TERMINE
 
 [FE_DNCM]
 NON TERMINE
+
+#
+# Auto Updater
+#
+[FE_UPD]
+Mise a jour du jeu
+
+[FE_UPD_CHK]
+Recherche de mises a jour...
+
+[FE_UPD_UTD]
+Vous etes a jour !
+
+[FE_UPD_ERR]
+Echec de la verification: %s
+
+[FE_UPD_CUR]
+Version actuelle: %s
+
+[FE_UPD_LAT]
+Nouvelle version disponible: %s
+
+[FE_UPD_NOTES]
+Nouveautes
+
+[FE_UPD_NOCHANGE]
+Aucun changelog disponible.
+
+[FE_UPD_DL]
+Telecharger la mise a jour
+
+[FE_UPD_RMD]
+Me le rappeler plus tard
+
+[FE_UPD_CHKNOW]
+Rechercher des mises a jour
+
+[FE_UPD_PRG]
+Telechargement... %d%%
+
+[FE_UPD_CNL]
+Annuler
+
+[FE_UPD_RDY]
+Mise a jour telechargee, prete a installer.
+
+[FE_UPD_INST]
+Installer et redemarrer
+
+[FE_UPD_INSTG]
+Installation...
+
+[FE_UPD_AVAIL]
+Mise a jour disponible
+
+#
+# Asset Extraction
+#
+[FE_ASSET_TITLE]
+Fichiers du jeu
+
+[FE_ASSET_MISS]
+Les fichiers du jeu PSX sont introuvables. Placez l'image disque originale (.bin ou .iso) dans le dossier "discimage", puis cliquez sur Extraire les fichiers.
+
+[FE_ASSET_EXT]
+Extraire les fichiers
+
+[FE_ASSET_RESCAN]
+Rechercher a nouveau
+
+[FE_ASSET_SCAN]
+Recherche de l'image disque...
+
+[FE_ASSET_NONE]
+Aucun fichier .bin ou .iso trouve dans le dossier "discimage". Ajoutez votre image disque puis reessayez.
+
+[FE_ASSET_MULTI]
+Plusieurs fichiers .bin/.iso trouves dans "discimage". Ne conservez qu'un seul fichier puis reessayez.
+
+[FE_ASSET_ONE]
+Image disque trouvee. Prete a etre extraite.
+
+[FE_ASSET_EXTG]
+Extraction des fichiers du jeu...
+
+[FE_ASSET_ERR]
+Extraction echouee : %s
+
+#
+# Mods et triches
+#
+[FE_MODS]
+Mods
+
+[FE_MOD_NONE]
+Aucun mod installe
+
+[FE_CHEATS]
+Triches:
+
+[FE_CH_DRAG]
+Tous les dragons:
+
+[FE_CH_LEVL]
+Tous les niveaux:
+
+[FE_CH_GOD]
+Mode invincible:
+
+[FE_CH_PNCH]
+One Punch Man:
+
+[FE_CH_HVN]
+Vers le paradis :
 
 #
 # PSX overrides

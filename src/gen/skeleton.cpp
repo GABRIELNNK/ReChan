@@ -9,9 +9,50 @@
 #include "p3d/context.h"
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
+#include "extra/modloader.h"
+#include "extra/realtexture.h"
+#include <algorithm>
 #include <cstring>
 #include <cstdlib>
 #include <vector>
+
+#ifdef REAL_TEXTURE_RENDERING
+// Registers a real-texture entry for a named VRAM-rect texture, preferring a
+// ModLoader override (at its own native resolution) and falling back to
+// decoding the original data already uploaded into world's VRAM (native PSX
+// resolution -- no quality gain, just routed through the same pipeline).
+static void RegisterRealTexture(World* world, const char* scope, const char* name,
+                                 u16 tpage, u16 cba,
+                                 float offsetX, float offsetY, float sizeX, float sizeY) {
+    if (!world) return;
+
+#ifdef MOD_LOADER
+    std::vector<u8> overrideRgba;
+    int overrideW = 0, overrideH = 0;
+    if (ModLoader::Instance().GetTextureOverrideRGBA(scope, name, overrideRgba, overrideW, overrideH)) {
+        RealTextureRegistry::Instance().Register(tpage, cba, overrideRgba.data(), overrideW, overrideH,
+                                                  offsetX, offsetY, sizeX, sizeY);
+        return;
+    }
+#endif
+
+    const int w = static_cast<int>(sizeX);
+    const int h = static_cast<int>(sizeY);
+    const int px0 = static_cast<int>(offsetX);
+    const int py0 = static_cast<int>(offsetY);
+    if (w <= 0 || h <= 0 || w > 256 || h > 256 || px0 < 0 || py0 < 0 || px0 + w > 256 || py0 + h > 256) return;
+
+    std::vector<u8> page(256 * 256 * 4);
+    world->GetVRAM().DecodePage(tpage, cba, page.data());
+    std::vector<u8> crop(static_cast<size_t>(w) * h * 4);
+    for (int row = 0; row < h; row++) {
+        memcpy(crop.data() + static_cast<size_t>(row) * w * 4,
+               page.data() + static_cast<size_t>(py0 + row) * 256 * 4 + static_cast<size_t>(px0) * 4,
+               static_cast<size_t>(w) * 4);
+    }
+    RealTextureRegistry::Instance().Register(tpage, cba, crop.data(), w, h, offsetX, offsetY, sizeX, sizeY);
+}
+#endif // REAL_TEXTURE_RENDERING
 
 // P3D chunk IDs
 static constexpr u16 CHUNK_P3D_CONTAINER = 0xFF04;
@@ -153,7 +194,8 @@ static ClutAnimData* ParseClutAnimChunk(const u8* data, u32 size) {
 STreeData* ParseP3DStreamFull(const u8* data,
                               u32 size,
                               CompositeAnimData** outCompositeAnim,
-                              u32 expectedCompositeNameUID) {
+                              u32 expectedCompositeNameUID,
+                              const char* textureScope) {
     if (!data || size < 6) {
         if (outCompositeAnim) {
             *outCompositeAnim = nullptr;
@@ -176,6 +218,15 @@ STreeData* ParseP3DStreamFull(const u8* data,
     u32 cpos = 6;
     u32 cend = (rootSize < size) ? rootSize : size;
 
+#if defined(MOD_LOADER) || defined(REAL_TEXTURE_RENDERING)
+    // CLUT chunks (e.g. "jeans5 CLUT") always precede their indexed data chunk
+    // (e.g. "jeans5") within the stream. Remember each CLUT's VRAM rect by base
+    // name so the matching data chunk can re-quantize+repaint (or register a
+    // real-texture entry for) both as a pair.
+    struct PendingClutRect { s16 rx, ry, rw, rh; };
+    std::unordered_map<std::string, PendingClutRect> pendingCluts;
+#endif
+
     while (cpos + 6 <= cend) {
         u16 chunkId = p3dReadU16LE(data + cpos);
         u32 chunkSize = p3dReadU32LE(data + cpos + 2);
@@ -187,9 +238,14 @@ STreeData* ParseP3DStreamFull(const u8* data,
             u32 tp = cpos + 6;
             u32 tend = cpos + chunkSize;
 
+            std::string texName;
             if (tp < tend) {
                 u8 nameLen = data[tp++];
+                texName.assign(reinterpret_cast<const char*>(data + tp), nameLen);
                 tp += nameLen;
+                // PStrings may be padded with trailing nulls/spaces for alignment.
+                while (!texName.empty() && (texName.back() == ' ' || texName.back() == '\0'))
+                    texName.pop_back();
             }
 
             if (tp + 12 <= tend) {
@@ -202,6 +258,68 @@ STreeData* ParseP3DStreamFull(const u8* data,
                 if (rw > 0 && rh > 0 && rw <= 1024 && rh <= 512 &&
                     tp + (u32)(rw * rh * 2) <= tend) {
                     world->UploadToVRAM(rx, ry, rw, rh, data + tp);
+
+#if defined(MOD_LOADER) || defined(REAL_TEXTURE_RENDERING)
+                    static constexpr const char* kClutSuffix = " CLUT";
+                    const size_t suffixPos = texName.size() >= 5 ? texName.size() - 5 : std::string::npos;
+                    const bool isClut = suffixPos != std::string::npos && texName.compare(suffixPos, 5, kClutSuffix) == 0;
+
+                    if (isClut) {
+                        pendingCluts[texName.substr(0, suffixPos)] = PendingClutRect{ rx, ry, rw, rh };
+                    }
+                    else {
+                        auto clutIt = pendingCluts.find(texName);
+                        if (clutIt != pendingCluts.end()) {
+                            const PendingClutRect& clutRect = clutIt->second;
+                            const s16 paletteColorCount = clutRect.rw * clutRect.rh;
+#ifdef MOD_LOADER
+                            std::vector<u16> clutOverride, indexOverride;
+                            if (ModLoader::Instance().GetIndexedTextureOverride(
+                                    textureScope, texName.c_str(), rw, rh, paletteColorCount,
+                                    clutOverride, indexOverride)) {
+                                world->UploadToVRAM(clutRect.rx, clutRect.ry, clutRect.rw, clutRect.rh,
+                                                     reinterpret_cast<const u8*>(clutOverride.data()));
+                                world->UploadToVRAM(rx, ry, rw, rh, reinterpret_cast<const u8*>(indexOverride.data()));
+                                LOG("[ModLoader] Skeleton texture override: %s", texName.c_str());
+                            }
+#endif
+#ifdef REAL_TEXTURE_RENDERING
+                            {
+                                const u8 ttx = static_cast<u8>(rx / 64), tty = static_cast<u8>(ry / 256);
+                                const int dep = (paletteColorCount == 256) ? 1 : 0;
+                                const u16 tpage = static_cast<u16>(ttx | (tty << 4) | (dep << 7));
+                                const u16 cba = static_cast<u16>((clutRect.rx / 16) | (clutRect.ry << 6));
+                                const int bppDiv = (paletteColorCount == 256) ? 2 : 4;
+                                RegisterRealTexture(world, textureScope, texName.c_str(), tpage, cba,
+                                                     static_cast<float>(rx - ttx * 64) * bppDiv,
+                                                     static_cast<float>(ry - tty * 256),
+                                                     static_cast<float>(rw) * bppDiv,
+                                                     static_cast<float>(rh));
+                            }
+#endif
+                        }
+                        else {
+#ifdef MOD_LOADER
+                            std::vector<u16> overridePixels;
+                            if (ModLoader::Instance().GetTextureOverridePixels(textureScope, texName.c_str(), rw, rh, overridePixels)) {
+                                world->UploadToVRAM(rx, ry, rw, rh, reinterpret_cast<const u8*>(overridePixels.data()));
+                                LOG("[ModLoader] Skeleton texture override: %s", texName.c_str());
+                            }
+#endif
+#ifdef REAL_TEXTURE_RENDERING
+                            {
+                                const u8 ttx = static_cast<u8>(rx / 64), tty = static_cast<u8>(ry / 256);
+                                const u16 tpage = static_cast<u16>(ttx | (tty << 4) | (2 << 7));
+                                RegisterRealTexture(world, textureScope, texName.c_str(), tpage, 0,
+                                                     static_cast<float>(rx - ttx * 64),
+                                                     static_cast<float>(ry - tty * 256),
+                                                     static_cast<float>(rw),
+                                                     static_cast<float>(rh));
+                            }
+#endif
+                        }
+                    }
+#endif
                 }
             }
         }
@@ -999,6 +1117,50 @@ void BuildPerJointMeshes(OriginalSTree* original, const u8* primGeomData, u32 pr
     if (allIndices.empty()) {
         return;
     }
+
+#ifdef REAL_TEXTURE_RENDERING
+    // Re-sort the (already complete, triangle-list) index buffer by each
+    // triangle's (tpage, cba) so the real-texture path can sub-range-draw
+    // one material at a time. Vertex data/order is untouched -- only the
+    // index order changes, so the legacy single-draw path is unaffected.
+    if (original) {
+        const u32 numTris = static_cast<u32>(allIndices.size() / 3);
+        std::vector<u32> order(numTris);
+        for (u32 t = 0; t < numTris; t++) order[t] = t;
+
+        auto keyOf = [&](u32 tri) -> u32 {
+            const SkinVertex& sv = skinVerts[allIndices[tri * 3]];
+            return (static_cast<u32>(static_cast<u16>(sv.tpage)) << 16) | static_cast<u16>(sv.cba);
+        };
+        std::stable_sort(order.begin(), order.end(), [&](u32 a, u32 b) { return keyOf(a) < keyOf(b); });
+
+        std::vector<u16> groupedIndices(allIndices.size());
+        original->realTexGroups.clear();
+        u32 groupStart = 0;
+        u32 prevKey = (numTris > 0) ? keyOf(order[0]) : 0;
+        for (u32 i = 0; i < numTris; i++) {
+            const u32 tri = order[i];
+            groupedIndices[i * 3 + 0] = allIndices[tri * 3 + 0];
+            groupedIndices[i * 3 + 1] = allIndices[tri * 3 + 1];
+            groupedIndices[i * 3 + 2] = allIndices[tri * 3 + 2];
+
+            const u32 key = keyOf(tri);
+            if (key != prevKey) {
+                original->realTexGroups.push_back(RealTextureGroup{
+                    groupStart, i * 3 - groupStart,
+                    static_cast<u16>(prevKey >> 16), static_cast<u16>(prevKey & 0xFFFFu) });
+                groupStart = i * 3;
+                prevKey = key;
+            }
+        }
+        if (numTris > 0) {
+            original->realTexGroups.push_back(RealTextureGroup{
+                groupStart, static_cast<u32>(allIndices.size()) - groupStart,
+                static_cast<u16>(prevKey >> 16), static_cast<u16>(prevKey & 0xFFFFu) });
+        }
+        allIndices.swap(groupedIndices);
+    }
+#endif
 
     // Store SkinData for per-frame CPU skinning
     SkinData* sd = new SkinData();

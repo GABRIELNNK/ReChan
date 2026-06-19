@@ -56,6 +56,10 @@
 #include "extra/fecustommenumgr.h"
 #endif
 
+#if AUTO_UPDATER
+#include "extra/autoupdater.h"
+#endif
+
 // Global game pointer
 Game* g_game = nullptr;
 
@@ -661,11 +665,175 @@ bool Game::gsNullState(Game*) {
 bool Game::gsIntroState(Game* game) {
     MARKFUNCTION(0x800C99A0); // gsIntroState
 
-#if SKIP_INTRO
-    game->SetState(GameState::Init);
-    return true;
+#if CUSTOM_MENU
+    // g_frontEndSound is normally constructed later in gsTitleState; without it, every
+    // menu sound (open/move/confirm) in any of this state's boot-time popups is silently
+    // dropped. Needed unconditionally - both the legal splash and the asset-missing gate
+    // use g_feCustomMenuMgr regardless of whether AUTO_UPDATER is enabled.
+    if (!g_feCustomMenuMgr) {
+        InitXconFSImage();
+        g_feCustomMenuMgr = new feCustomMenuMgr();
+        g_feCustomMenuMgr->Init(&g_customText);
+    }
+    if (!g_psxDiscExtractor) {
+        g_psxDiscExtractor = new PsxDiscExtractor();
+        g_psxDiscExtractor->Init();
+    }
 #endif
 
+#if SKIP_INTRO
+    // Only skips the legal-splash presentation, not the asset check below - a build with
+    // no PSX assets must never silently fall through to a broken title screen.
+    game->introPhase = 4;
+#endif
+
+#if CUSTOM_MENU
+    // Custom legal splash (entirely replaces the PSX LICENSE.TIM + movie intro)
+    if (!game->assetCheckDone && game->introPhase != 4) {
+        static constexpr f32 kLegalBlackSec = 0.25f;
+        static constexpr f32 kLegalFadeInSec = 0.5f;
+        static constexpr f32 kLegalHoldSec = 5.0f;
+        static constexpr f32 kLegalFadeOutSec = 0.5f;
+
+        const f32 dt = g_time ? g_time->GetDeltaTime() : (1.0f / 30.0f);
+        game->customIntroTimer += dt;
+
+        f32 alpha = 0.0f;
+        bool finished = false;
+
+        switch (game->introPhase) {
+            case 0: // black hold
+                alpha = 0.0f;
+                if (game->customIntroTimer >= kLegalBlackSec) {
+                    game->customIntroTimer = 0.0f;
+                    game->introPhase = 1;
+                }
+                break;
+            case 1: // fade in
+                alpha = (kLegalFadeInSec > 0.0f) ? (game->customIntroTimer / kLegalFadeInSec) : 1.0f;
+                if (game->customIntroTimer >= kLegalFadeInSec) {
+                    game->customIntroTimer = 0.0f;
+                    game->introPhase = 2;
+                }
+                break;
+            case 2: { // hold at full visibility
+                alpha = 1.0f;
+                const bool skipPressed = g_actionInput &&
+                    (g_actionInput->AnyJustPressed() ||
+                     g_actionInput->IsMouseButtonTriggered(MouseBtn::Left) ||
+                     g_actionInput->IsMouseButtonTriggered(MouseBtn::Right) ||
+                     g_actionInput->IsMouseButtonTriggered(MouseBtn::Middle));
+                if (skipPressed || game->customIntroTimer >= kLegalHoldSec) {
+                    game->customIntroTimer = 0.0f;
+                    game->introPhase = 3;
+                }
+                break;
+            }
+            case 3: // fade out
+                alpha = (kLegalFadeOutSec > 0.0f) ? (1.0f - game->customIntroTimer / kLegalFadeOutSec) : 0.0f;
+                if (game->customIntroTimer >= kLegalFadeOutSec) {
+                    finished = true;
+                }
+                break;
+            default:
+                finished = true;
+                break;
+        }
+
+        if (alpha < 0.0f) alpha = 0.0f;
+        if (alpha > 1.0f) alpha = 1.0f;
+
+        g_display->BeginFrame();
+        if (g_feCustomMenuMgr) {
+            g_feCustomMenuMgr->DrawLegalScreen(alpha);
+        }
+        g_display->EndFrame();
+
+        if (finished) {
+            game->introPhase = 4;
+            game->customIntroTimer = 0.0f;
+        }
+        return true;
+    }
+
+    // --- Asset presence check + missing-assets gate ---
+    if (!game->assetCheckDone) {
+        // Once the popup is active, an in-progress extraction can make this sentinel
+        // check (xc/fe/tim/license.tim) go true well before bin/sound is fully written
+        // (disc LBA order, not whitelist order) - don't let that short-circuit the gate
+        // and skip the post-extraction Sound::SetupSound() re-run below. Only the menu's
+        // own Done state (menuResult == 8) may resolve the gate once it's active.
+        const bool assetMenuActive = g_feCustomMenuMgr && g_feCustomMenuMgr->IsActive();
+        if (!assetMenuActive && PsxDiscExtractor::AreAssetsPresent()) {
+            game->assetCheckDone = true;
+            game->introPhase = 0;
+        }
+        else {
+            if (g_feCustomMenuMgr && !g_feCustomMenuMgr->IsActive()) {
+                g_feCustomMenuMgr->Activate(MenuPage_AssetMissing);
+            }
+
+            if (g_feCustomMenuMgr) {
+                s32 menuResult = g_feCustomMenuMgr->Invoke();
+
+                g_display->BeginFrame();
+                g_feCustomMenuMgr->Render();
+                g_display->EndFrame();
+
+                if (menuResult == 8) {
+                    g_feCustomMenuMgr->Deactivate();
+                    game->assetCheckDone = true;
+                    game->introPhase = 0;
+
+                    // Sound::SetupSound() already ran once in Game::InternalOpen(), before
+                    // this extraction step could have populated bin/sound - the WAX banks it
+                    // tried to load didn't exist yet. Re-run it now that they're on disk.
+                    if (g_sound) {
+                        g_sound->SetupSound();
+                    }
+                }
+            }
+            return true;
+        }
+    }
+#else
+    game->assetCheckDone = true;
+#endif
+
+#if AUTO_UPDATER
+    if (!g_autoUpdater) {
+        g_autoUpdater = new AutoUpdater();
+        g_autoUpdater->Init();
+        g_autoUpdater->CheckAsync();
+#if CUSTOM_MENU
+        if (g_feCustomMenuMgr) {
+            g_feCustomMenuMgr->Activate(MenuPage_CheckingUpdate);
+        }
+#endif
+    }
+
+#if CUSTOM_MENU
+    // Gates the rest of the intro on the checking popup until it resolves (dismissed,
+    // installed, or no update found).
+    if (g_feCustomMenuMgr && g_feCustomMenuMgr->IsActive()) {
+        s32 menuResult = g_feCustomMenuMgr->Invoke();
+
+        g_display->BeginFrame();
+        g_feCustomMenuMgr->Render();
+        g_display->EndFrame();
+
+        if (menuResult == 8 || menuResult == 4) {
+            g_feCustomMenuMgr->Deactivate();
+        }
+        return true;
+    }
+#endif
+#endif
+
+#if CUSTOM_MENU
+    game->SetState(GameState::Init);
+    return true;
+#else
     // Phase 0: first entry - start 300-frame wait with LICENSE.TIM
     if (game->introPhase == 0) {
         game->introTimer = 0;
@@ -713,6 +881,7 @@ bool Game::gsIntroState(Game* game) {
     }
 
     return true;
+#endif
 }
 
 bool Game::gsTitleState(Game* game) {
@@ -909,6 +1078,11 @@ bool Game::gsTitleLoopState(Game* game) {
         game->RenderTitleWithCustomBackground(true);
 #else
         game->titleScreen->Render();
+#endif
+#if AUTO_UPDATER
+        if (g_feCustomMenuMgr) {
+            g_feCustomMenuMgr->DrawVersionOverlay();
+        }
 #endif
     }
     g_display->EndFrame();

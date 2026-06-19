@@ -6,6 +6,12 @@
 #include <initializer_list>
 #include <vector>
 
+#if AUTO_UPDATER
+#include "extra/autoupdater.h"
+#endif
+
+#include "extra/psxdiscextractor.h"
+
 class tTexture;
 
 enum MenuPage : s32 {
@@ -20,6 +26,12 @@ enum MenuPage : s32 {
     MenuPage_KeyBindings,
     MenuPage_Display,
     MenuPage_Sound,
+#if NEW_CHEATS
+    MenuPage_Cheats,
+#endif
+#ifdef MOD_LOADER
+    MenuPage_Mods,
+#endif
     MenuPage_LoadSlots,
     MenuPage_SaveSlots,
     MenuPage_DeleteSlots,
@@ -33,6 +45,12 @@ enum MenuPage : s32 {
     MenuPage_QuitConfirm,
     MenuPage_Quitting,
     MenuPage_Location,
+    MenuPage_Update,
+    MenuPage_CheckingUpdate,
+    MenuPage_Changelog,
+    MenuPage_AssetMissing,
+    MenuPage_AssetScanning,
+    MenuPage_AssetExtracting,
     MenuPage_Count,
 };
 
@@ -58,6 +76,13 @@ enum EntryBinding : u8 {
     EntryBinding_DisplayVsync,
     EntryBinding_DisplayFrameRate,
     EntryBinding_DisplayMsaa,
+#if NEW_CHEATS
+    EntryBinding_CheatAllDragons,
+    EntryBinding_CheatAllLevels,
+    EntryBinding_CheatGodMode,
+    EntryBinding_CheatOnePunchMan,
+    EntryBinding_CheatHeavenBound,
+#endif
 };
 
 enum EntryEvent : u8 {
@@ -76,10 +101,19 @@ enum EntryEvent : u8 {
     EntryEvent_SaveConfirmYes,
     EntryEvent_DeleteConfirmYes,
     EntryEvent_LocationSelect,
+    EntryEvent_StartUpdate,
+    EntryEvent_DismissUpdate,
+    EntryEvent_CancelUpdate,
+    EntryEvent_InstallUpdate,
+    EntryEvent_ShowChangelog,
+    EntryEvent_CheckForUpdate,
+    EntryEvent_ScanForAssets,
+    EntryEvent_ExtractAssets,
+    EntryEvent_QuitFromAssetCheck,
 };
 
 #define MAX_ENTRIES_PER_MENU (12)
-#define MAX_CUSTOM_MENU_TOKEN (8)
+#define MAX_CUSTOM_MENU_TOKEN (16)
 
 #define DEF_WINDOW_W 340
 #define DEF_WINDOW_H 108
@@ -119,6 +153,13 @@ enum EntryEvent : u8 {
 #define DEF_CONTROLLER_WINDOW_W 420
 #define DEF_CONTROLLER_WINDOW_H 186
 
+// Changelog page tuning
+#define DEF_CHANGELOG_WINDOW_W 380
+#define DEF_CHANGELOG_WINDOW_H 200
+
+#define DEF_CHANGELOG_TEXT_W 0.25f
+#define DEF_CHANGELOG_TEXT_H 0.25f
+
 // Key Bindings page tuning
 #define DEF_KEYBIND_WINDOW_W 420
 #define DEF_KEYBIND_WINDOW_H 198
@@ -133,6 +174,13 @@ enum EntryEvent : u8 {
 #define DEF_KEYBIND_ROW_TOP_PAD 2
 #define DEF_KEYBIND_CELL_PAD 2
 #define DEF_KEYBIND_X_PAD 18
+
+#ifdef MOD_LOADER
+#define DEF_MODS_WINDOW_W 400
+#define DEF_MODS_WINDOW_H 198
+#define DEF_MODS_VISIBLE_ROWS 8
+#define DEF_MODS_ROW_STEP 14
+#endif
 
 // Key Bindings row stripe colors (transparent black / warm yellow)
 #define DEF_KEYBIND_STRIPE_DARK_R 0
@@ -235,7 +283,7 @@ enum EntryEvent : u8 {
 #define DEF_SLIDER_CIRCLE_SEGMENTS 6
 #define DEF_SLIDER_CIRCLE_STEP 24.0f
 
-#define DEF_QUIT_TIMER_SEC 0.2f
+#define DEF_QUIT_TIMER_SEC 1.0f
 
 struct Entry {
     char token[MAX_CUSTOM_MENU_TOKEN + 1];
@@ -290,6 +338,8 @@ public:
     bool DrawTitleScreen();
     bool DrawLoadingScreen();
     void DrawTitleStartPrompt(s32 baseX, s32 baseY);
+    void DrawVersionOverlay();
+    void DrawLegalScreen(f32 alpha01);
     bool GetSplashScreenRect(f32* outX, f32* outY, f32* outW, f32* outH) const;
 
     void Activate(MenuPage startPage = MenuPage_Frontend);
@@ -304,6 +354,7 @@ private:
                      s32 frameW = 260, s32 frameH = 150);
     static s32 CalcAutoFrameHeight(s32 numEntries, s32 extraH = 0);
     s32 GetEntryExtraHeight(const PageDef& page, const Entry& entry) const;
+    s32 GetWrappedLineCount(const PageDef& page, const char* label) const;
     s32 CalcEntryYExtra(const PageDef& page, s32 upToIndex) const;
     s32 CalcPageExtraHeight(const PageDef& page) const;
     void ResolveEntryLayout(const PageDef& page, s32 entryIndex,
@@ -323,11 +374,26 @@ private:
     void Confirm();
     void GoBack();
     void Adjust(s32 dir);
+    void UpdateMouseCursorVisibility(); // mouse-move/click reactivation + keyboard/gamepad hide, shared by every page including non-interactive popups
     s32 GetBoundValue(const Entry& e) const;
     void ApplyValue(const Entry& e, s32 v);
     void PlaySound(s32 id) const;
     void RefreshSaveSlots();
     void BuildSaveSlotLabel(s32 slotIndex, char* outText, s32 outTextLen) const;
+
+#if AUTO_UPDATER
+    void RefreshUpdatePageEntries();
+    void RenderUpdateProgressBar(s32 panelX, s32 panelW, s32 rowTop) const;
+    void RenderUpdateIndeterminateBar(s32 panelX, s32 panelW, s32 rowTop) const;
+    bool BuildUpdateInfoText(const char* token, char* outText, s32 outTextLen) const;
+    void RebuildChangelogLines();
+    void RenderChangelogBody(s32 panelX, s32 panelY, s32 panelW, s32 panelH, s32 contentTop) const;
+#endif
+
+    void RefreshAssetPageEntries();
+    void RenderAssetExtractProgressBar(s32 panelX, s32 panelW, s32 rowTop) const;
+    void RenderAssetScanSweep(s32 panelX, s32 panelW, s32 rowTop) const;
+    bool BuildAssetInfoText(const char* token, char* outText, s32 outTextLen) const;
 
     void LoadControllerOverlayTexture();
     void LoadMenuOrnamentTexture();
@@ -368,6 +434,13 @@ private:
     void RenderKeyBindingsPage(s32 panelX, s32 panelY, s32 panelW, s32 panelH,
                                const xcColour1555& normalColor,
                                const xcColour1555& selectedColor) const;
+#ifdef MOD_LOADER
+    void RenderModsPage(s32 panelX, s32 panelY, s32 panelW, s32 panelH,
+                        const xcColour1555& normalColor,
+                        const xcColour1555& selectedColor) const;
+    void ClampModsScroll();
+    bool ToggleSelectedMod();
+#endif
     void RenderLocationPage() const;
     bool InvokeLocationSelection();
 
@@ -415,6 +488,11 @@ private:
     bool m_keyBindCaptureActive = false;
     s32 m_keyBindCaptureBlockFrames = 0;
 
+#ifdef MOD_LOADER
+    s32 m_modCursor = 0;
+    s32 m_modScrollTop = 0;
+#endif
+
     SaveGameSlotInfo m_saveSlots[SAVEGAME_SLOT_COUNT] = {};
     s32 m_pendingLoadSlot = -1;
     s32 m_pendingSaveSlot = -1;
@@ -422,6 +500,15 @@ private:
 
     bool m_active = 0;
     f32 m_quitTimerSec = 0.0f; // seconds remaining before game actually closes
+    f32 m_assetPopupMinTimer = 0.0f; // keeps Scanning/Extracting popups on screen long enough to read
+
+#if AUTO_UPDATER
+    AutoUpdater::State m_lastUpdateState = AutoUpdater::State::Idle;
+    f32 m_checkingPopupMinTimer = 0.0f;
+    std::vector<std::string> m_changelogLines;
+    s32 m_changelogScrollTop = 0;
+    f32 m_updateAvailFadeTimer = 0.0f; // drives the "Update available" fade in/out
+#endif
 };
 
 extern feCustomMenuMgr* g_feCustomMenuMgr;

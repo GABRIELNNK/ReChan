@@ -122,6 +122,8 @@ private:
     // PSX globals stored per-game instance
     s32 introTimer = 0;                         // frame counter for intro screens
     s32 introPhase = 0;                         // sub-phase within intro state
+    f32 customIntroTimer = 0.0f;                // elapsed seconds within the current custom-intro sub-phase
+    bool assetCheckDone = false;                // true once PSX assets are confirmed present during boot
     tTexture* introTexture = nullptr;           // current intro screen texture (PSX: gp+24)
     World* worldManager = nullptr;
     TitleScreen* titleScreen = nullptr;         // PSX: gp+60

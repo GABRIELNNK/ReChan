@@ -6,11 +6,13 @@ struct CompositeAnimData;
 // Parse the P3D stream (0xFF04 container) extracting BOTH textures (to VRAM)
 // and skeleton data (returned). Textures are uploaded via World::UploadToVRAM.
 // When requested, also preserves the raw character composite animation
-// definition from chunk 0x4007.
+// definition from chunk 0x4007. textureScope (e.g. the character name) is used
+// to look up mod texture overrides nested under "{textureScope}/{name}".
 STreeData* ParseP3DStreamFull(const u8* data,
                               u32 size,
                               CompositeAnimData** outCompositeAnim = nullptr,
-                              u32 expectedCompositeNameUID = 0);
+                              u32 expectedCompositeNameUID = 0,
+                              const char* textureScope = nullptr);
 
 // Parse the raw tTransformAnim binary blob and apply frame-0 values to skeleton joints.
 // PSX: tTranAnimLoader2::Load relocates the blob, then UpdateJoints writes to joints.

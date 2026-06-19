@@ -15,6 +15,9 @@
 #include "snd/rsevent.h"
 #include "snd/sound.h"
 #include "fe/fe_sound_menu_helpers.h"
+#if NEW_CHEATS
+#include "extra/cheats.h"
+#endif
 
 // Global feMenuMgr pointer
 feMenuMgr* g_feMenuMgr = nullptr;
@@ -775,6 +778,10 @@ void feMenuMgr::PushLoadSaveMenu(s32 mode) {
 // Checks if a level/sublevel combination is unlocked.
 s32 feMenuMgr::LevelValid(s32 levelID, s32 subLevel) {
     MARKFUNCTION(0x80011188);
+
+#if NEW_CHEATS
+    if (IsCheatEnabled(CheatOption::AllLevels)) return 1;
+#endif
 
     if (levelID == 7) {
         return 1;

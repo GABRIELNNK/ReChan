@@ -131,6 +131,7 @@ namespace RsdFormat {
         std::vector<s16> pcmData; // interleaved stereo s16 PCM (L,R,L,R,...)
         u32 numFrames = 0;        // number of stereo frames (pcmData.size() / channels)
         u32 channels = 2;         // always stereo for FAG
+        u32 sampleRate = 22050;
     };
 
     // Load a FAG file - streaming music with whole-chunk stereo interleave

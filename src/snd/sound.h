@@ -62,6 +62,9 @@ public:
     // PC: music control
     bool PlayMusicTrack(const char* fagPath, f32 volume = 1.0f);
     bool PlayMusicTrackSong(const char* fagPath, u32 songIndex, f32 volume = 1.0f);
+#ifdef MOD_LOADER
+    bool TryPlayMusicOverride(const char* fagPath, f32 volume);
+#endif
     void StopMusic();
     void SetMusicVolume(f32 volume);
     void SetEffectsVolume(f32 volume);

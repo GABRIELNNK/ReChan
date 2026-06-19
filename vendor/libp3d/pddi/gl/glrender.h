@@ -211,7 +211,7 @@ public:
                   float x, float y, float w, float h,
                   float u0, float v0, float u1, float v1) override;
 
-    void DrawPrimBuffer(pddiPrimBuffer* buffer) override;
+    void DrawPrimBuffer(pddiPrimBuffer* buffer, u32 indexOffset = 0, u32 indexCount = 0) override;
 
     void SetTexture(pddiTexture* tex) override;
     void SetVRAMHandle(u32 handle) override;
@@ -219,6 +219,10 @@ public:
 
     u32  CreateVRAMTexture(int w, int h, const u16* data) override;
     void DestroyVRAMTexture(u32 handle) override;
+
+    void SetRealTextureMode(bool enabled) override { realTextureModeEnabled = enabled; }
+    bool IsRealTextureModeEnabled() const override { return realTextureModeEnabled; }
+    void SetRealTextureRect(float offsetX, float offsetY, float sizeX, float sizeY) override;
 
     u32 Get3DProgram() const { return program3D; }
 
@@ -238,6 +242,8 @@ private:
     u32 vramHandle = 0;
     bool texInfoOverrideEnabled = false;
     u32 texInfoOverrideWord = 0;
+    bool realTextureModeEnabled = false;
+    float realTexOffsetX = 0.0f, realTexOffsetY = 0.0f, realTexSizeX = 1.0f, realTexSizeY = 1.0f;
     u32 quadVAO = 0;
     u32 quadVBO = 0;
     u32 program3D = 0;

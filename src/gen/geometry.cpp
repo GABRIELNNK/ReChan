@@ -2,11 +2,15 @@
 #include "gen/display.h"
 #include "gen/lights.h"
 #include "gen/skeleton.h"
+#include "gen/config.h"
 #include "p3d/byteread.h"
 #include "p3d/context.h"
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
 #include "pc/log.h"
+#ifdef REAL_TEXTURE_RENDERING
+#include "extra/realtexture.h"
+#endif
 #include <algorithm>
 #include <cstring>
 #include <tuple>
@@ -518,7 +522,11 @@ static pddiPrimBuffer* BuildPrimBufferFromPrimGeom(const tPrimGeom* geom,
                                                    const LVector* drawPos,
                                                    const GMFogState* gmFogState,
                                                    bool* outUsesSemiTrans,
-                                                   u8* outSemiTransMode) {
+                                                   u8* outSemiTransMode
+#ifdef REAL_TEXTURE_RENDERING
+                                                   , std::vector<RealTextureGroup>* outRealTexGroups = nullptr
+#endif
+                                                   ) {
     if (outUsesSemiTrans) {
         *outUsesSemiTrans = false;
     }
@@ -1215,6 +1223,50 @@ static pddiPrimBuffer* BuildPrimBufferFromPrimGeom(const tPrimGeom* geom,
         return nullptr;
     }
 
+#ifdef REAL_TEXTURE_RENDERING
+    // Re-sort the (already complete, triangle-list) index buffer by each
+    // triangle's (tpage, cba) so the real-texture path can sub-range-draw
+    // one material at a time. Vertex data/order is untouched -- only the
+    // index order changes, so the legacy single-draw path is unaffected.
+    if (outRealTexGroups) {
+        const u32 numTris = static_cast<u32>(idxBuf.size() / 3);
+        std::vector<u32> order(numTris);
+        for (u32 t = 0; t < numTris; t++) order[t] = t;
+
+        auto keyOf = [&](u32 tri) -> u32 {
+            const Vert& v = vertBuf[idxBuf[tri * 3]];
+            return (static_cast<u32>(static_cast<u16>(v.tpage)) << 16) | static_cast<u16>(v.cba);
+        };
+        std::stable_sort(order.begin(), order.end(), [&](u32 a, u32 b) { return keyOf(a) < keyOf(b); });
+
+        std::vector<u16> groupedIndices(idxBuf.size());
+        outRealTexGroups->clear();
+        u32 groupStart = 0;
+        u32 prevKey = (numTris > 0) ? keyOf(order[0]) : 0;
+        for (u32 i = 0; i < numTris; i++) {
+            const u32 tri = order[i];
+            groupedIndices[i * 3 + 0] = idxBuf[tri * 3 + 0];
+            groupedIndices[i * 3 + 1] = idxBuf[tri * 3 + 1];
+            groupedIndices[i * 3 + 2] = idxBuf[tri * 3 + 2];
+
+            const u32 key = keyOf(tri);
+            if (key != prevKey) {
+                outRealTexGroups->push_back(RealTextureGroup{
+                    groupStart, i * 3 - groupStart,
+                    static_cast<u16>(prevKey >> 16), static_cast<u16>(prevKey & 0xFFFFu) });
+                groupStart = i * 3;
+                prevKey = key;
+            }
+        }
+        if (numTris > 0) {
+            outRealTexGroups->push_back(RealTextureGroup{
+                groupStart, static_cast<u32>(idxBuf.size()) - groupStart,
+                static_cast<u16>(prevKey >> 16), static_cast<u16>(prevKey & 0xFFFFu) });
+        }
+        idxBuf.swap(groupedIndices);
+    }
+#endif
+
     // Create pddiPrimBuffer through the device abstraction
     u32 format = PDDI_V_POSITION | PDDI_V_COLOUR | PDDI_V_UV | PDDI_V_TEXINFO;
     pddiPrimBufferDesc desc(PDDI_PRIM_TRIANGLES, format,
@@ -1287,13 +1339,21 @@ tPrimGeom* CloneRawPrimGeom(const u8* primData, u32 primSize) {
     return geom;
 }
 
-pddiPrimBuffer* BuildPrimBufferFromRawPrimGeom(const u8* primData, u32 primSize) {
+pddiPrimBuffer* BuildPrimBufferFromRawPrimGeom(const u8* primData, u32 primSize
+#ifdef REAL_TEXTURE_RENDERING
+                                               , std::vector<RealTextureGroup>* outRealTexGroups
+#endif
+                                               ) {
     tPrimGeom* geom = CloneRawPrimGeom(primData, primSize);
     if (!geom) {
         return nullptr;
     }
 
-    pddiPrimBuffer* buffer = BuildPrimBufferFromPrimGeom(geom, nullptr, nullptr, nullptr, nullptr);
+    pddiPrimBuffer* buffer = BuildPrimBufferFromPrimGeom(geom, nullptr, nullptr, nullptr, nullptr
+#ifdef REAL_TEXTURE_RENDERING
+                                                          , outRealTexGroups
+#endif
+                                                          );
     delete geom;
     return buffer;
 }
@@ -1582,6 +1642,166 @@ u8* RP_FixUpPolysCBF_CL(tPrimGeom* geometry, void* view, u32 loopIndex, u32 poly
     }
 
     return outCursor;
+}
+
+bool ExtractPrimGeomVerts(const u8* raw, u32 size,
+                          std::vector<PrimGeomVertex>& vertsOut,
+                          std::vector<u32>& indicesOut,
+                          const std::vector<u32>* vertJointMap,
+                          const Mat4* jointMatrices)
+{
+    if (!raw || size < 108) return false;
+
+    const u32 vertListOff = p3dReadU32LE(raw + 0x10) << 2;
+    const u16 numVerts    = p3dReadU16LE(raw + 0x14);
+    const u16 numPolys    = p3dReadU16LE(raw + 0x16);
+    const u32 primListOff = p3dReadU32LE(raw + 0x40) << 2;
+    const u32 polyDataOff = p3dReadU32LE(raw + 0x54) << 2;
+    const u32 loopVertOff = p3dReadU32LE(raw + 0x60) << 2;
+    const u16 numLoops    = p3dReadU16LE(raw + 0x66);
+    const u32 loopPrimOff = p3dReadU32LE(raw + 0x68) << 2;
+
+    if (numVerts == 0 || numPolys == 0 || numLoops == 0) return false;
+    if (vertListOff + static_cast<u32>(numVerts) * 8u > size) return false;
+    if (primListOff >= size) return false;
+    if (polyDataOff + static_cast<u32>(numPolys) * 4u > size) return false;
+    if (loopVertOff + static_cast<u32>(numLoops) * 4u > size) return false;
+    if (loopPrimOff + static_cast<u32>(numLoops) * 8u > size) return false;
+
+    const u8* verts    = raw + vertListOff;
+    const u8* primBase = raw + primListOff;
+    const u8* polys    = raw + polyDataOff;
+
+    struct LoopInfo { u16 vertBase; u16 primCounts[4]; };
+    std::vector<LoopInfo> loops;
+    loops.reserve(numLoops);
+
+    u16 vertAccum = 0;
+    u32 expectedPolys = 0;
+    for (u16 i = 0; i < numLoops; i++) {
+        LoopInfo info;
+        info.vertBase = vertAccum;
+        const u8* lv = raw + loopVertOff + i * 4;
+        const u8* lp = raw + loopPrimOff + i * 8;
+        u16 loopVertCount = p3dReadU16LE(lv);
+        info.primCounts[0] = p3dReadU16LE(lp + 0);
+        info.primCounts[1] = p3dReadU16LE(lp + 2);
+        info.primCounts[2] = p3dReadU16LE(lp + 4);
+        info.primCounts[3] = p3dReadU16LE(lp + 6);
+        loops.push_back(info);
+        vertAccum = static_cast<u16>(vertAccum + loopVertCount);
+        expectedPolys += info.primCounts[0] + info.primCounts[1]
+                       + info.primCounts[2] + info.primCounts[3];
+    }
+    if (expectedPolys != numPolys) return false;
+
+    static constexpr u32 kBucketStride[4] = { 52, 36, 40, 28 };
+    const u8* primCursor = primBase;
+    u32 polyIdx = 0;
+
+    auto readVert = [&](u16 vertBase, u8 vi) -> PrimGeomVertex {
+        u32 idx = static_cast<u32>(vertBase) + vi;
+        if (idx >= numVerts) idx = 0;
+        const u8* v = verts + idx * 8;
+        PrimGeomVertex pv;
+        pv.x = static_cast<f32>(p3dReadS16LE(v + 0));
+        pv.y = static_cast<f32>(p3dReadS16LE(v + 2));
+        pv.z = static_cast<f32>(p3dReadS16LE(v + 4));
+        pv.r = 0.7f; pv.g = 0.7f; pv.b = 0.7f;
+        pv.u = 0.0f; pv.v = 0.0f; pv.tpage = -1.0f; pv.cba = 0.0f;
+        pv.jointIndex = (vertJointMap && idx < vertJointMap->size()) ? (*vertJointMap)[idx] : 0u;
+        if (vertJointMap && jointMatrices && idx < vertJointMap->size()) {
+            const Mat4& jm = jointMatrices[(*vertJointMap)[idx]];
+            f32 wx, wy, wz;
+            Mat4TransformPoint(jm, pv.x, pv.y, pv.z, wx, wy, wz);
+            pv.x = wx; pv.y = wy; pv.z = wz;
+        }
+        return pv;
+    };
+
+    auto readRGB = [](const u8* pkt, int off, u32 sz) -> std::tuple<f32,f32,f32> {
+        if (off < 0 || static_cast<u32>(off) + 3u > sz) return { 0.7f, 0.7f, 0.7f };
+        return { pkt[off]/128.0f, pkt[off+1]/128.0f, pkt[off+2]/128.0f };
+    };
+
+    for (const LoopInfo& loop : loops) {
+        for (int bucket = 0; bucket < 4; bucket++) {
+            const u32 pktSize = kBucketStride[bucket];
+            for (u16 cnt = 0; cnt < loop.primCounts[bucket]; cnt++, polyIdx++) {
+                if (polyIdx >= numPolys || primCursor + pktSize > raw + size) {
+                    primCursor += pktSize;
+                    continue;
+                }
+                const u8* pkt  = primCursor;
+                const u8* poly = polys + polyIdx * 4;
+                u8 vi0=poly[0], vi1=poly[1], vi2=poly[2], vi3=poly[3];
+                u8 cmdBase = pkt[7] & 0xFCu;
+
+                if (bucket <= 1) {
+                    PrimGeomVertex v0=readVert(loop.vertBase,vi0), v1=readVert(loop.vertBase,vi1);
+                    PrimGeomVertex v2=readVert(loop.vertBase,vi2), v3=readVert(loop.vertBase,vi3);
+                    if (cmdBase == 0x3C) {
+                        f32 tp=static_cast<f32>(p3dReadU16LE(pkt+26)), cb=static_cast<f32>(p3dReadU16LE(pkt+14));
+                        auto [r0,g0,b0]=readRGB(pkt,4,pktSize);  auto [r1,g1,b1]=readRGB(pkt,16,pktSize);
+                        auto [r2,g2,b2]=readRGB(pkt,28,pktSize); auto [r3,g3,b3]=readRGB(pkt,40,pktSize);
+                        v0.r=r0; v0.g=g0; v0.b=b0; v0.u=pkt[12]; v0.v=pkt[13]; v0.tpage=tp; v0.cba=cb;
+                        v1.r=r1; v1.g=g1; v1.b=b1; v1.u=pkt[24]; v1.v=pkt[25]; v1.tpage=tp; v1.cba=cb;
+                        v2.r=r2; v2.g=g2; v2.b=b2; v2.u=pkt[36]; v2.v=pkt[37]; v2.tpage=tp; v2.cba=cb;
+                        v3.r=r3; v3.g=g3; v3.b=b3; v3.u=pkt[48]; v3.v=pkt[49]; v3.tpage=tp; v3.cba=cb;
+                    } else if (cmdBase == 0x2C) {
+                        f32 tp=static_cast<f32>(p3dReadU16LE(pkt+22)), cb=static_cast<f32>(p3dReadU16LE(pkt+14));
+                        auto [r0,g0,b0]=readRGB(pkt,4,pktSize);
+                        v0.r=r0; v0.g=g0; v0.b=b0; v0.u=pkt[12]; v0.v=pkt[13]; v0.tpage=tp; v0.cba=cb;
+                        v1.r=r0; v1.g=g0; v1.b=b0; v1.u=pkt[20]; v1.v=pkt[21]; v1.tpage=tp; v1.cba=cb;
+                        v2.r=r0; v2.g=g0; v2.b=b0; v2.u=pkt[28]; v2.v=pkt[29]; v2.tpage=tp; v2.cba=cb;
+                        v3.r=r0; v3.g=g0; v3.b=b0; v3.u=pkt[36]; v3.v=pkt[37]; v3.tpage=tp; v3.cba=cb;
+                    } else {
+                        bool gour = (cmdBase == 0x38);
+                        auto [r0,g0,b0]=readRGB(pkt,4,pktSize);
+                        auto [r1,g1,b1]=gour ? readRGB(pkt,12,pktSize) : std::make_tuple(r0,g0,b0);
+                        auto [r2,g2,b2]=gour ? readRGB(pkt,20,pktSize) : std::make_tuple(r0,g0,b0);
+                        auto [r3,g3,b3]=gour ? readRGB(pkt,28,pktSize) : std::make_tuple(r0,g0,b0);
+                        v0.r=r0; v0.g=g0; v0.b=b0; v1.r=r1; v1.g=g1; v1.b=b1;
+                        v2.r=r2; v2.g=g2; v2.b=b2; v3.r=r3; v3.g=g3; v3.b=b3;
+                    }
+                    u32 base = static_cast<u32>(vertsOut.size());
+                    vertsOut.push_back(v0); vertsOut.push_back(v1);
+                    vertsOut.push_back(v2); vertsOut.push_back(v3);
+                    indicesOut.push_back(base+0); indicesOut.push_back(base+1); indicesOut.push_back(base+2);
+                    indicesOut.push_back(base+0); indicesOut.push_back(base+2); indicesOut.push_back(base+3);
+                } else {
+                    PrimGeomVertex v0=readVert(loop.vertBase,vi0), v1=readVert(loop.vertBase,vi1);
+                    PrimGeomVertex v2=readVert(loop.vertBase,vi2);
+                    if (cmdBase == 0x34) {
+                        f32 tp=static_cast<f32>(p3dReadU16LE(pkt+26)), cb=static_cast<f32>(p3dReadU16LE(pkt+14));
+                        auto [r0,g0,b0]=readRGB(pkt,4,pktSize);
+                        auto [r1,g1,b1]=readRGB(pkt,16,pktSize);
+                        auto [r2,g2,b2]=readRGB(pkt,28,pktSize);
+                        v0.r=r0; v0.g=g0; v0.b=b0; v0.u=pkt[12]; v0.v=pkt[13]; v0.tpage=tp; v0.cba=cb;
+                        v1.r=r1; v1.g=g1; v1.b=b1; v1.u=pkt[24]; v1.v=pkt[25]; v1.tpage=tp; v1.cba=cb;
+                        v2.r=r2; v2.g=g2; v2.b=b2; v2.u=pkt[36]; v2.v=pkt[37]; v2.tpage=tp; v2.cba=cb;
+                    } else if (cmdBase == 0x24) {
+                        f32 tp=static_cast<f32>(p3dReadU16LE(pkt+22)), cb=static_cast<f32>(p3dReadU16LE(pkt+14));
+                        auto [r0,g0,b0]=readRGB(pkt,4,pktSize);
+                        v0.r=r0; v0.g=g0; v0.b=b0; v0.u=pkt[12]; v0.v=pkt[13]; v0.tpage=tp; v0.cba=cb;
+                        v1.r=r0; v1.g=g0; v1.b=b0; v1.u=pkt[20]; v1.v=pkt[21]; v1.tpage=tp; v1.cba=cb;
+                        v2.r=r0; v2.g=g0; v2.b=b0; v2.u=pkt[28]; v2.v=pkt[29]; v2.tpage=tp; v2.cba=cb;
+                    } else {
+                        bool gour = (cmdBase == 0x30);
+                        auto [r0,g0,b0]=readRGB(pkt,4,pktSize);
+                        auto [r1,g1,b1]=gour ? readRGB(pkt,12,pktSize) : std::make_tuple(r0,g0,b0);
+                        auto [r2,g2,b2]=gour ? readRGB(pkt,20,pktSize) : std::make_tuple(r0,g0,b0);
+                        v0.r=r0; v0.g=g0; v0.b=b0; v1.r=r1; v1.g=g1; v1.b=b1; v2.r=r2; v2.g=g2; v2.b=b2;
+                    }
+                    u32 base = static_cast<u32>(vertsOut.size());
+                    vertsOut.push_back(v0); vertsOut.push_back(v1); vertsOut.push_back(v2);
+                    indicesOut.push_back(base+0); indicesOut.push_back(base+1); indicesOut.push_back(base+2);
+                }
+                primCursor += pktSize;
+            }
+        }
+    }
+    return !vertsOut.empty();
 }
 
 int RP_ZCullGClip(tGeometry* geometry, const LVector* drawPos) {

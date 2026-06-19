@@ -8,6 +8,9 @@
 #include "xclib/xcfile.h"
 #include "gen/blockmgr.h"
 #include "ai/player.h"
+#ifdef MOD_LOADER
+#include "extra/modloader.h"
+#endif
 
 static constexpr u32 DIALOG_SECTOR_SIZE = 2048;
 static constexpr u32 DIALOG_RATE = 11025;
@@ -17,6 +20,7 @@ static std::vector<u8> g_dialogHeader;
 static u32 g_dialogHeaderSize = 0;
 static u32 g_dialogDataBaseOffset = 0;
 static u16 g_lastDialogChoiceOffset = 0;
+static s32 g_forcedDialogVariant = -1;
 
 static void SetDlgStatus(s32 status);
 
@@ -130,8 +134,9 @@ static bool EnsureDialogDataLoaded() {
     return !g_dialogHeader.empty();
 }
 
-static bool SelectDialogClipOffset(s32 character, s32 dialogID, u32* outStart, u32* outEnd, u16* outChoiceOffset, u32* outSectors) {
-    if (!outStart || !outEnd || !outChoiceOffset || !outSectors) {
+static bool SelectDialogClipOffset(s32 character, s32 dialogID, u32* outStart, u32* outEnd,
+                                   u16* outChoiceOffset, u32* outSectors, u32* outVariant) {
+    if (!outStart || !outEnd || !outChoiceOffset || !outSectors || !outVariant) {
         return false;
     }
 
@@ -197,43 +202,50 @@ static bool SelectDialogClipOffset(s32 character, s32 dialogID, u32* outStart, u
     const u32 transferLimitBytes = GetDialogTransferLimitBytes();
 
     while (true) {
-        u8 available[256] = {};
-        u32 availableCount = 0;
-        for (u32 i = 0; i < (u32)clipCount; ++i) {
-            const u8 flags = DialogHeaderU8(clipSizeTableOffset + i);
-            if ((flags & 0xC0) == 0) {
-                available[availableCount++] = (u8)i;
-            }
+        u32 selected = 0;
+        if (g_forcedDialogVariant >= 0) {
+            selected = static_cast<u32>(g_forcedDialogVariant);
+            if (selected >= clipCount) return false;
         }
-
-        if (availableCount == 0) {
-            for (u32 i = 0; i < (u32)clipCount; ++i) {
-                const u32 off = clipSizeTableOffset + i;
-                const u8 flags = DialogHeaderU8(off);
-                if ((flags & 0x80) != 0 && (flags & 0x40) == 0) {
-                    g_dialogHeader[off] = (u8)(flags & 0x3F);
-                }
-            }
-
+        else {
+            u8 available[256] = {};
+            u32 availableCount = 0;
             for (u32 i = 0; i < (u32)clipCount; ++i) {
                 const u8 flags = DialogHeaderU8(clipSizeTableOffset + i);
                 if ((flags & 0xC0) == 0) {
                     available[availableCount++] = (u8)i;
                 }
             }
-        }
 
-        if (availableCount == 0) {
-            SetDlgStatus(9);
-            return false;
-        }
+            if (availableCount == 0) {
+                for (u32 i = 0; i < (u32)clipCount; ++i) {
+                    const u32 off = clipSizeTableOffset + i;
+                    const u8 flags = DialogHeaderU8(off);
+                    if ((flags & 0x80) != 0 && (flags & 0x40) == 0) {
+                        g_dialogHeader[off] = (u8)(flags & 0x3F);
+                    }
+                }
 
-        const u32 selectedSlot = (u32)rmRangedRandom((s32)availableCount);
-        const u32 selected = (u32)available[selectedSlot];
+                for (u32 i = 0; i < (u32)clipCount; ++i) {
+                    const u8 flags = DialogHeaderU8(clipSizeTableOffset + i);
+                    if ((flags & 0xC0) == 0) {
+                        available[availableCount++] = (u8)i;
+                    }
+                }
+            }
+
+            if (availableCount == 0) {
+                SetDlgStatus(9);
+                return false;
+            }
+
+            const u32 selectedSlot = (u32)rmRangedRandom((s32)availableCount);
+            selected = (u32)available[selectedSlot];
+        }
         const u16 choiceOffset = (u16)(clipSizeTableOffset + selected);
 
         // PSX SelectDialog rejects immediate repeat selection instead of rerolling.
-        if (choiceOffset == g_lastDialogChoiceOffset) {
+        if (g_forcedDialogVariant < 0 && choiceOffset == g_lastDialogChoiceOffset) {
             SetDlgStatus(9);
             return false;
         }
@@ -267,6 +279,7 @@ static bool SelectDialogClipOffset(s32 character, s32 dialogID, u32* outStart, u
         *outEnd = clipEnd;
         *outChoiceOffset = choiceOffset;
         *outSectors = selectedSectors;
+        *outVariant = selected;
         return true;
     }
 }
@@ -280,9 +293,29 @@ static AudioSample LoadDialogSample(s32 character, s32 dialogID, u16* outChoiceO
     u32 end = 0;
     u16 choiceOffset = 0;
     u32 selectedSectors = 0;
-    if (!SelectDialogClipOffset(character, dialogID, &start, &end, &choiceOffset, &selectedSectors)) {
+    u32 variant = 0;
+    if (!SelectDialogClipOffset(character, dialogID, &start, &end, &choiceOffset, &selectedSectors, &variant)) {
         return AUDIO_SAMPLE_INVALID;
     }
+
+#ifdef MOD_LOADER
+    char overrideName[64];
+    std::snprintf(overrideName, sizeof(overrideName), "c%02d_d%03d_v%02u", character, dialogID, variant);
+    std::vector<s16> overridePcm;
+    u32 overrideRate = 0, overrideChannels = 0;
+    if (ModLoader::Instance().GetSoundOverridePCM(
+            "dialog", overrideName, overridePcm, overrideRate, overrideChannels)
+        && !overridePcm.empty() && overrideRate > 0 && overrideChannels > 0) {
+        AudioSample overrideSample = AudioEngine::LoadSample(
+            overridePcm.data(), static_cast<u32>(overridePcm.size()), overrideRate, overrideChannels);
+        if (overrideSample != AUDIO_SAMPLE_INVALID) {
+            *outChoiceOffset = choiceOffset;
+            *outSectors = selectedSectors;
+            LOG("[Dialog] Override: dialog/%s", overrideName);
+            return overrideSample;
+        }
+    }
+#endif
 
     const u8* clipData = &g_dialogFileData[start];
     const u32 clipSize = end - start;
@@ -1762,4 +1795,25 @@ void jcsStartDialog() {
     ResetDialogQueueInfo(0);
     ResetDialogQueueInfo(1);
     g_dialogResultStatus = 0;
+}
+
+s32 jcsPlaySpecificDialog(s32 character, s32 dialogId, u32 variant) {
+    rsEvent(RS_STOP_DIALOG, 0, 0, 0);
+    jcsStartDialog();
+    g_forcedDialogVariant = static_cast<s32>(variant);
+    const s32 handle = rsEvent(RS_LOAD_DIALOG, character, dialogId, 255);
+    g_forcedDialogVariant = -1;
+    if (handle != 0) {
+        // Loading the decoded PC sample above is synchronous, although the
+        // emulated PSX dialog state normally waits a few frames before making
+        // it playable.  Callers usually poll the dialog system during gameplay
+        // and advance that state.  The quitting menu deliberately processes no
+        // more input/gameplay, so promote this one-shot request immediately.
+        g_dialogLoadReadyFrame = GetDialogFrameCounter();
+        PromotePendingDialogLoadState();
+        if (rsEvent(RS_PLAY_DIALOG, handle, 0, 360) == 0) {
+            return 0;
+        }
+    }
+    return handle;
 }

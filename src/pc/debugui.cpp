@@ -1,4 +1,4 @@
-#include "gen/common.h"
+﻿#include "gen/common.h"
 #include "pc/debugui.h"
 #include "imgui.h"
 #include "gen/game.h"
@@ -31,6 +31,10 @@
 #include "pc/log.h"
 #include "fe/xcfont.h"
 #include "p3d/hash.h"
+#include "extra/modloader.h"
+#include "extra/assetexporter.h"
+#include "extra/assetexporter_ui.h"
+#include "p3d/context.h"
 
 static bool sEnabled = false;
 static bool sShowPlayer = false;
@@ -49,6 +53,15 @@ static s32 sInputRoutingSelection = 0; // 0 = Camera input, 1 = Player input
 static char sConsoleNoteInput[1024] = {};
 static char sLastConsoleNote[1024] = {};
 static bool sCursorForcedByDebugUI = false;
+static bool sShowAssetExporter = false;
+static bool sShowMods = false;
+#ifdef REAL_TEXTURE_RENDERING
+static bool sRealTextureMode = false;
+#endif
+static bool sAssetExporterCatalogBuilt = false;
+static char sAssetExporterFilter[128] = {};
+static int sAssetExporterCategoryFilter = 0;
+static char sAssetExporterOutputDir[256] = "~mods/ExportedAssets";
 
 struct DebugParticleChoice {
     const char* label;
@@ -1532,6 +1545,14 @@ void DebugUI::Draw() {
             ImGui::MenuItem("Audio", nullptr, &sShowAudio);
             ImGui::MenuItem("Console Notes", nullptr, &sShowConsoleNotes);
             ImGui::Separator();
+            ImGui::MenuItem("Asset Exporter", nullptr, &sShowAssetExporter);
+            ImGui::MenuItem("Mods", nullptr, &sShowMods);
+#ifdef REAL_TEXTURE_RENDERING
+            if (ImGui::MenuItem("Real Textures", nullptr, &sRealTextureMode)) {
+                if (p3d::context) p3d::context->SetRealTextureMode(sRealTextureMode);
+            }
+#endif
+            ImGui::Separator();
             ImGui::MenuItem("ImGui Demo", nullptr, &sShowImGuiDemo);
             ImGui::EndMenu();
         }
@@ -2329,5 +2350,8 @@ void DebugUI::Draw() {
     if (sShowImGuiDemo) {
         ImGui::ShowDemoWindow(&sShowImGuiDemo);
     }
+
+    if (sShowAssetExporter) { DrawAssetExporterWindow(&sShowAssetExporter); }
+    if (sShowMods) { DrawModsWindow(&sShowMods); }
 
 }

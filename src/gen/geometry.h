@@ -1,5 +1,10 @@
 #pragma once
 #include "core.h"
+#include "gen/config.h"
+#include <vector>
+#ifdef REAL_TEXTURE_RENDERING
+#include "extra/realtexture.h"
+#endif
 
 class pddiPrimBuffer;
 struct STreeJoint;
@@ -66,4 +71,30 @@ int RP_ZCullGMFog(tGeometry* geometry, const LVector* drawPos, u16 fogNear, u16 
 // Legacy host bridge for non-block call sites that still consume a raw
 // pddiPrimBuffer instead of owning a reversed tPrimGeom object.
 tPrimGeom* CloneRawPrimGeom(const u8* primData, u32 primSize);
-pddiPrimBuffer* BuildPrimBufferFromRawPrimGeom(const u8* primData, u32 primSize);
+pddiPrimBuffer* BuildPrimBufferFromRawPrimGeom(const u8* primData, u32 primSize
+#ifdef REAL_TEXTURE_RENDERING
+                                               , std::vector<RealTextureGroup>* outRealTexGroups = nullptr
+#endif
+                                               );
+
+// Standalone vertex extraction for asset export (no GPU/culling dependency).
+// Parses raw tPrimGeom binary and returns float vertices + triangle indices.
+// Vertex positions are in raw PSX s16 units (divide by 4096 for world scale).
+struct PrimGeomVertex {
+    f32 x, y, z;
+    f32 r, g, b;
+    f32 u, v;
+    f32 tpage, cba;
+    u32 jointIndex = 0;
+};
+
+// vertJointMap/jointMatrices are optional: when both are supplied, each source
+// vertex (indexed by its absolute position in the tPrimGeom vertex list) is
+// placed into world space via its owning joint's matrix before being emitted.
+// Without them, vertices are emitted in raw joint-local space unchanged (the
+// correct behaviour for non-skeletal geometry, e.g. level/static meshes).
+bool ExtractPrimGeomVerts(const u8* raw, u32 size,
+                          std::vector<PrimGeomVertex>& vertsOut,
+                          std::vector<u32>& indicesOut,
+                          const std::vector<u32>* vertJointMap = nullptr,
+                          const Mat4* jointMatrices = nullptr);

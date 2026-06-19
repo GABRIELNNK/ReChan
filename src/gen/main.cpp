@@ -6,6 +6,7 @@
 #include "p3d/texture.h"
 #include "p3d/shader.h"
 #include "p3d/stream.h"
+#include "p3d/skeleton.h"
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
 #include "pc/audio.h"
@@ -16,8 +17,18 @@
 #include "gen/time.h"
 #include "gen/display.h"
 #include "extra/fecustommenumgr.h"
+#include "extra/assetexporter.h"
+#include "extra/gltfloader.h"
+#include "gen/model.h"
 #include "radlib/rtask.h"
 #include "ai/player.h"
+#ifdef MOD_LOADER
+#include "extra/modloader.h"
+#endif
+
+#if AUTO_UPDATER
+#include "extra/autoupdater.h"
+#endif
 
 #include <vector>
 #include <algorithm>
@@ -97,8 +108,31 @@ static bool OnWndProc(const pddiWndMessage& msg) {
     return false;
 }
 
-int main() {
+int main(int argc, char** argv) {
     Log::Get().Init();
+
+    // Headless verification/export path used by automated round-trip checks
+    // and mod authors who want the same output as the DebugUI button.
+    if (argc >= 2 && std::strcmp(argv[1], "--export-assets") == 0) {
+        const char* outputDir = (argc >= 3 && argv[2] && argv[2][0])
+            ? argv[2]
+            : "~mods/ExportedAssets";
+        AssetExporter& exporter = AssetExporter::Instance();
+        exporter.BuildCatalog();
+        const int exported = exporter.ExportAllCategories(outputDir);
+        LOG("[AssetExporter] Headless export completed: %d asset bundle(s)", exported);
+        Log::Get().Shutdown();
+        return exported > 0 ? 0 : 2;
+    }
+
+#ifdef MOD_LOADER
+    if (argc >= 3 && std::strcmp(argv[1], "--verify-png-baseline") == 0) {
+        const bool unchanged = ModLoader::Instance().IsUnmodifiedTextureDump(argv[2]);
+        LOG("[ModLoader] PNG baseline %s: %s", unchanged ? "matched" : "not matched", argv[2]);
+        Log::Get().Shutdown();
+        return unchanged ? 0 : 5;
+    }
+#endif
 
     tPlatform* platform = tPlatform::Create();
 
@@ -110,6 +144,31 @@ int main() {
     tContext* ctx = platform->CreateContext(init);
     if (!ctx)
         return 1;
+
+#ifdef MOD_LOADER
+    if (argc >= 3 && std::strcmp(argv[1], "--verify-glb") == 0) {
+        OriginalGeo* geometry = GLTFLoader::LoadGeo(argv[2]);
+        const bool valid = geometry && geometry->meshBuffer;
+        delete geometry;
+        platform->DestroyContext(ctx);
+        tPlatform::Destroy();
+        LOG("[GLTFLoader] Verification %s: %s", valid ? "passed" : "failed", argv[2]);
+        Log::Get().Shutdown();
+        return valid ? 0 : 3;
+    }
+    if (argc >= 3 && std::strcmp(argv[1], "--verify-stree") == 0) {
+        OriginalSTree* character = GLTFLoader::LoadSTree(argv[2]);
+        const bool valid = character && character->skeleton && character->skinData
+            && character->skeleton->numJoints > 0
+            && character->skeleton->joints[0].meshBuffer;
+        delete character;
+        platform->DestroyContext(ctx);
+        tPlatform::Destroy();
+        LOG("[GLTFLoader] Skinned verification %s: %s", valid ? "passed" : "failed", argv[2]);
+        Log::Get().Shutdown();
+        return valid ? 0 : 4;
+    }
+#endif
 
     p3d::display->SetWndProc(OnWndProc);
     p3d::display->SetOverlayCallback(DebugUI::Draw);
@@ -134,9 +193,20 @@ int main() {
         if (!g_textManager->LoadFont(desc)) {
             LOG("[TextManager] Failed to load menu font: %s", desc.path);
         }
+
+        desc.name = "Legal";
+        desc.path = "pc/fonts/Roboto-Regular.ttf";
+        desc.pixelHeight = 48;
+        if (!g_textManager->LoadFont(desc)) {
+            LOG("[TextManager] Failed to load menu font: %s", desc.path);
+        }
     }
 
     game.Open();
+
+#ifdef MOD_LOADER
+    ModLoader::Instance().Init();
+#endif
 
     game.SetState(GameState::Intro);
 
@@ -227,8 +297,26 @@ int main() {
         g_textManager = nullptr;
     }
 
+#if AUTO_UPDATER
+    if (g_autoUpdater) {
+        g_autoUpdater->Shutdown();
+        delete g_autoUpdater;
+        g_autoUpdater = nullptr;
+    }
+#endif
+
+    if (g_psxDiscExtractor) {
+        g_psxDiscExtractor->Shutdown();
+        delete g_psxDiscExtractor;
+        g_psxDiscExtractor = nullptr;
+    }
+
     delete g_actionInput;
     g_actionInput = nullptr;
+
+#ifdef MOD_LOADER
+    ModLoader::Instance().Shutdown();
+#endif
 
     LOG("Clean shutdown");
     Log::Get().Shutdown();

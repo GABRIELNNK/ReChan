@@ -265,38 +265,6 @@ static const f32 kTallyDragonCountRate = 6.0f;
 static const s32 kTallyScoreMinStep = 1;
 static const s32 kTallyDragonMinStep = 1;
 
-static f32 HudSafeWidth() {
-    const f32 screenW = SCREEN_WIDTH;
-    const f32 screenH = SCREEN_HEIGHT;
-    const f32 maxW16x9 = screenH * TARGET_ASPECT_RATIO;
-    return (screenW > maxW16x9) ? maxW16x9 : screenW;
-}
-
-static f32 HudSafeOffsetX() {
-    const f32 safeW = HudSafeWidth();
-    const f32 screenW = SCREEN_WIDTH;
-    if (screenW > safeW) {
-        return (screenW - safeW) * 0.5f;
-    }
-    return 0.0f;
-}
-
-static f32 HudX(f32 x) {
-    return HudSafeOffsetX() + (x / DEFAULT_SCREEN_WIDTH) * HudSafeWidth();
-}
-
-static f32 HudY(f32 y) {
-    return SCREEN_SCALE_Y(y);
-}
-
-static f32 HudW(f32 w) {
-    return (w / DEFAULT_SCREEN_WIDTH) * HudSafeWidth();
-}
-
-static f32 HudH(f32 h) {
-    return SCREEN_SCALE_Y(h);
-}
-
 static f32 s_hudDrawAlpha = 1.0f;
 
 static f32 ClampHudAlpha(f32 alpha) {
@@ -1005,21 +973,21 @@ static void DrawTallyRow(f32 x,
     const f32 labelX = x + (icon ? 20.0f : 2.0f);
 
     if (BeginHudText(kHudBodyFontName,
-                     kTallyLabelScale,
-                     TextAlign_Left,
-                     kTallyLabelR,
-                     kTallyLabelG,
-                     kTallyLabelB,
-                     255,
-                     false,
-                     false)) {
+        kTallyLabelScale,
+        TextAlign_Left,
+        kTallyLabelR,
+        kTallyLabelG,
+        kTallyLabelB,
+        255,
+        false,
+        false)) {
         g_textManager->PrintString(label ? label : "",
                                    HudX(labelX),
                                    HudY(y + 3.0f));
     }
 
     if (BeginHudText(GetHudTitleFontName(), kTallyValueScale, TextAlign_Right,
-                     valueR, valueG, valueB, 255, true, false)) {
+        valueR, valueG, valueB, 255, true, false)) {
         g_textManager->PrintString(value ? value : "0",
                                    HudX(valueBoxX + kTallyValueBoxW - 8.0f),
                                    HudY(y + 3.0f));
@@ -1028,8 +996,7 @@ static void DrawTallyRow(f32 x,
 
 CustomHudMgr g_customHudMgr;
 
-CustomHudMgr::CustomHudMgr() {
-}
+CustomHudMgr::CustomHudMgr() {}
 
 CustomHudMgr::~CustomHudMgr() {
     Shutdown();
@@ -1194,7 +1161,7 @@ void CustomHudMgr::Shutdown() {
         m_ornamentTex->Release();
         m_ornamentTex = nullptr;
     }
-    if (m_clockTex ) {
+    if (m_clockTex) {
         m_clockTex->Release();
         m_clockTex = nullptr;
     }
@@ -1376,14 +1343,14 @@ void CustomHudMgr::DrawPlayerHealthCard(const HUD& hud) {
     }
 
     if (BeginHudText(GetHudTitleFontName(),
-                     kPlayerHealthNameScale,
-                     TextAlign_Left,
-                     kPlayerHealthNameR,
-                     kPlayerHealthNameG,
-                     kPlayerHealthNameB,
-                     kPlayerHealthNameA,
-                     true,
-                     false)) {
+        kPlayerHealthNameScale,
+        TextAlign_Left,
+        kPlayerHealthNameR,
+        kPlayerHealthNameG,
+        kPlayerHealthNameB,
+        kPlayerHealthNameA,
+        true,
+        false)) {
         g_textManager->SetFontByName("Menu");
         g_textManager->PrintString(playerNameText, HudX(kPlayerHealthNameX), HudY(kPlayerHealthNameY));
     }
@@ -1519,14 +1486,14 @@ void CustomHudMgr::DrawEnemyHealthCards(const HUD& hud) {
         char displayName[48] = {};
         CopyUpperAscii(displayName, (s32)sizeof(displayName), name);
         if (BeginHudText(kHudBodyFontName,
-                         kEnemyHealthLabelScale,
-                         TextAlign_Center,
-                         kBossHealthLabelR,
-                         kBossHealthLabelG,
-                         kBossHealthLabelB,
-                         kBossHealthLabelA,
-                         true,
-                         false)) {
+            kEnemyHealthLabelScale,
+            TextAlign_Center,
+            kBossHealthLabelR,
+            kBossHealthLabelG,
+            kBossHealthLabelB,
+            kBossHealthLabelA,
+            true,
+            false)) {
             g_textManager->PrintString(displayName,
                                        barX + barW * 0.5f,
                                        barY - SCREEN_HEIGHT * kEnemyHealthLabelYOffsetFromScreenH);
@@ -1668,14 +1635,14 @@ void CustomHudMgr::DrawInventoryCard(const HUD& hud) {
         const s32 redBoost = (s32)(redPulse * kInventoryPulseTextColorBoost);
         const f32 redTextScale = 1.0f + redPulse * kInventoryPulseTextScale;
         if (BeginHudText(GetHudTitleFontName(),
-                         0.30f * redTextScale,
-                         TextAlign_Left,
-                         255,
-                         SaturatingAddU8(244, redBoost),
-                         SaturatingAddU8(214, redBoost),
-                         255,
-                         true,
-                         false)) {
+            0.30f * redTextScale,
+            TextAlign_Left,
+            255,
+            SaturatingAddU8(244, redBoost),
+            SaturatingAddU8(214, redBoost),
+            255,
+            true,
+            false)) {
             g_textManager->PrintString(redBuf,
                                        HudX(redX + iconSize + kInventoryTextGapFromIcon + redTextShakeX),
                                        HudY(redCenterY - kInventoryTextCenterToPrintYOffset * redTextScale));
@@ -1685,14 +1652,14 @@ void CustomHudMgr::DrawInventoryCard(const HUD& hud) {
     const s32 goldBoost = (s32)(goldPulse * kInventoryPulseTextColorBoost);
     const f32 goldTextScale = 1.0f + goldPulse * kInventoryPulseTextScale;
     if (BeginHudText(GetHudTitleFontName(),
-                     0.30f * goldTextScale,
-                     TextAlign_Left,
-                     255,
-                     SaturatingAddU8(244, goldBoost),
-                     SaturatingAddU8(214, goldBoost),
-                     255,
-                     true,
-                     false)) {
+        0.30f * goldTextScale,
+        TextAlign_Left,
+        255,
+        SaturatingAddU8(244, goldBoost),
+        SaturatingAddU8(214, goldBoost),
+        255,
+        true,
+        false)) {
         g_textManager->PrintString(goldBuf,
                                    HudX(goldX + iconSize + kInventoryTextGapFromIcon + goldTextShakeX),
                                    HudY(goldCenterY - kInventoryTextCenterToPrintYOffset * goldTextScale));
@@ -1701,14 +1668,14 @@ void CustomHudMgr::DrawInventoryCard(const HUD& hud) {
     const s32 livesBoost = (s32)(livesPulse * kInventoryPulseTextColorBoost);
     const f32 livesTextScale = 1.0f + livesPulse * kInventoryPulseTextScale;
     if (BeginHudText(GetHudTitleFontName(),
-                     0.30f * livesTextScale,
-                     TextAlign_Left,
-                     255,
-                     SaturatingAddU8(244, livesBoost),
-                     SaturatingAddU8(214, livesBoost),
-                     255,
-                     true,
-                     false)) {
+        0.30f * livesTextScale,
+        TextAlign_Left,
+        255,
+        SaturatingAddU8(244, livesBoost),
+        SaturatingAddU8(214, livesBoost),
+        255,
+        true,
+        false)) {
         g_textManager->PrintString(livesText,
                                    HudX(livesX + iconSize + kInventoryTextGapFromIcon + livesTextShakeX),
                                    HudY(livesCenterY - kInventoryTextCenterToPrintYOffset * livesTextScale));
@@ -1783,12 +1750,12 @@ void CustomHudMgr::DrawHitsCard(const HUD& hud) {
 
     const char* comboText = TrimLeftOrZero(hud.hits.hitsBuf);
     if (BeginHudText(GetHudTitleFontName(), 0.28f, TextAlign_Center,
-                     (u8)hud.hits.colorR,
-                     (u8)hud.hits.colorG,
-                     (u8)hud.hits.colorB,
-                     255,
-                     true,
-                     false)) {
+        (u8)hud.hits.colorR,
+        (u8)hud.hits.colorG,
+        (u8)hud.hits.colorB,
+        255,
+        true,
+        false)) {
         g_textManager->PrintString(comboText, screenX + shakeX, screenY + shakeY);
     }
 
@@ -1847,7 +1814,7 @@ void CustomHudMgr::DrawDestinationBanner(const HUD& hud) const {
     const s32 currentLevel = hud.destSelect.currentLevel;
     if (currentLevel <= 0) {
         if (BeginHudText(GetHudTitleFontName(), 0.35f, TextAlign_Center,
-                         kMenuTitleTextR, kMenuTitleTextG, kMenuTitleTextB, 255, true, false)) {
+            kMenuTitleTextR, kMenuTitleTextG, kMenuTitleTextB, 255, true, false)) {
             g_textManager->PrintString(destSelectTitleText, HudX(x + w * 0.5f), HudY(y + 5.0f));
         }
 
@@ -1859,7 +1826,7 @@ void CustomHudMgr::DrawDestinationBanner(const HUD& hud) const {
         char line[64];
         std::snprintf(line, sizeof(line), destTotalGoldFormatText, totalGold);
         if (BeginHudText(kHudBodyFontName, 0.20f, TextAlign_Center,
-                         kMenuTextNormR, kMenuTextNormG, kMenuTextNormB, 255, false, false)) {
+            kMenuTextNormR, kMenuTextNormG, kMenuTextNormB, 255, false, false)) {
             g_textManager->PrintString(line, HudX(x + w * 0.5f), HudY(y + 20.0f));
         }
         return;
@@ -1885,12 +1852,12 @@ void CustomHudMgr::DrawDestinationBanner(const HUD& hud) const {
     }
 
     if (BeginHudText(kHudBodyFontName, 0.20f, TextAlign_Center,
-                     kMenuTextNormR, kMenuTextNormG, kMenuTextNormB, 255, false, false)) {
+        kMenuTextNormR, kMenuTextNormG, kMenuTextNormB, 255, false, false)) {
         g_textManager->PrintString(destTravelToText, HudX(x + w * 0.5f), HudY(y + 4.0f));
     }
 
     if (BeginHudText(GetHudTitleFontName(), 0.37f, TextAlign_Center,
-                     kMenuTitleTextR, kMenuTitleTextG, kMenuTitleTextB, 255, true, false)) {
+        kMenuTitleTextR, kMenuTitleTextG, kMenuTitleTextB, 255, true, false)) {
         g_textManager->PrintString(levelBuf, HudX(x + w * 0.5f), HudY(y + 12.0f));
     }
 
@@ -1901,12 +1868,12 @@ void CustomHudMgr::DrawDestinationBanner(const HUD& hud) const {
     }
 
     if (BeginHudText(kHudBodyFontName, 0.20f, TextAlign_Center,
-                     kMenuTextNormR,
-                     kMenuTextNormG,
-                     kMenuTextNormB,
-                     255,
-                     false,
-                     false)) {
+        kMenuTextNormR,
+        kMenuTextNormG,
+        kMenuTextNormB,
+        255,
+        false,
+        false)) {
         g_textManager->PrintString(completed ? destCompletedText : destNotCompletedText,
                                    HudX(x + w * 0.5f),
                                    HudY(y + 24.0f));
@@ -1987,18 +1954,18 @@ void CustomHudMgr::DrawTallyOverlay(const HUD& hud) {
     DrawGradientRect(panelInnerX, y + 1.0f + topHalfH, panelInnerW, topInnerH - topHalfH,
                      kTallyPanelBarMidR, kTallyPanelBarMidG, kTallyPanelBarMidB, kTallyPanelBarA,
                      kTallyPanelBarEdgeR, kTallyPanelBarEdgeG, kTallyPanelBarEdgeB, kTallyPanelBarA);
-    
+
     DrawFilledRect(panelInnerX, bodyY0, panelInnerW, bodyY1 - bodyY0,
                    kTallyPanelBodyR, kTallyPanelBodyG, kTallyPanelBodyB, kTallyPanelBodyA);
     DrawFilledRect(panelInnerX, bodyY0, panelInnerW, 1.0f,
                    kTallyPanelOutlineR, kTallyPanelOutlineG, kTallyPanelOutlineB, kTallyPanelOutlineA);
-    
+
     DrawFilledRect(x + 10.0f, y + 5.0f, w - 20.0f, 18.0f, 0, 0, 0, 255);
     DrawOutlineRect(x + 10.0f, y + 5.0f, w - 20.0f, 18.0f,
                     kTallyPanelOutlineR, kTallyPanelOutlineG, kTallyPanelOutlineB, 255, 1.0f);
 
     if (BeginHudText(kHudBodyFontName, kTallyHeaderTextScale, TextAlign_Center,
-                     kTallyTitleR, kTallyTitleG, kTallyTitleB, 255, true, false)) {
+        kTallyTitleR, kTallyTitleG, kTallyTitleB, 255, true, false)) {
         g_textManager->PrintString(tallyHeaderText, HudX(x + w * 0.5f), HudY(y + 9.0f));
     }
 
@@ -2196,8 +2163,8 @@ void CustomHudMgr::DrawTallyOverlay(const HUD& hud) {
     const bool goldBonusAnimDone = (m_tallyGoldBonusAnimTimer <= 0.0f);
     const bool movieBonusTimingReady =
         (gdragonTarget > 0)
-            ? (goldDragonCountDone && goldBonusAnimDone)
-            : (redDragonsRevealed && (m_tallyRDragonDisplay >= rdragonTarget));
+        ? (goldDragonCountDone && goldBonusAnimDone)
+        : (redDragonsRevealed && (m_tallyRDragonDisplay >= rdragonTarget));
     const bool rawMovieBonusVisible = useDebugPreview ? m_debugTallyShowMovieBonus : hud.tally.movieBonusOvl.IsVisible();
     const bool movieBonusVisible = rawMovieBonusVisible && movieBonusTimingReady;
     if (movieBonusVisible) {
@@ -2377,28 +2344,28 @@ void CustomHudMgr::DrawTallyOverlay(const HUD& hud) {
 
             if (glowAlpha > 0 &&
                 BeginHudText(GetHudTitleFontName(),
-                             glowScale,
-                             TextAlign_Center,
-                             255,
-                             186,
-                             72,
-                             glowAlpha,
-                             false,
-                             false)) {
+                glowScale,
+                TextAlign_Center,
+                255,
+                186,
+                72,
+                glowAlpha,
+                false,
+                false)) {
                 const f32 glowScaleY = SCREEN_SCALE_Y(glowScale);
                 g_textManager->SetScale(glowScaleY * backWidthMul, glowScaleY);
                 g_textManager->PrintString(bonusGoldText, drawX, drawY);
             }
 
             if (BeginHudText(GetHudTitleFontName(),
-                             mainScale,
-                             TextAlign_Center,
-                             255,
-                             244,
-                             176,
-                             alpha,
-                             true,
-                             false)) {
+                mainScale,
+                TextAlign_Center,
+                255,
+                244,
+                176,
+                alpha,
+                true,
+                false)) {
                 g_textManager->PrintString(bonusGoldText, drawX, drawY);
             }
         }
@@ -2471,14 +2438,14 @@ void CustomHudMgr::DrawTallyOverlay(const HUD& hud) {
             m_tallyPromptPulse.Update();
             const xcColour1555 pulseColor = m_tallyPromptPulse.GetColor();
             if (BeginHudText(kHudBodyFontName,
-                             kTallyContinuePromptScale,
-                             TextAlign_Center,
-                             pulseColor.GetRed8(),
-                             pulseColor.GetGreen8(),
-                             pulseColor.GetBlue8(),
-                             255,
-                             true,
-                             false)) {
+                kTallyContinuePromptScale,
+                TextAlign_Center,
+                pulseColor.GetRed8(),
+                pulseColor.GetGreen8(),
+                pulseColor.GetBlue8(),
+                255,
+                true,
+                false)) {
                 g_textManager->PrintString(continuePromptText,
                                            HudX(kTallyContinuePromptX),
                                            HudY(kTallyContinuePromptY));

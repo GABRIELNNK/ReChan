@@ -6,6 +6,9 @@
 #include "fe/hud.h"
 #include "gen/time.h"
 #include "gen/director.h"
+#if NEW_CHEATS
+#include "extra/cheats.h"
+#endif
 
 ScoreManager* g_scoreManager = nullptr;
 static Handler* s_scoreMgrHandler = nullptr;
@@ -118,6 +121,9 @@ void ScoreManager::InitGameStats() {
     }
 
     petalStats[0].fightScore = -1;
+#if NEW_CHEATS
+    ApplyProgressCheats();
+#endif
 }
 
 // PSX: InitLevelStats__12ScoreManager (SCOREMGR.CPP:326, 0x8004CDEC)
@@ -471,6 +477,9 @@ void ScoreManager::AddFightingPoints(s32 points) {
 // PSX: HandleGameBegin__12ScoreManager (SCOREMGR.CPP:798, 0x8004D4C8)
 void ScoreManager::HandleGameBegin() {
     MARKFUNCTION(0x8004D4C8);
+#if NEW_CHEATS
+    ResetCheats();
+#endif
     InitGameStats();
     InitLevelStats();
 }

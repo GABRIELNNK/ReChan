@@ -190,8 +190,9 @@ public:
                           float u0 = 0, float v0 = 0,
                           float u1 = 1, float v1 = 1) = 0;
 
-    // Draw a retained-mode primitive buffer
-    virtual void DrawPrimBuffer(pddiPrimBuffer* buffer) = 0;
+    // Draw a retained-mode primitive buffer. indexCount=0 draws the full buffer
+    // (buffer->GetIndexCount()); otherwise draws indexCount indices starting at indexOffset.
+    virtual void DrawPrimBuffer(pddiPrimBuffer* buffer, u32 indexOffset = 0, u32 indexCount = 0) = 0;
 
     // Gouraud-shaded quad with 4 per-vertex colors (PSX POLYG4)
     virtual void DrawGouraudQuad(float x0, float y0, float r0, float g0, float b0, float a0,
@@ -211,6 +212,16 @@ public:
     // Create/destroy a raw R16UI texture for PSX VRAM upload
     virtual u32  CreateVRAMTexture(int w, int h, const u16* data) = 0;
     virtual void DestroyVRAMTexture(u32 handle) = 0;
+
+    // Real-texture rendering: an alternate 3D texturing path that samples a
+    // real 2D texture (bound via SetTexture) instead of the PSX VRAM atlas.
+    // Off by default; the texture set via SetTexture is only used for 3D
+    // draws while this mode is enabled. offsetX/Y, sizeX/Y are in the same
+    // raw page-pixel UV space the legacy VRAM path uses (0-256 per page),
+    // describing the sub-rect of that space the bound texture corresponds to.
+    virtual void SetRealTextureMode(bool enabled) = 0;
+    virtual bool IsRealTextureModeEnabled() const = 0;
+    virtual void SetRealTextureRect(float offsetX, float offsetY, float sizeX, float sizeY) = 0;
 };
 
 // pddiGamepad - abstract gamepad/controller interface

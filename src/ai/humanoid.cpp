@@ -33,6 +33,9 @@
 #include "p3d/skeleton.h"
 #include "pc/debugui.h"
 #include "pc/log.h"
+#if NEW_CHEATS
+#include "extra/cheats.h"
+#endif
 
 
 static constexpr s32 HUMANOID_ANIM_RUN = 2;
@@ -2008,6 +2011,13 @@ void Humanoid::HandleCollision(Thing* other, s32 damage, ...) {
         }
 
         if (this != (Humanoid*)Player::s_player) {
+#if NEW_CHEATS
+            const bool playerMelee = other == static_cast<Thing*>(Player::s_player)
+                && hitType >= 1 && hitType <= 5;
+            if (playerMelee && IsCheatEnabled(CheatOption::OnePunchMan)) {
+                appliedDamage = static_cast<s32>(health);
+            }
+#endif
             bool setFoe = other->thingType >= 0x191u && other->thingType < 0x1D9u;
             if (!setFoe && other->thingType == AITypes::TT_PLATFORM) {
                 setFoe = ((other->flags2 >> 13) & 1) != 0;
@@ -2230,6 +2240,15 @@ s32 Humanoid::SubtractHitPoints(u16 hitPoints) {
     MARKFUNCTION(0x8006CEB4);
 
     const u16 healthBefore = health;
+
+#if NEW_CHEATS
+    if (this == static_cast<Humanoid*>(Player::s_player)
+        && IsCheatEnabled(CheatOption::GodMode)) {
+        health = maxHealth;
+        if (g_hud) g_hud->UpdateFoe(this);
+        return health;
+    }
+#endif
 
     if (DebugUI::IsHumanoidDamageDisabled()) {
         if (g_hud) {
@@ -5337,6 +5356,49 @@ void Humanoid::_Dead() {
             isBossType = true;
             break;
     }
+
+#if NEW_CHEATS
+    // Saints Row-style "Heaven Bound": let the death animation settle for one
+    // second, turn the limp corpse pose upright, then ascend slowly before
+    // resuming the original cleanup path below. Boss scripts remain untouched.
+    static constexpr s32 HEAVEN_BOUND_DELAY_FRAMES = 15;
+    static constexpr s32 HEAVEN_BOUND_ASCEND_FRAMES = 90;
+    static constexpr s32 HEAVEN_BOUND_ROTATE_FRAMES = 15;
+    static constexpr s32 HEAVEN_BOUND_ASCEND_SPEED = 44;
+    if (!isBossType && IsCheatEnabled(CheatOption::HeavenBound)
+        && thinkCounter < HEAVEN_BOUND_DELAY_FRAMES + HEAVEN_BOUND_ASCEND_FRAMES) {
+        if (thinkCounter <= 1) {
+            FightingCollision::RemoveHumanoid(this);
+            ReleaseTarget();
+            if (Player::s_player) Player::s_player->SignalEnemyDead(this);
+        }
+
+        flags |= 0x0080;
+        if (thinkCounter >= HEAVEN_BOUND_DELAY_FRAMES) {
+            const s32 ascendFrame = thinkCounter - HEAVEN_BOUND_DELAY_FRAMES;
+            if (ascendFrame < HEAVEN_BOUND_ROTATE_FRAMES) {
+                // No ragdoll solver exists, so ease the finished horizontal
+                // death pose upright over half a second while retaining its
+                // limp animation pose. Include the integer remainder on the
+                // final frame so the total rotation is exactly 90 degrees.
+                const s32 baseStep = 0x4000 / HEAVEN_BOUND_ROTATE_FRAMES;
+                orientation.x += (ascendFrame + 1 == HEAVEN_BOUND_ROTATE_FRAMES)
+                    ? (0x4000 - baseStep * (HEAVEN_BOUND_ROTATE_FRAMES - 1))
+                    : baseStep;
+            }
+            flags &= ~TF_ON_GROUND;
+            maxFallDivisor = 0;
+            velocity.x = 0;
+            velocity.y = HEAVEN_BOUND_ASCEND_SPEED;
+            velocity.z = 0;
+            force = {};
+            contactForce = {};
+            orientation.y += 96;
+        }
+        KillDialog(0, 0, 512);
+        return;
+    }
+#endif
 
     if (!isBossType) {
         // PSX: SignalEnemyDead(thePlayer, this)

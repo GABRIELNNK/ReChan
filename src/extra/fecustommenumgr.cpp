@@ -21,6 +21,18 @@
 #include "pddi/pdditex.h"
 #include "p3d/context.h"
 #include "p3d/input.h"
+#if NEW_CHEATS
+#include "extra/cheats.h"
+#endif
+
+#ifdef MOD_LOADER
+#include "extra/modloader.h"
+#endif
+
+#if AUTO_UPDATER
+#include "extra/autoupdater.h"
+#include "version.h"
+#endif
 
 feCustomMenuMgr* g_feCustomMenuMgr = nullptr;
 
@@ -46,6 +58,16 @@ static f32 ScrollArrowPulseScale(u32 frameCounter, s32 phaseOffset) {
         : ((f32)(24u - phase) / 12.0f);
     return 0.92f + ramp * 0.16f;
 }
+
+#if AUTO_UPDATER
+// Derived from the page's actual frameH so a window resize can't desync from how many
+// lines are rendered (a fixed line-count constant previously drifted out of sync with this).
+static s32 ComputeChangelogVisibleLines(s32 frameH) {
+    const s32 bodyAvailH = frameH - DEF_TITLE_BAR_H - DEF_BOTTOM_BAR_H - DEF_CONTENT_TOP_PAD - DEF_CONTENT_BOTTOM_PAD * 2;
+    const s32 lines = bodyAvailH / 8;
+    return (lines > 1) ? lines : 1;
+}
+#endif
 
 struct LocationRuntimeInfo {
     s32 levelID = 0;
@@ -102,16 +124,16 @@ static const char* GradeToLetter(u8 grade) {
     switch (grade) {
         case 1:
             return "D";
-        case 2: 
+        case 2:
             return "C";
         case 3:
             return "B";
-        case 4: 
+        case 4:
             return "A";
-        default: 
+        default:
             if (grade >= 5) {
                 return "A+";
-            }      
+            }
             break;
     }
 
@@ -518,7 +540,14 @@ void feCustomMenuMgr::BuildPages() {
         Button("FE_KBD", EntryEvent_GoPage, MenuPage_KeyBindings),
         Button("FE_DIS", EntryEvent_GoPage, MenuPage_Display),
         Button("FE_SND", EntryEvent_GoPage, MenuPage_Sound),
+        Button("FE_UPD", EntryEvent_GoPage, MenuPage_Update),
         Button("FE_CRE", EntryEvent_Credits),
+#if NEW_CHEATS
+        Button("FE_CHEATS", EntryEvent_GoPage, MenuPage_Cheats),
+#endif
+#ifdef MOD_LOADER
+        Button("FE_MODS", EntryEvent_GoPage, MenuPage_Mods),
+#endif
         Button("FE_BCK", EntryEvent_Back),
                });
 
@@ -530,7 +559,7 @@ void feCustomMenuMgr::BuildPages() {
                }, 0, 42);
 
     auto& feKeyBindings = AddPage(MenuPage_KeyBindings, "FE_KBD", "Menu_Controller", MenuPage_Controller, 1, false,
-            DEF_KEYBIND_WINDOW_W, DEF_KEYBIND_WINDOW_H);
+                                  DEF_KEYBIND_WINDOW_W, DEF_KEYBIND_WINDOW_H);
     SetEntries(feKeyBindings, {
                 Button("FE_BCK", EntryEvent_Back),
                }, 0, 64);
@@ -540,7 +569,9 @@ void feCustomMenuMgr::BuildPages() {
         List("FE_RES", EntryBinding_DisplayResolution, 1, 0, 64),
         List("FE_FSC", EntryBinding_DisplayScreenMode, 1, 0, 2),
         Toggle("FE_VYS", EntryBinding_DisplayVsync),
+#if HIGH_FPS_PLAY_PRESENTATION
         List("FE_FPS", EntryBinding_DisplayFrameRate, 1, 0, 3),
+#endif
         List("FE_MSA", EntryBinding_DisplayMsaa, 1, 0, 4),
         List("FE_LNG", EntryBinding_Language, 1, 0, (s32)NumLanguages - 1),
         Button("FE_BCK", EntryEvent_Back),
@@ -554,6 +585,26 @@ void feCustomMenuMgr::BuildPages() {
         Toggle("FE_STR", EntryBinding_Stereo),
         Button("FE_BCK", EntryEvent_Back),
                });
+
+#if NEW_CHEATS
+    auto& feCheats = AddPage(MenuPage_Cheats, "FE_CHEATS", "Menu_GameOption", MenuPage_Options, 0, false, -1, -1);
+    SetEntries(feCheats, {
+        Toggle("FE_CH_DRAG", EntryBinding_CheatAllDragons),
+        Toggle("FE_CH_LEVL", EntryBinding_CheatAllLevels),
+        Toggle("FE_CH_GOD", EntryBinding_CheatGodMode),
+        Toggle("FE_CH_PNCH", EntryBinding_CheatOnePunchMan),
+        Toggle("FE_CH_HVN", EntryBinding_CheatHeavenBound),
+        Button("FE_BCK", EntryEvent_Back),
+               });
+#endif
+
+#ifdef MOD_LOADER
+    auto& feMods = AddPage(MenuPage_Mods, "FE_MODS", "Menu_GameOption", MenuPage_Options, 0, false,
+                           DEF_MODS_WINDOW_W, DEF_MODS_WINDOW_H);
+    SetEntries(feMods, {
+        Button("FE_BCK", EntryEvent_Back),
+               }, 0, 64);
+#endif
 
     auto& feLoadSlots = AddPage(MenuPage_LoadSlots, "FE_LDG", "Menu_GameOption", MenuPage_StartGame, 1, false, -1, -1);
     SetEntries(feLoadSlots, {
@@ -665,6 +716,35 @@ void feCustomMenuMgr::BuildPages() {
     SetEntries(feLocation, {
         Button("", EntryEvent_LocationSelect),
                });
+
+#if AUTO_UPDATER
+    AddPage(MenuPage_Update, "FE_UPD", "Menu_GameOption", MenuPage_Title, 0, false, 380, -1);
+    RefreshUpdatePageEntries();
+
+    auto& feCheckingUpdate = AddPage(MenuPage_CheckingUpdate, "FE_UPD", "Menu_GameOption", MenuPage_None, 0, false, 280, -1);
+    SetEntries(feCheckingUpdate, {
+        Info("FE_UPD_CHK"),
+               });
+
+    // Fully custom page: body text + scrollbar are hand-drawn in RenderChangelogBody,
+    // and input is handled in its own Invoke() block, so it carries no real entries.
+    AddPage(MenuPage_Changelog, "FE_UPD_NOTES", "Menu_GameOption", MenuPage_Update, 0, false,
+            DEF_CHANGELOG_WINDOW_W, DEF_CHANGELOG_WINDOW_H);
+#endif
+
+    // Entries are populated by RefreshAssetPageEntries() via SetPage()'s refresh hook the
+    // first time this page is actually shown - g_psxDiscExtractor doesn't exist yet here.
+    AddPage(MenuPage_AssetMissing, "FE_ASSET_TITLE", "Menu_GameOption", MenuPage_None, 0, false, 380, -1);
+
+    auto& feAssetScanning = AddPage(MenuPage_AssetScanning, "FE_ASSET_TITLE", "Menu_GameOption", MenuPage_None, 0, false, 280, -1);
+    SetEntries(feAssetScanning, {
+        Info("FE_ASSET_SCAN"),
+               });
+
+    auto& feAssetExtracting = AddPage(MenuPage_AssetExtracting, "FE_ASSET_TITLE", "Menu_GameOption", MenuPage_None, 0, false, 320, -1);
+    SetEntries(feAssetExtracting, {
+        Info("FE_ASSET_EXTG"),
+               });
 }
 
 void feCustomMenuMgr::Init(CustomText* textSystem) {
@@ -728,11 +808,64 @@ void feCustomMenuMgr::Shutdown() {
     m_text = nullptr;
 }
 
+// Tracks mouse movement/clicks to keep cursor visibility in sync on every page,
+// including the early-return "popup" pages below (Quitting, CheckingUpdate,
+// Changelog, Asset Scanning/Extracting) that don't run the generic list-page
+// input loop further down - without this, pressing a key while one of those is
+// showing hides the cursor and it never gets reactivated since those blocks
+// return before reaching the generic mouse-move/click handling.
+void feCustomMenuMgr::UpdateMouseCursorVisibility() {
+    if (!g_actionInput)
+        return;
+
+    double sx = 0.0;
+    double sy = 0.0;
+    g_actionInput->GetMousePosition(sx, sy);
+
+    bool mouseMoved = false;
+    if (!m_mousePosInitialized) {
+        m_lastMouseX = sx;
+        m_lastMouseY = sy;
+        m_mousePosInitialized = true;
+    }
+    else if (m_mouseInputActive) {
+        mouseMoved = (std::fabs(sx - m_lastMouseX) > 0.5) || (std::fabs(sy - m_lastMouseY) > 0.5);
+        m_lastMouseX = sx;
+        m_lastMouseY = sy;
+    }
+    else {
+        mouseMoved = (std::fabs(sx - m_lastMouseX) > 4.0) || (std::fabs(sy - m_lastMouseY) > 4.0);
+        if (mouseMoved) {
+            m_lastMouseX = sx;
+            m_lastMouseY = sy;
+        }
+    }
+
+    const bool leftClick = g_actionInput->IsMouseButtonTriggered(MouseBtn::Left);
+    const bool rightClick = g_actionInput->IsMouseButtonTriggered(MouseBtn::Right);
+    const bool nonMouseInput = g_actionInput->HadKeyboardInputThisFrame() || g_actionInput->HadGamepadInputThisFrame();
+
+    if ((mouseMoved || leftClick || rightClick) && !nonMouseInput) {
+        if (!m_mouseInputActive && g_display) {
+            g_display->SetCursorVisible(true);
+        }
+        m_mouseInputActive = true;
+    }
+
+    if (nonMouseInput && m_mouseInputActive) {
+        m_mouseInputActive = false;
+        if (g_display) {
+            g_display->SetCursorVisible(false);
+        }
+    }
+}
+
 s32 feCustomMenuMgr::Invoke() {
     if (!m_active)
         return (s32)GameResult::ResumePlay;
 
     m_result = 1;
+    UpdateMouseCursorVisibility();
 
     // Quitting countdown: no input processed, just tick down then close.
     if (m_currPage == MenuPage_Quitting) {
@@ -744,6 +877,102 @@ s32 feCustomMenuMgr::Invoke() {
             m_quitTimerSec = 0.0f;
             if (g_game)
                 g_game->SetState(GameState::End);
+        }
+        return m_result;
+    }
+
+#if AUTO_UPDATER
+    // Checking popup: no input processed, no prompts - just wait for the check to finish.
+    // Reached either at boot (resume into the title screen once done) or from the Game
+    // Update page's "Check for Updates" button (return there once done instead).
+    if (m_currPage == MenuPage_CheckingUpdate) {
+        if (m_checkingPopupMinTimer > 0.0f) {
+            const f32 dt = g_time ? g_time->GetDeltaTime() : (1.0f / 30.0f);
+            m_checkingPopupMinTimer -= dt;
+        }
+        if (m_checkingPopupMinTimer <= 0.0f && g_autoUpdater && g_autoUpdater->IsCheckComplete()) {
+            if (m_pages[MenuPage_CheckingUpdate].parentPage == MenuPage_Update) {
+                SetPage(MenuPage_Update);
+            }
+            else {
+                m_result = (s32)GameResult::ResumePlay;
+            }
+        }
+        return m_result;
+    }
+
+    // Changelog: read-only scrolling text, no cursor/selection - handle Up/Down/Back directly.
+    if (m_currPage == MenuPage_Changelog) {
+        if (!g_actionInput)
+            return m_result;
+
+        const s32 totalLines = (s32)m_changelogLines.size();
+        const s32 visibleLines = ComputeChangelogVisibleLines(m_pages[MenuPage_Changelog].frameH);
+        const s32 maxScrollTop = (totalLines > visibleLines) ? (totalLines - visibleLines) : 0;
+        const s32 scroll = g_actionInput->ConsumeScrollDelta();
+
+        if (g_actionInput->JustPressed(ACTION_MENU_UP) && m_changelogScrollTop > 0) {
+            m_changelogScrollTop--;
+            PlaySound(FE_SND_MENU_7);
+        }
+        else if (g_actionInput->JustPressed(ACTION_MENU_DOWN) && m_changelogScrollTop < maxScrollTop) {
+            m_changelogScrollTop++;
+            PlaySound(FE_SND_MENU_7);
+        }
+        else if (scroll != 0) {
+            const s32 oldScrollTop = m_changelogScrollTop;
+            const s32 dir = (scroll > 0) ? -1 : 1;
+            const s32 scrollSteps = (scroll > 0) ? scroll : -scroll;
+
+            for (s32 step = 0; step < scrollSteps; step++) {
+                const s32 next = m_changelogScrollTop + dir;
+                if (next < 0 || next > maxScrollTop) break;
+                m_changelogScrollTop = next;
+            }
+
+            if (m_changelogScrollTop != oldScrollTop) {
+                PlaySound(FE_SND_MENU_7);
+            }
+        }
+        else if (g_actionInput->JustPressed(ACTION_MENU_BACK) || g_actionInput->JustPressed(ACTION_MENU_CONFIRM)
+                 || g_actionInput->IsMouseButtonTriggered(MouseBtn::Right)) {
+            PlaySound(FE_SND_MENU_5);
+            GoBack();
+        }
+        return m_result;
+    }
+
+    if (m_currPage == MenuPage_Update && g_autoUpdater && g_autoUpdater->GetState() != m_lastUpdateState) {
+        RefreshUpdatePageEntries();
+    }
+#endif
+
+    // Asset-scan/extract popups: no input processed, no prompts - just wait for the
+    // background work to finish, same shape as the update-checker's CheckingUpdate popup.
+    if (m_currPage == MenuPage_AssetScanning) {
+        if (m_assetPopupMinTimer > 0.0f) {
+            const f32 dt = g_time ? g_time->GetDeltaTime() : (1.0f / 30.0f);
+            m_assetPopupMinTimer -= dt;
+        }
+        if (m_assetPopupMinTimer <= 0.0f && g_psxDiscExtractor && g_psxDiscExtractor->GetState() != PsxDiscExtractor::State::Scanning) {
+            SetPage(MenuPage_AssetMissing);
+        }
+        return m_result;
+    }
+
+    if (m_currPage == MenuPage_AssetExtracting) {
+        if (m_assetPopupMinTimer > 0.0f) {
+            const f32 dt = g_time ? g_time->GetDeltaTime() : (1.0f / 30.0f);
+            m_assetPopupMinTimer -= dt;
+        }
+        if (m_assetPopupMinTimer <= 0.0f && g_psxDiscExtractor) {
+            const PsxDiscExtractor::State state = g_psxDiscExtractor->GetState();
+            if (state == PsxDiscExtractor::State::Done) {
+                m_result = (s32)GameResult::ResumePlay;
+            }
+            else if (state == PsxDiscExtractor::State::Error) {
+                SetPage(MenuPage_AssetMissing);
+            }
         }
         return m_result;
     }
@@ -1134,49 +1363,142 @@ s32 feCustomMenuMgr::Invoke() {
         return m_result;
     }
 
+#ifdef MOD_LOADER
+    if (m_currPage == MenuPage_Mods) {
+        const auto& mods = ModLoader::Instance().GetMods();
+        const s32 count = static_cast<s32>(mods.size());
+        if (count == 0) {
+            m_cursor = 0;
+        }
+        else if (m_modCursor < 0 || m_modCursor >= count) {
+            m_modCursor = 0;
+        }
+        ClampModsScroll();
+
+        const bool nonMouseInput = g_actionInput->HadKeyboardInputThisFrame()
+            || g_actionInput->HadGamepadInputThisFrame();
+        const s32 scroll = g_actionInput->ConsumeScrollDelta();
+
+        double sx = 0.0, sy = 0.0;
+        g_actionInput->GetMousePosition(sx, sy);
+        const bool leftClick = g_actionInput->IsMouseButtonTriggered(MouseBtn::Left);
+        const bool rightClick = g_actionInput->IsMouseButtonTriggered(MouseBtn::Right);
+        if (m_mouseInputActive) {
+            const f32 screenW = g_display ? static_cast<f32>(g_display->GetScreenWidth()) : DEFAULT_SCREEN_WIDTH;
+            const f32 screenH = g_display ? static_cast<f32>(g_display->GetScreenHeight()) : DEFAULT_SCREEN_HEIGHT;
+            const f32 aspect = g_display ? g_display->GetAspectRatio() : (4.0f / 3.0f);
+#if FIX_ASPECT_RATIO
+            const f32 effectiveW = screenW * DEFAULT_ASPECT_RATIO / aspect;
+            const f32 offsetX = (screenW - effectiveW) * 0.5f;
+            const f32 psxX = (static_cast<f32>(sx) - offsetX) * DEFAULT_SCREEN_WIDTH / effectiveW;
+#else
+            const f32 psxX = static_cast<f32>(sx) * DEFAULT_SCREEN_WIDTH / screenW;
+#endif
+            const f32 psxY = static_cast<f32>(sy) * DEFAULT_SCREEN_HEIGHT / screenH;
+            const PageDef& page = m_pages[MenuPage_Mods];
+            const s32 panelX = DEF_WINDOW_CENTER_X - page.frameW / 2;
+            const s32 panelY = DEF_WINDOW_CENTER_Y - page.frameH / 2;
+            const f32 firstRowY = static_cast<f32>(panelY + DEF_TITLE_BAR_H + DEF_CONTENT_PAD + 8);
+            if (psxX >= panelX && psxX < panelX + page.frameW) {
+                const s32 visible = std::min(DEF_MODS_VISIBLE_ROWS, std::max(0, count - m_modScrollTop));
+                for (s32 row = 0; row < visible; ++row) {
+                    const f32 top = firstRowY + row * DEF_MODS_ROW_STEP - DEF_KEYBIND_ROW_TOP_PAD;
+                    if (psxY >= top && psxY < top + DEF_MODS_ROW_STEP) {
+                        const s32 hovered = m_modScrollTop + row;
+                        if (m_cursor == 0 || m_modCursor != hovered) PlaySound(FE_SND_MENU_7);
+                        m_cursor = -1;
+                        m_modCursor = hovered;
+                        break;
+                    }
+                }
+
+                const s32 backTop = panelY + page.frameH - DEF_BOTTOM_BAR_H - DEF_ROW_STEP - 2;
+                if (psxY >= backTop && psxY < backTop + DEF_ROW_STEP) {
+                    if (m_cursor != 0) PlaySound(FE_SND_MENU_7);
+                    m_cursor = 0;
+                }
+            }
+
+            if (leftClick) {
+                PlaySound(FE_SND_MENU_5);
+                if (m_cursor == 0) Confirm();
+                else if (!ToggleSelectedMod()) PlaySound(FE_SND_MENU_7);
+                return m_result;
+            }
+            if (rightClick) {
+                PlaySound(FE_SND_MENU_5);
+                GoBack();
+                return m_result;
+            }
+        }
+
+        if (scroll != 0 && count > 0) {
+            m_cursor = -1;
+            m_modCursor += (scroll > 0) ? -1 : 1;
+            if (m_modCursor < 0) m_modCursor = 0;
+            if (m_modCursor >= count) m_modCursor = count - 1;
+            ClampModsScroll();
+            PlaySound(FE_SND_MENU_7);
+        }
+
+        if (nonMouseInput && g_actionInput->JustPressed(ACTION_MENU_UP)) {
+            if (m_cursor == 0 && count > 0) {
+                m_cursor = -1;
+                m_modCursor = count - 1;
+            }
+            else if (m_modCursor > 0) {
+                --m_modCursor;
+            }
+            else {
+                m_cursor = 0;
+            }
+            ClampModsScroll();
+            PlaySound(FE_SND_MENU_7);
+        }
+        if (nonMouseInput && g_actionInput->JustPressed(ACTION_MENU_DOWN)) {
+            if (m_cursor == 0 && count > 0) {
+                m_cursor = -1;
+                m_modCursor = 0;
+            }
+            else if (m_modCursor + 1 < count) {
+                ++m_modCursor;
+            }
+            else {
+                m_cursor = 0;
+            }
+            ClampModsScroll();
+            PlaySound(FE_SND_MENU_7);
+        }
+
+        if (nonMouseInput && g_actionInput->JustPressed(ACTION_MENU_CONFIRM)) {
+            PlaySound(FE_SND_MENU_5);
+            if (m_cursor == 0) Confirm();
+            else if (!ToggleSelectedMod()) PlaySound(FE_SND_MENU_7);
+        }
+        if (nonMouseInput && g_actionInput->JustPressed(ACTION_MENU_BACK)) {
+            PlaySound(FE_SND_MENU_5);
+            GoBack();
+        }
+
+        if (nonMouseInput && m_mouseInputActive) {
+            m_mouseInputActive = false;
+            if (g_display) g_display->SetCursorVisible(false);
+        }
+        return m_result;
+    }
+#endif
+
+    // Reactivation/deactivation already happened in UpdateMouseCursorVisibility()
+    // at the top of Invoke() - just read current position/click state here.
     double sx = 0.0;
     double sy = 0.0;
     g_actionInput->GetMousePosition(sx, sy);
-
-    bool mouseMoved = false;
-    if (!m_mousePosInitialized) {
-        m_lastMouseX = sx;
-        m_lastMouseY = sy;
-        m_mousePosInitialized = true;
-    }
-    else if (m_mouseInputActive) {
-        // Only track delta while mouse is active; when inactive we keep the
-        // saved position so we measure distance from where it was deactivated.
-        mouseMoved = (std::fabs(sx - m_lastMouseX) > 0.5) || (std::fabs(sy - m_lastMouseY) > 0.5);
-        m_lastMouseX = sx;
-        m_lastMouseY = sy;
-    }
-    else {
-        // Require a larger intentional movement to re-activate from keyboard/gamepad mode.
-        mouseMoved = (std::fabs(sx - m_lastMouseX) > 4.0) || (std::fabs(sy - m_lastMouseY) > 4.0);
-        if (mouseMoved) {
-            m_lastMouseX = sx;
-            m_lastMouseY = sy;
-        }
-    }
 
     const bool leftClick = g_actionInput->IsMouseButtonTriggered(MouseBtn::Left);
     const bool rightClick = g_actionInput->IsMouseButtonTriggered(MouseBtn::Right);
     const s32 scroll = g_actionInput->ConsumeScrollDelta();
     const Entry* e = &m_pages[m_currPage].entries[m_cursor];
     auto prevVal = GetBoundValue(*e);
-
-    // Determine non-mouse input first so it can suppress mouse re-activation below.
-    const bool nonMouseInput = g_actionInput->HadKeyboardInputThisFrame() || g_actionInput->HadGamepadInputThisFrame();
-
-    // Mouse activity takes menu control back and shows cursor,
-    // but only when no keyboard/gamepad input is happening this frame.
-    if ((mouseMoved || leftClick || rightClick || scroll != 0) && !nonMouseInput) {
-        if (!m_mouseInputActive && g_display) {
-            g_display->SetCursorVisible(true);
-        }
-        m_mouseInputActive = true;
-    }
 
     // Mouse hover and click
     if (m_mouseInputActive) {
@@ -1296,14 +1618,6 @@ s32 feCustomMenuMgr::Invoke() {
         Deactivate();
     }
 
-    // Any keyboard/gamepad input disables mouse hover until mouse moves again.
-    if (nonMouseInput && m_mouseInputActive) {
-        m_mouseInputActive = false;
-        if (g_display) {
-            g_display->SetCursorVisible(false);
-        }
-    }
-
     return m_result;
 }
 
@@ -1317,6 +1631,23 @@ void feCustomMenuMgr::SetPage(MenuPage page) {
     m_pendingMsaaActive = false;
     m_keyBindCaptureActive = false;
     m_keyBindCaptureBlockFrames = 0;
+
+#ifdef MOD_LOADER
+    if (m_currPage == MenuPage_Mods && m_prevPage != MenuPage_Mods) {
+        ModLoader::Instance().EnsureStorage();
+        ModLoader::Instance().Reload();
+        m_modCursor = 0;
+        m_modScrollTop = 0;
+        m_cursor = ModLoader::Instance().GetMods().empty() ? 0 : -1;
+    }
+#endif
+
+    if (m_currPage == MenuPage_Quitting && m_prevPage != MenuPage_Quitting) {
+        // Jackie character 0, quit line 75, exact variant 0. The one-second
+        // quitting page gives the ~0.59s clip and async dialog load time room
+        // to finish before GameState::End tears down audio.
+        jcsPlaySpecificDialog(0, 75, 0);
+    }
 
     if (m_currPage == MenuPage_None) {
         m_pendingLoadSlot = -1;
@@ -1353,6 +1684,19 @@ void feCustomMenuMgr::SetPage(MenuPage page) {
 
     if (IsSaveSlotPage(m_currPage)) {
         RefreshSaveSlots();
+    }
+
+#if AUTO_UPDATER
+    if (m_currPage == MenuPage_Update) {
+        RefreshUpdatePageEntries();
+    }
+    if (m_currPage == MenuPage_Changelog) {
+        RebuildChangelogLines();
+    }
+#endif
+
+    if (m_currPage == MenuPage_AssetMissing) {
+        RefreshAssetPageEntries();
     }
 
     if (m_currPage != MenuPage_None) {
@@ -1392,6 +1736,12 @@ void feCustomMenuMgr::Activate(MenuPage startPage) {
     if (startPage != MenuPage_Title) {
         rsEvent(RS_MUTE, 0, 0, 0);
     }
+
+#if AUTO_UPDATER
+    if (startPage == MenuPage_CheckingUpdate) {
+        m_checkingPopupMinTimer = 2.0f;
+    }
+#endif
 
     if (startPage == MenuPage_Pause && g_game && g_game->GetState() == GameState::Play) {
         s32 track = 23;
@@ -1687,6 +2037,61 @@ void feCustomMenuMgr::Confirm() {
                 PlaySound(FE_SND_MENU_7);
             }
             break;
+#if AUTO_UPDATER
+        case EntryEvent_StartUpdate:
+            if (g_autoUpdater) {
+                g_autoUpdater->StartDownload();
+            }
+            break;
+        case EntryEvent_DismissUpdate:
+            GoBack();
+            break;
+        case EntryEvent_ShowChangelog:
+            m_pages[MenuPage_Changelog].parentPage = m_currPage;
+            m_pages[MenuPage_Changelog].parentEntry = m_cursor;
+            SetPage(MenuPage_Changelog);
+            break;
+        case EntryEvent_CancelUpdate:
+            if (g_autoUpdater) {
+                g_autoUpdater->CancelDownload();
+            }
+            break;
+        case EntryEvent_CheckForUpdate:
+            if (g_autoUpdater) {
+                g_autoUpdater->CheckAsync();
+                m_pages[MenuPage_CheckingUpdate].parentPage = MenuPage_Update;
+                m_pages[MenuPage_CheckingUpdate].parentEntry = 0;
+                m_checkingPopupMinTimer = 2.0f;
+                SetPage(MenuPage_CheckingUpdate);
+                PlaySound(FE_SND_MENU_OPEN);
+            }
+            break;
+        case EntryEvent_InstallUpdate:
+            if (g_autoUpdater) {
+                g_autoUpdater->InstallAndRelaunch();
+            }
+            break;
+#endif
+        case EntryEvent_ScanForAssets:
+            if (g_psxDiscExtractor) {
+                g_psxDiscExtractor->ScanAsync();
+                m_assetPopupMinTimer = 2.0f;
+                SetPage(MenuPage_AssetScanning);
+                PlaySound(FE_SND_MENU_OPEN);
+            }
+            break;
+        case EntryEvent_ExtractAssets:
+            if (g_psxDiscExtractor) {
+                g_psxDiscExtractor->StartExtractAsync();
+                m_assetPopupMinTimer = 2.0f;
+                SetPage(MenuPage_AssetExtracting);
+                PlaySound(FE_SND_MENU_OPEN);
+            }
+            break;
+        case EntryEvent_QuitFromAssetCheck:
+            m_quitTimerSec = DEF_QUIT_TIMER_SEC;
+            SetPage(MenuPage_Quitting);
+            break;
     }
 }
 
@@ -1703,6 +2108,12 @@ void feCustomMenuMgr::GoBack() {
 
     if (m_currPage == MenuPage_Location) {
         m_result = 8;
+        return;
+    }
+
+    // No sane "back" target while gating boot on missing assets - use the on-screen
+    // Quit/Extract/Scan buttons instead.
+    if (m_currPage == MenuPage_AssetMissing) {
         return;
     }
 
@@ -1836,6 +2247,13 @@ s32 feCustomMenuMgr::GetBoundValue(const Entry& e) const {
             const s32 samples = g_display ? g_display->GetMSAA() : Display::GetDefaultMSAA();
             return MsaaSamplesToOptionIndex(samples);
         }
+#if NEW_CHEATS
+        case EntryBinding_CheatAllDragons: return IsCheatEnabled(CheatOption::AllDragons) ? 1 : 0;
+        case EntryBinding_CheatAllLevels: return IsCheatEnabled(CheatOption::AllLevels) ? 1 : 0;
+        case EntryBinding_CheatGodMode: return IsCheatEnabled(CheatOption::GodMode) ? 1 : 0;
+        case EntryBinding_CheatOnePunchMan: return IsCheatEnabled(CheatOption::OnePunchMan) ? 1 : 0;
+        case EntryBinding_CheatHeavenBound: return IsCheatEnabled(CheatOption::HeavenBound) ? 1 : 0;
+#endif
         default: return 0;
     }
 }
@@ -1921,7 +2339,30 @@ void feCustomMenuMgr::ApplyValue(const Entry& e, s32 v) {
     else if (e.binding == EntryBinding_DisplayResolution) {
         if (g_display) g_display->SetResolutionIndex(v);
     }
+#if NEW_CHEATS
+    else if (e.binding == EntryBinding_CheatAllDragons) {
+        SetCheatEnabled(CheatOption::AllDragons, v != 0);
+    }
+    else if (e.binding == EntryBinding_CheatAllLevels) {
+        SetCheatEnabled(CheatOption::AllLevels, v != 0);
+    }
+    else if (e.binding == EntryBinding_CheatGodMode) {
+        SetCheatEnabled(CheatOption::GodMode, v != 0);
+    }
+    else if (e.binding == EntryBinding_CheatOnePunchMan) {
+        SetCheatEnabled(CheatOption::OnePunchMan, v != 0);
+    }
+    else if (e.binding == EntryBinding_CheatHeavenBound) {
+        SetCheatEnabled(CheatOption::HeavenBound, v != 0);
+    }
+#endif
 
+#if NEW_CHEATS
+    if (e.binding >= EntryBinding_CheatAllDragons
+        && e.binding <= EntryBinding_CheatHeavenBound) {
+        return;
+    }
+#endif
     g_settings.Save(SETTINGS_PATH);
 }
 
@@ -1967,6 +2408,279 @@ void feCustomMenuMgr::BuildSaveSlotLabel(s32 slotIndex, char* outText, s32 outTe
         snprintf(outText, outTextLen, fmt, slotIndex + 1);
     }
 }
+
+#if AUTO_UPDATER
+void feCustomMenuMgr::RefreshUpdatePageEntries() {
+    if (!g_autoUpdater) {
+        return;
+    }
+
+    m_lastUpdateState = g_autoUpdater->GetState();
+    PageDef& page = m_pages[MenuPage_Update];
+
+    switch (m_lastUpdateState) {
+        case AutoUpdater::State::UpdateAvailable:
+            SetEntries(page, {
+                Info("FE_UPD_CUR"),
+                Info("FE_UPD_LAT"),
+                Button("FE_UPD_NOTES", EntryEvent_ShowChangelog),
+                Button("FE_UPD_DL", EntryEvent_StartUpdate),
+                Button("FE_UPD_CHKNOW", EntryEvent_CheckForUpdate),
+                Button("FE_BCK", EntryEvent_Back),
+                       });
+            break;
+        case AutoUpdater::State::Downloading:
+            SetEntries(page, {
+                Info("FE_UPD_PRG"),
+                Button("FE_UPD_CNL", EntryEvent_CancelUpdate),
+                       });
+            break;
+        case AutoUpdater::State::ReadyToInstall:
+            SetEntries(page, {
+                Info("FE_UPD_RDY"),
+                Button("FE_UPD_INST", EntryEvent_InstallUpdate),
+                Button("FE_BCK", EntryEvent_DismissUpdate),
+                       });
+            break;
+        case AutoUpdater::State::Installing:
+            SetEntries(page, {
+                Info("FE_UPD_INSTG"),
+                       });
+            break;
+        case AutoUpdater::State::UpToDate:
+            SetEntries(page, {
+                Info("FE_UPD_UTD"),
+                Button("FE_UPD_CHKNOW", EntryEvent_CheckForUpdate),
+                Button("FE_BCK", EntryEvent_Back),
+                       });
+            break;
+        case AutoUpdater::State::Error:
+            SetEntries(page, {
+                Info("FE_UPD_ERR"),
+                Button("FE_UPD_CHKNOW", EntryEvent_CheckForUpdate),
+                Button("FE_BCK", EntryEvent_Back),
+                       });
+            break;
+        case AutoUpdater::State::Idle:
+        case AutoUpdater::State::Checking:
+        default:
+            SetEntries(page, {
+                Info("FE_UPD_CHK"),
+                Button("FE_BCK", EntryEvent_Back),
+                       });
+            break;
+    }
+
+    // A refresh mid-visit can shrink the entry list out from under the cursor.
+    if (m_cursor < 0 || m_cursor >= page.numEntries || page.entries[m_cursor].type == EntryType_Info) {
+        m_cursor = 0;
+        while (m_cursor < page.numEntries && page.entries[m_cursor].type == EntryType_Info) {
+            m_cursor++;
+        }
+    }
+}
+
+bool feCustomMenuMgr::BuildUpdateInfoText(const char* token, char* outText, s32 outTextLen) const {
+    if (!g_autoUpdater || !token) {
+        return false;
+    }
+
+    if (!strcmp(token, "FE_UPD_CUR")) {
+        const char* fmt = Localize("FE_UPD_CUR");
+        if (!fmt) fmt = "Current Version: %s";
+        snprintf(outText, outTextLen, fmt, g_autoUpdater->GetCurrentVersion());
+        return true;
+    }
+    if (!strcmp(token, "FE_UPD_LAT")) {
+        const char* fmt = Localize("FE_UPD_LAT");
+        if (!fmt) fmt = "New Version Available: %s";
+        snprintf(outText, outTextLen, fmt, g_autoUpdater->GetLatestVersionTag());
+        return true;
+    }
+    if (!strcmp(token, "FE_UPD_ERR")) {
+        const char* fmt = Localize("FE_UPD_ERR");
+        if (!fmt) fmt = "Update check failed: %s";
+        snprintf(outText, outTextLen, fmt, g_autoUpdater->GetError());
+        return true;
+    }
+    if (!strcmp(token, "FE_UPD_PRG")) {
+        const char* fmt = Localize("FE_UPD_PRG");
+        if (!fmt) fmt = "Downloading... %d%%";
+        snprintf(outText, outTextLen, fmt, (s32)(g_autoUpdater->GetDownloadProgress() * 100.0f));
+        return true;
+    }
+    return false;
+}
+
+// Width reserved on the left of the text column for the scroll arrows (matching the
+// KeyBindings page layout), and the slotW used for them below.
+static constexpr s32 kChangelogArrowColumnW = 28;
+
+void feCustomMenuMgr::RebuildChangelogLines() {
+    m_changelogLines.clear();
+    m_changelogScrollTop = 0;
+
+    std::string notes = g_autoUpdater ? g_autoUpdater->GetReleaseNotes() : std::string();
+    if (notes.empty()) {
+        m_changelogLines.push_back(std::string());
+        return;
+    }
+
+    if (!g_textManager || !g_textManager->SetFontByName(DEF_MENU_FONT_NAME)) {
+        m_changelogLines.push_back(notes);
+        return;
+    }
+
+    g_textManager->SetScale(SCREEN_SCALE_Y(DEF_MENU_TEXT_SCALE), SCREEN_SCALE_Y(DEF_MENU_TEXT_SCALE));
+    g_textManager->SetWrapWidth(0.0f);
+    const f32 maxWidth = SCREEN_SCALE_X((f32)(DEF_CHANGELOG_WINDOW_W - DEF_LABEL_X_PAD * 2 - kChangelogArrowColumnW));
+
+    size_t pos = 0;
+    while (pos <= notes.size()) {
+        size_t newlinePos = notes.find('\n', pos);
+        std::string paragraph = (newlinePos == std::string::npos) ? notes.substr(pos) : notes.substr(pos, newlinePos - pos);
+
+        if (paragraph.empty()) {
+            m_changelogLines.push_back(std::string());
+        }
+        else {
+            size_t wordStart = 0;
+            std::string currentLine;
+            while (wordStart < paragraph.size()) {
+                size_t wordEnd = paragraph.find(' ', wordStart);
+                if (wordEnd == std::string::npos) wordEnd = paragraph.size();
+                std::string word = paragraph.substr(wordStart, wordEnd - wordStart);
+
+                std::string candidate = currentLine.empty() ? word : (currentLine + " " + word);
+                if (g_textManager->MeasureString(candidate.c_str()).width <= maxWidth) {
+                    currentLine = candidate;
+                }
+                else {
+                    if (!currentLine.empty()) {
+                        m_changelogLines.push_back(currentLine);
+                        currentLine.clear();
+                    }
+
+                    // The word alone doesn't fit even on an empty line - hard-split it by
+                    // character so it can never overflow the box (e.g. a long unbroken URL/token).
+                    while (!word.empty() && g_textManager->MeasureString(word.c_str()).width > maxWidth) {
+                        size_t splitLen = word.size() - 1;
+                        while (splitLen > 1 && g_textManager->MeasureString(word.substr(0, splitLen).c_str()).width > maxWidth) {
+                            splitLen--;
+                        }
+                        m_changelogLines.push_back(word.substr(0, splitLen));
+                        word = word.substr(splitLen);
+                    }
+                    currentLine = word;
+                }
+
+                wordStart = wordEnd + 1;
+            }
+            if (!currentLine.empty()) {
+                m_changelogLines.push_back(currentLine);
+            }
+        }
+
+        if (newlinePos == std::string::npos) break;
+        pos = newlinePos + 1;
+    }
+
+    if (m_changelogLines.empty()) {
+        m_changelogLines.push_back(std::string());
+    }
+}
+
+void feCustomMenuMgr::RenderChangelogBody(s32 panelX, s32 panelY, s32 panelW, s32 panelH, s32 contentTop) const {
+    if (!g_textManager || !g_textManager->SetFontByName(DEF_MENU_FONT_NAME)) {
+        return;
+    }
+
+    const s32 totalLines = (s32)m_changelogLines.size();
+    const bool isEmpty = (totalLines == 0) || (totalLines == 1 && m_changelogLines[0].empty());
+    const s32 maxVisibleLines = ComputeChangelogVisibleLines(panelH);
+    const s32 visibleLines = (totalLines < maxVisibleLines) ? totalLines : maxVisibleLines;
+    const bool canScrollUp = (m_changelogScrollTop > 0);
+    const bool canScrollDown = (m_changelogScrollTop + visibleLines < totalLines);
+
+    g_textManager->SetFontByName("Legal");
+    g_textManager->SetScale(SCREEN_SCALE_Y(DEF_CHANGELOG_TEXT_W), SCREEN_SCALE_Y(DEF_CHANGELOG_TEXT_H));
+    g_textManager->SetAlignment(TextAlign_Left);
+    g_textManager->SetWrapWidth(0.0f);
+    g_textManager->SetLineSpacing(0);
+    g_textManager->SetPromptsEnabled(false);
+    g_textManager->SetShadow(false);
+    g_textManager->SetOutline(true);
+    g_textManager->SetColor(255, 255, 255);
+
+    const s32 textX = panelX + DEF_LABEL_X_PAD + kChangelogArrowColumnW;
+    if (isEmpty) {
+        const char* empty = Localize("FE_UPD_NOCHANGE");
+        if (!empty) empty = "No changelog available.";
+        g_textManager->PrintString(empty,
+                                   SCALE_AND_CENTER_X((f32)textX),
+                                   SCREEN_SCALE_Y((f32)(contentTop + DEF_CONTENT_PAD)));
+    }
+    else {
+        for (s32 row = 0; row < visibleLines; row++) {
+            const s32 lineIndex = m_changelogScrollTop + row;
+            if (lineIndex < 0 || lineIndex >= totalLines) break;
+            const s32 rowY = contentTop + DEF_CONTENT_PAD + row * 8;
+            g_textManager->PrintString(m_changelogLines[lineIndex].c_str(),
+                                       SCALE_AND_CENTER_X((f32)textX),
+                                       SCREEN_SCALE_Y((f32)rowY));
+        }
+    }
+    g_textManager->SetPromptsEnabled(true);
+
+    if (totalLines > visibleLines) {
+        char rangeText[32];
+        snprintf(rangeText, sizeof(rangeText), "%d-%d/%d",
+                 m_changelogScrollTop + 1,
+                 m_changelogScrollTop + visibleLines,
+                 totalLines);
+
+        g_textManager->SetFontByName("Menu");
+        g_textManager->SetScale(SCREEN_SCALE_Y(DEF_REDEFINE_KEY_TEXT_SCALE), SCREEN_SCALE_Y(DEF_REDEFINE_KEY_TEXT_SCALE));
+        g_textManager->SetAlignment(TextAlign_Right);
+        g_textManager->SetColor(DEF_TEXT_NORM_R, DEF_TEXT_NORM_G, DEF_TEXT_NORM_B);
+        g_textManager->PrintString(rangeText,
+                                   SCALE_AND_CENTER_X((f32)(panelX + panelW - DEF_VALUE_X_PAD)),
+                                   SCREEN_SCALE_Y((f32)(panelY + panelH - DEF_BOTTOM_BAR_H - DEF_CONTENT_BOTTOM_PAD - DEF_ROW_TEXT_H + DEF_TEXT_Y_OFF)));
+    }
+
+    if (m_scrollArrowTexture && (canScrollUp || canScrollDown)) {
+        const u32 frameCounter = g_time ? g_time->GetFrameCounter() : 0u;
+        const f32 slotW = 20.0f;
+        const f32 slotH = 20.0f;
+        const f32 leftX = (f32)(panelX + DEF_BORDER_W + 4);
+        const f32 bottomY = (f32)(panelY + panelH - DEF_BOTTOM_BAR_H - DEF_CONTENT_BOTTOM_PAD - 2);
+        const f32 topY = (f32)(panelY + DEF_TITLE_BAR_H + DEF_CONTENT_BOTTOM_PAD);
+
+        auto drawArrow = [&](f32 slotX, f32 slotY, bool up, s32 phaseOffset) {
+            const f32 pulse = ScrollArrowPulseScale(frameCounter, phaseOffset);
+            const f32 drawW = SCREEN_SCALE_Y(slotW * pulse);
+            const f32 drawH = SCREEN_SCALE_Y(slotH * pulse);
+            const f32 baseX = SCALE_AND_CENTER_X(slotX);
+            const f32 baseY = SCREEN_SCALE_Y(slotY);
+            const f32 drawX = baseX + (SCREEN_SCALE_X(slotW) - drawW) * 0.5f;
+            const f32 drawY = baseY + (SCREEN_SCALE_Y(slotH) - drawH) * 0.5f;
+            const f32 v0 = up ? 1.0f : 0.0f;
+            const f32 v1 = up ? 0.0f : 1.0f;
+            ScreenDraw::DrawQuad(m_scrollArrowTexture,
+                                 drawX, drawY, drawW, drawH,
+                                 0.0f, v0, 1.0f, v1,
+                                 m_pulse.GetRed8(), m_pulse.GetGreen8(), m_pulse.GetBlue8(), 255);
+        };
+
+        if (canScrollDown) {
+            drawArrow(leftX, bottomY - slotH, false, 0);
+        }
+        if (canScrollUp) {
+            drawArrow(leftX, topY, true, 12);
+        }
+    }
+}
+#endif
 
 PageDef& feCustomMenuMgr::AddPage(
     MenuPage id, const char* title,
@@ -2081,14 +2795,7 @@ s32 feCustomMenuMgr::CalcAutoFrameHeight(s32 numEntries, s32 extraH) {
     return DEF_TITLE_BAR_H + DEF_BOTTOM_BAR_H + bodyHeight;
 }
 
-s32 feCustomMenuMgr::GetEntryExtraHeight(const PageDef& page, const Entry& entry) const {
-    if (entry.type != EntryType_Info)
-        return 0;
-
-    const char* label = Localize(entry.token);
-    if (!label)
-        label = entry.token;
-
+s32 feCustomMenuMgr::GetWrappedLineCount(const PageDef& page, const char* label) const {
     const f32 wrapWidth = SCREEN_SCALE_X((f32)(page.frameW - DEF_LABEL_X_PAD * 2));
     s32 lines = 1;
     if (g_textManager && g_textManager->SetFontByName(DEF_MENU_FONT_NAME)) {
@@ -2099,10 +2806,43 @@ s32 feCustomMenuMgr::GetEntryExtraHeight(const PageDef& page, const Entry& entry
         lines = g_textManager->CountWrappedLines(label);
         g_textManager->SetWrapWidth(0.0f);
     }
-    if (lines < 1)
-        lines = 1;
+    return (lines < 1) ? 1 : lines;
+}
 
-    return DEF_INFO_ROW_EXTRA + (lines - 1) * DEF_ROW_STEP;
+s32 feCustomMenuMgr::GetEntryExtraHeight(const PageDef& page, const Entry& entry) const {
+    if (entry.type != EntryType_Info)
+        return 0;
+
+    const char* label = Localize(entry.token);
+    if (!label)
+        label = entry.token;
+
+#if AUTO_UPDATER
+    char updateInfoText[256];
+    if (BuildUpdateInfoText(entry.token, updateInfoText, (s32)sizeof(updateInfoText))) {
+        label = updateInfoText;
+    }
+#endif
+
+    char assetInfoText[256];
+    if (BuildAssetInfoText(entry.token, assetInfoText, (s32)sizeof(assetInfoText))) {
+        label = assetInfoText;
+    }
+
+    const s32 lines = GetWrappedLineCount(page, label);
+    s32 extra = DEF_INFO_ROW_EXTRA + (lines - 1) * DEF_ROW_STEP;
+
+#if AUTO_UPDATER
+    if (!strcmp(entry.token, "FE_UPD_PRG") || !strcmp(entry.token, "FE_UPD_CHK")) {
+        extra += DEF_ROW_STEP; // reserve room for the progress bar drawn below this row
+    }
+#endif
+
+    if (!strcmp(entry.token, "FE_ASSET_SCAN") || !strcmp(entry.token, "FE_ASSET_EXTG")) {
+        extra += DEF_ROW_STEP; // reserve room for the progress bar drawn below this row
+    }
+
+    return extra;
 }
 
 s32 feCustomMenuMgr::CalcEntryYExtra(const PageDef& page, s32 upToIndex) const {
@@ -2371,6 +3111,41 @@ bool feCustomMenuMgr::DrawLoadingScreen() {
     return true;
 }
 
+void feCustomMenuMgr::DrawLegalScreen(f32 alpha01) {
+    ScreenDraw::DrawColoredRect(0.0f, 0.0f, SCREEN_WIDTH, SCREEN_HEIGHT, 0, 0, 0, 255);
+
+    if (alpha01 <= 0.0f) {
+        return;
+    }
+    if (alpha01 > 1.0f) {
+        alpha01 = 1.0f;
+    }
+
+    if (!g_textManager || !g_textManager->SetFontByName("Legal")) {
+        return;
+    }
+
+    static constexpr f32 kColumnWidth = 420.0f;
+    static constexpr f32 kVerticalUpOffset = 8.0f;
+
+    g_textManager->SetScale(SCREEN_SCALE_Y(0.2f), SCREEN_SCALE_Y(0.2f));
+    g_textManager->SetAlignment(TextAlign_Left);
+    g_textManager->SetWrapWidth(SCREEN_SCALE_X(kColumnWidth));
+    g_textManager->SetLineSpacing(0);
+    g_textManager->SetPromptsEnabled(false);
+    g_textManager->SetShadow(false);
+    g_textManager->SetOutline(false);
+    g_textManager->SetColor(255, 255, 255, (u8)(alpha01 * 255.0f));
+
+    const TextBounds bounds = g_textManager->MeasureString(LEGAL_TEXT);
+    const f32 columnLeftX = SCALE_AND_CENTER_X(DEFAULT_SCREEN_WIDTH / 2.0f - kColumnWidth / 2.0f);
+    const f32 topY = SCREEN_SCALE_Y(DEFAULT_SCREEN_HEIGHT / 2.0f - kVerticalUpOffset) - bounds.height / 2.0f;
+
+    g_textManager->PrintString(LEGAL_TEXT, columnLeftX, topY);
+    g_textManager->SetWrapWidth(0.0f);
+    g_textManager->SetPromptsEnabled(true);
+}
+
 static void DrawGouraudRectPSX(f32 x, f32 y, f32 w, f32 h,
                                u8 topR, u8 topG, u8 topB,
                                u8 bottomR, u8 bottomG, u8 bottomB,
@@ -2422,9 +3197,9 @@ static void DrawSliderCircleMeterPSX(f32 rightX, f32 textY, f32 value, tTexture*
     static constexpr s32 kSegments = DEF_SLIDER_CIRCLE_SEGMENTS;
     static constexpr f32 kSliderIconSize = 12.0f;
 
-    if (value < 0) 
+    if (value < 0)
         value = 0;
-    if (value > 100) 
+    if (value > 100)
         value = 100;
 
     s32 filled = (s32)((value * (f32)kSegments) / 100.0f);
@@ -2782,12 +3557,12 @@ void feCustomMenuMgr::RenderKeyBindingsPage(s32 panelX, s32 panelY, s32 panelW, 
         g_textManager->PrintString(actionName, SCALE_AND_CENTER_X(labelX), rowScreenY);
         g_textManager->SetAlignment(TextAlign_Center);
         g_textManager->SetColor(selectedSlot0 ? selectedColor.GetRed8() : normalColor.GetRed8(),
-                         selectedSlot0 ? selectedColor.GetGreen8() : normalColor.GetGreen8(),
-                         selectedSlot0 ? selectedColor.GetBlue8() : normalColor.GetBlue8());
+                                selectedSlot0 ? selectedColor.GetGreen8() : normalColor.GetGreen8(),
+                                selectedSlot0 ? selectedColor.GetBlue8() : normalColor.GetBlue8());
         g_textManager->PrintString(slot0Label, SCALE_AND_CENTER_X((slot1Left + slotW / 2)), rowScreenY);
         g_textManager->SetColor(selectedSlot1 ? selectedColor.GetRed8() : normalColor.GetRed8(),
-                         selectedSlot1 ? selectedColor.GetGreen8() : normalColor.GetGreen8(),
-                         selectedSlot1 ? selectedColor.GetBlue8() : normalColor.GetBlue8());
+                                selectedSlot1 ? selectedColor.GetGreen8() : normalColor.GetGreen8(),
+                                selectedSlot1 ? selectedColor.GetBlue8() : normalColor.GetBlue8());
         g_textManager->PrintString(slot1Label, SCALE_AND_CENTER_X((slot2Left + slotW / 2)), rowScreenY);
     }
 
@@ -2836,6 +3611,123 @@ void feCustomMenuMgr::RenderKeyBindingsPage(s32 panelX, s32 panelY, s32 panelW, 
     }
 }
 
+#ifdef MOD_LOADER
+void feCustomMenuMgr::ClampModsScroll() {
+    const s32 count = static_cast<s32>(ModLoader::Instance().GetMods().size());
+    if (count <= 0) {
+        m_modCursor = 0;
+        m_modScrollTop = 0;
+        return;
+    }
+    if (m_modCursor < 0) m_modCursor = 0;
+    if (m_modCursor >= count) m_modCursor = count - 1;
+    if (m_modCursor < m_modScrollTop) m_modScrollTop = m_modCursor;
+    if (m_modCursor >= m_modScrollTop + DEF_MODS_VISIBLE_ROWS) {
+        m_modScrollTop = m_modCursor - DEF_MODS_VISIBLE_ROWS + 1;
+    }
+    const s32 maxTop = (count > DEF_MODS_VISIBLE_ROWS) ? count - DEF_MODS_VISIBLE_ROWS : 0;
+    if (m_modScrollTop < 0) m_modScrollTop = 0;
+    if (m_modScrollTop > maxTop) m_modScrollTop = maxTop;
+}
+
+bool feCustomMenuMgr::ToggleSelectedMod() {
+    const auto& mods = ModLoader::Instance().GetMods();
+    if (m_modCursor < 0 || m_modCursor >= static_cast<s32>(mods.size())) return false;
+    const std::string folder = mods[m_modCursor].folder;
+    const bool enable = !mods[m_modCursor].enabled;
+    if (!ModLoader::Instance().SetModEnabled(folder, enable)) return false;
+    ClampModsScroll();
+    return true;
+}
+
+void feCustomMenuMgr::RenderModsPage(s32 panelX, s32 panelY, s32 panelW, s32 panelH,
+                                     const xcColour1555& normalColor,
+                                     const xcColour1555& selectedColor) const {
+    if (!g_textManager) return;
+    const auto& mods = ModLoader::Instance().GetMods();
+    const s32 count = static_cast<s32>(mods.size());
+    const s32 visibleRows = std::min(DEF_MODS_VISIBLE_ROWS, std::max(0, count - m_modScrollTop));
+    const f32 labelX = static_cast<f32>(panelX + DEF_LABEL_X_PAD + DEF_KEYBIND_X_PAD);
+    const f32 valueX = static_cast<f32>(panelX + panelW - DEF_VALUE_X_PAD - DEF_KEYBIND_X_PAD);
+    const f32 firstRowY = static_cast<f32>(panelY + DEF_TITLE_BAR_H + DEF_CONTENT_PAD + 8);
+    const f32 tableLeft = labelX - DEF_KEYBIND_TABLE_SIDE_PAD;
+    const f32 tableW = valueX - tableLeft + DEF_KEYBIND_TABLE_SIDE_PAD;
+
+    g_textManager->SetScale(SCREEN_SCALE_Y(DEF_REDEFINE_KEY_TEXT_SCALE), SCREEN_SCALE_Y(DEF_REDEFINE_KEY_TEXT_SCALE));
+    g_textManager->SetWrapWidth(0.0f);
+    g_textManager->SetOutline(true);
+
+    if (count == 0) {
+        g_textManager->SetAlignment(TextAlign_Center);
+        g_textManager->SetColor(normalColor.GetRed8(), normalColor.GetGreen8(), normalColor.GetBlue8());
+        const char* emptyText = Localize("FE_MOD_NONE");
+        g_textManager->PrintString(emptyText ? emptyText : "No mods installed",
+                                   SCALE_AND_CENTER_X(static_cast<f32>(panelX + panelW / 2)),
+                                   SCREEN_SCALE_Y(firstRowY + 32.0f));
+        return;
+    }
+
+    for (s32 row = 0; row < visibleRows; ++row) {
+        const s32 index = m_modScrollTop + row;
+        const ModInfo& mod = mods[index];
+        const bool selected = m_cursor != 0 && index == m_modCursor;
+        const f32 rowY = firstRowY + row * DEF_MODS_ROW_STEP;
+        if ((row & 1) == 0) {
+            DrawRect(tableLeft, rowY - DEF_KEYBIND_ROW_TOP_PAD, tableW, DEF_MODS_ROW_STEP,
+                     DEF_KEYBIND_STRIPE_DARK_R, DEF_KEYBIND_STRIPE_DARK_G,
+                     DEF_KEYBIND_STRIPE_DARK_B, DEF_KEYBIND_STRIPE_DARK_A);
+        }
+        else {
+            DrawRect(tableLeft, rowY - DEF_KEYBIND_ROW_TOP_PAD, tableW, DEF_MODS_ROW_STEP,
+                     DEF_KEYBIND_STRIPE_WARM_R, DEF_KEYBIND_STRIPE_WARM_G,
+                     DEF_KEYBIND_STRIPE_WARM_B, DEF_KEYBIND_STRIPE_WARM_A);
+        }
+        if (selected) {
+            DrawHighlight(tableLeft, rowY - DEF_KEYBIND_ROW_TOP_PAD, tableW, DEF_MODS_ROW_STEP);
+        }
+
+        const u8 r = selected ? selectedColor.GetRed8() : normalColor.GetRed8();
+        const u8 g = selected ? selectedColor.GetGreen8() : normalColor.GetGreen8();
+        const u8 b = selected ? selectedColor.GetBlue8() : normalColor.GetBlue8();
+        g_textManager->SetColor(r, g, b);
+        g_textManager->SetAlignment(TextAlign_Left);
+        g_textManager->PrintString(mod.name.c_str(), SCALE_AND_CENTER_X(labelX), SCREEN_SCALE_Y(rowY));
+        g_textManager->SetAlignment(TextAlign_Right);
+        const char* stateText = Localize(mod.enabled ? "FE_ON" : "FE_OFF");
+        g_textManager->PrintString(stateText ? stateText : (mod.enabled ? "ON" : "OFF"),
+                                   SCALE_AND_CENTER_X(valueX), SCREEN_SCALE_Y(rowY));
+    }
+
+    char range[32] = {};
+    snprintf(range, sizeof(range), "%d-%d/%d", m_modScrollTop + 1, m_modScrollTop + visibleRows, count);
+    g_textManager->SetAlignment(TextAlign_Right);
+    g_textManager->SetColor(normalColor.GetRed8(), normalColor.GetGreen8(), normalColor.GetBlue8());
+    g_textManager->PrintString(range, SCALE_AND_CENTER_X(valueX),
+                               SCREEN_SCALE_Y(static_cast<f32>(panelY + panelH - DEF_BOTTOM_BAR_H - DEF_CONTENT_BOTTOM_PAD - DEF_ROW_TEXT_H)));
+
+    const bool canScrollUp = m_modScrollTop > 0;
+    const bool canScrollDown = m_modScrollTop + visibleRows < count;
+    if (m_scrollArrowTexture && (canScrollUp || canScrollDown)) {
+        const u32 frameCounter = g_time ? g_time->GetFrameCounter() : 0u;
+        auto drawArrow = [&](f32 y, bool up, s32 phase) {
+            const f32 pulse = ScrollArrowPulseScale(frameCounter, phase);
+            const f32 size = 20.0f;
+            const f32 drawSize = SCREEN_SCALE_Y(size * pulse);
+            const f32 x = static_cast<f32>(panelX + DEF_BORDER_W + 4);
+            const f32 baseX = SCALE_AND_CENTER_X(x);
+            const f32 baseY = SCREEN_SCALE_Y(y);
+            ScreenDraw::DrawQuad(m_scrollArrowTexture,
+                                 baseX + (SCREEN_SCALE_X(size) - drawSize) * 0.5f,
+                                 baseY + (SCREEN_SCALE_Y(size) - drawSize) * 0.5f,
+                                 drawSize, drawSize, 0.0f, up ? 1.0f : 0.0f, 1.0f, up ? 0.0f : 1.0f,
+                                 m_pulse.GetRed8(), m_pulse.GetGreen8(), m_pulse.GetBlue8(), 255);
+        };
+        if (canScrollUp) drawArrow(static_cast<f32>(panelY + DEF_TITLE_BAR_H + 2), true, 12);
+        if (canScrollDown) drawArrow(static_cast<f32>(panelY + panelH - DEF_BOTTOM_BAR_H - 22), false, 0);
+    }
+}
+#endif
+
 void feCustomMenuMgr::Render() {
     if (!m_active)
         return;
@@ -2854,6 +3746,11 @@ void feCustomMenuMgr::Render() {
     const char* title = Localize(page->titleToken);
     if (!title)
         title = page->titleToken;
+#ifdef MOD_LOADER
+    if (m_currPage == MenuPage_Mods && (!title || strcmp(title, "FE_MODS") == 0)) {
+        title = "Mods";
+    }
+#endif
     char locationTitle[64] = {};
 
     // For the location page the title bar must show the selected destination name.
@@ -2946,11 +3843,35 @@ void feCustomMenuMgr::Render() {
         case MenuPage_KeyBindings:
             RenderKeyBindingsPage(panelX, panelY, panelW, panelH, normalColor, selectedColor);
             break;
+#ifdef MOD_LOADER
+        case MenuPage_Mods:
+            RenderModsPage(panelX, panelY, panelW, panelH, normalColor, selectedColor);
+            break;
+#endif
         case MenuPage_Controller:
             RenderControllerOverlay(panelX, panelY);
             break;
         case MenuPage_Location:
             RenderLocationPage();
+            break;
+#if AUTO_UPDATER
+        case MenuPage_Update:
+            if (g_autoUpdater && g_autoUpdater->GetState() == AutoUpdater::State::Downloading) {
+                RenderUpdateProgressBar(panelX, panelW, firstY);
+            }
+            break;
+        case MenuPage_CheckingUpdate:
+            RenderUpdateIndeterminateBar(panelX, panelW, firstY);
+            break;
+        case MenuPage_Changelog:
+            RenderChangelogBody(panelX, panelY, panelW, panelH, contentTop);
+            break;
+#endif
+        case MenuPage_AssetScanning:
+            RenderAssetScanSweep(panelX, panelW, firstY);
+            break;
+        case MenuPage_AssetExtracting:
+            RenderAssetExtractProgressBar(panelX, panelW, firstY);
             break;
         default:
             break;
@@ -2958,7 +3879,11 @@ void feCustomMenuMgr::Render() {
 
     g_textManager->SetScale(SCREEN_SCALE_Y(DEF_MENU_TEXT_SCALE), SCREEN_SCALE_Y(DEF_MENU_TEXT_SCALE));
 
-    if (m_currPage != MenuPage_Location) {
+    if (m_currPage != MenuPage_Location
+#if AUTO_UPDATER
+        && m_currPage != MenuPage_Changelog
+#endif
+        ) {
         for (s32 i = 0; i < page->numEntries; i++) {
             const Entry& item = page->entries[i];
             const bool selected = (i == m_cursor);
@@ -2973,6 +3898,23 @@ void feCustomMenuMgr::Render() {
 
             const char* label = Localize(item.token);
             if (!label) label = item.token;
+#ifdef MOD_LOADER
+            if (strcmp(item.token, "FE_MODS") == 0 && strcmp(label, "FE_MODS") == 0) {
+                label = "Mods";
+            }
+#endif
+
+#if AUTO_UPDATER
+            char updateInfoText[256];
+            if (BuildUpdateInfoText(item.token, updateInfoText, (s32)sizeof(updateInfoText))) {
+                label = updateInfoText;
+            }
+#endif
+
+            char assetInfoText[256];
+            if (BuildAssetInfoText(item.token, assetInfoText, (s32)sizeof(assetInfoText))) {
+                label = assetInfoText;
+            }
 
             const f32 rowScreenY = SCREEN_SCALE_Y((f32)rowY);
             const f32 labelScreenX = SCALE_AND_CENTER_X((f32)rowLabelX);
@@ -2990,8 +3932,8 @@ void feCustomMenuMgr::Render() {
             else if (item.type == EntryType_List && item.binding != EntryBinding_None) {
                 g_textManager->SetAlignment(TextAlign_Left);
                 g_textManager->SetColor(selected ? selectedColor.GetRed8() : normalColor.GetRed8(),
-                                 selected ? selectedColor.GetGreen8() : normalColor.GetGreen8(),
-                                 selected ? selectedColor.GetBlue8() : normalColor.GetBlue8());
+                                        selected ? selectedColor.GetGreen8() : normalColor.GetGreen8(),
+                                        selected ? selectedColor.GetBlue8() : normalColor.GetBlue8());
                 g_textManager->PrintString(label, labelScreenX, rowScreenY);
 
                 if (item.binding == EntryBinding_DisplayResolution) {
@@ -3021,8 +3963,8 @@ void feCustomMenuMgr::Render() {
 
                     g_textManager->SetAlignment(TextAlign_Right);
                     g_textManager->SetColor(selected ? selectedColor.GetRed8() : normalColor.GetRed8(),
-                                     selected ? selectedColor.GetGreen8() : normalColor.GetGreen8(),
-                                     selected ? selectedColor.GetBlue8() : normalColor.GetBlue8());
+                                            selected ? selectedColor.GetGreen8() : normalColor.GetGreen8(),
+                                            selected ? selectedColor.GetBlue8() : normalColor.GetBlue8());
                     g_textManager->PrintString(resText, valueScreenX, rowScreenY);
                 }
                 else if (item.binding == EntryBinding_DisplayScreenMode) {
@@ -3040,8 +3982,8 @@ void feCustomMenuMgr::Render() {
 
                     g_textManager->SetAlignment(TextAlign_Right);
                     g_textManager->SetColor(selected ? selectedColor.GetRed8() : normalColor.GetRed8(),
-                                     selected ? selectedColor.GetGreen8() : normalColor.GetGreen8(),
-                                     selected ? selectedColor.GetBlue8() : normalColor.GetBlue8());
+                                            selected ? selectedColor.GetGreen8() : normalColor.GetGreen8(),
+                                            selected ? selectedColor.GetBlue8() : normalColor.GetBlue8());
                     g_textManager->PrintString(modeText, valueScreenX, rowScreenY);
                 }
                 else if (item.binding == EntryBinding_DisplayMsaa) {
@@ -3061,8 +4003,8 @@ void feCustomMenuMgr::Render() {
 
                     g_textManager->SetAlignment(TextAlign_Right);
                     g_textManager->SetColor(selected ? selectedColor.GetRed8() : normalColor.GetRed8(),
-                                     selected ? selectedColor.GetGreen8() : normalColor.GetGreen8(),
-                                     selected ? selectedColor.GetBlue8() : normalColor.GetBlue8());
+                                            selected ? selectedColor.GetGreen8() : normalColor.GetGreen8(),
+                                            selected ? selectedColor.GetBlue8() : normalColor.GetBlue8());
                     g_textManager->PrintString(msaaText, valueScreenX, rowScreenY);
                 }
                 else if (item.binding == EntryBinding_DisplayFrameRate) {
@@ -3075,8 +4017,8 @@ void feCustomMenuMgr::Render() {
 
                     g_textManager->SetAlignment(TextAlign_Right);
                     g_textManager->SetColor(selected ? selectedColor.GetRed8() : normalColor.GetRed8(),
-                                     selected ? selectedColor.GetGreen8() : normalColor.GetGreen8(),
-                                     selected ? selectedColor.GetBlue8() : normalColor.GetBlue8());
+                                            selected ? selectedColor.GetGreen8() : normalColor.GetGreen8(),
+                                            selected ? selectedColor.GetBlue8() : normalColor.GetBlue8());
                     g_textManager->PrintString(frameRateText, valueScreenX, rowScreenY);
                 }
                 else if (item.binding == EntryBinding_PlayerConfig) {
@@ -3092,8 +4034,8 @@ void feCustomMenuMgr::Render() {
 
                     g_textManager->SetAlignment(TextAlign_Right);
                     g_textManager->SetColor(selected ? selectedColor.GetRed8() : normalColor.GetRed8(),
-                                     selected ? selectedColor.GetGreen8() : normalColor.GetGreen8(),
-                                     selected ? selectedColor.GetBlue8() : normalColor.GetBlue8());
+                                            selected ? selectedColor.GetGreen8() : normalColor.GetGreen8(),
+                                            selected ? selectedColor.GetBlue8() : normalColor.GetBlue8());
                     g_textManager->PrintString(cfgText, valueScreenX, rowScreenY);
                 }
                 else if (item.binding == EntryBinding_Language) {
@@ -3106,16 +4048,16 @@ void feCustomMenuMgr::Render() {
 
                     g_textManager->SetAlignment(TextAlign_Right);
                     g_textManager->SetColor(selected ? selectedColor.GetRed8() : normalColor.GetRed8(),
-                                     selected ? selectedColor.GetGreen8() : normalColor.GetGreen8(),
-                                     selected ? selectedColor.GetBlue8() : normalColor.GetBlue8());
+                                            selected ? selectedColor.GetGreen8() : normalColor.GetGreen8(),
+                                            selected ? selectedColor.GetBlue8() : normalColor.GetBlue8());
                     g_textManager->PrintString(langText, valueScreenX, rowScreenY);
                 }
             }
             else if (item.type == EntryType_Slider && item.binding != EntryBinding_None) {
                 g_textManager->SetAlignment(TextAlign_Left);
                 g_textManager->SetColor(selected ? selectedColor.GetRed8() : normalColor.GetRed8(),
-                                 selected ? selectedColor.GetGreen8() : normalColor.GetGreen8(),
-                                 selected ? selectedColor.GetBlue8() : normalColor.GetBlue8());
+                                        selected ? selectedColor.GetGreen8() : normalColor.GetGreen8(),
+                                        selected ? selectedColor.GetBlue8() : normalColor.GetBlue8());
                 g_textManager->PrintString(label, labelScreenX, rowScreenY);
 
                 DrawSliderCircleMeterPSX(
@@ -3136,14 +4078,14 @@ void feCustomMenuMgr::Render() {
 
                 g_textManager->SetAlignment(TextAlign_Left);
                 g_textManager->SetColor(selected ? selectedColor.GetRed8() : normalColor.GetRed8(),
-                                 selected ? selectedColor.GetGreen8() : normalColor.GetGreen8(),
-                                 selected ? selectedColor.GetBlue8() : normalColor.GetBlue8());
+                                        selected ? selectedColor.GetGreen8() : normalColor.GetGreen8(),
+                                        selected ? selectedColor.GetBlue8() : normalColor.GetBlue8());
                 g_textManager->PrintString(label, labelScreenX, rowScreenY);
 
                 g_textManager->SetAlignment(TextAlign_Right);
                 g_textManager->SetColor(selected ? selectedColor.GetRed8() : normalColor.GetRed8(),
-                                 selected ? selectedColor.GetGreen8() : normalColor.GetGreen8(),
-                                 selected ? selectedColor.GetBlue8() : normalColor.GetBlue8());
+                                        selected ? selectedColor.GetGreen8() : normalColor.GetGreen8(),
+                                        selected ? selectedColor.GetBlue8() : normalColor.GetBlue8());
                 g_textManager->PrintString(toggleText, valueScreenX, rowScreenY);
             }
             else {
@@ -3152,15 +4094,15 @@ void feCustomMenuMgr::Render() {
                     BuildSaveSlotLabel(i, slotLabel, (s32)sizeof(slotLabel));
                     g_textManager->SetAlignment(TextAlign_Left);
                     g_textManager->SetColor(selected ? selectedColor.GetRed8() : normalColor.GetRed8(),
-                                     selected ? selectedColor.GetGreen8() : normalColor.GetGreen8(),
-                                     selected ? selectedColor.GetBlue8() : normalColor.GetBlue8());
+                                            selected ? selectedColor.GetGreen8() : normalColor.GetGreen8(),
+                                            selected ? selectedColor.GetBlue8() : normalColor.GetBlue8());
                     g_textManager->PrintString(slotLabel, labelScreenX, rowScreenY);
                 }
                 else {
                     g_textManager->SetAlignment(TextAlign_Center);
                     g_textManager->SetColor(selected ? selectedColor.GetRed8() : normalColor.GetRed8(),
-                                     selected ? selectedColor.GetGreen8() : normalColor.GetGreen8(),
-                                     selected ? selectedColor.GetBlue8() : normalColor.GetBlue8());
+                                            selected ? selectedColor.GetGreen8() : normalColor.GetGreen8(),
+                                            selected ? selectedColor.GetBlue8() : normalColor.GetBlue8());
                     g_textManager->PrintString(label, centerScreenX, rowScreenY);
                 }
             }
@@ -3224,7 +4166,13 @@ void feCustomMenuMgr::Render() {
     }
 
     // Help prompts in the bottom bar
-    if (g_textManager && g_textManager->SetFontByName(DEF_MENU_FONT_NAME) && m_currPage != MenuPage_Quitting) {
+    if (g_textManager && g_textManager->SetFontByName(DEF_MENU_FONT_NAME) && m_currPage != MenuPage_Quitting
+#if AUTO_UPDATER
+        && m_currPage != MenuPage_CheckingUpdate
+#endif
+        && m_currPage != MenuPage_AssetScanning
+        && m_currPage != MenuPage_AssetExtracting
+        ) {
         f32 helpScale = DEF_MENU_PROMPT_SCALE;
         f32 promptGap = DEF_HELP_GROUP_GAP_PX;
 
@@ -3272,6 +4220,32 @@ void feCustomMenuMgr::Render() {
                 pushPrompt("FE_KBBCK", "<ACT:MENU_BACK> Back");
             }
         }
+#ifdef MOD_LOADER
+        else if (m_currPage == MenuPage_Mods) {
+            if (static_cast<s32>(ModLoader::Instance().GetMods().size()) > DEF_MODS_VISIBLE_ROWS) {
+                pushPrompt("FE_HPSCR", "<ACT:MENU_UP>/<ACT:MENU_DOWN> Scroll");
+            }
+            if (m_cursor != 0) {
+                pushPrompt("FE_HPTGL", "<ACT:MENU_CONFIRM> Toggle");
+            }
+            pushPrompt("FE_HPBCK", "<ACT:MENU_BACK> Back");
+        }
+#endif
+#if AUTO_UPDATER
+        else if (m_currPage == MenuPage_Changelog) {
+            if ((s32)m_changelogLines.size() > ComputeChangelogVisibleLines(m_pages[MenuPage_Changelog].frameH)) {
+                pushPrompt("FE_HPSCR", "<ACT:MENU_UP>/<ACT:MENU_DOWN> Scroll");
+            }
+            pushPrompt("FE_HPBCK", "<ACT:MENU_BACK> Back");
+        }
+#endif
+        else if (m_currPage == MenuPage_AssetMissing) {
+            // Back is a no-op while gating boot on missing assets (use the on-screen
+            // buttons instead), so don't advertise it here.
+            if (selectedEntry) {
+                pushPrompt("FE_HPSEL", "<ACT:MENU_CONFIRM> Select");
+            }
+        }
         else {
             if (selectedEntry) {
                 if (selectedEntry->type == EntryType_Slider) {
@@ -3316,6 +4290,12 @@ void feCustomMenuMgr::Render() {
             }
         }
     }
+
+#if AUTO_UPDATER
+    if (m_currPage == MenuPage_Title) {
+        DrawVersionOverlay();
+    }
+#endif
 }
 
 void feCustomMenuMgr::RenderLocationPage() const {
@@ -3525,4 +4505,273 @@ void feCustomMenuMgr::RenderControllerOverlay(s32 panelX, s32 panelY) const {
     }
 
     g_textManager->SetScale(1.0f, 1.0f);
+}
+
+#if AUTO_UPDATER
+void feCustomMenuMgr::DrawVersionOverlay() {
+    if (!g_textManager)
+        return;
+
+    static constexpr f32 kOverlayX = 8.0f;
+    static constexpr f32 kOverlayY = 6.0f;
+    static constexpr f32 kOverlayScale = 0.2f;
+    static constexpr f32 kOverlayLineStep = 5.0f;
+
+    g_textManager->SetFontByName("Legal");
+    g_textManager->SetScale(SCREEN_SCALE_Y(kOverlayScale), SCREEN_SCALE_Y(kOverlayScale));
+    g_textManager->SetAlignment(TextAlign_Left);
+    g_textManager->SetWrapWidth(0.0f);
+    g_textManager->SetLineSpacing(0);
+    g_textManager->SetPromptsEnabled(false);
+    g_textManager->SetShadow(false);
+    g_textManager->SetOutline(true);
+    g_textManager->SetColor(255, 255, 255);
+    g_textManager->PrintString(GAME_VERSION, HudX(kOverlayX), HudY(kOverlayY));
+
+    if (g_autoUpdater && g_autoUpdater->IsUpdateAvailable()) {
+        const char* text = Localize("FE_UPD_AVAIL");
+        if (!text)
+            text = "Update available";
+
+        static constexpr f32 kFadeCycleSec = 2.0f;
+        if (g_time) {
+            m_updateAvailFadeTimer += g_time->GetDeltaTime();
+            while (m_updateAvailFadeTimer >= kFadeCycleSec) {
+                m_updateAvailFadeTimer -= kFadeCycleSec;
+            }
+        }
+
+        const f32 half = kFadeCycleSec * 0.5f;
+        f32 t = (m_updateAvailFadeTimer < half)
+            ? (m_updateAvailFadeTimer / half)
+            : ((kFadeCycleSec - m_updateAvailFadeTimer) / half);
+        if (t < 0.0f)
+            t = 0.0f;
+        if (t > 1.0f)
+            t = 1.0f;
+        const u8 alpha = (u8)(t * 255.0f);
+
+        g_textManager->SetColor(DEF_TEXT_NORM_R, DEF_TEXT_NORM_G, DEF_TEXT_NORM_B, alpha);
+        g_textManager->PrintString(text, HudX(kOverlayX), HudY(kOverlayY + kOverlayLineStep));
+    }
+
+    g_textManager->SetPromptsEnabled(true);
+}
+
+void feCustomMenuMgr::RenderUpdateProgressBar(s32 panelX, s32 panelW, s32 rowTop) const {
+    if (!g_autoUpdater) return;
+
+    // Offset below the "FE_UPD_PRG" Info row by however many lines it actually
+    // wrapped to, so longer translated/interpolated text doesn't overlap the bar.
+    const PageDef& page = m_pages[MenuPage_Update];
+    s32 lines = 1;
+    if (page.numEntries > 0) {
+        const Entry& infoEntry = page.entries[0];
+        const char* label = Localize(infoEntry.token);
+        if (!label) label = infoEntry.token;
+        char updateInfoText[256];
+        if (BuildUpdateInfoText(infoEntry.token, updateInfoText, (s32)sizeof(updateInfoText))) {
+            label = updateInfoText;
+        }
+        lines = GetWrappedLineCount(page, label);
+    }
+
+    const s32 barX = panelX + DEF_LABEL_X_PAD;
+    const s32 barY = rowTop + DEF_ROW_TEXT_H + (lines - 1) * DEF_ROW_STEP + DEF_INFO_ROW_EXTRA;
+    const s32 barW = panelW - DEF_LABEL_X_PAD * 2;
+    const s32 barH = DEF_METER_H;
+
+    DrawUniformBorderRectPSX(barX, barY, barW, barH, GetMenuBorderPx(),
+                             DEF_FRAME_R, DEF_FRAME_G, DEF_FRAME_B, DEF_FRAME_A);
+    DrawRect((f32)barX, (f32)barY, (f32)barW, (f32)barH,
+             DEF_SLIDER_TRACK_R, DEF_SLIDER_TRACK_G, DEF_SLIDER_TRACK_B, DEF_SLIDER_TRACK_A);
+
+    f32 progress = g_autoUpdater->GetDownloadProgress();
+    if (progress < 0.0f) progress = 0.0f;
+    if (progress > 1.0f) progress = 1.0f;
+
+    const s32 fillW = (s32)((f32)barW * progress);
+    if (fillW > 0) {
+        DrawRect((f32)barX, (f32)barY, (f32)fillW, (f32)barH,
+                 DEF_SLIDER_FILL_R, DEF_SLIDER_FILL_G, DEF_SLIDER_FILL_B, DEF_SLIDER_FILL_A);
+    }
+}
+
+void feCustomMenuMgr::RenderUpdateIndeterminateBar(s32 panelX, s32 panelW, s32 rowTop) const {
+    // Offset below the "FE_UPD_CHK" Info row by however many lines it actually
+    // wrapped to, so longer translated text doesn't overlap the bar.
+    const PageDef& page = m_pages[MenuPage_CheckingUpdate];
+    s32 lines = 1;
+    if (page.numEntries > 0) {
+        const Entry& infoEntry = page.entries[0];
+        const char* label = Localize(infoEntry.token);
+        if (!label) label = infoEntry.token;
+        lines = GetWrappedLineCount(page, label);
+    }
+
+    const s32 barX = panelX + DEF_LABEL_X_PAD;
+    const s32 barY = rowTop + DEF_ROW_TEXT_H + (lines - 1) * DEF_ROW_STEP + DEF_INFO_ROW_EXTRA;
+    const s32 barW = panelW - DEF_LABEL_X_PAD * 2;
+    const s32 barH = DEF_METER_H;
+
+    DrawUniformBorderRectPSX(barX, barY, barW, barH, GetMenuBorderPx(),
+                             DEF_FRAME_R, DEF_FRAME_G, DEF_FRAME_B, DEF_FRAME_A);
+    DrawRect((f32)barX, (f32)barY, (f32)barW, (f32)barH,
+             DEF_SLIDER_TRACK_R, DEF_SLIDER_TRACK_G, DEF_SLIDER_TRACK_B, DEF_SLIDER_TRACK_A);
+
+    // No real progress to report yet, so sweep a block back and forth across the track.
+    const s32 blockW = barW / 3;
+    const u32 frameCounter = g_time ? g_time->GetFrameCounter() : 0u;
+    const u32 cycleFrames = 60u;
+    const u32 phase = frameCounter % cycleFrames;
+    const f32 half = (f32)(cycleFrames / 2);
+    const f32 frac = (phase < cycleFrames / 2) ? ((f32)phase / half) : (2.0f - (f32)phase / half);
+    const s32 blockX = barX + (s32)((f32)(barW - blockW) * frac);
+
+    DrawRect((f32)blockX, (f32)barY, (f32)blockW, (f32)barH,
+             DEF_SLIDER_FILL_R, DEF_SLIDER_FILL_G, DEF_SLIDER_FILL_B, DEF_SLIDER_FILL_A);
+}
+#endif
+
+void feCustomMenuMgr::RefreshAssetPageEntries() {
+    if (!g_psxDiscExtractor) {
+        return;
+    }
+
+    PageDef& page = m_pages[MenuPage_AssetMissing];
+
+    switch (g_psxDiscExtractor->GetState()) {
+        case PsxDiscExtractor::State::ScanNoneFound:
+            SetEntries(page, {
+                Info("FE_ASSET_NONE"),
+                Button("FE_ASSET_RESCAN", EntryEvent_ScanForAssets),
+                Button("FE_QTG", EntryEvent_QuitFromAssetCheck),
+                       });
+            break;
+        case PsxDiscExtractor::State::ScanMultipleFound:
+            SetEntries(page, {
+                Info("FE_ASSET_MULTI"),
+                Button("FE_ASSET_RESCAN", EntryEvent_ScanForAssets),
+                Button("FE_QTG", EntryEvent_QuitFromAssetCheck),
+                       });
+            break;
+        case PsxDiscExtractor::State::ScanFoundOne:
+            SetEntries(page, {
+                Info("FE_ASSET_ONE"),
+                Button("FE_ASSET_EXT", EntryEvent_ExtractAssets),
+                Button("FE_QTG", EntryEvent_QuitFromAssetCheck),
+                       });
+            break;
+        case PsxDiscExtractor::State::Error:
+            SetEntries(page, {
+                Info("FE_ASSET_ERR"),
+                Button("FE_ASSET_RESCAN", EntryEvent_ScanForAssets),
+                Button("FE_QTG", EntryEvent_QuitFromAssetCheck),
+                       });
+            break;
+        default:
+            SetEntries(page, {
+                Info("FE_ASSET_MISS"),
+                Button("FE_ASSET_EXT", EntryEvent_ScanForAssets),
+                Button("FE_QTG", EntryEvent_QuitFromAssetCheck),
+                       });
+            break;
+    }
+
+    // A refresh mid-visit can shrink the entry list out from under the cursor.
+    if (m_cursor < 0 || m_cursor >= page.numEntries || page.entries[m_cursor].type == EntryType_Info) {
+        m_cursor = 0;
+        while (m_cursor < page.numEntries && page.entries[m_cursor].type == EntryType_Info) {
+            m_cursor++;
+        }
+    }
+}
+
+bool feCustomMenuMgr::BuildAssetInfoText(const char* token, char* outText, s32 outTextLen) const {
+    if (!g_psxDiscExtractor || !token) {
+        return false;
+    }
+
+    if (!strcmp(token, "FE_ASSET_ERR")) {
+        const char* fmt = Localize("FE_ASSET_ERR");
+        if (!fmt) fmt = "Extraction failed: %s";
+        snprintf(outText, outTextLen, fmt, g_psxDiscExtractor->GetError());
+        return true;
+    }
+    return false;
+}
+
+void feCustomMenuMgr::RenderAssetExtractProgressBar(s32 panelX, s32 panelW, s32 rowTop) const {
+    if (!g_psxDiscExtractor) return;
+
+    // Offset below the "FE_ASSET_EXTG" Info row by however many lines it actually
+    // wrapped to, so longer translated text doesn't overlap the bar.
+    const PageDef& page = m_pages[MenuPage_AssetExtracting];
+    s32 lines = 1;
+    if (page.numEntries > 0) {
+        const Entry& infoEntry = page.entries[0];
+        const char* label = Localize(infoEntry.token);
+        if (!label) label = infoEntry.token;
+        char assetInfoText[256];
+        if (BuildAssetInfoText(infoEntry.token, assetInfoText, (s32)sizeof(assetInfoText))) {
+            label = assetInfoText;
+        }
+        lines = GetWrappedLineCount(page, label);
+    }
+
+    const s32 barX = panelX + DEF_LABEL_X_PAD;
+    const s32 barY = rowTop + DEF_ROW_TEXT_H + (lines - 1) * DEF_ROW_STEP + DEF_INFO_ROW_EXTRA;
+    const s32 barW = panelW - DEF_LABEL_X_PAD * 2;
+    const s32 barH = DEF_METER_H;
+
+    DrawUniformBorderRectPSX(barX, barY, barW, barH, GetMenuBorderPx(),
+                             DEF_FRAME_R, DEF_FRAME_G, DEF_FRAME_B, DEF_FRAME_A);
+    DrawRect((f32)barX, (f32)barY, (f32)barW, (f32)barH,
+             DEF_SLIDER_TRACK_R, DEF_SLIDER_TRACK_G, DEF_SLIDER_TRACK_B, DEF_SLIDER_TRACK_A);
+
+    f32 progress = g_psxDiscExtractor->GetProgress();
+    if (progress < 0.0f) progress = 0.0f;
+    if (progress > 1.0f) progress = 1.0f;
+
+    const s32 fillW = (s32)((f32)barW * progress);
+    if (fillW > 0) {
+        DrawRect((f32)barX, (f32)barY, (f32)fillW, (f32)barH,
+                 DEF_SLIDER_FILL_R, DEF_SLIDER_FILL_G, DEF_SLIDER_FILL_B, DEF_SLIDER_FILL_A);
+    }
+}
+
+void feCustomMenuMgr::RenderAssetScanSweep(s32 panelX, s32 panelW, s32 rowTop) const {
+    // Offset below the "FE_ASSET_SCAN" Info row by however many lines it actually
+    // wrapped to, so longer translated text doesn't overlap the bar.
+    const PageDef& page = m_pages[MenuPage_AssetScanning];
+    s32 lines = 1;
+    if (page.numEntries > 0) {
+        const Entry& infoEntry = page.entries[0];
+        const char* label = Localize(infoEntry.token);
+        if (!label) label = infoEntry.token;
+        lines = GetWrappedLineCount(page, label);
+    }
+
+    const s32 barX = panelX + DEF_LABEL_X_PAD;
+    const s32 barY = rowTop + DEF_ROW_TEXT_H + (lines - 1) * DEF_ROW_STEP + DEF_INFO_ROW_EXTRA;
+    const s32 barW = panelW - DEF_LABEL_X_PAD * 2;
+    const s32 barH = DEF_METER_H;
+
+    DrawUniformBorderRectPSX(barX, barY, barW, barH, GetMenuBorderPx(),
+                             DEF_FRAME_R, DEF_FRAME_G, DEF_FRAME_B, DEF_FRAME_A);
+    DrawRect((f32)barX, (f32)barY, (f32)barW, (f32)barH,
+             DEF_SLIDER_TRACK_R, DEF_SLIDER_TRACK_G, DEF_SLIDER_TRACK_B, DEF_SLIDER_TRACK_A);
+
+    // Scanning a single folder is effectively instant - sweep a block, same as the
+    // update-checker's indeterminate bar, rather than faking a 0..1 progress value.
+    const s32 blockW = barW / 3;
+    const u32 frameCounter = g_time ? g_time->GetFrameCounter() : 0u;
+    const u32 cycleFrames = 60u;
+    const u32 phase = frameCounter % cycleFrames;
+    const f32 half = (f32)(cycleFrames / 2);
+    const f32 frac = (phase < cycleFrames / 2) ? ((f32)phase / half) : (2.0f - (f32)phase / half);
+    const s32 blockX = barX + (s32)((f32)(barW - blockW) * frac);
+
+    DrawRect((f32)blockX, (f32)barY, (f32)blockW, (f32)barH,
+             DEF_SLIDER_FILL_R, DEF_SLIDER_FILL_G, DEF_SLIDER_FILL_B, DEF_SLIDER_FILL_A);
 }

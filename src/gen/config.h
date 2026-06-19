@@ -9,7 +9,7 @@
 #define IMPROVED_DEBUG_CAM 1
 
 // Skip initial intros and goes straight into title screen
-#define SKIP_INTRO 1
+#define SKIP_INTRO 0
 
 // Adds support to any aspect ratio, fixes ui and camera.
 #define FIX_ASPECT_RATIO 1
@@ -33,3 +33,23 @@
 
 // Experimental: Keep simulation fixed at 30 fps while rendering at higher frame rates, with interpolation for smoothness.
 #define HIGH_FPS_PLAY_PRESENTATION 0
+
+// Mod loader support: when enabled, the game checks the ~mods/ directory for
+// replacement assets (PNG textures, GLB models, WAV sounds, JSON data) before
+// falling back to original PSX-format assets. Set to 0 to keep original code
+// path fully intact with zero mod-related overhead.
+#define MOD_LOADER 1
+
+// Adds a persistent Cheats page and its optional gameplay changes.
+#define NEW_CHEATS 1
+
+// Real-texture rendering: adds a second, runtime-switchable rendering path
+// (toggle via the debug UI) that samples a real full-resolution 2D texture
+// per material instead of the shared PSX VRAM/CLUT atlas. Off by default at
+// runtime even when compiled in. Every named texture chunk (character and
+// world geometry) still gets decoded at native resolution either way, so
+// toggling never changes vanilla (unmodded) visuals -- it only lifts the
+// resolution/palette cap for ModLoader texture overrides.
+#define REAL_TEXTURE_RENDERING 1
+
+#define AUTO_UPDATER 1

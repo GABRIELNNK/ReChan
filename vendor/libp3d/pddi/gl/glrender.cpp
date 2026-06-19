@@ -55,8 +55,21 @@ uniform float uAlphaScale;
 uniform int uUseZeroTexelKey;
 uniform int uTexInfoOverrideEnabled;
 uniform vec2 uTexInfoOverride;
+uniform int uRealTextureMode;
+uniform sampler2D uRealTex;
+uniform vec2 uRealTexOffset;
+uniform vec2 uRealTexSize;
 out vec4 FragColor;
 void main() {
+    if (uRealTextureMode != 0) {
+        vec2 puv = mod(vUV + vec2(256.0), vec2(256.0));
+        vec2 ruv = (puv - uRealTexOffset) / uRealTexSize;
+        vec4 texColor = texture(uRealTex, ruv);
+        if (texColor.a < 0.01) discard;
+        FragColor = vec4(texColor.rgb, uAlphaScale * texColor.a) * vec4(vColor, 1.0);
+        return;
+    }
+
     float tpageF = vTexInfo.x;
     float cbaF = vTexInfo.y;
     if (uTexInfoOverrideEnabled != 0) {
@@ -1510,6 +1523,13 @@ void glContext::SetTexInfoOverride(bool enabled, u32 texInfoWord) {
     texInfoOverrideWord = texInfoWord;
 }
 
+void glContext::SetRealTextureRect(float offsetX, float offsetY, float sizeX, float sizeY) {
+    realTexOffsetX = offsetX;
+    realTexOffsetY = offsetY;
+    realTexSizeX = sizeX;
+    realTexSizeY = sizeY;
+}
+
 u32 glContext::CreateVRAMTexture(int w, int h, const u16* data) {
     u32 tex;
     glGenTextures(1, &tex);
@@ -1528,7 +1548,7 @@ void glContext::DestroyVRAMTexture(u32 handle) {
     if (handle) glDeleteTextures(1, &handle);
 }
 
-void glContext::DrawPrimBuffer(pddiPrimBuffer* buffer) {
+void glContext::DrawPrimBuffer(pddiPrimBuffer* buffer, u32 indexOffset, u32 indexCount) {
     if (!buffer)
         return;
 
@@ -1563,6 +1583,15 @@ void glContext::DrawPrimBuffer(pddiPrimBuffer* buffer) {
         glUniform1i(glGetUniformLocation(program3D, "uVRAM"), 0);
     }
 
+    const int useRealTexture = (realTextureModeEnabled && currentTexture) ? 1 : 0;
+    glUniform1i(glGetUniformLocation(program3D, "uRealTextureMode"), useRealTexture);
+    if (useRealTexture) {
+        static_cast<glTexture*>(currentTexture)->Bind(1);
+        glUniform1i(glGetUniformLocation(program3D, "uRealTex"), 1);
+        glUniform2f(glGetUniformLocation(program3D, "uRealTexOffset"), realTexOffsetX, realTexOffsetY);
+        glUniform2f(glGetUniformLocation(program3D, "uRealTexSize"), realTexSizeX, realTexSizeY);
+    }
+
     GLenum glMode = GL_TRIANGLES;
     switch (buffer->GetPrimType()) {
         case PDDI_PRIM_TRIANGLES: glMode = GL_TRIANGLES; break;
@@ -1572,9 +1601,12 @@ void glContext::DrawPrimBuffer(pddiPrimBuffer* buffer) {
         case PDDI_PRIM_POINTS:    glMode = GL_POINTS; break;
     }
 
+    const u32 drawCount = (indexCount != 0) ? indexCount : buffer->GetIndexCount();
+    const void* indexPtr = reinterpret_cast<const void*>(static_cast<uintptr_t>(indexOffset) * sizeof(u16));
+
     auto* glBuf = static_cast<glPrimBuffer*>(buffer);
     glBindVertexArray(glBuf->GetVAO());
-    glDrawElements(glMode, buffer->GetIndexCount(), GL_UNSIGNED_SHORT, nullptr);
+    glDrawElements(glMode, drawCount, GL_UNSIGNED_SHORT, indexPtr);
     glBindVertexArray(0);
     glUseProgram(0);
 }

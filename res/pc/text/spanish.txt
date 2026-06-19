@@ -109,6 +109,9 @@ Configuracion de Pantalla
 [FE_SND]
 Configuracion de Sonido
 
+[FE_CRE]
+Creditos
+
 [FE_BCK]
 Atras
 
@@ -255,6 +258,9 @@ Pulsa una tecla o boton del raton
 
 [FE_HPADJ]
 <ACT:MENU_LEFT>/<ACT:MENU_RIGHT> Ajustar
+
+[FE_HPSCR]
+<ACT:MENU_UP>/<ACT:MENU_DOWN> Desplazar
 
 [FE_HPSET]
 <ACT:MENU_CONFIRM> Establecer
@@ -441,6 +447,120 @@ COMPLETADO
 
 [FE_DNCM]
 NO COMPLETADO
+
+#
+# Auto Updater
+#
+[FE_UPD]
+Actualizacion del Juego
+
+[FE_UPD_CHK]
+Buscando actualizaciones...
+
+[FE_UPD_UTD]
+Estas actualizado!
+
+[FE_UPD_ERR]
+Error al buscar actualizaciones: %s
+
+[FE_UPD_CUR]
+Version actual: %s
+
+[FE_UPD_LAT]
+Nueva version disponible: %s
+
+[FE_UPD_NOTES]
+Novedades
+
+[FE_UPD_NOCHANGE]
+No hay novedades disponibles.
+
+[FE_UPD_DL]
+Descargar actualizacion
+
+[FE_UPD_RMD]
+Recordarmelo mas tarde
+
+[FE_UPD_CHKNOW]
+Buscar actualizaciones
+
+[FE_UPD_PRG]
+Descargando... %d%%
+
+[FE_UPD_CNL]
+Cancelar
+
+[FE_UPD_RDY]
+Actualizacion descargada y lista para instalar.
+
+[FE_UPD_INST]
+Instalar y reiniciar
+
+[FE_UPD_INSTG]
+Instalando actualizacion...
+
+[FE_UPD_AVAIL]
+Actualizacion disponible
+
+#
+# Asset Extraction
+#
+[FE_ASSET_TITLE]
+Archivos del juego
+
+[FE_ASSET_MISS]
+No se encontraron los archivos del juego PSX. Coloca tu imagen de disco original (.bin o .iso) en la carpeta "discimage" y luego haz clic en Extraer archivos.
+
+[FE_ASSET_EXT]
+Extraer archivos
+
+[FE_ASSET_RESCAN]
+Buscar de nuevo
+
+[FE_ASSET_SCAN]
+Buscando imagen de disco...
+
+[FE_ASSET_NONE]
+No se encontro ningun archivo .bin o .iso en la carpeta "discimage". Agrega tu imagen de disco e intenta de nuevo.
+
+[FE_ASSET_MULTI]
+Se encontraron varios archivos .bin/.iso en "discimage". Conserva solo uno e intenta de nuevo.
+
+[FE_ASSET_ONE]
+Imagen de disco encontrada. Lista para extraer.
+
+[FE_ASSET_EXTG]
+Extrayendo archivos del juego...
+
+[FE_ASSET_ERR]
+Extraccion fallida: %s
+
+#
+# Mods y trucos
+#
+[FE_MODS]
+Mods
+
+[FE_MOD_NONE]
+No hay mods instalados
+
+[FE_CHEATS]
+Trucos
+
+[FE_CH_DRAG]
+Todos los dragones:
+
+[FE_CH_LEVL]
+Todos los niveles:
+
+[FE_CH_GOD]
+Modo dios:
+
+[FE_CH_PNCH]
+One Punch Man:
+
+[FE_CH_HVN]
+Rumbo al cielo:
 
 #
 # PSX overrides

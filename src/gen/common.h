@@ -53,6 +53,38 @@
 #define SCALE_AND_CENTER_X(x) SCREEN_STRETCH_X(x)
 #endif
 
+static f32 HudSafeWidth() {
+    const f32 screenW = SCREEN_WIDTH;
+    const f32 screenH = SCREEN_HEIGHT;
+    const f32 maxW16x9 = screenH * TARGET_ASPECT_RATIO;
+    return (screenW > maxW16x9) ? maxW16x9 : screenW;
+}
+
+static f32 HudSafeOffsetX() {
+    const f32 safeW = HudSafeWidth();
+    const f32 screenW = SCREEN_WIDTH;
+    if (screenW > safeW) {
+        return (screenW - safeW) * 0.5f;
+    }
+    return 0.0f;
+}
+
+static f32 HudX(f32 x) {
+    return HudSafeOffsetX() + (x / DEFAULT_SCREEN_WIDTH) * HudSafeWidth();
+}
+
+static f32 HudY(f32 y) {
+    return SCREEN_SCALE_Y(y);
+}
+
+static f32 HudW(f32 w) {
+    return (w / DEFAULT_SCREEN_WIDTH) * HudSafeWidth();
+}
+
+static f32 HudH(f32 h) {
+    return SCREEN_SCALE_Y(h);
+}
+
 template <typename T>
 static inline T Clamp(T v, T lo, T hi) {
     return v < lo ? lo : (v > hi ? hi : v);

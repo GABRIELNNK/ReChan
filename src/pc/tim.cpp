@@ -11,6 +11,12 @@
 #include "pddi/pddishad.h"
 #include "pddi/pdditex.h"
 #include "xclib/xcfile.h"
+#ifdef MOD_LOADER
+#include "extra/modloader.h"
+#include "p3d/hash.h"
+#include <filesystem>
+#include "vendor/stb/stb_image.h"
+#endif
 
 // TIM file structures
 struct TimHeader {
@@ -25,6 +31,30 @@ struct TimSection {
 };
 
 TimImage* Tim::LoadFromFile(const char* path) {
+#ifdef MOD_LOADER
+    {
+        std::string stem = std::filesystem::path(path).stem().string();
+        for (char& c : stem) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        u32 crc = p3dHash(stem.c_str());
+        if (ModLoader::Instance().HasTexture(crc)) {
+            const std::string* pngPath = ModLoader::Instance().GetTexturePath(crc);
+            if (pngPath) {
+                int w, h, ch;
+                unsigned char* px = stbi_load(pngPath->c_str(), &w, &h, &ch, 4);
+                if (px) {
+                    TimImage* img = new TimImage();
+                    img->width = w;
+                    img->height = h;
+                    img->rgba = new u32[w * h];
+                    memcpy(img->rgba, px, static_cast<size_t>(w * h) * 4);
+                    stbi_image_free(px);
+                    LOG("[ModLoader] Texture override: %s -> %s", path, pngPath->c_str());
+                    return img;
+                }
+            }
+        }
+    }
+#endif
     u8* data = nullptr;
     u32 fileSize = 0;
     if (!xcReadFileLow(path, &data, &fileSize)) {
