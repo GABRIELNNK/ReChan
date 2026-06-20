@@ -62,29 +62,31 @@ public:
 
 class KnockDown : public Obstacle {
 public:
-    // PSX +116 (s32): unknown (init 0 in ctor)
+    // PSX +116: 0 upright, 1 falling, 2 finished.
     s32 field116 = 0;
-    // PSX +120..+151: unknown (8 dwords)
+    // PSX +120/+124: current and maximum angular velocity.
     s32 field120 = 0;
     s32 field124 = 0;
+    // PSX +128..+136: initial orientation.
     s32 field128 = 0;
     s32 field132 = 0;
     s32 field136 = 0;
+    // PSX +140..+148: falling orientation.
     s32 field140 = 0;
     s32 field144 = 0;
     s32 field148 = 0;
     // PSX +152..+167: saved collision box (INVALID initially)
     tagCollisionBox savedCollBox = { 0x7FFF, 0x7FFF, 0x7FFF, -0x7FFF, -0x7FFF, -0x7FFF, -0x7FFF, 0 };
-    // PSX +168 (s32): unknown (init 0 in ctor)
+    // PSX +168: optional trigger target hash.
     s32 field168 = 0;
-    // PSX +172 (s32): unknown (init 0 in ctor)
+    // PSX +172: impact effect hash.
     s32 field172 = 0;
-    // PSX +176..+183: unknown (2 dwords)
+    // PSX +176: damage; +180: remain alive after impact.
     s32 field176 = 0;
     s32 field180 = 0;
     // PSX +184 (ptr): CKnockDownSound* (init nullptr in ctor)
     CKnockDownSound* field184 = nullptr;
-    // PSX +188..+191: unknown
+    // PSX +188: fall direction (0 +X, 1 -Z, 2 -X, 3 +Z rotation).
     s32 field188 = 0;
 
     KnockDown(const LVector* pos, u16 type);
@@ -101,6 +103,7 @@ public:
     void HandlePickupCollision(Thing* pickup) override;
     void HandleHumanoidCollision(Humanoid* hum) override;
     void HandleAttack(Humanoid* attacker, s32 damageType, s32 attackMagnitude, s32 damage) override;
+    bool CareAboutAttack() const override;
 
     virtual void UpdateCollisionBox();
 };

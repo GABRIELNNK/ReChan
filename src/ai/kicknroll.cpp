@@ -22,6 +22,48 @@
 #include "p3d/skeleton.h"
 #include <cstdio>
 
+static constexpr s32 KNOCKDOWN_COLLISION_TAG_IMPACT_REGION = static_cast<s32>(0x80000002u);
+static constexpr s32 KNOCKDOWN_COLLISION_TAG_HIT_TYPE = static_cast<s32>(0x80000003u);
+static constexpr s32 KNOCKDOWN_COLLISION_TAG_DAMAGE = static_cast<s32>(0x80000007u);
+static constexpr s32 KNOCKDOWN_COLLISION_TAG_END = 0;
+static constexpr u32 KNOCKDOWN_DEFAULT_EFFECT_HASH = 0x065C8E90;
+
+static LVector KnockDownLocalDominantDirection(const KnockDown& knockDown, const LVector& point) {
+    LVector direction = {
+        point.x - knockDown.pos.x,
+        point.y - knockDown.pos.y,
+        point.z - knockDown.pos.z
+    };
+
+    const s32 absX = direction.x < 0 ? -direction.x : direction.x;
+    const s32 absZ = direction.z < 0 ? -direction.z : direction.z;
+    const s32 dominantX = absZ < absX ? direction.x : 0;
+    const s32 dominantZ = absX < absZ ? direction.z : 0;
+    direction.x = dominantX;
+    direction.z = dominantZ;
+
+    switch (static_cast<u16>(knockDown.field132)) {
+        case 0x4000:
+            direction.x = -dominantZ;
+            direction.y = dominantX;
+            direction.z = dominantX;
+            break;
+        case 0x8000:
+            direction.x = -dominantX;
+            direction.z = -dominantZ;
+            break;
+        case 0xC000:
+            direction.x = dominantZ;
+            direction.y = -dominantX;
+            direction.z = -dominantX;
+            break;
+        default:
+            break;
+    }
+
+    return direction;
+}
+
 KickNRoll::KickNRoll(const LVector* pos, u16 type)
     : Obstacle(pos, type) {
     MARKFUNCTION(0x8001C398);
@@ -425,30 +467,66 @@ KnockDown::KnockDown(const LVector* pos, u16 type)
 
 KnockDown::~KnockDown() {
     MARKFUNCTION(0x8001D650);
+
+    if (field184) {
+        delete field184;
+        field184 = nullptr;
+    }
 }
 
 void KnockDown::AnalyzeMesh(DBRoot* root) {
     MARKFUNCTION(0x8001D6B8);
     Obstacle::AnalyzeMesh(root);
 
-    orientation.x = root->field40;
-    orientation.y = root->field44;
-    orientation.z = root->field48;
+    field128 = root->field40;
+    field132 = root->field44;
+    field136 = root->field48;
+    while (field132 > 0xFF49) field132 -= 0x10000;
+    while (field132 < 0) field132 += 0x10000;
 
-    // Save the initial orientation for Reset to restore.
-    field128 = orientation.x;
-    field132 = orientation.y;
-    field136 = orientation.z;
+    field140 = field128;
+    field144 = field132;
+    field148 = field136;
+    orientation = { field128, field132, field136 };
 
     tagCollisionBox localBox = INVALID_COLLISION_BOX;
     ObstacleFillCollisionBox(localBox, root, 5);
     SetCollisionBox(localBox);
     savedCollBox = localBox;
+
+    if (const DBAttrib* attr6 = root->FindAttrib(6)) {
+        const char* name = attr6->GetAttribString();
+        field168 = name ? static_cast<s32>(p3dHash(name)) : 0;
+    }
+
+    if (const DBAttrib* attr7 = root->FindAttrib(7)) {
+        const char* name = attr7->GetAttribString();
+        field172 = name ? static_cast<s32>(p3dHash(name)) : 0;
+    } else {
+        field172 = static_cast<s32>(KNOCKDOWN_DEFAULT_EFFECT_HASH);
+    }
+
+    if (const DBAttrib* attr8 = root->FindAttrib(8)) {
+        field124 = static_cast<s32>((static_cast<s64>(static_cast<s32>(attr8->GetAttribValue())) * 0x10000) / 360);
+    } else {
+        field124 = 0xB6;
+    }
+
+    field176 = root->FindAttrib(9) ? static_cast<s32>(root->FindAttrib(9)->GetAttribValue()) : 50;
+    field180 = root->FindAttrib(10) ? static_cast<s32>(root->FindAttrib(10)->GetAttribValue()) : 0;
 }
 
 void KnockDown::CreateModel(const char* name) {
     MARKFUNCTION(0x8001D8D8);
     Obstacle::CreateModel(name);
+
+    if (!field184) {
+        CSound* soundObject = nullptr;
+        if (CSoundFactory::CreateObject(0x2792, &soundObject, 0) >= 0) {
+            field184 = static_cast<CKnockDownSound*>(soundObject);
+            if (field184) field184->Initialize(&pos);
+        }
+    }
 }
 
 void KnockDown::Draw() {
@@ -459,16 +537,21 @@ void KnockDown::Draw() {
 void KnockDown::DeleteModel() {
     MARKFUNCTION(0x8001D9A8);
     Obstacle::DeleteModel();
+
+    if (field184) {
+        delete field184;
+        field184 = nullptr;
+    }
 }
 
 void KnockDown::Reset() {
     MARKFUNCTION(0x8001D9F8);
     field116 = 0;
     field120 = 0;
-    // Restore the original orientation saved from AnalyzeMesh.
-    orientation.x = field128;
-    orientation.y = field132;
-    orientation.z = field136;
+    field140 = field128;
+    field144 = field132;
+    field148 = field136;
+    orientation = { field128, field132, field136 };
     SetCollisionBox(savedCollBox);
     aliveFlag = 1;
 }
@@ -480,55 +563,81 @@ void KnockDown::Think() {
         return;
     }
 
-    const s32 state = field116;
-    if (state == 1) {
-        // Wobble: advance counter, transition to fall when wobble completes.
-        field120++;
-        const s32 wobbleDuration = (field144 != 0) ? field144 : 20;
-        if (field120 >= wobbleDuration) {
-            field116 = 2;
-            field120 = 0;
-
-            CKnockDownSound* snd = field184;
-            if (snd) {
-                snd->BeginFall();
-            }
-        }
-    } else if (state >= 2) {
-        // Falling: advance physics and reshape the collision box.
+    if (field116 == 1) {
         Move();
         UpdateCollisionBox();
+    } else if (field116 == 2) {
+        if (field172) {
+            GEffect_Create(static_cast<u32>(field172), &pos, nullptr, nullptr, 0, 0, 0);
+        }
+        if (field184) {
+            field184->EndFall();
+            field184->Impact();
+        }
+        if (field168 && g_ai) {
+            ccNode* target = g_ai->moveList.FindNodeCRC(static_cast<u32>(field168), nullptr);
+            if (target) {
+                static_cast<Obstacle*>(static_cast<Thing*>(target))->TriggerByName(Player::s_player, nullptr, nullptr);
+            }
+        }
+        if (!field180) aliveFlag = 0;
     }
 }
 
 void KnockDown::Move() {
     MARKFUNCTION(0x8001DB8C);
 
-    const s32 angVel = (field140 != 0) ? field140 : 0x100;
-    orientation.x += angVel;
+    field120 += 0x48;
+    if (field120 > field124) field120 = field124;
 
-    if (orientation.x >= 0x4000) {
-        orientation.x = 0x4000;
-        if (field116 == 2) {
-            field116 = 3;
-            aliveFlag = 0;
-            SetCollisionBox(INVALID_COLLISION_BOX);
-
-            CKnockDownSound* snd = field184;
-            if (snd) {
-                snd->Impact();
-            }
-        }
+    switch (field188) {
+        case 0:
+            field140 += field120;
+            if (field140 > 0x4000) { field140 = 0x4000; field116 = 2; }
+            break;
+        case 1:
+            field148 -= field120;
+            if (field148 < -0x4000) { field148 = -0x4000; field116 = 2; }
+            break;
+        case 2:
+            field140 -= field120;
+            if (field140 < -0x4000) { field140 = -0x4000; field116 = 2; }
+            break;
+        case 3:
+            field148 += field120;
+            if (field148 > 0x4000) { field148 = 0x4000; field116 = 2; }
+            break;
+        default:
+            break;
     }
+    orientation = { field140, field144, field148 };
 }
 
 void KnockDown::UpdateCollisionBox() {
     MARKFUNCTION(0x8001DCA0);
 
-    // Widen the collision box on the X/Z axis as the obstacle tilts.
     tagCollisionBox box = savedCollBox;
-    const s32 extentY = (s32)box.maxY - (s32)box.minY;
-    box.maxX = (s16)((s32)box.maxX + extentY);
+    switch (field188) {
+        case 0:
+            box.maxY = static_cast<s16>(MulShift16(savedCollBox.maxY, rmSin16(-field140 + 0x4000)));
+            box.minZ = static_cast<s16>(savedCollBox.minZ - MulShift16(savedCollBox.maxY, rmSin16(-field140)));
+            break;
+        case 1:
+            box.maxY = static_cast<s16>(MulShift16(savedCollBox.maxY, rmSin16(field148 + 0x4000)));
+            box.maxX = static_cast<s16>(savedCollBox.maxX + MulShift16(savedCollBox.maxY, rmSin16(field148)));
+            break;
+        case 2:
+            box.maxY = static_cast<s16>(MulShift16(savedCollBox.maxY, rmSin16(field140 + 0x4000)));
+            box.maxZ = static_cast<s16>(savedCollBox.maxZ + MulShift16(savedCollBox.maxY, rmSin16(field140)));
+            break;
+        case 3:
+            box.maxY = static_cast<s16>(MulShift16(savedCollBox.maxY, rmSin16(-field148 + 0x4000)));
+            box.minX = static_cast<s16>(savedCollBox.minX - MulShift16(savedCollBox.maxY, rmSin16(-field148)));
+            break;
+        default:
+            break;
+    }
+    box.maxY = static_cast<s16>(box.maxY + savedCollBox.maxZ - savedCollBox.minZ);
     SetCollisionBox(box);
 }
 
@@ -538,23 +647,17 @@ void KnockDown::UpdatePosition() {
 
 void KnockDown::HandlePickupCollision(Thing* pickup) {
     MARKFUNCTION(0x8001E120);
-    (void)pickup;
-    if (!aliveFlag || field116 != 0) {
-        return;
-    }
-    field116 = 1;
-    field120 = 0;
-
-    CKnockDownSound* snd = field184;
-    if (snd) {
-        snd->Kick();
+    if (aliveFlag && pickup) {
+        Pickup* pickupObject = static_cast<Pickup*>(pickup);
+        pickupObject->PlayEffect();
+        pickupObject->DamageExtra();
     }
 }
 
 void KnockDown::HandleHumanoidCollision(Humanoid* hum) {
     MARKFUNCTION(0x8001E16C);
 
-    if (!aliveFlag) {
+    if (!aliveFlag || !hum) {
         return;
     }
 
@@ -570,30 +673,50 @@ void KnockDown::HandleHumanoidCollision(Humanoid* hum) {
         hum->collBboxMin.x, hum->collBboxMin.y, hum->collBboxMin.z,
         correctedPos, correctionNormal, pushedPos);
 
-    hum->homePos = correctedPos;
-
-    if (correctionNormal.y > 0 && hum->velocity.y <= 0) {
-        hum->SetFloorHeight(pos.y + (s32)collBox.maxY);
-        hum->velocity.y = 0;
-        AddPassenger(hum);
+    if (field116 == 0) {
+        hum->homePos = correctedPos;
+        return;
     }
 
-    if (field116 == 0) {
-        // Trigger wobble if the humanoid kicks from the side.
-        if (LedgeCheck(collBox, correctionNormal, pushedPos, hum) && hum->thingType != 0) {
-            field116 = 1;
-            field120 = 0;
+    if (field116 == 2) {
+        hum->homePos = correctedPos;
+        if (correctionNormal.y > 0 && hum->velocity.y <= 0) {
+            hum->SetFloorHeight(pos.y + static_cast<s32>(collBox.maxY));
+            hum->velocity.y = 0;
+            AddPassenger(hum);
         }
-    } else if (field116 == 2) {
-        // Falling obstacle damages and stuns any humanoid it strikes.
-        const s32 dmg = (field148 != 0) ? field148 : 50;
-        hum->HandleCollision(this, 1, dmg, 0x80000007, 0);
-        hum->SetActionState(AS_COLLAPSE_STUN, 0);
+        return;
+    }
 
-        CKnockDownSound* snd = field184;
-        if (snd) {
-            snd->HitHumanoid();
-        }
+    if (field116 != 1) return;
+
+    const LVector direction = KnockDownLocalDominantDirection(*this, hum->homePos);
+    bool hit = false;
+    switch (field188) {
+        case 0: hit = direction.z > 0; break;
+        case 1: hit = direction.x < 0; break;
+        case 2: hit = direction.z < 0; break;
+        case 3: hit = direction.x > 0; break;
+        default: break;
+    }
+
+    if (!hit) {
+        hum->homePos = correctedPos;
+        return;
+    }
+
+    hum->HandleCollision(
+        this,
+        1,
+        KNOCKDOWN_COLLISION_TAG_IMPACT_REGION,
+        4,
+        KNOCKDOWN_COLLISION_TAG_HIT_TYPE,
+        14,
+        KNOCKDOWN_COLLISION_TAG_DAMAGE,
+        field176,
+        KNOCKDOWN_COLLISION_TAG_END);
+    if (field184) {
+        field184->HitHumanoid();
     }
 }
 
@@ -603,18 +726,26 @@ void KnockDown::HandleAttack(Humanoid* attacker, s32 damageType, s32 attackMagni
     (void)attackMagnitude;
     (void)damage;
 
-    if (field116 != 0) {
+    if (field116 != 0 || !attacker) {
         return;
     }
 
-    field116 = 1;
-    field120 = 0;
+    const LVector direction = KnockDownLocalDominantDirection(*this, attacker->homePos);
+    if (direction.x > 0) field188 = 1;
+    else if (direction.x < 0) field188 = 3;
+    else if (direction.z > 0) field188 = 2;
+    else field188 = 0;
 
-    CKnockDownSound* snd = field184;
-    if (snd) {
-        snd->Kick();
+    field116 = 1;
+    if (field184) {
+        field184->Kick();
+        field184->BeginFall();
     }
-    (void)attacker;
+}
+
+bool KnockDown::CareAboutAttack() const {
+    MARKFUNCTION(0x8001F66C);
+    return true;
 }
 
 static const u32 STACK_DEFAULT_EFFECT_HASH = 0x065C8E90;

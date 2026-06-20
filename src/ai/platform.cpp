@@ -1129,8 +1129,15 @@ bool Platform::HandleEnvironmentCollision(LVector& nextPos) {
     s32 ceilingHeight = 0;
     LVector floorNormal = {};
     LVector ceilingNormal = {};
+
+    // Falling platforms must search from below their current lower face.  The
+    // collision data can contain the floor the platform initially replaces;
+    // querying from the box centre selects that surface and ends the fall on
+    // its first frame instead of selecting the floor underneath it.
+    LVector floorQueryPos = boxCentre;
+    floorQueryPos.y = pos.y + static_cast<s32>(collBox.minY) - 1;
     CollisionSector::GetWorldFloorAndCeilingHeight(
-        floorHeight, ceilingHeight, floorNormal, ceilingNormal, boxCentre, radius);
+        floorHeight, ceilingHeight, floorNormal, ceilingNormal, floorQueryPos, radius);
 
     const s32 nextBottom = nextPos.y + (s32)collBox.minY;
     if (floorHeight <= (s32)0x80000001) {
