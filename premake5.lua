@@ -55,8 +55,11 @@ project "rechan"
         }
 
     filter "system:linux"
-        defines { "PLATFORM_LINUX" }
-        links { "GL", "X11", "pthread", "dl" }
+        defines { "RC_PLATFORM_LINUX", "PLATFORM_LINUX" }
+        links {
+            "GL", "X11", "Xcursor", "Xi", "Xinerama", "Xrandr",
+            "SDL2", "pthread", "dl", "m",
+        }
 
     filter "configurations:Debug"
         runtime "Debug"

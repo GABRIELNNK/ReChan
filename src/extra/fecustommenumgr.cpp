@@ -2687,8 +2687,8 @@ PageDef& feCustomMenuMgr::AddPage(
     const char* overlay, MenuPage parent, s32 parentEntry, bool pause,
     s32 frameW, s32 frameH) {
     PageDef def;
-    strcpy_s(def.titleToken, title);
-    strcpy_s(def.overlayName, overlay);
+    std::snprintf(def.titleToken, sizeof(def.titleToken), "%s", title);
+    std::snprintf(def.overlayName, sizeof(def.overlayName), "%s", overlay);
     def.parentPage = parent;
     def.parentEntry = parentEntry;
     def.isPause = pause;
@@ -2723,7 +2723,7 @@ void feCustomMenuMgr::SetEntries(PageDef& page, std::initializer_list<Entry> lis
 Entry feCustomMenuMgr::Button(const char* tok, EntryEvent ev, MenuPage go) {
     Entry e;
     memset(e.token, 0, sizeof(e.token));
-    strcpy_s(e.token, tok);
+    std::snprintf(e.token, sizeof(e.token), "%s", tok);
     e.type = EntryType_Button;
     e.event = ev;
     e.goPage = go;
@@ -2736,7 +2736,7 @@ Entry feCustomMenuMgr::Button(const char* tok, EntryEvent ev, MenuPage go) {
 Entry feCustomMenuMgr::Slider(const char* tok, EntryBinding binding, s32 step, s32 lo, s32 hi) {
     Entry e;
     memset(e.token, 0, sizeof(e.token));
-    strcpy_s(e.token, tok);
+    std::snprintf(e.token, sizeof(e.token), "%s", tok);
     e.type = EntryType_Slider;
     e.event = EntryEvent_None;
     e.goPage = MenuPage_None;
@@ -2749,7 +2749,7 @@ Entry feCustomMenuMgr::Slider(const char* tok, EntryBinding binding, s32 step, s
 Entry feCustomMenuMgr::List(const char* tok, EntryBinding binding, s32 step, s32 lo, s32 hi) {
     Entry e;
     memset(e.token, 0, sizeof(e.token));
-    strcpy_s(e.token, tok);
+    std::snprintf(e.token, sizeof(e.token), "%s", tok);
     e.type = EntryType_List;
     e.event = EntryEvent_None;
     e.goPage = MenuPage_None;
@@ -2762,7 +2762,7 @@ Entry feCustomMenuMgr::List(const char* tok, EntryBinding binding, s32 step, s32
 Entry feCustomMenuMgr::Toggle(const char* tok, EntryBinding binding) {
     Entry e;
     memset(e.token, 0, sizeof(e.token));
-    strcpy_s(e.token, tok);
+    std::snprintf(e.token, sizeof(e.token), "%s", tok);
     e.type = EntryType_Toggle;
     e.event = EntryEvent_None;
     e.goPage = MenuPage_None;
@@ -2775,7 +2775,7 @@ Entry feCustomMenuMgr::Toggle(const char* tok, EntryBinding binding) {
 Entry feCustomMenuMgr::Info(const char* tok) {
     Entry e;
     memset(e.token, 0, sizeof(e.token));
-    strcpy_s(e.token, tok);
+    std::snprintf(e.token, sizeof(e.token), "%s", tok);
     e.type = EntryType_Info;
     e.event = EntryEvent_None;
     e.goPage = MenuPage_None;
@@ -3948,7 +3948,7 @@ void feCustomMenuMgr::Render() {
                     if (g_display) {
                         pddiVideoMode mode;
                         if (g_display->GetResolutionMode(idx, mode)) {
-                            sprintf_s(resTextBuf, "%dx%d", mode.width, mode.height);
+                            std::snprintf(resTextBuf, sizeof(resTextBuf), "%dx%d", mode.width, mode.height);
                             resText = resTextBuf;
                         }
                     }
@@ -4152,7 +4152,7 @@ void feCustomMenuMgr::Render() {
         s32 totalGold = g_scoreManager ? g_scoreManager->GetTotalGoldDragon() : 0;
         if (totalGold > 99) totalGold = 99;
         char dragonCountStr[8];
-        sprintf_s(dragonCountStr, "%d", totalGold);
+        std::snprintf(dragonCountStr, sizeof(dragonCountStr), "%d", totalGold);
 
         g_textManager->SetScale(SCREEN_SCALE_Y(DEF_MENU_DRAGON_COUNT_SCALE), SCREEN_SCALE_Y(DEF_MENU_DRAGON_COUNT_SCALE));
         g_textManager->SetAlignment(TextAlign_Center);

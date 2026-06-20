@@ -1487,11 +1487,6 @@ void DebugUI::Draw() {
         sEnabled = !sEnabled;
     }
 
-    if (ImGui::IsKeyPressed(ImGuiKey_F1, false)) {
-        const LVector dest = {-54444, 513, -11106};
-        Player::s_player->Teleport(dest);
-    }
-
     ApplyCursorPolicy();
 
     if (ImGui::IsKeyPressed(ImGuiKey_B, false) && ImGui::GetIO().KeyCtrl) {

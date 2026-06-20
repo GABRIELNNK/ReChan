@@ -11,4 +11,7 @@ bin/
 *.i64
 *.idb
 scripts/
+!scripts/
+scripts/*
+!scripts/build_linux.sh
 .vs/

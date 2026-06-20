@@ -1969,7 +1969,7 @@ void Game::PlayMovie(const char* name, s32 skippable, s32 unloadLevel) {
     // PSX: SetPath(0x800DB43C = "fe\\movies") then AddPlayMovie(name)
     // MoviePlayer builds full path as "fe\\movies\\<name>"
     char moviePath[128];
-    std::snprintf(moviePath, sizeof(moviePath), "fe\\movies\\%s", name);
+    std::snprintf(moviePath, sizeof(moviePath), "fe/movies/%s", name);
 
     if (!player->Open(moviePath)) {
         LOG("[Game] PlayMovie: cannot open %s, skipping", moviePath);

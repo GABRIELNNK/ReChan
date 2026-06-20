@@ -3,6 +3,20 @@
 #include "pc/log.h"
 #include "gen/display.h"
 
+#include <cctype>
+
+// Locale-independent ASCII comparison for asset and data identifiers.
+static inline int rcStricmp(const char* lhs, const char* rhs) {
+    while (*lhs && *rhs) {
+        const int a = std::tolower(static_cast<unsigned char>(*lhs));
+        const int b = std::tolower(static_cast<unsigned char>(*rhs));
+        if (a != b) return a - b;
+        ++lhs;
+        ++rhs;
+    }
+    return static_cast<unsigned char>(*lhs) - static_cast<unsigned char>(*rhs);
+}
+
 // Game title
 #define JCSM_TITLE "Jackie Chan Stuntmaster"
 #define JCSM_VERSION "1.0.0"

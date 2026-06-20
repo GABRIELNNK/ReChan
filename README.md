@@ -8,7 +8,7 @@
 
 ### To use this project:
 * You **must own a legal copy** of *Jackie Chan Stuntmaster* (SLUS-00684).
-* You must extract your own data from your copy.
+* You must provide your own game disc image.
 * All rights to the original game, assets and intellectual property belong to their respective owners.
 
 <br>
@@ -49,51 +49,50 @@ Beyond reconstruction, the project also introduces improvements over the origina
   <img src="res/screenshots/waterfront3.jpg" width="30%">
 </p>
 
-## Build
-```bash
-git clone --recursive https://github.com/gennariarmando/rechan.git
-cd rechan
-./premake5.cmd vs2026
+## Getting Started
+
+Game data is **not included**. Place a legally obtained NTSC-U game image from
+your own copy (`.bin` or `.iso`) in a `discimage` folder beside the executable:
+
+```text
+rechan/
+|-- rechan.exe       # Windows (use "rechan" on Linux)
+`-- discimage/
+    `-- game.bin     # or game.iso
 ```
 
-Open `rechan.slnx` in Visual Studio and build (Release x64).
+Keep only one disc image in `discimage`. On first launch, rechan verifies the
+disc version and uses its built-in extractor to prepare the required assets.
+No separate extraction utility is needed.
+Once assets are extracted the disc image folder can be deleted.
 
-Output:
+rechan currently supports 64-bit x86 (`x86_64`) Windows and Linux. To compile
+it yourself, see the [build guide](docs/BUILDING.md).
 
-```
-bin/rechan.exe
-```
+## Legal and Asset Notice
 
-## Game Data & Extraction
-Game data is **not included**.
-You must obtain a valid `.bin` from your own copy of the game.
-Extraction tool:
+rechan is an unofficial, free, non-commercial reimplementation project for
+*Jackie Chan Stuntmaster*. It is not affiliated with, endorsed by, sponsored
+by, or approved by any original developer, publisher, license holder, or
+rights holder.
 
-```
-tools/extract_assets/rechan_assets_extractor.bat
-```
+The release package may include support files created specifically for rechan
+by the project author, including new text files, fonts, and textures. These are
+newly authored rechan files, not files from the PlayStation game. They do not
+contain or redistribute content extracted or copied from the original game.
 
-Usage:
-* Run the tool
-* Drag & drop the `.bin` file into the console
-* Press Enter
+For the avoidance of doubt, **no original game assets, disc images, ROMs,
+original game executables, videos, music, voice clips, textures, models,
+levels, or other copyrighted PlayStation game data are included or distributed
+with rechan.**
+The disc image placed in `discimage` is supplied by the user from their own
+legally obtained copy. Its required assets are extracted locally on that
+user's computer and are not part of the rechan distribution.
 
-Output:
-```
-rechan_assets/
-```
-
-## Run
-
-Copy:
-```
-bin/rechan.exe
-```
-
-into:
-```
-rechan_assets/
-```
+*Jackie Chan Stuntmaster* and all related trademarks, copyrights, characters,
+names, logos, assets, and game data remain the property of their respective
+rights holders. Third-party libraries or assets included with rechan remain
+subject to their respective licenses.
 
 ## FAQ
 **Is this a PS1 emulator?**  
@@ -106,7 +105,8 @@ Currently only the NTSC-U version (**SLUS-00684**) is targeted. The PAL version 
 No. That is not a goal of this project.
 
 **Can I contribute?**  
-Yes. Documentation, data formats, and behavior analysis are all welcome.
+Yes. Documentation, data formats, and behavior analysis are all welcome. See
+the [build guide](docs/BUILDING.md) to get started.
 
 ## License
 MIT License.

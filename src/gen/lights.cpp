@@ -493,7 +493,7 @@ void LightingClass::SetupLighting() {
             }
             else {
                 const char* name = volume->GetName();
-                if (name && _stricmp(name, "StageVolume") == 0) {
+                if (name && rcStricmp(name, "StageVolume") == 0) {
                     SetupStageAttributes(volume);
                 }
             }

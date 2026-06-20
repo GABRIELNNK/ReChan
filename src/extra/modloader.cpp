@@ -76,6 +76,16 @@ static bool EqualsIgnoreCase(const std::string& lhs, const std::string& rhs) {
     return true;
 }
 
+static bool LessIgnoreCase(const std::string& lhs, const std::string& rhs) {
+    const size_t count = std::min(lhs.size(), rhs.size());
+    for (size_t i = 0; i < count; ++i) {
+        const int a = std::tolower(static_cast<unsigned char>(lhs[i]));
+        const int b = std::tolower(static_cast<unsigned char>(rhs[i]));
+        if (a != b) return a < b;
+    }
+    return lhs.size() < rhs.size();
+}
+
 static std::string BuildAssetKey(const std::filesystem::path& relativePath,
                                  const std::string& extension) {
     std::vector<std::string> parts;
@@ -245,7 +255,7 @@ static std::vector<std::string> BuildLoadOrder(
         if (!used[i]) remaining.push_back(allModNames[i]);
     }
     std::sort(remaining.begin(), remaining.end(), [](const std::string& a, const std::string& b) {
-        return _stricmp(a.c_str(), b.c_str()) < 0;
+        return LessIgnoreCase(a, b);
     });
 
     ordered.insert(ordered.end(), remaining.begin(), remaining.end());
@@ -369,7 +379,7 @@ int ModLoader::ScanCategory(
         if (entry.is_regular_file()) files.push_back(entry.path());
     }
     std::sort(files.begin(), files.end(), [](const auto& a, const auto& b) {
-        return _stricmp(a.generic_string().c_str(), b.generic_string().c_str()) < 0;
+        return LessIgnoreCase(a.generic_string(), b.generic_string());
     });
     int scanned = 0;
     for (const auto& filePath : files) {

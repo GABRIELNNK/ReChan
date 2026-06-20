@@ -123,6 +123,27 @@ project "libp3d"
             "SDL_STATIC",
         }
 
+    filter "system:linux"
+        files {
+            libp3d_root .. "/vendor/glfw/src/egl_context.c",
+            libp3d_root .. "/vendor/glfw/src/glx_context.c",
+            libp3d_root .. "/vendor/glfw/src/linux_joystick.c",
+            libp3d_root .. "/vendor/glfw/src/osmesa_context.c",
+            libp3d_root .. "/vendor/glfw/src/posix_module.c",
+            libp3d_root .. "/vendor/glfw/src/posix_poll.c",
+            libp3d_root .. "/vendor/glfw/src/posix_thread.c",
+            libp3d_root .. "/vendor/glfw/src/posix_time.c",
+            libp3d_root .. "/vendor/glfw/src/x11_init.c",
+            libp3d_root .. "/vendor/glfw/src/x11_monitor.c",
+            libp3d_root .. "/vendor/glfw/src/x11_window.c",
+            libp3d_root .. "/vendor/glfw/src/xkb_unicode.c",
+        }
+        defines {
+            "_GLFW_X11",
+            "P3D_USE_VENDORED_SDL2",
+            "SDL_MAIN_HANDLED",
+        }
+
     filter "configurations:Debug"
         runtime "Debug"
         symbols "on"

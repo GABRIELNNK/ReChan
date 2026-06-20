@@ -89,7 +89,9 @@ static std::string getTempDir() {
 #else
     const char* tmp = getenv("TMPDIR");
     if (!tmp) tmp = "/tmp";
-    return std::string(tmp);
+    std::string result(tmp);
+    if (!result.empty() && result.back() != '/') result += '/';
+    return result;
 #endif
 }
 

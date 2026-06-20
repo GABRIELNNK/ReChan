@@ -1333,7 +1333,7 @@ void AI::ParseBehaviourAttribScript() {
     MARKFUNCTION(0x800CA650);
 
     ccFile file;
-    if (!file.Open("scr\\behave.txt", ccFile::OPEN_READ)) {
+    if (!file.Open("scr/behave.txt", ccFile::OPEN_READ)) {
         return;
     }
 
