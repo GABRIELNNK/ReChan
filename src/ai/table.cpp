@@ -154,7 +154,10 @@ void DynamicObstacle::Move() {
 
 void DynamicObstacle::Draw() {
     MARKFUNCTION(0x80014484);
-    Obstacle::Draw();
+
+    if (aliveFlag) {
+        Obstacle::Draw();
+    }
 }
 
 void DynamicObstacle::AddForce(s32 damage, const LVector* matrix) {
