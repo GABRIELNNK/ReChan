@@ -37,11 +37,12 @@ static constexpr f32 kBarMaxW = 229.0f;
 
 // PSX: Update__10VBlankLogoP6_RTASK (LOADANIM.CPP:85, 0x80047778)
 static void DrawLoadingScreen(u8 fill) {
+    bool usedCustomScreen = false;
 #if CUSTOM_MENU
     if (g_feCustomMenuMgr) {
-        g_feCustomMenuMgr->DrawLoadingScreen();
+        usedCustomScreen = g_feCustomMenuMgr->DrawLoadingScreen(fill, static_cast<u8>(s_pulseR << 3));
     }
-    else {
+    if (!usedCustomScreen) {
         ScreenDraw::DrawColoredRect(0.0f, 0.0f, SCREEN_WIDTH, SCREEN_HEIGHT, 0, 0, 0, 255);
     }
 #else
@@ -51,56 +52,18 @@ static void DrawLoadingScreen(u8 fill) {
     ScreenDraw::DrawFullscreen(s_logo.bgTexture);
 #endif
 
-    if (fill == 0)
-        return;
-    if (fill > 100)
-        fill = 100;
+    if (!usedCustomScreen && fill != 0) {
+        if (fill > 100)
+            fill = 100;
 
-    f32 nx = 0.0f;
-    f32 ny = 0.0f;
-    f32 nw = 0.0f;
-    f32 nh = 0.0f;
+        f32 nx = SCALE_AND_CENTER_X(kBarLeftX);
+        f32 ny = SCREEN_SCALE_Y(kBarY);
+        f32 nw = SCREEN_SCALE_X(kBarMaxW * (fill / 100.0f));
+        f32 nh = SCREEN_SCALE_Y(kBarH);
 
-#if CUSTOM_MENU
-    bool usedCustomLayout = false;
-    if (g_feCustomMenuMgr) {
-        f32 kCustomBarLeftX = 157.5f;
-        f32 kCustomBarTopY = 142.0f;
-        f32 kCustomBarMaxW = 172.5f;
-        f32 kCustomBarH = 5.0f;
-
-        f32 bgX = 0.0f;
-        f32 bgY = 0.0f;
-        f32 bgW = 0.0f;
-        f32 bgH = 0.0f;
-        if (g_feCustomMenuMgr->GetSplashScreenRect(&bgX, &bgY, &bgW, &bgH)) {
-            const f32 refW = SCREEN_SCALE_X(DEFAULT_SCREEN_WIDTH);
-            const f32 refH = SCREEN_SCALE_Y(DEFAULT_SCREEN_HEIGHT);
-
-            if (refW > 0.0f && refH > 0.0f) {
-                const f32 splashScaleX = bgW / refW;
-                const f32 splashScaleY = bgH / refH;
-
-                nx = bgX + SCREEN_SCALE_X(kCustomBarLeftX) * splashScaleX;
-                ny = bgY + SCREEN_SCALE_Y(kCustomBarTopY) * splashScaleY;
-                nw = SCREEN_SCALE_X(kCustomBarMaxW) * splashScaleX * (fill / 100.0f);
-                nh = SCREEN_SCALE_Y(kCustomBarH) * splashScaleY;
-                usedCustomLayout = true;
-            }
-        }
+        u8 r8 = s_pulseR << 3;
+        ScreenDraw::DrawColoredRect(nx, ny, nw, nh, r8, 0, 0, 255);
     }
-
-    if (!usedCustomLayout)
-#endif
-    {
-        nx = SCALE_AND_CENTER_X(kBarLeftX);
-        ny = SCREEN_SCALE_Y(kBarY);
-        nw = SCREEN_SCALE_X(kBarMaxW * (fill / 100.0f));
-        nh = SCREEN_SCALE_Y(kBarH);
-    }
-
-    u8 r8 = s_pulseR << 3;
-    ScreenDraw::DrawColoredRect(nx, ny, nw, nh, r8, 0, 0, 255);
 
     // PSX: pulse R channel each VBlank
     if (s_pulseDir) {

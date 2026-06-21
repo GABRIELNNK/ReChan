@@ -7,7 +7,22 @@
 class pddiTexture;
 class pddiBaseShader;
 class pddiPrimBuffer;
+class pddiRenderTarget;
 struct pddiPrimBufferDesc;
+
+enum pddiRenderTargetFormat {
+    PDDI_RENDER_TARGET_RGBA8,
+    PDDI_RENDER_TARGET_RGBA16F,
+};
+
+class pddiRenderTarget : public pddiObject {
+public:
+    virtual bool Resize(int width, int height) = 0;
+    virtual int GetWidth() const = 0;
+    virtual int GetHeight() const = 0;
+    virtual pddiTexture* GetTexture() const = 0;
+    virtual bool IsValid() const = 0;
+};
 
 // Video mode description
 
@@ -183,6 +198,12 @@ public:
     virtual void SetMultisampleEnabled(bool enable) = 0;
     // Resolves the MSAA scene and switches subsequent draws in this frame to the single-sample backbuffer.
     virtual void ResolveForOverlayPass() = 0;
+
+    // Texture-backed off-screen rendering. Passing nullptr restores the
+    // framebuffer and viewport that were active before the first target bind.
+    virtual pddiRenderTarget* CreateRenderTarget(int width, int height,
+                                                  pddiRenderTargetFormat format) = 0;
+    virtual bool SetRenderTarget(pddiRenderTarget* target) = 0;
 
     // Immediate-mode textured quad (for UI / debug rendering)
     virtual void DrawQuad(pddiBaseShader* shader,

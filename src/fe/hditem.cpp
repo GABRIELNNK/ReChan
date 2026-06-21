@@ -1090,6 +1090,12 @@ void hdDestSelect::Start(s32 totalGoldDragon) {
     ttlive.SetVisible(0);
 
     currentLevel = 0;
+    if (totalGoldDragon < 0) {
+        totalGoldDragon = 0;
+    }
+    else if (totalGoldDragon > 99) {
+        totalGoldDragon = 99;
+    }
     sprintf(s_dragonCountBuf, "%d", totalGoldDragon);
 
     if (titleOvl1 && rawData) {

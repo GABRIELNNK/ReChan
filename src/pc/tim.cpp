@@ -205,11 +205,16 @@ static void EnsureShader() {
 }
 
 // Internal: begin 2D overlay rendering (saves projection, sets ortho).
-static Mat4 BeginOverlay() {
+// canvasW/canvasH default to the live screen size; pass the actual render
+// target's size when drawing off-screen so the projection matches the
+// buffer being rendered to instead of the main window.
+static Mat4 BeginOverlay(f32 canvasW = 0.0f, f32 canvasH = 0.0f) {
     EnsureShader();
     Mat4 prev = p3d::context->GetProjectionMatrix();
 
-    p3d::context->SetProjectionMatrix(Ortho(0.0f, SCREEN_WIDTH, SCREEN_HEIGHT, 0.0f, -1.0f, 1.0f));
+    const f32 w = canvasW > 0.0f ? canvasW : SCREEN_WIDTH;
+    const f32 h = canvasH > 0.0f ? canvasH : SCREEN_HEIGHT;
+    p3d::context->SetProjectionMatrix(Ortho(0.0f, w, h, 0.0f, -1.0f, 1.0f));
     p3d::context->EnableZBuffer(false);
     p3d::context->SetCullMode(PDDI_CULL_NONE);
     p3d::context->SetMultisampleEnabled(false);
@@ -246,6 +251,20 @@ void ScreenDraw::DrawQuad(tTexture* tex, f32 x, f32 y, f32 w, f32 h,
     s_screenShader->SetColour(0, pddiColour(r, g, b, a));
     p3d::context->DrawQuad(s_screenShader, x, y, w, h, u0, v0, u1, v1);
 
+    EndOverlay(prev);
+}
+
+void ScreenDraw::DrawShaderQuad(pddiBaseShader* shader, f32 x, f32 y, f32 w, f32 h,
+                                f32 u0, f32 v0, f32 u1, f32 v1,
+                                pddiBlendMode blendMode,
+                                f32 canvasW, f32 canvasH) {
+    if (!shader) {
+        return;
+    }
+
+    Mat4 prev = BeginOverlay(canvasW, canvasH);
+    p3d::context->SetBlendMode(blendMode);
+    p3d::context->DrawQuad(shader, x, y, w, h, u0, v0, u1, v1);
     EndOverlay(prev);
 }
 

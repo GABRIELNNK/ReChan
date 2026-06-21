@@ -1,5 +1,6 @@
 #include "gen/common.h"
 #include "fecustommenumgr.h"
+#include <cstdlib>
 #include "gen/display.h"
 #include "pc/inputaction.h"
 #include "pc/tim.h"
@@ -19,6 +20,7 @@
 #include "gen/world.h"
 #include "p3d/texture.h"
 #include "pddi/pdditex.h"
+#include "pddi/pddishad.h"
 #include "p3d/context.h"
 #include "p3d/input.h"
 #if NEW_CHEATS
@@ -762,13 +764,27 @@ void feCustomMenuMgr::Init(CustomText* textSystem) {
 }
 
 void feCustomMenuMgr::Shutdown() {
-    if (m_titleScreenTexture) {
-        m_titleScreenTexture->Release();
-        m_titleScreenTexture = nullptr;
+    ReleaseTitleScreenEffects();
+
+    if (m_titleScreenBackgroundTexture) {
+        m_titleScreenBackgroundTexture->Release();
+        m_titleScreenBackgroundTexture = nullptr;
     }
-    if (m_loadingScreenTexture) {
-        m_loadingScreenTexture->Release();
-        m_loadingScreenTexture = nullptr;
+    if (m_titleScreenJackieTexture) {
+        m_titleScreenJackieTexture->Release();
+        m_titleScreenJackieTexture = nullptr;
+    }
+    if (m_titleScreenLogoTexture) {
+        m_titleScreenLogoTexture->Release();
+        m_titleScreenLogoTexture = nullptr;
+    }
+    if (m_gameOverTexture) {
+        m_gameOverTexture->Release();
+        m_gameOverTexture = nullptr;
+    }
+    if (m_loadingBarTexture) {
+        m_loadingBarTexture->Release();
+        m_loadingBarTexture = nullptr;
     }
     if (m_controllerTexture) {
         m_controllerTexture->Release();
@@ -804,8 +820,206 @@ void feCustomMenuMgr::Shutdown() {
     }
 
     m_titleScreenTextureTried = false;
-    m_loadingScreenTextureTried = false;
+    m_gameOverTextureTried = false;
+    m_loadingScreenTexturesTried = false;
     m_text = nullptr;
+}
+
+void feCustomMenuMgr::ReleaseTitleScreenEffects() {
+    if (m_titleScreenLogoSeed) {
+        m_titleScreenLogoSeed->Release();
+        m_titleScreenLogoSeed = nullptr;
+    }
+    if (m_titleScreenGlow) {
+        m_titleScreenGlow->Release();
+        m_titleScreenGlow = nullptr;
+    }
+    if (m_titleScreenGodRays) {
+        m_titleScreenGodRays->Release();
+        m_titleScreenGodRays = nullptr;
+    }
+    if (m_titleScreenGlowShader) {
+        m_titleScreenGlowShader->Release();
+        m_titleScreenGlowShader = nullptr;
+    }
+    if (m_titleScreenGodRaysShader) {
+        m_titleScreenGodRaysShader->Release();
+        m_titleScreenGodRaysShader = nullptr;
+    }
+    if (m_titleScreenCompositeShader) {
+        m_titleScreenCompositeShader->Release();
+        m_titleScreenCompositeShader = nullptr;
+    }
+    if (m_titleScreenLogoTiltShader) {
+        m_titleScreenLogoTiltShader->Release();
+        m_titleScreenLogoTiltShader = nullptr;
+    }
+    if (m_titleDebrisDotShader) {
+        m_titleDebrisDotShader->Release();
+        m_titleDebrisDotShader = nullptr;
+    }
+    m_titleEffectTargetW = 0;
+    m_titleEffectTargetH = 0;
+}
+
+bool feCustomMenuMgr::EnsureTitleScreenEffects(f32 drawW, f32 drawH) {
+    if (m_titleScreenEffectsUnavailable || !p3d::device || !p3d::context) {
+        return false;
+    }
+
+    if (!m_titleScreenGlowShader) {
+        m_titleScreenGlowShader = p3d::device->NewShader("glow");
+    }
+    if (!m_titleScreenGodRaysShader) {
+        m_titleScreenGodRaysShader = p3d::device->NewShader("godrays");
+    }
+    if (!m_titleScreenCompositeShader) {
+        m_titleScreenCompositeShader = p3d::device->NewShader("simple");
+    }
+    if (!m_titleScreenLogoTiltShader) {
+        m_titleScreenLogoTiltShader = p3d::device->NewShader("tilt");
+    }
+    if (!m_titleDebrisDotShader) {
+        m_titleDebrisDotShader = p3d::device->NewShader("dot");
+    }
+    if (!m_titleScreenGlowShader || !m_titleScreenGodRaysShader
+        || !m_titleScreenCompositeShader || !m_titleScreenLogoTiltShader
+        || !m_titleDebrisDotShader) {
+        m_titleScreenEffectsUnavailable = true;
+        return false;
+    }
+
+    // The seed/glow/ray buffers are intentionally soft and never need full
+    // display resolution. Preserve the splash rect's aspect while capping
+    // the size.
+    const f32 targetScale = std::min(1.0f,
+        std::min(960.0f / std::max(drawW, 1.0f),
+                 540.0f / std::max(drawH, 1.0f)));
+    const s32 targetW = std::max(1, (s32)(drawW * targetScale + 0.5f));
+    const s32 targetH = std::max(1, (s32)(drawH * targetScale + 0.5f));
+
+    if (m_titleScreenLogoSeed && m_titleScreenGlow && m_titleScreenGodRays
+        && targetW == m_titleEffectTargetW && targetH == m_titleEffectTargetH) {
+        return true;
+    }
+
+    if (m_titleScreenLogoSeed) {
+        m_titleScreenLogoSeed->Release();
+        m_titleScreenLogoSeed = nullptr;
+    }
+    if (m_titleScreenGlow) {
+        m_titleScreenGlow->Release();
+        m_titleScreenGlow = nullptr;
+    }
+    if (m_titleScreenGodRays) {
+        m_titleScreenGodRays->Release();
+        m_titleScreenGodRays = nullptr;
+    }
+
+    m_titleScreenLogoSeed = p3d::context->CreateRenderTarget(
+        targetW, targetH, PDDI_RENDER_TARGET_RGBA16F);
+    m_titleScreenGlow = p3d::context->CreateRenderTarget(
+        targetW, targetH, PDDI_RENDER_TARGET_RGBA16F);
+    m_titleScreenGodRays = p3d::context->CreateRenderTarget(
+        targetW, targetH, PDDI_RENDER_TARGET_RGBA16F);
+    if (!m_titleScreenLogoSeed || !m_titleScreenGlow || !m_titleScreenGodRays) {
+        ReleaseTitleScreenEffects();
+        m_titleScreenEffectsUnavailable = true;
+        return false;
+    }
+
+    m_titleEffectTargetW = targetW;
+    m_titleEffectTargetH = targetH;
+    return true;
+}
+
+void feCustomMenuMgr::UpdateTitleDebrisParticles(f32 dt, f32 emitX, f32 emitY, f32 spanW) {
+    constexpr f32 kSpawnRate = 6; // particles per second -- an intensive sideways spray
+    constexpr f32 kGravity = 20.0f;
+    constexpr f32 kDragPerSec = 0.8f; // velocity multiplier retained per second -- mild, so they carry far
+    constexpr f32 kSpawnJitter = 256.0f; // px, keeps the burst centered but not pinpoint
+    constexpr f32 kSideConeDeg = 32.0f; // spread either side of due left/due right
+
+    // Speed is scaled to the logo's own width so the sparks travel all the
+    // way out across it (and a bit past) regardless of screen resolution.
+    const f32 speedBase = spanW * 0.04f;
+    const f32 speedRange = spanW * 0.08f;
+
+    m_titleDebrisSpawnAccum += dt * kSpawnRate;
+    while (m_titleDebrisSpawnAccum >= 1.0f) {
+        m_titleDebrisSpawnAccum -= 1.0f;
+
+        for (s32 i = 0; i < kMaxTitleDebrisParticles; i++) {
+            TitleDebrisParticle& p = m_titleDebrisParticles[i];
+            if (p.life > 0.0f) {
+                continue;
+            }
+
+            // Fire mostly due left or due right, with a narrow cone of spread
+            // rather than a uniform circle, so the burst reads as sparks
+            // shooting sideways out of the center instead of a soft puff.
+            const f32 side = (rand() % 2 == 0) ? 0.0f : 180.0f;
+            const f32 spreadDeg = side + ((f32)(rand() % (s32)(kSideConeDeg * 2.0f + 1.0f)) - kSideConeDeg);
+            const f32 angle = spreadDeg * 0.0174532925f;
+            const f32 speed = speedBase + (f32)(rand() % 1000) * 0.001f * speedRange;
+
+            p.x = emitX + ((f32)(rand() % (s32)(kSpawnJitter * 2.0f + 1.0f)) - kSpawnJitter);
+            p.y = emitY; //+ ((f32)(rand() % (s32)(kSpawnJitter * 2.0f + 1.0f)) - kSpawnJitter);
+            p.vx = std::cos(angle) * speed;
+            p.vy = std::sin(angle) * speed - 30.0f;
+            p.maxLife = 5.0f;//0.5f + (f32)(rand() % 60) * 0.01f;
+            p.life = p.maxLife;
+            p.size = 4.0f + (f32)(rand() % 22); // big, randomly sized chips (4-25px)
+            p.shapeSeed = (f32)(rand() % 1000) * 0.01f;
+            p.r = 255;
+            p.g = (u8)(165 + rand() % 55);
+            p.b = (u8)(30 + rand() % 65);
+            break;
+        }
+    }
+
+    const f32 drag = std::pow(kDragPerSec, dt);
+    for (s32 i = 0; i < kMaxTitleDebrisParticles; i++) {
+        TitleDebrisParticle& p = m_titleDebrisParticles[i];
+        if (p.life <= 0.0f) {
+            continue;
+        }
+
+        p.life -= dt;
+        if (p.life <= 0.0f) {
+            continue;
+        }
+
+        p.vy += kGravity * dt;
+        p.vx *= drag;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+    }
+}
+
+void feCustomMenuMgr::DrawTitleDebrisParticles() const {
+    for (s32 i = 0; i < kMaxTitleDebrisParticles; i++) {
+        const TitleDebrisParticle& p = m_titleDebrisParticles[i];
+        if (p.life <= 0.0f) {
+            continue;
+        }
+
+        const f32 t01 = std::min(1.0f, p.life / p.maxLife);
+        const u8 a = (u8)(255.0f * t01);
+        const f32 dotSize = p.size * (0.5f + 0.5f * t01);
+
+        if (m_titleDebrisDotShader) {
+            m_titleDebrisDotShader->SetColour(0, pddiColour(p.r, p.g, p.b, a));
+            m_titleDebrisDotShader->SetFloat("uShapeSeed", p.shapeSeed);
+            ScreenDraw::DrawShaderQuad(m_titleDebrisDotShader,
+                                       p.x - dotSize * 0.5f, p.y - dotSize * 0.5f, dotSize, dotSize,
+                                       0.0f, 0.0f, 1.0f, 1.0f, PDDI_BLEND_ALPHA);
+        }
+        else {
+            ScreenDraw::DrawColoredRect(p.x - dotSize * 0.5f, p.y - dotSize * 0.5f,
+                                        dotSize, dotSize, p.r, p.g, p.b, a);
+        }
+    }
 }
 
 // Tracks mouse movement/clicks to keep cursor visibility in sync on every page,
@@ -2940,25 +3154,53 @@ void feCustomMenuMgr::LoadMenuOrnamentTexture() {
 }
 
 void feCustomMenuMgr::LoadSplashTextures() {
-    if (!m_titleScreenTexture && !m_titleScreenTextureTried) {
+    if (!m_titleScreenTextureTried) {
         m_titleScreenTextureTried = true;
-        m_titleScreenTexture = tTexture::LoadFromImagePath(kTitleScreenTexturePath);
-        if (m_titleScreenTexture && m_titleScreenTexture->GetTexture()) {
-            m_titleScreenTexture->GetTexture()->SetFilterMode(PDDI_FILTER_BILINEAR);
+
+        m_titleScreenBackgroundTexture = tTexture::LoadFromImagePath(kTitleScreenBackgroundTexturePath);
+        if (m_titleScreenBackgroundTexture && m_titleScreenBackgroundTexture->GetTexture()) {
+            m_titleScreenBackgroundTexture->GetTexture()->SetFilterMode(PDDI_FILTER_BILINEAR);
         }
-        if (!m_titleScreenTexture) {
-            LOG("[CustomMenu] Failed to load title splash texture (%s)", kTitleScreenTexturePath);
+        if (!m_titleScreenBackgroundTexture) {
+            LOG("[CustomMenu] Failed to load title splash background texture (%s)", kTitleScreenBackgroundTexturePath);
+        }
+
+        m_titleScreenJackieTexture = tTexture::LoadFromImagePath(kTitleScreenJackieTexturePath);
+        if (m_titleScreenJackieTexture && m_titleScreenJackieTexture->GetTexture()) {
+            m_titleScreenJackieTexture->GetTexture()->SetFilterMode(PDDI_FILTER_BILINEAR);
+        }
+        if (!m_titleScreenJackieTexture) {
+            LOG("[CustomMenu] Failed to load title splash Jackie texture (%s)", kTitleScreenJackieTexturePath);
+        }
+
+        m_titleScreenLogoTexture = tTexture::LoadFromImagePath(kTitleScreenLogoTexturePath);
+        if (m_titleScreenLogoTexture && m_titleScreenLogoTexture->GetTexture()) {
+            m_titleScreenLogoTexture->GetTexture()->SetFilterMode(PDDI_FILTER_BILINEAR);
+        }
+        if (!m_titleScreenLogoTexture) {
+            LOG("[CustomMenu] Failed to load title splash logo texture (%s)", kTitleScreenLogoTexturePath);
         }
     }
 
-    if (!m_loadingScreenTexture && !m_loadingScreenTextureTried) {
-        m_loadingScreenTextureTried = true;
-        m_loadingScreenTexture = tTexture::LoadFromImagePath(kLoadingScreenTexturePath);
-        if (m_loadingScreenTexture && m_loadingScreenTexture->GetTexture()) {
-            m_loadingScreenTexture->GetTexture()->SetFilterMode(PDDI_FILTER_BILINEAR);
+    if (!m_gameOverTextureTried) {
+        m_gameOverTextureTried = true;
+        m_gameOverTexture = tTexture::LoadFromImagePath(kGameOverTexturePath);
+        if (m_gameOverTexture && m_gameOverTexture->GetTexture()) {
+            m_gameOverTexture->GetTexture()->SetFilterMode(PDDI_FILTER_BILINEAR);
         }
-        if (!m_loadingScreenTexture) {
-            LOG("[CustomMenu] Failed to load loading splash texture (%s)", kLoadingScreenTexturePath);
+        if (!m_gameOverTexture) {
+            LOG("[CustomMenu] Failed to load game over texture (%s)", kGameOverTexturePath);
+        }
+    }
+
+    if (!m_loadingScreenTexturesTried) {
+        m_loadingScreenTexturesTried = true;
+        m_loadingBarTexture = tTexture::LoadFromImagePath(kLoadingBarTexturePath);
+        if (m_loadingBarTexture && m_loadingBarTexture->GetTexture()) {
+            m_loadingBarTexture->GetTexture()->SetFilterMode(PDDI_FILTER_BILINEAR);
+        }
+        if (!m_loadingBarTexture) {
+            LOG("[CustomMenu] Failed to load loading bar texture (%s)", kLoadingBarTexturePath);
         }
     }
 }
@@ -3030,9 +3272,10 @@ bool feCustomMenuMgr::GetSplashScreenRect(f32* outX, f32* outY, f32* outW, f32* 
     return true;
 }
 
-void feCustomMenuMgr::DrawSplashTexture16x9(tTexture* texture) {
-    if (!texture) {
-        return;
+bool feCustomMenuMgr::DrawTitleScreen() {
+    LoadSplashTextures();
+    if (!m_titleScreenBackgroundTexture || !m_titleScreenJackieTexture || !m_titleScreenLogoTexture) {
+        return false;
     }
 
     f32 drawX = 0.0f;
@@ -3040,21 +3283,144 @@ void feCustomMenuMgr::DrawSplashTexture16x9(tTexture* texture) {
     f32 drawW = 0.0f;
     f32 drawH = 0.0f;
     if (!GetSplashScreenRect(&drawX, &drawY, &drawW, &drawH)) {
-        return;
-    }
-
-    // Clear to black first so narrower/taller targets produce clean letterbox bars.
-    ScreenDraw::DrawColoredRect(0.0f, 0.0f, SCREEN_WIDTH, SCREEN_HEIGHT, 0, 0, 0, 255);
-    ScreenDraw::DrawQuad(texture, drawX, drawY, drawW, drawH);
-}
-
-bool feCustomMenuMgr::DrawTitleScreen() {
-    LoadSplashTextures();
-    if (!m_titleScreenTexture) {
         return false;
     }
 
-    DrawSplashTexture16x9(m_titleScreenTexture);
+    // Drives the glow/ray motion below and the logo's idle bob; tracked
+    // unconditionally so the logo still feels alive even if the off-screen
+    // effects are unavailable (see EnsureTitleScreenEffects).
+    const f32 dt = g_time ? g_time->GetDeltaTime() : (1.0f / 30.0f);
+    m_titleScreenAnimSec += std::min(std::max(dt, 0.0f), 0.1f);
+
+    // Idle logo motion: a gentle continuous sway plus a periodic little pop
+    // (position + scale), and a true pseudo-3D pitch/yaw/roll tilt on top,
+    // so the logo never sits dead still. Computed once here and reused for
+    // both the on-screen draw and the warped seed the glow/rays sample from,
+    // so the effects track the logo's motion instead of staying static.
+    const f32 t = m_titleScreenAnimSec;
+    const f32 sway = std::sin(t * 0.9f);
+    const f32 bump = std::pow(0.5f + 0.5f * std::sin(t * 1.7f + 0.6f), 4.0f);
+    const f32 logoOffsetY = -(sway * 0.006f + bump * 0.014f) * drawH;
+    const f32 logoScale = 1.0f + bump * 0.02f;
+    const f32 logoHalfW = (drawW * logoScale) * 0.5f;
+    const f32 logoHalfH = (drawH * logoScale) * 0.5f;
+    const f32 logoLocalCenterX = drawW * 0.5f;
+    const f32 logoLocalCenterY = drawH * 0.5f + logoOffsetY;
+    const f32 tiltPitch = std::sin(t * 0.5f) * 0.05f;
+    const f32 tiltYaw = std::sin(t * 0.6f + 0.3f) * 0.09f;
+    const f32 tiltRoll = std::sin(t * 0.37f + 1.1f) * 0.025f;
+    const f32 tiltFocal = logoHalfH * 6.0f;
+
+    ScreenDraw::DrawColoredRect(0.0f, 0.0f, SCREEN_WIDTH, SCREEN_HEIGHT, 0, 0, 0, 255);
+    ScreenDraw::DrawQuad(m_titleScreenBackgroundTexture, drawX, drawY, drawW, drawH);
+
+    if (EnsureTitleScreenEffects(drawW, drawH)) {
+        // Render the tilted/bobbing logo into its own small seed buffer so
+        // the glow and rays below sample the same animated shape as the
+        // on-screen logo instead of its static source texture.
+        if (p3d::context->SetRenderTarget(m_titleScreenLogoSeed)) {
+            m_titleScreenLogoTiltShader->SetTexture(0, m_titleScreenLogoTexture->GetTexture());
+            m_titleScreenLogoTiltShader->SetVector("uTiltRect",
+                logoLocalCenterX, logoLocalCenterY, logoHalfW, logoHalfH);
+            m_titleScreenLogoTiltShader->SetVector("uTiltAngles",
+                tiltPitch, tiltYaw, tiltRoll, tiltFocal);
+            ScreenDraw::DrawShaderQuad(m_titleScreenLogoTiltShader, 0.0f, 0.0f, drawW, drawH,
+                                       0.0f, 0.0f, 1.0f, 1.0f, PDDI_BLEND_NONE, drawW, drawH);
+            p3d::context->SetRenderTarget(nullptr);
+        }
+
+        // Pass 1: soft halo glow behind Jackie and the logo, rendered before
+        // the god rays so the rays sit on top of it in the final composite.
+        // uGlowMotion rotates the ring sampling pattern and drifts the
+        // sample center over time, giving the halo a slow living swirl
+        // instead of a static blur (intensity itself stays constant).
+        if (p3d::context->SetRenderTarget(m_titleScreenGlow)) {
+            m_titleScreenGlowShader->SetVector("uGlowParams", 0.025f, 3.0f, 0.0f, 0.0f);
+            m_titleScreenGlowShader->SetVector("uGlowMotion", 0.05f, 0.0f, 0.2f, 0.0f);
+            m_titleScreenGlowShader->SetFloat("uTime", m_titleScreenAnimSec);
+
+            // The logo seed is a render target (vertically inverted relative
+            // to image textures), hence the flipped v0/v1 here.
+            m_titleScreenGlowShader->SetTexture(0, m_titleScreenLogoSeed->GetTexture());
+            ScreenDraw::DrawShaderQuad(m_titleScreenGlowShader, 0.0f, 0.0f, drawW, drawH,
+                                       0.0f, 1.0f, 1.0f, 1.0f, PDDI_BLEND_NONE, drawW, drawH);
+
+            m_titleScreenGlowShader->SetTexture(0, m_titleScreenJackieTexture->GetTexture());
+            ScreenDraw::DrawShaderQuad(m_titleScreenGlowShader, 0.0f, 0.0f, drawW, drawH,
+                                       0.0f, 0.0f, 1.0f, 1.0f, PDDI_BLEND_ADD, drawW, drawH);
+
+            p3d::context->SetRenderTarget(nullptr);
+
+            m_titleScreenCompositeShader->SetTexture(0, m_titleScreenGlow->GetTexture());
+            ScreenDraw::DrawShaderQuad(m_titleScreenCompositeShader, drawX, drawY, drawW, drawH,
+                                       0.0f, 1.0f, 1.0f, 0.0f, PDDI_BLEND_ADD);
+        }
+
+        // Pass 2: god rays on top of the glow. uRayParams is hand-tuned --
+        // leave it alone. uRayMotion twists each marching step by a slowly
+        // evolving angle (the whole fan of rays swirls around the source)
+        // and orbits the light source itself a little, so the rays have
+        // continuous movement instead of sitting still.
+        if (p3d::context->SetRenderTarget(m_titleScreenGodRays)) {
+            // The render target's pixel size is capped (see
+            // EnsureTitleScreenEffects) and can differ from drawW/drawH, so
+            // the quad's projection must use drawW/drawH as its own canvas
+            // instead of the live screen size -- otherwise this pass
+            // scales/positions wrong whenever the window isn't exactly 16:9
+            // and the splash rect gets letterboxed.
+            m_titleScreenGodRaysShader->SetVector("uRayParams", 0.5f, 0.5f, 0.3f, 0.95f);
+            m_titleScreenGodRaysShader->SetVector("uRayMotion", 0.0f, 0.0f, 0.04f, 1.5f);
+            m_titleScreenGodRaysShader->SetFloat("uExposure", 4.5f);
+            m_titleScreenGodRaysShader->SetFloat("uTime", m_titleScreenAnimSec);
+
+            // The logo seed is a render target (vertically inverted relative
+            // to image textures), hence the flipped v0/v1 here.
+            m_titleScreenGodRaysShader->SetTexture(0, m_titleScreenLogoSeed->GetTexture());
+            ScreenDraw::DrawShaderQuad(m_titleScreenGodRaysShader, 0.0f, 0.0f, drawW, drawH,
+                                       0.0f, 1.0f, 1.0f, 0.0f, PDDI_BLEND_NONE, drawW, drawH);
+
+            m_titleScreenGodRaysShader->SetTexture(0, m_titleScreenJackieTexture->GetTexture());
+            ScreenDraw::DrawShaderQuad(m_titleScreenGodRaysShader, 0.0f, 0.0f, drawW, drawH,
+                                       0.0f, 0.0f, 1.0f, 1.0f, PDDI_BLEND_ADD, drawW, drawH);
+
+            p3d::context->SetRenderTarget(nullptr);
+
+            // fragColor = texture(GOD_RAYS_TEXTURE, uv) + texture(LIGHT_SOURCE_TEXTURE, uv):
+            // the rays buffer is added on top of the scene, then the crisp source
+            // art is drawn over it below.
+            m_titleScreenCompositeShader->SetTexture(0, m_titleScreenGodRays->GetTexture());
+            ScreenDraw::DrawShaderQuad(m_titleScreenCompositeShader, drawX, drawY, drawW, drawH,
+                                       0.0f, 1.0f, 1.0f, 0.0f, PDDI_BLEND_ADD);
+        }
+    }
+
+    ScreenDraw::DrawQuad(m_titleScreenJackieTexture, drawX, drawY, drawW, drawH);
+
+    if (m_titleScreenLogoTiltShader) {
+        m_titleScreenLogoTiltShader->SetTexture(0, m_titleScreenLogoTexture->GetTexture());
+        m_titleScreenLogoTiltShader->SetVector("uTiltRect",
+            drawX + logoLocalCenterX, drawY + logoLocalCenterY, logoHalfW, logoHalfH);
+        m_titleScreenLogoTiltShader->SetVector("uTiltAngles",
+            tiltPitch, tiltYaw, tiltRoll, tiltFocal);
+        ScreenDraw::DrawShaderQuad(m_titleScreenLogoTiltShader, drawX, drawY, drawW, drawH,
+                                   0.0f, 0.0f, 1.0f, 1.0f, PDDI_BLEND_ALPHA);
+    }
+    else {
+        // Fallback without the 3D tilt shader: plain bob/scale, no tilt.
+        const f32 logoW = logoHalfW * 2.0f;
+        const f32 logoH = logoHalfH * 2.0f;
+        const f32 logoX = drawX - (logoW - drawW) * 0.5f;
+        const f32 logoY = drawY + logoOffsetY - (logoH - drawH) * 0.5f;
+        ScreenDraw::DrawQuad(m_titleScreenLogoTexture, logoX, logoY, logoW, logoH);
+    }
+
+    // Gold debris: small fading dots sprayed left/right out of the screen
+    // center, with their own gravity/drag.
+    const f32 debrisX = drawX + drawW * kTitleDebrisCenterU;
+    const f32 debrisY = drawY + drawH * kTitleDebrisCenterV;
+    UpdateTitleDebrisParticles(dt, debrisX, debrisY, drawW);
+    DrawTitleDebrisParticles();
+
     return true;
 }
 
@@ -3101,13 +3467,101 @@ void feCustomMenuMgr::DrawTitleStartPrompt(s32 baseX, s32 baseY) {
     g_textManager->PrintString(promptText, promptX, promptY);
 }
 
-bool feCustomMenuMgr::DrawLoadingScreen() {
+bool feCustomMenuMgr::DrawGameOverScreen() {
     LoadSplashTextures();
-    if (!m_loadingScreenTexture) {
+    if (!m_titleScreenBackgroundTexture || !m_gameOverTexture) {
         return false;
     }
 
-    DrawSplashTexture16x9(m_loadingScreenTexture);
+    f32 drawX = 0.0f;
+    f32 drawY = 0.0f;
+    f32 drawW = 0.0f;
+    f32 drawH = 0.0f;
+    if (!GetSplashScreenRect(&drawX, &drawY, &drawW, &drawH)) {
+        return false;
+    }
+
+    ScreenDraw::DrawColoredRect(0.0f, 0.0f, SCREEN_WIDTH, SCREEN_HEIGHT, 0, 0, 0, 255);
+    ScreenDraw::DrawQuad(m_titleScreenBackgroundTexture, drawX, drawY, drawW, drawH);
+    ScreenDraw::DrawQuad(m_gameOverTexture, drawX, drawY, drawW, drawH);
+    return true;
+}
+
+void feCustomMenuMgr::DrawGameOverContinuePrompt(s32 baseX, s32 baseY, u8 r, u8 g, u8 b, u8 a) {
+    f32 bgX = 0.0f;
+    f32 bgY = 0.0f;
+    f32 bgW = 0.0f;
+    f32 bgH = 0.0f;
+    if (!GetSplashScreenRect(&bgX, &bgY, &bgW, &bgH)) {
+        return;
+    }
+
+    const f32 refW = SCREEN_SCALE_X(DEFAULT_SCREEN_WIDTH);
+    const f32 refH = SCREEN_SCALE_Y(DEFAULT_SCREEN_HEIGHT);
+    if (refW <= 0.0f || refH <= 0.0f) {
+        return;
+    }
+
+    const f32 splashScaleX = bgW / refW;
+    const f32 splashScaleY = bgH / refH;
+
+    if (!g_textManager || !g_textManager->SetFontByName(DEF_MENU_FONT_NAME)) {
+        return;
+    }
+
+    const char* promptText = Localize("FE_TLC");
+    const f32 promptX = bgX + SCREEN_SCALE_X((f32)baseX) * splashScaleX;
+    const f32 promptY = bgY + SCREEN_SCALE_Y((f32)baseY) * splashScaleY;
+
+    g_textManager->SetScale(SCREEN_SCALE_Y(DEF_MENU_TITLE_SCALE), SCREEN_SCALE_Y(DEF_MENU_TITLE_SCALE));
+    g_textManager->SetAlignment(TextAlign_Center);
+    g_textManager->SetWrapWidth(0.0f);
+    g_textManager->SetLineSpacing(0);
+    g_textManager->SetPromptsEnabled(true);
+    g_textManager->SetShadow(false);
+    g_textManager->SetOutline(true);
+    g_textManager->SetColor(r, g, b, a);
+    g_textManager->PrintString(promptText, promptX, promptY);
+}
+
+bool feCustomMenuMgr::DrawLoadingScreen(u8 fill, u8 pulseR8) {
+    LoadSplashTextures();
+    if (!m_titleScreenBackgroundTexture || !m_loadingBarTexture) {
+        return false;
+    }
+
+    f32 drawX = 0.0f;
+    f32 drawY = 0.0f;
+    f32 drawW = 0.0f;
+    f32 drawH = 0.0f;
+    if (!GetSplashScreenRect(&drawX, &drawY, &drawW, &drawH)) {
+        return false;
+    }
+
+    // Clear to black first so narrower/taller targets produce clean letterbox bars.
+    ScreenDraw::DrawColoredRect(0.0f, 0.0f, SCREEN_WIDTH, SCREEN_HEIGHT, 0, 0, 0, 255);
+    ScreenDraw::DrawQuad(m_titleScreenBackgroundTexture, drawX, drawY, drawW, drawH);
+    ScreenDraw::DrawQuad(m_loadingBarTexture, drawX, drawY, drawW, drawH);
+
+    if (fill > 0) {
+        if (fill > 100) {
+            fill = 100;
+        }
+
+        static constexpr f32 kLoadingBarFillLeftPx = 597.0f;
+        static constexpr f32 kLoadingBarFillTopPx = 635.0f;
+        static constexpr f32 kLoadingBarFillWidthPx = 638.0f;
+        static constexpr f32 kLoadingBarFillHeightPx = 23.0f;
+
+        const f32 scaleX = drawW / 1920.0f;
+        const f32 scaleY = drawH / 1080.0f;
+        const f32 fillX = drawX + kLoadingBarFillLeftPx * scaleX;
+        const f32 fillY = drawY + kLoadingBarFillTopPx * scaleY;
+        const f32 fillW = kLoadingBarFillWidthPx * scaleX * (fill / 100.0f);
+        const f32 fillH = kLoadingBarFillHeightPx * scaleY;
+        ScreenDraw::DrawColoredRect(fillX, fillY, fillW, fillH, pulseR8, 0, 0, 255);
+    }
+
     return true;
 }
 
@@ -3126,7 +3580,7 @@ void feCustomMenuMgr::DrawLegalScreen(f32 alpha01) {
     }
 
     static constexpr f32 kColumnWidth = 420.0f;
-    static constexpr f32 kVerticalUpOffset = 8.0f;
+    static constexpr f32 kVerticalUpOffset = 4.0f;
 
     g_textManager->SetScale(SCREEN_SCALE_Y(0.2f), SCREEN_SCALE_Y(0.2f));
     g_textManager->SetAlignment(TextAlign_Left);

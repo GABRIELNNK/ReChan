@@ -1551,10 +1551,13 @@ void CustomHudMgr::DrawInventoryCard(const HUD& hud) {
 
     s32 goldDragons = hud.dragon.goldDragonFlag ? 1 : 0;
     if (g_scoreManager) {
-        goldDragons = g_scoreManager->currentGoldDragons;
+        goldDragons = g_scoreManager->GetTotalGoldDragon();
     }
     if (goldDragons < 0) {
         goldDragons = 0;
+    }
+    else if (goldDragons > 99) {
+        goldDragons = 99;
     }
 
     const char* livesText = TrimLeftOrZero(hud.takes.numberBuf);
@@ -1821,6 +1824,9 @@ void CustomHudMgr::DrawDestinationBanner(const HUD& hud) const {
         s32 totalGold = 0;
         if (g_scoreManager) {
             totalGold = g_scoreManager->GetTotalGoldDragon();
+        }
+        if (totalGold > 99) {
+            totalGold = 99;
         }
 
         char line[64];

@@ -13,6 +13,8 @@
 #include "extra/psxdiscextractor.h"
 
 class tTexture;
+class pddiBaseShader;
+class pddiRenderTarget;
 
 enum MenuPage : s32 {
     MenuPage_None,
@@ -328,6 +330,15 @@ struct PageDef {
     }
 };
 
+struct TitleDebrisParticle {
+    f32 x = 0.0f, y = 0.0f;
+    f32 vx = 0.0f, vy = 0.0f;
+    f32 size = 4.0f;
+    f32 life = 0.0f, maxLife = 1.0f;
+    f32 shapeSeed = 0.0f; // randomizes the dot shader's edge wobble per particle
+    u8 r = 255, g = 200, b = 60;
+};
+
 class feCustomMenuMgr {
 public:
     void Init(CustomText* textSystem);
@@ -336,8 +347,10 @@ public:
     s32 Invoke(); // 1 = stay in menu, 4 = state change, 8 = resume play
     void Render();
     bool DrawTitleScreen();
-    bool DrawLoadingScreen();
+    bool DrawLoadingScreen(u8 fill, u8 pulseR8);
     void DrawTitleStartPrompt(s32 baseX, s32 baseY);
+    bool DrawGameOverScreen();
+    void DrawGameOverContinuePrompt(s32 baseX, s32 baseY, u8 r, u8 g, u8 b, u8 a);
     void DrawVersionOverlay();
     void DrawLegalScreen(f32 alpha01);
     bool GetSplashScreenRect(f32* outX, f32* outY, f32* outW, f32* outH) const;
@@ -398,14 +411,25 @@ private:
     void LoadControllerOverlayTexture();
     void LoadMenuOrnamentTexture();
     void LoadSplashTextures();
+    bool EnsureTitleScreenEffects(f32 drawW, f32 drawH);
+    void ReleaseTitleScreenEffects();
+    void UpdateTitleDebrisParticles(f32 dt, f32 emitX, f32 emitY, f32 spanW);
+    void DrawTitleDebrisParticles() const;
     void LoadSliderTextures();
     void LoadScrollArrowTexture();
+
+    // Center of the gold debris burst within the splash rect (0..1, UV-style).
+    static constexpr f32 kTitleDebrisCenterU = 0.5f;
+    static constexpr f32 kTitleDebrisCenterV = 0.5f;
 
     // frontend
     static constexpr const char* kControllerOverlayTexturePath = "pc/textures/frontend/controller_overlay_default.png";
     static constexpr const char* kMenuOrnamentTexturePath = "pc/textures/frontend/menu_ornament.png";
-    static constexpr const char* kTitleScreenTexturePath = "pc/textures/frontend/title_screen.png";
-    static constexpr const char* kLoadingScreenTexturePath = "pc/textures/frontend/loading_screen.png";
+    static constexpr const char* kTitleScreenBackgroundTexturePath = "pc/textures/frontend/background.png";
+    static constexpr const char* kTitleScreenJackieTexturePath = "pc/textures/frontend/jackie.png";
+    static constexpr const char* kTitleScreenLogoTexturePath = "pc/textures/frontend/jcslogo.png";
+    static constexpr const char* kGameOverTexturePath = "pc/textures/frontend/game_over.png";
+    static constexpr const char* kLoadingBarTexturePath = "pc/textures/frontend/loading_bar.png";
     static constexpr const char* kScrollArrowTexturePath = "pc/textures/frontend/scroll_arrow.png";
     static constexpr const char* kSliderOTexturePath = "pc/textures/frontend/slider_o.png";
     static constexpr const char* kSliderFTexturePath = "pc/textures/frontend/slider_f.png";
@@ -420,8 +444,6 @@ private:
     static constexpr const char* kTakeTexturePath = "pc/textures/collectibles/take.png";
 
     static constexpr f32 kSplashScreenAspect = 16.0f / 9.0f;
-
-    void DrawSplashTexture16x9(tTexture* texture);
 
     void DrawMenuWindow(s32 x, s32 y, s32 w, s32 h, const char* title) const;
 
@@ -446,8 +468,26 @@ private:
 
     CustomText* m_text = nullptr;
     PageDef m_pages[MenuPage_Count];
-    tTexture* m_titleScreenTexture = nullptr;
-    tTexture* m_loadingScreenTexture = nullptr;
+    tTexture* m_titleScreenBackgroundTexture = nullptr;
+    tTexture* m_titleScreenJackieTexture = nullptr;
+    tTexture* m_titleScreenLogoTexture = nullptr;
+    pddiBaseShader* m_titleScreenGlowShader = nullptr;
+    pddiBaseShader* m_titleScreenGodRaysShader = nullptr;
+    pddiBaseShader* m_titleScreenCompositeShader = nullptr;
+    pddiBaseShader* m_titleScreenLogoTiltShader = nullptr;
+    pddiBaseShader* m_titleDebrisDotShader = nullptr;
+    pddiRenderTarget* m_titleScreenLogoSeed = nullptr;
+    pddiRenderTarget* m_titleScreenGlow = nullptr;
+    pddiRenderTarget* m_titleScreenGodRays = nullptr;
+    f32 m_titleScreenAnimSec = 0.0f;
+    s32 m_titleEffectTargetW = 0;
+    s32 m_titleEffectTargetH = 0;
+    static constexpr s32 kMaxTitleDebrisParticles = 32;
+    TitleDebrisParticle m_titleDebrisParticles[kMaxTitleDebrisParticles];
+    f32 m_titleDebrisSpawnAccum = 0.0f;
+    bool m_titleScreenEffectsUnavailable = false;
+    tTexture* m_gameOverTexture = nullptr;
+    tTexture* m_loadingBarTexture = nullptr;
     mutable tTexture* m_controllerTexture = nullptr;
     tTexture* m_menuOrnamentTexture = nullptr;
     tTexture* m_scrollArrowTexture = nullptr;
@@ -457,7 +497,8 @@ private:
     tTexture* m_sliderOTex = nullptr;
     tTexture* m_sliderFTex = nullptr;
     bool m_titleScreenTextureTried = false;
-    bool m_loadingScreenTextureTried = false;
+    bool m_gameOverTextureTried = false;
+    bool m_loadingScreenTexturesTried = false;
     MenuPage m_currPage = MenuPage_None;
     MenuPage m_prevPage = MenuPage_None;
     s32 m_cursor = 0;

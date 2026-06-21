@@ -24,6 +24,42 @@ void main() {
 }
 )";
 
+// Pseudo-3D tilt vertex shader: treats the quad as a flat plane centered at
+// uTiltRect.xy with half-extents uTiltRect.zw, rotates it in 3D by
+// uTiltAngles.xyz (pitch, yaw, roll) and perspective-projects it back to 2D
+// using a focal distance (uTiltAngles.w). aPos is ignored -- the quad's
+// position is fully rebuilt from aUV so any caller-supplied rect works.
+static const char* kTiltVert = R"(
+#version 450 core
+layout(location=0) in vec2 aPos;
+layout(location=1) in vec2 aUV;
+uniform mat4 uProj;
+uniform vec4 uTiltRect;   // xy = center, zw = half width/height
+uniform vec4 uTiltAngles; // x = pitch (rad), y = yaw (rad), z = roll (rad), w = focal distance
+out vec2 vUV;
+void main() {
+    vUV = aUV;
+
+    vec2 local = (aUV - 0.5) * 2.0 * uTiltRect.zw;
+    vec3 p = vec3(local, 0.0);
+
+    float cx = cos(uTiltAngles.x), sx = sin(uTiltAngles.x);
+    p = vec3(p.x, p.y * cx - p.z * sx, p.y * sx + p.z * cx);
+
+    float cy = cos(uTiltAngles.y), sy = sin(uTiltAngles.y);
+    p = vec3(p.x * cy + p.z * sy, p.y, -p.x * sy + p.z * cy);
+
+    float cz = cos(uTiltAngles.z), sz = sin(uTiltAngles.z);
+    p = vec3(p.x * cz - p.y * sz, p.x * sz + p.y * cz, p.z);
+
+    float focal = max(uTiltAngles.w, 1.0);
+    float perspective = focal / max(focal - p.z, 0.0001);
+    vec2 screenPos = uTiltRect.xy + p.xy * perspective;
+
+    gl_Position = uProj * vec4(screenPos, 0.0, 1.0);
+}
+)";
+
 // 3D vertex-color shader with PSX VRAM palette lookup
 
 static const char* k3DVert = R"(
@@ -144,6 +180,129 @@ uniform vec4 uTint;
 out vec4 FragColor;
 void main() {
     FragColor = texture(uTex, vUV) * uTint;
+}
+)";
+
+// Soft irregular dot: a textureless sprite with a noise-wobbled edge so it
+// reads as a small jagged debris chip instead of a perfect circle.
+// uShapeSeed offsets the noise per particle so each chip's wobble differs.
+static const char* kDotFrag = R"(
+#version 450 core
+in vec2 vUV;
+uniform vec4 uTint;
+uniform float uShapeSeed;
+out vec4 FragColor;
+
+float hash11(float v) {
+    return fract(sin(v * 127.1) * 43758.5453123);
+}
+
+float angularNoise(float v) {
+    float cell = floor(v);
+    float blend = fract(v);
+    blend = blend * blend * (3.0 - 2.0 * blend);
+    return mix(hash11(cell), hash11(cell + 1.0), blend);
+}
+
+void main() {
+    vec2 centered = (vUV - 0.5) * 2.0;
+    float dist = length(centered);
+    float angle = atan(centered.y, centered.x);
+
+    float n1 = angularNoise(angle * 2.4 + uShapeSeed);
+    float n2 = angularNoise(angle * 5.1 - uShapeSeed * 1.7 + 4.0);
+    float wobble = (n1 * 0.6 + n2 * 0.4) - 0.5;
+    float edge = 0.74 + wobble * 0.36;
+
+    float alpha = 1.0 - smoothstep(edge - 0.18, edge, dist);
+    if (alpha <= 0.0) discard;
+    FragColor = vec4(uTint.rgb, uTint.a * alpha);
+}
+)";
+
+// Soft halo shader: a cheap multi-ring blur of a source texture's lit
+// shape, used as a glow buffer behind the rays/source art. uGlowMotion
+// rotates the ring sampling pattern and drifts the sample center over time
+// so the halo has a slow, living swirl instead of sitting still.
+static const char* kGlowFrag = R"(
+#version 450 core
+in vec2 vUV;
+uniform sampler2D uTex;
+uniform vec4 uGlowParams; // x = blur radius (uv units), y = intensity
+uniform vec4 uGlowMotion; // x = ring rotation speed (rad/s), y = drift radius (uv), z = drift speed (rad/s)
+uniform float uTime;
+out vec4 FragColor;
+
+const int kRings = 3;
+const int kDirections = 8;
+
+void main() {
+    vec2 driftedUV = vUV + vec2(cos(uTime * uGlowMotion.z), sin(uTime * uGlowMotion.z * 1.21)) * uGlowMotion.y;
+
+    vec4 center = texture(uTex, vUV);
+    vec3 color = center.rgb * center.a;
+    float alpha = center.a;
+    float total = 1.0;
+    float rot = uTime * uGlowMotion.x;
+    for (int ring = 1; ring <= kRings; ++ring) {
+        float radius = uGlowParams.x * (float(ring) / float(kRings));
+        float weight = 1.0 / float(ring);
+        for (int dir = 0; dir < kDirections; ++dir) {
+            float angle = (float(dir) / float(kDirections)) * 6.28318530718 + rot + float(ring) * 0.35;
+            vec2 offset = vec2(cos(angle), sin(angle)) * radius;
+            vec4 tap = texture(uTex, driftedUV + offset);
+            color += tap.rgb * tap.a * weight;
+            alpha += tap.a * weight;
+            total += weight;
+        }
+    }
+    color /= total;
+    alpha /= total;
+    FragColor = vec4(color * uGlowParams.y, alpha * uGlowParams.y);
+}
+)";
+
+// God rays shader: radial streak accumulation toward a light-source point,
+// used to generate an additive glow buffer from a source texture's alpha.
+// uRayMotion twists each marching step by a slowly evolving angle (so the
+// whole fan of rays swirls around the source) and orbits the light source
+// itself a little, so the rays have continuous movement instead of being a
+// static fan.
+static const char* kGodRaysFrag = R"(
+#version 450 core
+in vec2 vUV;
+uniform sampler2D uTex;
+uniform vec4 uRayParams; // xy = light source uv, z = sample spread, w = decay per sample
+uniform vec4 uRayMotion; // x = swirl twist amount (rad), y = swirl speed (rad/s), z = orbit radius (uv), w = orbit speed (rad/s)
+uniform float uExposure;
+uniform float uTime;
+out vec4 FragColor;
+
+const int kSampleCount = 48;
+
+void main() {
+    vec2 origin = uRayParams.xy
+        + vec2(cos(uTime * uRayMotion.w), sin(uTime * uRayMotion.w * 1.37)) * uRayMotion.z;
+
+    vec2 uv = vUV;
+    vec4 source = texture(uTex, uv);
+    vec3 color = source.rgb * source.a;
+    float decay = 1.0;
+    float stepFrac = uRayParams.z / float(kSampleCount);
+    for (int i = 0; i < kSampleCount; ++i) {
+        vec2 step = (origin - uv) * stepFrac;
+
+        float twist = uRayMotion.x * sin(uTime * uRayMotion.y + float(i) * 0.22);
+        float ca = cos(twist);
+        float sa = sin(twist);
+        step = vec2(step.x * ca - step.y * sa, step.x * sa + step.y * ca);
+        uv += step;
+
+        vec4 tap = texture(uTex, uv);
+        color += tap.rgb * tap.a * decay;
+        decay *= uRayParams.w;
+    }
+    FragColor = vec4(color * (uExposure / float(kSampleCount)), 1.0);
 }
 )";
 
@@ -376,13 +535,69 @@ void glTexture::Bind(int unit) {
     glBindTexture(GL_TEXTURE_2D, handle);
 }
 
+bool glTexture::SetRenderTargetStorage(int w, int h, pddiRenderTargetFormat format) {
+    if (w <= 0 || h <= 0) return false;
+    width = w;
+    height = h;
+    bpp = (format == PDDI_RENDER_TARGET_RGBA16F) ? 64 : 32;
+    alphaDepth = (format == PDDI_RENDER_TARGET_RGBA16F) ? 16 : 8;
+    if (handle) glDeleteTextures(1, &handle);
+    glGenTextures(1, &handle);
+    glBindTexture(GL_TEXTURE_2D, handle);
+    const GLint internalFormat = (format == PDDI_RENDER_TARGET_RGBA16F) ? GL_RGBA16F : GL_RGBA8;
+    const GLenum dataType = (format == PDDI_RENDER_TARGET_RGBA16F) ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE;
+    glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, w, h, 0, GL_RGBA, dataType, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    filterMode = PDDI_FILTER_BILINEAR;
+    ApplyTextureFilterMode(handle, filterMode);
+    return handle != 0;
+}
+
+glRenderTarget::glRenderTarget(int w, int h, pddiRenderTargetFormat targetFormat)
+    : format(targetFormat) {
+    Resize(w, h);
+}
+
+glRenderTarget::~glRenderTarget() {
+    if (framebuffer) glDeleteFramebuffers(1, &framebuffer);
+    if (texture) texture->Release();
+}
+
+bool glRenderTarget::Resize(int w, int h) {
+    if (w <= 0 || h <= 0) return false;
+    if (valid && framebuffer && texture && width == w && height == h) return true;
+    valid = false;
+    if (!texture) texture = new glTexture();
+    if (!texture->SetRenderTargetStorage(w, h, format)) return false;
+    if (!framebuffer) glGenFramebuffers(1, &framebuffer);
+
+    GLint previous = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previous);
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                           texture->GetGLHandle(), 0);
+    const bool complete = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)previous);
+    if (!complete) {
+        std::fprintf(stderr, "GL: texture render target incomplete (%dx%d, format=%d)\n",
+                     w, h, (int)format);
+        return false;
+    }
+    width = w;
+    height = h;
+    valid = true;
+    return true;
+}
+
 // glShader
 
-glShader::glShader() {
+glShader::glShader(const char* shaderType) : type(shaderType ? shaderType : "simple") {
     for (s32 i = 0; i < kMaxTextureSlots; i++) {
         texSlots[i] = nullptr;
     }
-    CreateDefaultProgram();
+    CreateProgram();
 }
 
 glShader::~glShader() {
@@ -390,9 +605,24 @@ glShader::~glShader() {
         glDeleteProgram(program);
 }
 
-void glShader::CreateDefaultProgram() {
-    u32 vs = CompileGLShader(GL_VERTEX_SHADER, kSimpleVert);
-    u32 fs = CompileGLShader(GL_FRAGMENT_SHADER, kSimpleFrag);
+void glShader::CreateProgram() {
+    const char* vertexSource = kSimpleVert;
+    const char* fragmentSource = kSimpleFrag;
+    if (type == "godrays") {
+        fragmentSource = kGodRaysFrag;
+    }
+    else if (type == "glow") {
+        fragmentSource = kGlowFrag;
+    }
+    else if (type == "tilt") {
+        vertexSource = kTiltVert;
+    }
+    else if (type == "dot") {
+        fragmentSource = kDotFrag;
+    }
+
+    u32 vs = CompileGLShader(GL_VERTEX_SHADER, vertexSource);
+    u32 fs = CompileGLShader(GL_FRAGMENT_SHADER, fragmentSource);
     if (!vs || !fs)
         return;
 
@@ -407,6 +637,8 @@ void glShader::CreateDefaultProgram() {
         char log[512];
         glGetProgramInfoLog(program, sizeof(log), nullptr, log);
         std::fprintf(stderr, "GLSL link error:\n%s\n", log);
+        glDeleteProgram(program);
+        program = 0;
     }
 
     glDeleteShader(vs);
@@ -427,6 +659,35 @@ void glShader::SetColour(u32 param, pddiColour c) {
     diffuse = c;
 }
 
+void glShader::SetInt(const char* param, int value) {
+    if (param) intParams[param] = value;
+}
+
+void glShader::SetFloat(const char* param, float value) {
+    if (param) floatParams[param] = value;
+}
+
+void glShader::SetVector(const char* param, float x, float y, float z, float w) {
+    if (param) vectorParams[param] = { x, y, z, w };
+}
+
+void glShader::SetMatrix(const char* param, const float* matrix4x4) {
+    if (!param || !matrix4x4) return;
+    std::array<float, 16>& value = matrixParams[param];
+    std::memcpy(value.data(), matrix4x4, sizeof(float) * value.size());
+}
+
+int glShader::FindUniform(const std::string& name) {
+    const auto existing = uniformLocations.find(name);
+    if (existing != uniformLocations.end()) {
+        return existing->second;
+    }
+
+    const int location = glGetUniformLocation(program, name.c_str());
+    uniformLocations.emplace(name, location);
+    return location;
+}
+
 void glShader::PreRender() {
     glUseProgram(program);
 
@@ -440,7 +701,7 @@ void glShader::PreRender() {
         boundTexture->Bind(slot);
 
         if (slot == 0) {
-            int baseSamplerLoc = glGetUniformLocation(program, "uTex");
+            int baseSamplerLoc = FindUniform("uTex");
             if (baseSamplerLoc >= 0) {
                 glUniform1i(baseSamplerLoc, 0);
             }
@@ -448,21 +709,38 @@ void glShader::PreRender() {
 
         char samplerName[32];
         std::snprintf(samplerName, sizeof(samplerName), "uTex%d", slot);
-        int samplerLoc = glGetUniformLocation(program, samplerName);
+        int samplerLoc = FindUniform(samplerName);
         if (samplerLoc < 0) {
             std::snprintf(samplerName, sizeof(samplerName), "uTex[%d]", slot);
-            samplerLoc = glGetUniformLocation(program, samplerName);
+            samplerLoc = FindUniform(samplerName);
         }
         if (samplerLoc >= 0) {
             glUniform1i(samplerLoc, slot);
         }
     }
 
-    int tintLoc = glGetUniformLocation(program, "uTint");
+    int tintLoc = FindUniform("uTint");
     if (tintLoc >= 0) {
         glUniform4f(tintLoc,
                     diffuse.r / 255.0f, diffuse.g / 255.0f,
                     diffuse.b / 255.0f, diffuse.a / 255.0f);
+    }
+
+    for (const auto& [name, value] : intParams) {
+        int location = FindUniform(name);
+        if (location >= 0) glUniform1i(location, value);
+    }
+    for (const auto& [name, value] : floatParams) {
+        int location = FindUniform(name);
+        if (location >= 0) glUniform1f(location, value);
+    }
+    for (const auto& [name, value] : vectorParams) {
+        int location = FindUniform(name);
+        if (location >= 0) glUniform4fv(location, 1, value.data());
+    }
+    for (const auto& [name, value] : matrixParams) {
+        int location = FindUniform(name);
+        if (location >= 0) glUniformMatrix4fv(location, 1, GL_FALSE, value.data());
     }
 }
 
@@ -1151,6 +1429,7 @@ void glContext::BeginFrame() {
     glScissor(vx, vy, vw, vh);
     glEnable(GL_SCISSOR_TEST);
     stateDirty = true;
+    activeRenderTarget = nullptr;
 }
 
 void glContext::EndFrame() {
@@ -1383,6 +1662,45 @@ void glContext::ResolveForOverlayPass() {
     UpdateMultisampleState();
 }
 
+pddiRenderTarget* glContext::CreateRenderTarget(int width, int height,
+                                                 pddiRenderTargetFormat format) {
+    glRenderTarget* target = new glRenderTarget(width, height, format);
+    if (!target->IsValid()) {
+        target->Release();
+        return nullptr;
+    }
+    return target;
+}
+
+bool glContext::SetRenderTarget(pddiRenderTarget* target) {
+    glRenderTarget* glTarget = dynamic_cast<glRenderTarget*>(target);
+    if (target && (!glTarget || !glTarget->IsValid())) return false;
+
+    if (glTarget && !activeRenderTarget) {
+        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &savedFramebuffer);
+        glGetIntegerv(GL_VIEWPORT, savedViewport);
+        glGetIntegerv(GL_SCISSOR_BOX, savedScissor);
+        savedScissorEnabled = glIsEnabled(GL_SCISSOR_TEST) == GL_TRUE;
+    }
+
+    if (glTarget) {
+        glBindFramebuffer(GL_FRAMEBUFFER, glTarget->GetFramebuffer());
+        glViewport(0, 0, glTarget->GetWidth(), glTarget->GetHeight());
+        glScissor(0, 0, glTarget->GetWidth(), glTarget->GetHeight());
+        glEnable(GL_SCISSOR_TEST);
+        activeRenderTarget = glTarget;
+    }
+    else if (activeRenderTarget) {
+        glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)savedFramebuffer);
+        glViewport(savedViewport[0], savedViewport[1], savedViewport[2], savedViewport[3]);
+        glScissor(savedScissor[0], savedScissor[1], savedScissor[2], savedScissor[3]);
+        if (!savedScissorEnabled) glDisable(GL_SCISSOR_TEST);
+        activeRenderTarget = nullptr;
+    }
+    stateDirty = true;
+    return true;
+}
+
 void glContext::UpdateMultisampleState() {
     if (usingMsaaFramebuffer && multisampleEnabled) {
         glEnable(GL_MULTISAMPLE);
@@ -1395,11 +1713,8 @@ void glContext::UpdateMultisampleState() {
 void glContext::DrawQuad(pddiBaseShader* shader,
                          float x, float y, float w, float h,
                          float u0, float v0, float u1, float v1) {
+    shader->SetMatrix("uProj", projection.Data());
     shader->PreRender();
-
-    auto* s = static_cast<glShader*>(shader);
-    glUniformMatrix4fv(glGetUniformLocation(s->GetProgram(), "uProj"),
-                       1, GL_FALSE, projection.Data());
 
     const float yTop = y;
     const float yBottom = y + h;
@@ -1618,7 +1933,14 @@ pddiRenderContext* glDevice::NewRenderContext(pddiDisplay* d) { return new glCon
 pddiGamepad* glDevice::NewGamepad() { return new glGamepad(); }
 pddiTexture* glDevice::NewTexture() { return new glTexture(); }
 pddiPrimBuffer* glDevice::NewPrimBuffer(const pddiPrimBufferDesc& desc) { return new glPrimBuffer(desc); }
-pddiBaseShader* glDevice::NewShader(const char*) { return new glShader(); }
+pddiBaseShader* glDevice::NewShader(const char* type) {
+    glShader* shader = new glShader(type);
+    if (!shader->IsValid()) {
+        shader->Release();
+        return nullptr;
+    }
+    return shader;
+}
 
 // glGamepad
 

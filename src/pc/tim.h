@@ -1,5 +1,6 @@
 #pragma once
 #include "core.h"
+#include "pddi/pddi.h"
 
 class tTexture;
 class pddiBaseShader;
@@ -39,6 +40,17 @@ namespace ScreenDraw {
     void DrawQuad(tTexture* tex, f32 x, f32 y, f32 w, f32 h,
                   f32 u0 = 0.0f, f32 v0 = 0.0f, f32 u1 = 1.0f, f32 v1 = 1.0f,
                   u8 r = 255, u8 g = 255, u8 b = 255, u8 a = 255);
+
+    // Draw through a caller-owned programmable shader while preserving the
+    // same overlay state and coordinate system as the regular 2D helpers.
+    // canvasW/canvasH override the projected coordinate space (default: the
+    // live screen size); pass the target's own size when drawing into an
+    // off-screen render target so the quad isn't projected against the main
+    // window's resolution instead of the buffer actually being rendered to.
+    void DrawShaderQuad(pddiBaseShader* shader, f32 x, f32 y, f32 w, f32 h,
+                        f32 u0 = 0.0f, f32 v0 = 0.0f, f32 u1 = 1.0f, f32 v1 = 1.0f,
+                        pddiBlendMode blendMode = PDDI_BLEND_ALPHA,
+                        f32 canvasW = 0.0f, f32 canvasH = 0.0f);
 
     // Draw a solid colored rectangle (no texture).
     void DrawColoredRect(f32 x, f32 y, f32 w, f32 h,

@@ -5,6 +5,9 @@
 #include "pddi/pdditex.h"
 #include "pddi/pddishad.h"
 #include "pddi/pddidev.h"
+#include <array>
+#include <string>
+#include <unordered_map>
 
 struct GLFWwindow;
 
@@ -53,6 +56,7 @@ public:
     void Bind(int unit) override;
 
     u32 GetGLHandle() const { return handle; }
+    bool SetRenderTargetStorage(int w, int h, pddiRenderTargetFormat format);
 
 private:
     u32 handle = 0;
@@ -67,29 +71,63 @@ private:
 
 class glShader : public pddiBaseShader {
 public:
-    glShader();
+    explicit glShader(const char* type);
     ~glShader() override;
 
-    const char* GetType() override { return "simple"; }
+    const char* GetType() override { return type.c_str(); }
 
     void SetTexture(u32 param, pddiTexture* tex) override;
     void SetInt(u32 param, int value) override;
     void SetFloat(u32 param, float value) override;
     void SetColour(u32 param, pddiColour c) override;
+    void SetInt(const char* param, int value) override;
+    void SetFloat(const char* param, float value) override;
+    void SetVector(const char* param, float x, float y, float z, float w) override;
+    void SetMatrix(const char* param, const float* matrix4x4) override;
 
     void PreRender() override;
     void PostRender() override;
 
     u32 GetProgram() const { return program; }
+    bool IsValid() const { return program != 0; }
 
 private:
     static constexpr s32 kMaxTextureSlots = 16;
     u32 program = 0;
+    std::string type;
     pddiTexture* texSlots[kMaxTextureSlots] = {};
     pddiColour diffuse = pddiColour(255, 255, 255);
     pddiBlendMode blendMode = PDDI_BLEND_NONE;
 
-    void CreateDefaultProgram();
+    std::unordered_map<std::string, int> intParams;
+    std::unordered_map<std::string, float> floatParams;
+    std::unordered_map<std::string, std::array<float, 4>> vectorParams;
+    std::unordered_map<std::string, std::array<float, 16>> matrixParams;
+    std::unordered_map<std::string, int> uniformLocations;
+
+    void CreateProgram();
+    int FindUniform(const std::string& name);
+};
+
+class glRenderTarget : public pddiRenderTarget {
+public:
+    glRenderTarget(int width, int height, pddiRenderTargetFormat format);
+    ~glRenderTarget() override;
+
+    bool Resize(int width, int height) override;
+    int GetWidth() const override { return width; }
+    int GetHeight() const override { return height; }
+    pddiTexture* GetTexture() const override { return texture; }
+    bool IsValid() const override { return valid; }
+    u32 GetFramebuffer() const { return framebuffer; }
+
+private:
+    glTexture* texture = nullptr;
+    u32 framebuffer = 0;
+    int width = 0;
+    int height = 0;
+    pddiRenderTargetFormat format;
+    bool valid = false;
 };
 
 // glDisplay
@@ -206,6 +244,9 @@ public:
     void SetScissor(int x, int y, int w, int h) override;
     void SetMultisampleEnabled(bool enable) override;
     void ResolveForOverlayPass() override;
+    pddiRenderTarget* CreateRenderTarget(int width, int height,
+                                         pddiRenderTargetFormat format) override;
+    bool SetRenderTarget(pddiRenderTarget* target) override;
 
     void DrawQuad(pddiBaseShader* shader,
                   float x, float y, float w, float h,
@@ -259,6 +300,11 @@ private:
     bool usingMsaaFramebuffer = false;
     bool multisampleEnabled = true;
     bool resolvedForOverlay = false;
+    glRenderTarget* activeRenderTarget = nullptr;
+    s32 savedFramebuffer = 0;
+    s32 savedViewport[4] = {};
+    s32 savedScissor[4] = {};
+    bool savedScissorEnabled = false;
 
     // Renderstate cache
     pddiCullMode cachedCullMode = PDDI_CULL_NONE;

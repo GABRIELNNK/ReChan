@@ -37,3 +37,23 @@ void tShader::SetColour(u32 param, pddiColour c) {
     if (shader)
         shader->SetColour(param, c);
 }
+
+void tShader::SetTexture(u32 param, pddiTexture* tex) {
+    if (shader)
+        shader->SetTexture(param, tex);
+}
+
+void tShader::SetInt(const char* param, int value) {
+    if (shader)
+        shader->SetInt(param, value);
+}
+
+void tShader::SetFloat(const char* param, float value) {
+    if (shader)
+        shader->SetFloat(param, value);
+}
+
+void tShader::SetVector(const char* param, float x, float y, float z, float w) {
+    if (shader)
+        shader->SetVector(param, x, y, z, w);
+}

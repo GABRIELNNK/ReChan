@@ -140,6 +140,7 @@ private:
 
 #if CUSTOM_MENU
     void RenderTitleWithCustomBackground(bool drawPressStartOverlay);
+    void RenderGameOverWithCustomBackground();
 #endif
 
     static void FadeBegin();

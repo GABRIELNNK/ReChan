@@ -564,6 +564,27 @@ void Game::RenderTitleWithCustomBackground(bool drawPressStartOverlay) {
     }
 }
 
+void Game::RenderGameOverWithCustomBackground() {
+    if (!gameOverScreen) {
+        return;
+    }
+
+    gameOverScreen->Render();
+
+    if (!g_feCustomMenuMgr || !g_feCustomMenuMgr->DrawGameOverScreen()) {
+        return;
+    }
+
+    if (gameOverScreen->continueText) {
+        g_feCustomMenuMgr->DrawGameOverContinuePrompt(gameOverScreen->continueText->mtx.GetX(),
+                                                      gameOverScreen->continueText->mtx.GetY(),
+                                                      gameOverScreen->continueText->colorR,
+                                                      gameOverScreen->continueText->colorG,
+                                                      gameOverScreen->continueText->colorB,
+                                                      gameOverScreen->continueText->colorA);
+    }
+}
+
 static void CustomMenuRender(feCustomMenuMgr* menuMgr) {
     Game::DrawEverythingHandlerCB(nullptr);
     DrawDirectorOverlays(nullptr);
@@ -1852,6 +1873,13 @@ bool Game::gsEndGameState(Game* game) {
     FreeXconFE();
     InitXconFSImage();
 
+#if CUSTOM_MENU
+    if (!g_feCustomMenuMgr) {
+        g_feCustomMenuMgr = new feCustomMenuMgr();
+        g_feCustomMenuMgr->Init(&g_customText);
+    }
+#endif
+
     // PSX: new oxScreenManager(56) -> Init("xc/gameover.1", screenMgr)
     if (game->gameOverScreen) {
         delete game->gameOverScreen;
@@ -1878,7 +1906,11 @@ bool Game::gsEndGameLoopState(Game* game) {
     g_display->BeginFrame();
     if (game->gameOverScreen) {
         game->gameOverScreen->Update();
+#if CUSTOM_MENU
+        game->RenderGameOverWithCustomBackground();
+#else
         game->gameOverScreen->Render();
+#endif
     }
 
     if (game->gameOverFadeType != 0) {
@@ -1913,7 +1945,16 @@ bool Game::gsEndGameLoopState(Game* game) {
     }
     game->controlVal[0] = (s32)buttons;
 
-    if ((buttons & (PsxPad::Start | PsxPad::Cross)) != 0) {
+    bool continuePressed = (buttons & (PsxPad::Start | PsxPad::Cross)) != 0;
+
+#if CUSTOM_MENU
+    if (!continuePressed && g_actionInput) {
+        continuePressed = g_actionInput->JustPressed(ACTION_MENU_CONFIRM) ||
+                          g_actionInput->IsMouseButtonTriggered(MouseBtn::Left);
+    }
+#endif
+
+    if (continuePressed) {
         // PSX: ProcessSoundEvent(frontEndSound, 19) = FE_SND_JT_0
         if (g_frontEndSound) {
             g_frontEndSound->ProcessSoundEvent(FE_SND_JT_0);
