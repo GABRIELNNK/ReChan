@@ -11,22 +11,22 @@ void CustomText::Init() {
     const char* langPath = nullptr;
     switch (lang) {
         case LangEnglish:
-            langPath = "PC/TEXT/ENGLISH.TXT";
+            langPath = "pc/text/english.txt";
             break;
         case LangGerman:
-            langPath = "PC/TEXT/GERMAN.TXT";
+            langPath = "pc/text/german.txt";
             break;
         case LangFrench:
-            langPath = "PC/TEXT/FRENCH.TXT";
+            langPath = "pc/text/french.txt";
             break;
         case LangItalian:
-            langPath = "PC/TEXT/ITALIAN.TXT";
+            langPath = "pc/text/italian.txt";
             break;
         case LangSpanish:
-            langPath = "PC/TEXT/SPANISH.TXT";
+            langPath = "pc/text/spanish.txt";
             break;
         default:
-            langPath = "PC/TEXT/ENGLISH.TXT";
+            langPath = "pc/text/english.txt";
             break;
     }
 
