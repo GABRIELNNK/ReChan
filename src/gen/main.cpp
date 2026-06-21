@@ -12,6 +12,7 @@
 #include "pc/audio.h"
 #include "pc/debugui.h"
 #include "pc/inputaction.h"
+#include "pc/rechan_icon_embedded.h"
 #include "pc/textmgr.h"
 #include "gen/game.h"
 #include "gen/time.h"
@@ -35,6 +36,14 @@
 
 static f32 sSavedMasterVolume = 1.0f;
 static bool sWindowedCaptureRequestedByClick = false;
+
+static void TrySetPlatformWindowIcon() {
+    if (!p3d::display) {
+        return;
+    }
+
+    p3d::display->SetIcon(kRechanIconWidth, kRechanIconHeight, kRechanIconRgba);
+}
 
 static bool OnWndProc(const pddiWndMessage& msg) {
     switch (msg.event) {
@@ -144,6 +153,8 @@ int main(int argc, char** argv) {
     tContext* ctx = platform->CreateContext(init);
     if (!ctx)
         return 1;
+
+    TrySetPlatformWindowIcon();
 
 #ifdef MOD_LOADER
     if (argc >= 3 && std::strcmp(argv[1], "--verify-glb") == 0) {

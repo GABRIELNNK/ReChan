@@ -23,3 +23,18 @@ fi
 
 "$premake" --os=linux gmake
 make -C build config="$config" -j"${JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)}"
+
+# Keep a freedesktop-compatible launcher beside local builds. The checked-in
+# desktop entry uses install-time names; local builds need absolute paths so
+# launching it from a file manager works without installing rechan first.
+repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+mkdir -p "$repo_root/bin"
+awk \
+    -v executable="$repo_root/bin/rechan" \
+    -v icon="$repo_root/bin/rechan.png" '
+        /^Exec=/ { print "Exec=\"" executable "\""; next }
+        /^Icon=/ { print "Icon=" icon; next }
+        { print }
+    ' "$repo_root/res/rechan.desktop" > "$repo_root/bin/rechan.desktop"
+cp "$repo_root/src/pc/rechan.png" "$repo_root/bin/rechan.png"
+chmod +x "$repo_root/bin/rechan.desktop"

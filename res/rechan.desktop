@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=rechan
+GenericName=Jackie Chan Stuntmaster
+Comment=Play Jackie Chan Stuntmaster with the rechan reimplementation
+Exec=rechan
+Icon=rechan
+Terminal=false
+Categories=Game;ActionGame;
+StartupWMClass=rechan
