@@ -43,7 +43,7 @@ static void ParseRGBStringClamped(const char* text, u8* r, u8* g, u8* b) {
     u32 green = 0;
     u32 blue = 0;
     if (text) {
-        ::sscanf_s(text, "%u,%u,%u", &red, &green, &blue);
+        std::sscanf(text, "%u,%u,%u", &red, &green, &blue);
     }
 
     if (red >= 0x100u) {
@@ -66,7 +66,7 @@ static void ParseRGBStringRaw(const char* text, u8* r, u8* g, u8* b) {
     s32 green = 0;
     s32 blue = 0;
     if (text) {
-        ::sscanf_s(text, "%d,%d,%d", &red, &green, &blue);
+        std::sscanf(text, "%d,%d,%d", &red, &green, &blue);
     }
 
     *r = (u8)red;
@@ -802,7 +802,7 @@ void LightingClass::SetupStageAttributes(const DBVolume* volume) {
                 u32 r = 0;
                 u32 g = 0;
                 u32 b = 0;
-                ::sscanf_s(attrib->GetAttribString(), "%u,%u,%u", &r, &g, &b);
+                std::sscanf(attrib->GetAttribString(), "%u,%u,%u", &r, &g, &b);
                 ClampWithinRGBLimit(&r, &g, &b);
                 worldAmbientColour = (r & 0xFFu) | ((g & 0xFFu) << 8) | ((b & 0xFFu) << 16);
                 s_worldAmbientLightColour = worldAmbientColour;
@@ -819,7 +819,7 @@ void LightingClass::SetupStageAttributes(const DBVolume* volume) {
                 pendingR = 0;
                 pendingG = 0;
                 pendingB = 0;
-                ::sscanf_s(attrib->GetAttribString(), "%u,%u,%u", &pendingR, &pendingG, &pendingB);
+                std::sscanf(attrib->GetAttribString(), "%u,%u,%u", &pendingR, &pendingG, &pendingB);
                 ClampWithinRGBLimit(&pendingR, &pendingG, &pendingB);
                 break;
             }
@@ -830,7 +830,7 @@ void LightingClass::SetupStageAttributes(const DBVolume* volume) {
                 s32 dirX = 0;
                 s32 dirY = 0;
                 s32 dirZ = 0;
-                ::sscanf_s(attrib->GetAttribString(), "%d,%d,%d", &dirX, &dirY, &dirZ);
+                std::sscanf(attrib->GetAttribString(), "%d,%d,%d", &dirX, &dirY, &dirZ);
                 ClampWithinNormalLimit(&dirX, &dirY, &dirZ);
 
                 const s32 slot = (s32)((attrib->id - 5) / 2);
