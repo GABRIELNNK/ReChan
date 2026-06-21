@@ -43,6 +43,7 @@
 #include "p3d/context.h"
 #include "p3d/stream.h"
 #include "p3d/texture.h"
+#include "p3d/filepath.h"
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
 
@@ -2947,7 +2948,8 @@ static bool LoadBlocksForPetalFromStream(
 // A texture page is 256x256 pixels; in 15-bit mode each pixel = 1 word at (tx*64+x, ty*256+y).
 static void UploadPngToVRAMPage(PsxVRAM& vram, u16 tpage, const char* pngPath) {
     int w, h, ch;
-    unsigned char* px = stbi_load(pngPath, &w, &h, &ch, 4);
+    const std::string resolvedPngPath = p3d::ResolvePathCaseInsensitive(pngPath);
+    unsigned char* px = stbi_load(resolvedPngPath.c_str(), &w, &h, &ch, 4);
     if (!px) {
         LOG("[ModLoader] Failed to load PNG for VRAM page: %s", pngPath);
         return;
@@ -3214,7 +3216,7 @@ void World::LoadLevelNames() {
     char filename[128];
     std::snprintf(filename, sizeof(filename), "RTARGET/GAME_LN.TXT");
 
-    std::ifstream file(filename);
+    std::ifstream file(p3d::ResolvePathCaseInsensitive(filename));
     if (!file)
         return;
 
@@ -3636,7 +3638,8 @@ bool World::Load(const std::string& lcfPath) {
     g_particleSystemChunkCount = 0;
 
     // Read LCF file from disc (PC equivalent of Stream::Open + disc read)
-    std::ifstream file(lcfPath, std::ios::binary | std::ios::ate);
+    const std::string resolvedLcfPath = p3d::ResolvePathCaseInsensitive(lcfPath);
+    std::ifstream file(resolvedLcfPath, std::ios::binary | std::ios::ate);
     if (!file) {
         LOG("[World] Failed to open: %s", lcfPath.c_str());
         return false;

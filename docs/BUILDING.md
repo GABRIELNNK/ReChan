@@ -39,9 +39,6 @@ sh scripts/build_linux.sh release
 ```
 
 The executable is written to `bin/rechan`.
-The build also writes `bin/rechan.desktop` and `bin/rechan.png`; the desktop
-file can be launched directly from a Linux file manager and displays the
-rechan icon.
 
 ### Arch Linux and Garuda Linux
 

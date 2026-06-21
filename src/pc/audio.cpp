@@ -1,5 +1,6 @@
 #include "gen/common.h"
 #include "pc/audio.h"
+#include "p3d/filepath.h"
 #include "miniaudio.h"
 #include <vector>
 #include <mutex>
@@ -733,7 +734,8 @@ bool AudioEngine::PlayMusic(const char* path, f32 volume, bool loop) {
     std::lock_guard<std::mutex> lock(g_musicMutex);
 
     ma_decoder_config decoderConfig = ma_decoder_config_init(ma_format_f32, MUSIC_CHANNELS, g_deviceSampleRate);
-    if (ma_decoder_init_file(path, &decoderConfig, &g_musicDecoder) != MA_SUCCESS) {
+    const std::string resolvedPath = p3d::ResolvePathCaseInsensitive(path);
+    if (ma_decoder_init_file(resolvedPath.c_str(), &decoderConfig, &g_musicDecoder) != MA_SUCCESS) {
         LOG("AudioEngine: failed to load music '%s'", path);
         return false;
     }

@@ -3299,16 +3299,16 @@ bool feCustomMenuMgr::DrawTitleScreen() {
     // so the effects track the logo's motion instead of staying static.
     const f32 t = m_titleScreenAnimSec;
     const f32 sway = std::sin(t * 0.9f);
-    const f32 bump = std::pow(0.5f + 0.5f * std::sin(t * 1.7f + 0.6f), 4.0f);
+    const f32 bump = std::pow(0.5f + 0.5f * std::sin(t * 1.7f + 0.6f), 2.0f);
     const f32 logoOffsetY = -(sway * 0.006f + bump * 0.014f) * drawH;
-    const f32 logoScale = 1.0f + bump * 0.02f;
+    const f32 logoScale = 1.0f + bump * 0.05f;
     const f32 logoHalfW = (drawW * logoScale) * 0.5f;
     const f32 logoHalfH = (drawH * logoScale) * 0.5f;
     const f32 logoLocalCenterX = drawW * 0.5f;
     const f32 logoLocalCenterY = drawH * 0.5f + logoOffsetY;
     const f32 tiltPitch = std::sin(t * 0.5f) * 0.05f;
-    const f32 tiltYaw = std::sin(t * 0.6f + 0.3f) * 0.09f;
-    const f32 tiltRoll = std::sin(t * 0.37f + 1.1f) * 0.025f;
+    const f32 tiltYaw = 0;//std::sin(t * 0.6f + 0.3f) * 0.09f;
+    const f32 tiltRoll = std::sin(t * 2.5f + 1.1f) * 0.015f;
     const f32 tiltFocal = logoHalfH * 6.0f;
 
     ScreenDraw::DrawColoredRect(0.0f, 0.0f, SCREEN_WIDTH, SCREEN_HEIGHT, 0, 0, 0, 255);

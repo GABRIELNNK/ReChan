@@ -8,6 +8,7 @@
 #include "p3d/context.h"
 #include "p3d/chunkfile.h"
 #include "p3d/inventory.h"
+#include "p3d/filepath.h"
 #include "pddi/pddidev.h"
 #include "pddi/pdditex.h"
 
@@ -33,7 +34,8 @@ tTexture* tTexture::LoadFromImagePath(const char* path, s32* outWidth, s32* outH
     int width = 0;
     int height = 0;
     int channels = 0;
-    unsigned char* rgbaBytes = stbi_load(path, &width, &height, &channels, 4);
+    const std::string resolvedPath = p3d::ResolvePathCaseInsensitive(path);
+    unsigned char* rgbaBytes = stbi_load(resolvedPath.c_str(), &width, &height, &channels, 4);
     if (!rgbaBytes || width <= 0 || height <= 0) {
         return nullptr;
     }

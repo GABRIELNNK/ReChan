@@ -3,6 +3,7 @@
 #ifdef MOD_LOADER
 
 #include "pc/log.h"
+#include "p3d/filepath.h"
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
@@ -228,7 +229,7 @@ JSONValue JSONDataLoader::LoadFromFile(const char* path) {
         return {};
     }
 
-    std::ifstream file(path);
+    std::ifstream file(p3d::ResolvePathCaseInsensitive(path));
     if (!file.is_open()) {
         LOG("[JSONDataLoader] Cannot open: %s", path);
         return {};

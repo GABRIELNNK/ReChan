@@ -10,6 +10,7 @@
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
 #include "p3d/texture.h"
+#include "p3d/filepath.h"
 #ifdef REAL_TEXTURE_RENDERING
 #include "extra/realtexture.h"
 #include "vendor/stb/stb_image.h"
@@ -85,7 +86,8 @@ static bool RegisterMaterialTexture(const cgltf_material* material, const char* 
     const std::filesystem::path glbDir = std::filesystem::path(glbPath).parent_path();
     const std::filesystem::path pngPath = (glbDir / uri).lexically_normal();
     int width = 0, height = 0, channels = 0;
-    unsigned char* rgba = stbi_load(pngPath.string().c_str(), &width, &height, &channels, 4);
+    const std::string resolvedPngPath = p3d::ResolvePathCaseInsensitive(pngPath.string());
+    unsigned char* rgba = stbi_load(resolvedPngPath.c_str(), &width, &height, &channels, 4);
     if (!rgba) return false;
     RealTextureRegistry::Instance().Register(tpage, cba, rgba, width, height, 0.0f, 0.0f, 1.0f, 1.0f);
     stbi_image_free(rgba);
@@ -324,13 +326,14 @@ OriginalSTree* GLTFLoader::LoadSTree(const char* path) {
     cgltf_options options = {};
     cgltf_data* data = nullptr;
 
-    cgltf_result result = cgltf_parse_file(&options, path, &data);
+    const std::string resolvedPath = p3d::ResolvePathCaseInsensitive(path);
+    cgltf_result result = cgltf_parse_file(&options, resolvedPath.c_str(), &data);
     if (result != cgltf_result_success) {
         LOG("[GLTFLoader] Failed to parse GLB: %s", path);
         return nullptr;
     }
 
-    result = cgltf_load_buffers(&options, data, path);
+    result = cgltf_load_buffers(&options, data, resolvedPath.c_str());
     if (result != cgltf_result_success) {
         LOG("[GLTFLoader] Failed to load GLB buffers: %s", path);
         cgltf_free(data);
@@ -412,13 +415,14 @@ OriginalGeo* GLTFLoader::LoadGeo(const char* path) {
     cgltf_options options = {};
     cgltf_data* data = nullptr;
 
-    cgltf_result result = cgltf_parse_file(&options, path, &data);
+    const std::string resolvedPath = p3d::ResolvePathCaseInsensitive(path);
+    cgltf_result result = cgltf_parse_file(&options, resolvedPath.c_str(), &data);
     if (result != cgltf_result_success) {
         LOG("[GLTFLoader] Failed to parse GLB: %s", path);
         return nullptr;
     }
 
-    result = cgltf_load_buffers(&options, data, path);
+    result = cgltf_load_buffers(&options, data, resolvedPath.c_str());
     if (result != cgltf_result_success) {
         LOG("[GLTFLoader] Failed to load GLB buffers: %s", path);
         cgltf_free(data);
@@ -479,13 +483,14 @@ OriginalETree* GLTFLoader::LoadETree(const char* path) {
     cgltf_options options = {};
     cgltf_data* data = nullptr;
 
-    cgltf_result result = cgltf_parse_file(&options, path, &data);
+    const std::string resolvedPath = p3d::ResolvePathCaseInsensitive(path);
+    cgltf_result result = cgltf_parse_file(&options, resolvedPath.c_str(), &data);
     if (result != cgltf_result_success) {
         LOG("[GLTFLoader] Failed to parse GLB: %s", path);
         return nullptr;
     }
 
-    result = cgltf_load_buffers(&options, data, path);
+    result = cgltf_load_buffers(&options, data, resolvedPath.c_str());
     if (result != cgltf_result_success) {
         LOG("[GLTFLoader] Failed to load GLB buffers: %s", path);
         cgltf_free(data);

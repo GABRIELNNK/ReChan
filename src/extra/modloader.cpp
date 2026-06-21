@@ -5,6 +5,7 @@
 
 #include "pc/log.h"
 #include "p3d/hash.h"
+#include "p3d/filepath.h"
 #include "vendor/stb/stb_image.h"
 #include <algorithm>
 #include <cstring>
@@ -38,7 +39,7 @@ static u32 ReadBE32(const u8* data) {
 
 static bool IsUnmodifiedRechanPng(const std::string& path, const u8* rgba, int width, int height) {
     if (!rgba || width <= 0 || height <= 0) return false;
-    std::ifstream file(path, std::ios::binary);
+    std::ifstream file(p3d::ResolvePathCaseInsensitive(path), std::ios::binary);
     std::vector<u8> png((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
     if (png.size() < 12) return false;
     size_t pos = 8;
@@ -178,7 +179,7 @@ static void WriteDefaultIni(const std::string& path) {
 
 static ModLoaderConfig ReadConfig(const std::string& path) {
     ModLoaderConfig config;
-    std::ifstream file(path);
+    std::ifstream file(p3d::ResolvePathCaseInsensitive(path));
     if (!file.is_open()) return config;
 
     std::string currentSection;
@@ -520,7 +521,8 @@ bool ModLoader::GetTextureOverrideRGBA(
     if (!path) return false;
 
     int channels;
-    unsigned char* px = stbi_load(path->c_str(), &outWidth, &outHeight, &channels, 4);
+    const std::string resolvedPath = p3d::ResolvePathCaseInsensitive(*path);
+    unsigned char* px = stbi_load(resolvedPath.c_str(), &outWidth, &outHeight, &channels, 4);
     if (!px) return false;
     if (IsUnmodifiedRechanPng(*path, px, outWidth, outHeight)) {
         stbi_image_free(px);
@@ -539,7 +541,8 @@ bool ModLoader::GetTextureOverridePixels(const char* scope, const char* name, s1
     if (!path) return false;
 
     int pw, ph, channels;
-    unsigned char* px = stbi_load(path->c_str(), &pw, &ph, &channels, 4);
+    const std::string resolvedPath = p3d::ResolvePathCaseInsensitive(*path);
+    unsigned char* px = stbi_load(resolvedPath.c_str(), &pw, &ph, &channels, 4);
     if (!px) return false;
     if (IsUnmodifiedRechanPng(*path, px, pw, ph)) {
         stbi_image_free(px);
@@ -576,7 +579,8 @@ bool ModLoader::GetIndexedTextureOverride(
     if (!path) return false;
 
     int pw, ph, channels;
-    unsigned char* px = stbi_load(path->c_str(), &pw, &ph, &channels, 4);
+    const std::string resolvedPath = p3d::ResolvePathCaseInsensitive(*path);
+    unsigned char* px = stbi_load(resolvedPath.c_str(), &pw, &ph, &channels, 4);
     if (!px) return false;
     if (IsUnmodifiedRechanPng(*path, px, pw, ph)) {
         stbi_image_free(px);
@@ -680,7 +684,8 @@ const std::string* ModLoader::GetDataPath(u32 crc) const {
 bool ModLoader::IsUnmodifiedTextureDump(const char* path) const {
     if (!path || !path[0]) return false;
     int width = 0, height = 0, channels = 0;
-    unsigned char* rgba = stbi_load(path, &width, &height, &channels, 4);
+    const std::string resolvedPath = p3d::ResolvePathCaseInsensitive(path);
+    unsigned char* rgba = stbi_load(resolvedPath.c_str(), &width, &height, &channels, 4);
     if (!rgba) return false;
     const bool unchanged = IsUnmodifiedRechanPng(path, rgba, width, height);
     stbi_image_free(rgba);
@@ -738,7 +743,7 @@ const std::string* ModLoader::FindSoundOverridePath(const char* scope, const cha
 // format AssetExporter::WritePCMWav produces, and what any common WAV editor
 // exports by default.
 static bool ReadWavPCM16(const std::string& path, std::vector<s16>& outPcm, u32& outSampleRate, u32& outChannels) {
-    std::ifstream file(path, std::ios::binary);
+    std::ifstream file(p3d::ResolvePathCaseInsensitive(path), std::ios::binary);
     if (!file.is_open()) return false;
 
     std::vector<u8> data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());

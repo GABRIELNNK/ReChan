@@ -1,5 +1,7 @@
 #include "gen/ccfile.h"
+#include "p3d/filepath.h"
 #include <stdio.h>
+#include <string>
 
 static constexpr uintptr_t kWriteHandleSentinel = 2;
 
@@ -81,7 +83,11 @@ s32 ccFile::Open(const char* path, u16 mode) {
         openMode = "ab";
     }
 
-    FILE* file = fopen(GetName(), openMode);
+    const bool shouldResolve = (mode & (OPEN_WRITE | OPEN_APPEND)) == 0;
+    const std::string resolvedPath = shouldResolve
+        ? p3d::ResolvePathCaseInsensitive(GetName())
+        : std::string(GetName());
+    FILE* file = fopen(resolvedPath.c_str(), openMode);
     if (file) {
         fseek(file, 0, SEEK_END);
         length = (s32)ftell(file);

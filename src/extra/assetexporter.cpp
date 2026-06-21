@@ -11,6 +11,7 @@
 #include "p3d/byteread.h"
 #include "p3d/hash.h"
 #include "p3d/texture.h"
+#include "p3d/filepath.h"
 #include "snd/adpcm.h"
 #include <algorithm>
 #include <cstdio>
@@ -75,7 +76,8 @@ void AssetExporter::ClearCatalog() {
 // Directory scanners
 
 void AssetExporter::ScanRCHARS() {
-    if (!std::filesystem::is_directory("RCHARS")) {
+    const std::string rcharsDir = p3d::ResolvePathCaseInsensitive("RCHARS");
+    if (!std::filesystem::is_directory(rcharsDir)) {
         LOG("[AssetExporter] RCHARS/ directory not found");
         return;
     }
@@ -88,7 +90,8 @@ void AssetExporter::ScanRCHARS() {
         char rrPath[256];
         std::snprintf(rrPath, sizeof(rrPath), "RCHARS/%s.RR", name);
 
-        if (!std::filesystem::exists(rrPath)) continue;
+        const std::string resolvedRrPath = p3d::ResolvePathCaseInsensitive(rrPath);
+        if (!std::filesystem::exists(resolvedRrPath)) continue;
 
         u32 crc = p3dHash(name);
 
@@ -99,7 +102,7 @@ void AssetExporter::ScanRCHARS() {
             std::transform(entry.name.begin(), entry.name.end(), entry.name.begin(),
                            [](char c) { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); });
             entry.category = AssetCategory::SkeletalMesh;
-            entry.filePath = rrPath;
+            entry.filePath = resolvedRrPath;
             entry.crc = crc;
             entry.resourceIndex = 0;
             m_entries.push_back(std::move(entry));
@@ -109,7 +112,8 @@ void AssetExporter::ScanRCHARS() {
 }
 
 void AssetExporter::ScanRCHARS_Textures() {
-    if (!std::filesystem::is_directory("RCHARS")) return;
+    const std::string rcharsDir = p3d::ResolvePathCaseInsensitive("RCHARS");
+    if (!std::filesystem::is_directory(rcharsDir)) return;
 
     for (s32 type = 0; type < 29; type++) {
         const char* name = g_charNameTable[type];
@@ -117,7 +121,8 @@ void AssetExporter::ScanRCHARS_Textures() {
 
         char rrPath[256];
         std::snprintf(rrPath, sizeof(rrPath), "RCHARS/%s.RR", name);
-        if (!std::filesystem::exists(rrPath)) continue;
+        const std::string resolvedRrPath = p3d::ResolvePathCaseInsensitive(rrPath);
+        if (!std::filesystem::exists(resolvedRrPath)) continue;
 
         std::string lowerName = name;
         std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(),
@@ -131,7 +136,7 @@ void AssetExporter::ScanRCHARS_Textures() {
             AssetEntry entry;
             entry.name = texName;
             entry.category = AssetCategory::Texture;
-            entry.filePath = rrPath;
+            entry.filePath = resolvedRrPath;
             entry.crc = p3dHash(texName);
             entry.resourceIndex = resIdx;
             m_entries.push_back(std::move(entry));
@@ -253,7 +258,7 @@ void AssetExporter::ScanDataDirectory() {
 // File I/O helpers
 
 std::vector<u8> AssetExporter::ReadFileBytes(const std::string& path) {
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    std::ifstream file(p3d::ResolvePathCaseInsensitive(path), std::ios::binary | std::ios::ate);
     if (!file.is_open()) return {};
 
     size_t size = static_cast<size_t>(file.tellg());

@@ -23,12 +23,3 @@ fi
 
 "$premake" --os=linux gmake
 make -C build config="$config" -j"${JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)}"
-
-# Keep a relocatable freedesktop launcher beside the executable. Its %k field
-# resolves the desktop file itself, so moving the complete directory does not
-# bake the original build path into the launcher.
-repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
-mkdir -p "$repo_root/bin"
-cp "$repo_root/res/rechan.desktop" "$repo_root/bin/rechan.desktop"
-cp "$repo_root/src/pc/rechan.png" "$repo_root/bin/rechan.png"
-chmod +x "$repo_root/bin/rechan.desktop"

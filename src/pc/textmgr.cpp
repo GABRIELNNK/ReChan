@@ -2,6 +2,7 @@
 #include "pc/textbackend.h"
 #include "gen/common.h"
 #include "pc/log.h"
+#include "p3d/filepath.h"
 #if CUSTOM_TEXT
 #include "extra/customtext.h"
 #endif
@@ -246,11 +247,12 @@ bool TextManager::ReadWholeFile(const char* path, std::vector<u8>& outData) {
         return false;
     }
 
+    const std::string resolvedPath = p3d::ResolvePathCaseInsensitive(path);
     FILE* file = nullptr;
 #if defined(_MSC_VER)
-    fopen_s(&file, path, "rb");
+    fopen_s(&file, resolvedPath.c_str(), "rb");
 #else
-    file = fopen(path, "rb");
+    file = fopen(resolvedPath.c_str(), "rb");
 #endif
     if (!file) {
         return false;

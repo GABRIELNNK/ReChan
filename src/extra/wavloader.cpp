@@ -3,6 +3,7 @@
 #ifdef MOD_LOADER
 
 #include "pc/log.h"
+#include "p3d/filepath.h"
 #include <cstring>
 #include <fstream>
 #include <vector>
@@ -40,7 +41,8 @@ WAVAudioBuffer WAVLoader::LoadFromFile(const char* path) {
         return result;
     }
 
-    std::ifstream file(path, std::ios::binary);
+    const std::string resolvedPath = p3d::ResolvePathCaseInsensitive(path);
+    std::ifstream file(resolvedPath, std::ios::binary);
     if (!file.is_open()) {
         LOG("[WAVLoader] Cannot open: %s", path);
         return result;

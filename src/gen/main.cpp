@@ -199,7 +199,7 @@ int main(int argc, char** argv) {
         g_textManager->Init();
         TextFontDesc desc = {};
         desc.name = "Menu";
-        desc.path = "pc/fonts/YIKES!__.ttf";
+        desc.path = "pc/fonts/YIKES!__.TTF";
         desc.pixelHeight = 48;
         if (!g_textManager->LoadFont(desc)) {
             LOG("[TextManager] Failed to load menu font: %s", desc.path);
