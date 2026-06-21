@@ -594,7 +594,7 @@ bool GameSettings::Load(const char* path) {
                 }
                 *close = '\0';
                 char* section = TrimInPlace(trimmed + 1);
-                strncpy_s(currentSection, sizeof(currentSection), section, _TRUNCATE);
+                std::snprintf(currentSection, sizeof(currentSection), "%s", section);
                 continue;
             }
 

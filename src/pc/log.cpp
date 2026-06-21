@@ -42,20 +42,10 @@ void Log::LogMessageV(const char* fmt, va_list args) {
     std::lock_guard<std::mutex> lock(m_Mutex);
 
     char messageBuffer[2048];
-
-#if defined(_MSC_VER)
-    vsnprintf_s(messageBuffer, sizeof(messageBuffer), _TRUNCATE, fmt, args);
-#else
-    vsnprintf(messageBuffer, sizeof(messageBuffer), fmt, args);
-#endif
+    std::vsnprintf(messageBuffer, sizeof(messageBuffer), fmt, args);
 
     char finalBuffer[2050];
-
-#if defined(_MSC_VER)
-    snprintf(finalBuffer, sizeof(finalBuffer), "%s\n", messageBuffer);
-#else
     std::snprintf(finalBuffer, sizeof(finalBuffer), "%s\n", messageBuffer);
-#endif
 
     if (m_File.is_open()) {
         m_File << finalBuffer;
