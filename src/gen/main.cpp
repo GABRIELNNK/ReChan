@@ -10,6 +10,7 @@
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
 #include "pc/audio.h"
+#include "pc/crashreporter.h"
 #include "pc/debugui.h"
 #include "pc/inputaction.h"
 #include "pc/rechan_icon_embedded.h"
@@ -118,7 +119,14 @@ static bool OnWndProc(const pddiWndMessage& msg) {
 }
 
 int main(int argc, char** argv) {
+#if !defined(NDEBUG)
     Log::Get().Init();
+#endif
+    CrashReporter::Install();
+
+    if (argc >= 2 && std::strcmp(argv[1], "--test-crash-reporter") == 0) {
+        CrashReporter::TriggerTestCrash();
+    }
 
     // Headless verification/export path used by automated round-trip checks
     // and mod authors who want the same output as the DebugUI button.
@@ -130,7 +138,9 @@ int main(int argc, char** argv) {
         exporter.BuildCatalog();
         const int exported = exporter.ExportAllCategories(outputDir);
         LOG("[AssetExporter] Headless export completed: %d asset bundle(s)", exported);
+#if !defined(NDEBUG)
         Log::Get().Shutdown();
+#endif
         return exported > 0 ? 0 : 2;
     }
 
@@ -138,7 +148,9 @@ int main(int argc, char** argv) {
     if (argc >= 3 && std::strcmp(argv[1], "--verify-png-baseline") == 0) {
         const bool unchanged = ModLoader::Instance().IsUnmodifiedTextureDump(argv[2]);
         LOG("[ModLoader] PNG baseline %s: %s", unchanged ? "matched" : "not matched", argv[2]);
+#if !defined(NDEBUG)
         Log::Get().Shutdown();
+#endif
         return unchanged ? 0 : 5;
     }
 #endif
@@ -164,7 +176,9 @@ int main(int argc, char** argv) {
         platform->DestroyContext(ctx);
         tPlatform::Destroy();
         LOG("[GLTFLoader] Verification %s: %s", valid ? "passed" : "failed", argv[2]);
+#if !defined(NDEBUG)
         Log::Get().Shutdown();
+#endif
         return valid ? 0 : 3;
     }
     if (argc >= 3 && std::strcmp(argv[1], "--verify-stree") == 0) {
@@ -176,7 +190,9 @@ int main(int argc, char** argv) {
         platform->DestroyContext(ctx);
         tPlatform::Destroy();
         LOG("[GLTFLoader] Skinned verification %s: %s", valid ? "passed" : "failed", argv[2]);
+#if !defined(NDEBUG)
         Log::Get().Shutdown();
+#endif
         return valid ? 0 : 4;
     }
 #endif
@@ -330,7 +346,9 @@ int main(int argc, char** argv) {
 #endif
 
     LOG("Clean shutdown");
+#if !defined(NDEBUG)
     Log::Get().Shutdown();
+#endif
 
     return 0;
 }

@@ -145,7 +145,9 @@ void WorldPoints_AddPoint(DBPoint* pt) {
         WorldPointNode* node = new WorldPointNode();
         node->pos = pt->pos;
         node->parValue = 9999;
-        node->SetName(pt->GetName(), 0);
+        // Must own a copy: pt (DBPoint) is deleted by Database::Close() shortly
+        // after Populate(), which would otherwise leave this name dangling.
+        node->SetName(pt->GetName(), 1);
 
         const DBAttrib* a15 = pt->FindAttrib(15);
         if (a15) {
@@ -521,7 +523,9 @@ Thing* AI::AddThingNoTagList(const char* name, u16 type,
     }
 
     if (name) {
-        thing->SetName(name, 0);
+        // Must own a copy: 'name' typically points into a DBPoint/DBRoot owned
+        // string that Database::Close() frees shortly after Populate() runs.
+        thing->SetName(name, 1);
     }
 
     if (root) {

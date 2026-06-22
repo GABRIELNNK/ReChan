@@ -58,7 +58,7 @@ your own copy (`.bin` or `.iso`) in a `discimage` folder beside the executable:
 rechan/
 |-- rechan.exe       # Windows (use "rechan" on Linux)
 `-- discimage/
-    `-- game.bin     # or game.iso
+    `-- game.bin     # or game.iso, file name doesn't matter
 ```
 
 Keep only one disc image in `discimage`. On first launch, rechan verifies the
@@ -107,6 +107,17 @@ No. That is not a goal of this project.
 **Can I contribute?**  
 Yes. Documentation, data formats, and behavior analysis are all welcome. See
 the [build guide](docs/BUILDING.md) to get started.
+
+## Crash reports
+
+Fatal crashes create `minidumps/rechan-crash-<process-id>.txt` and ask the user
+to open a GitHub issue. Windows also creates a matching `.dmp` minidump in that
+folder. Debug reports append `rechan.log`; Release builds compile out logging
+entirely. Reports are stored locally and are never uploaded automatically.
+
+Maintainers can verify the packaged crash handler with
+`--test-crash-reporter`. Set `RECHAN_CRASH_REPORTER_NO_DIALOG=1` when running
+that check in automation.
 
 ## License
 MIT License.

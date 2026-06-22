@@ -343,7 +343,7 @@ void Butch::SetActionState(u32 state, s32 param) {
         field344 = 0;
         stateDispatch = SD_BUTCH_THROW_POT;
         field348 = 8;
-        Log::Get().LogMessage("[ChefPot] Butch::SetActionState AS_BUTCH_THROW_POT param=%d cmd=0x%08X right=%p left=%p",
+        LOG("[ChefPot] Butch::SetActionState AS_BUTCH_THROW_POT param=%d cmd=0x%08X right=%p left=%p",
             param,
             static_cast<u32>(commandBits),
             rightHandObj,
@@ -425,7 +425,7 @@ void Butch::_Charge() {
         || (((cb >> GA_GRAB_FORWARD) & 1u) != 0);
 
     if (wantsPickupAction) {
-        Log::Get().LogMessage("[ChefPot] _Charge pickupAction cmd=0x%08X right=%p left=%p",
+        LOG("[ChefPot] _Charge pickupAction cmd=0x%08X right=%p left=%p",
             cb,
             rightHandObj,
             leftHandObj);
@@ -477,7 +477,7 @@ void Butch::_ThrowPot() {
 
     if (anim->loopCount != 0) {
         if (rightHandObj) {
-            Log::Get().LogMessage("[ChefPot] _ThrowPot looped owner=%p frame=%d held=%p name='%s' type=%u",
+            LOG("[ChefPot] _ThrowPot looped owner=%p frame=%d held=%p name='%s' type=%u",
                 this,
                 static_cast<s16>((u32)anim->currentFrame >> 16),
                 rightHandObj,

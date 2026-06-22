@@ -28,4 +28,8 @@ private:
     std::mutex m_Mutex;
 };
 
+#if defined(NDEBUG)
+#define LOG(...) ((void)0)
+#else
 #define LOG(fmt, ...) Log::Get().LogMessage(fmt, ##__VA_ARGS__)
+#endif

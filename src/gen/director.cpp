@@ -1818,9 +1818,9 @@ void Director::Process() {
 
             case DirectorOpcode::RemoveNisEffect:
                 scriptPtr += 1;
-                Log::Get().LogMessage("[ChefPotNIS] RemoveNisEffect opcode");
+                LOG("[ChefPotNIS] RemoveNisEffect opcode");
                 if (WEffect* effect = WEffect::Find(kDirectorNisEffectHash)) {
-                    Log::Get().LogMessage(
+                    LOG(
                         "[ChefPotNIS] RemoveNisEffect found hash=0x%08X inList=%d",
                         kDirectorNisEffectHash,
                         effect->inEffectsList);
@@ -1896,7 +1896,7 @@ void Director::Process() {
 
             case DirectorOpcode::ModelFunc:
                 if (g_modelFuncLogBudget > 0) {
-                    Log::Get().LogMessage(
+                    LOG(
                         "[ChefPotNIS] ModelFunc dispatch scriptState=%d subOpRaw=%d subOpHex=0x%08X",
                         scriptState,
                         scriptPtr[1],
@@ -2159,7 +2159,7 @@ void Director::Process() {
                 WorldPointNode* wpn = WorldPoints_GetNISPoint(static_cast<u32>(pointIdx));
                 if (wpn) {
                     const char* pointName = wpn->GetName() ? wpn->GetName() : "null";
-                    Log::Get().LogMessage(
+                    LOG(
                         "[ChefPotNIS] SetNisPoint crc=0x%08X name='%s' pos=(%d,%d,%d)",
                         static_cast<u32>(pointIdx),
                         pointName,
@@ -2180,7 +2180,7 @@ void Director::Process() {
                     }
                 }
                 else {
-                    Log::Get().LogMessage(
+                    LOG(
                         "[ChefPotNIS] SetNisPoint crc=0x%08X unresolved",
                         static_cast<u32>(pointIdx));
                 }

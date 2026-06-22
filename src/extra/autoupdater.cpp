@@ -15,26 +15,82 @@
 #include <limits.h>
 #endif
 
+#ifdef RC_PLATFORM_WINDOWS
 static std::string shellExec(const char* cmd) {
     std::string result;
-    FILE* pipe =
-#ifdef RC_PLATFORM_WINDOWS
-        _popen(cmd, "r");
+    SECURITY_ATTRIBUTES security = { sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE };
+    HANDLE readPipe = nullptr;
+    HANDLE writePipe = nullptr;
+    if (!CreatePipe(&readPipe, &writePipe, &security, 0)) return result;
+    SetHandleInformation(readPipe, HANDLE_FLAG_INHERIT, 0);
+
+    HANDLE nullInput = CreateFileA("NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                   &security, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    HANDLE nullError = CreateFileA("NUL", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                   &security, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+
+    STARTUPINFOA startup = {};
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+    startup.wShowWindow = SW_HIDE;
+    startup.hStdInput = nullInput;
+    startup.hStdOutput = writePipe;
+    startup.hStdError = nullError;
+
+    PROCESS_INFORMATION process = {};
+    std::string commandLine(cmd);
+    const BOOL started = CreateProcessA(nullptr, commandLine.data(), nullptr, nullptr, TRUE,
+                                        CREATE_NO_WINDOW, nullptr, nullptr, &startup, &process);
+    CloseHandle(writePipe);
+    if (nullInput != INVALID_HANDLE_VALUE) CloseHandle(nullInput);
+    if (nullError != INVALID_HANDLE_VALUE) CloseHandle(nullError);
+
+    if (!started) {
+        CloseHandle(readPipe);
+        return result;
+    }
+
+    char buffer[4096];
+    DWORD bytesRead = 0;
+    while (ReadFile(readPipe, buffer, sizeof(buffer), &bytesRead, nullptr) && bytesRead > 0) {
+        result.append(buffer, bytesRead);
+    }
+    CloseHandle(readPipe);
+    WaitForSingleObject(process.hProcess, INFINITE);
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    return result;
+}
+
+static bool launchHidden(const std::string& commandLine) {
+    STARTUPINFOA startup = {};
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESHOWWINDOW;
+    startup.wShowWindow = SW_HIDE;
+
+    PROCESS_INFORMATION process = {};
+    std::string mutableCommandLine = commandLine;
+    const BOOL started = CreateProcessA(nullptr, mutableCommandLine.data(), nullptr, nullptr,
+                                        FALSE, CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP,
+                                        nullptr, nullptr, &startup, &process);
+    if (!started) return false;
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    return true;
+}
 #else
-        popen(cmd, "r");
-#endif
+static std::string shellExec(const char* cmd) {
+    std::string result;
+    FILE* pipe = popen(cmd, "r");
     if (!pipe) return result;
     char buf[4096];
     while (fgets(buf, sizeof(buf), pipe)) {
         result += buf;
     }
-#ifdef RC_PLATFORM_WINDOWS
-    _pclose(pipe);
-#else
     pclose(pipe);
-#endif
     return result;
 }
+#endif
 
 static bool fileExists(const char* path) {
 #ifdef RC_PLATFORM_WINDOWS
@@ -308,8 +364,8 @@ void AutoUpdater::InstallAndRelaunch() {
         fprintf(f, "del \"%%~f0\"\r\n");
         fclose(f);
     }
-    std::string cmd = "cmd /c start \"\" \"" + scriptPath + "\"";
-    system(cmd.c_str());
+    std::string cmd = "cmd.exe /D /S /C \"\"" + scriptPath + "\"\"";
+    launchHidden(cmd);
 #else
     std::string scriptPath = getTempDir() + "rechan_update.sh";
     FILE* f = fopen(scriptPath.c_str(), "w");

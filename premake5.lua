@@ -47,6 +47,7 @@ project "rechan"
         defines { "RC_PLATFORM_WINDOWS" }
         links {
             "opengl32",
+            "dbghelp",
             "cfgmgr32",
             "imm32",
             "setupapi",
@@ -56,6 +57,7 @@ project "rechan"
 
     filter "system:linux"
         defines { "RC_PLATFORM_LINUX", "PLATFORM_LINUX" }
+        linkoptions { "-rdynamic" }
         links {
             "GL", "X11", "Xcursor", "Xi", "Xinerama", "Xrandr",
             "SDL2", "pthread", "dl", "m",
@@ -70,3 +72,9 @@ project "rechan"
         defines { "NDEBUG" }
         runtime "Release"
         optimize "on"
+
+    filter { "system:windows", "configurations:Release" }
+        kind "WindowedApp"
+        entrypoint "mainCRTStartup"
+
+    filter {}

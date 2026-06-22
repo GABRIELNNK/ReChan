@@ -12,7 +12,7 @@
 
 // PSX: _13SubZoneVolumeP8DBVolume (ACTIVEZN.CPP:170)
 SubZoneVolume::SubZoneVolume(DBVolume* vol) {
-    SetName(vol->GetName(), 0);
+    SetName(vol->GetName(), 1);
     box.SetBox(vol);
 }
 
@@ -25,7 +25,7 @@ bool SubZoneVolume::IsInSubZoneVolume(Thing* thing) const {
 
 // PSX: _10ActiveZoneP8DBVolumeUl (ACTIVEZN.CPP:143)
 ActiveZone::ActiveZone(DBVolume* vol) {
-    SetName(vol->GetName(), 0);
+    SetName(vol->GetName(), 1);
 
     overlordType = 0;
     overlordValue = 0;
