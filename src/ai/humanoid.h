@@ -438,6 +438,7 @@ public:
     void SetIdleAnimation(s32 loopType, s32 doTransition);
     bool TestIdleAnimation();
     s32 LoadDialog(u32 dialogID, s32 priority);
+    void LoadEnemyTaunts();
     s32 PlayDialog(u32 dialogID, s32 priority);
     s32 PlayDialogBasedOnPriority(s32 minPriority, s32 maxPriority);
     s32 KillDialog(s32 force, s32 minPriority, s32 maxPriority);
@@ -542,6 +543,14 @@ public:
     virtual void _ClimbLadder();
     virtual void _Hotfoot();
     virtual void _NISMode();
+    // PSX Butch-only vtable slots (BOSS.CPP cases 74-76); no-op on base Humanoid.
+    virtual void _Stomp();
+    virtual void _Charge();
+    virtual void _ThrowPot();
+    // PSX Dante-only vtable slots (BOSS.CPP missile states); no-op on base Humanoid.
+    virtual void _MissilePrepare();
+    virtual void _MissileAttack();
+    virtual void _TargetMissileAttack();
     virtual void CreateSound();
     virtual void ReleaseSound();
     virtual void DoJump();

@@ -137,17 +137,12 @@ static WEffect* FindBossSpotLight() {
     return WEffect::Find(p3dHash(PAUL_SPOTLIGHT_NAME));
 }
 
-static s32 GetFaceAngleDataValue(const Humanoid* humanoid, s32 offset) {
-    const u8* bytes = reinterpret_cast<const u8*>(humanoid->faceAngleData);
-    return (s32)(*reinterpret_cast<const s16*>(bytes + offset));
+static s32 GetFaceAngleDataForwardAngle(const Behaviour* self) {
+    return self->animConfigPtr ? self->animConfigPtr->runningSpeed : 0;
 }
 
-static s32 GetFaceAngleDataForwardAngle(const Humanoid* humanoid) {
-    return GetFaceAngleDataValue(humanoid, 0x2C);
-}
-
-static s32 GetFaceAngleDataBackAngle(const Humanoid* humanoid) {
-    return GetFaceAngleDataValue(humanoid, 0x2E);
+static s32 GetFaceAngleDataBackAngle(const Behaviour* self) {
+    return self->animConfigPtr ? self->animConfigPtr->strafingSpeed : 0;
 }
 
 static bool ShouldAdvanceDantePhase(const Humanoid* humanoid, s32 scale) {
@@ -753,6 +748,10 @@ void Behaviour::GrontarDMS(Behaviour* self) {
         return;
     }
 
+    if (g_directorActive != 0) {
+        return;
+    }
+
     Humanoid* owner = self->owner;
     Player* player = Player::s_player;
     if (!player) {
@@ -777,27 +776,23 @@ void Behaviour::GrontarDMS(Behaviour* self) {
         comboStateB = 0;
     };
 
-    if (!self->InActiveZone()) {
-        if (distanceToPlayer < GRONTAR_CLOSE_ATTACK_DIST && !IsPlayerAggressiveCombatState(player->actionState)) {
-            const s32 playerInField = IsPointInFieldOf(player->pos, owner->pos, owner->orientation.y, 0x2AAA, 0x2AAA);
-            const s32 randomAction = (s32)rmRangedRandom(100);
-            if (playerInField != 0 && randomAction < 75) {
-                owner->RequestAction(15);
-            }
-            else {
-                self->ComplexAttack();
-            }
-
-            resetComboState();
-            return;
-        }
-
+    // Zone membership only matters while he hasn't engaged the player yet:
+    // at close/mid range he must keep fighting regardless of which side of
+    // the (boundary-adjacent, easy to straddle mid-fight) zone box he's on.
+    // Gating mid-range combat on InActiveZone() made him flicker between
+    // chasing the player and snapping toward a fixed zone-center point every
+    // time he crossed the box edge during a real fight.
+    if (!self->InActiveZone() && distanceToPlayer >= GRONTAR_FAR_ATTACK_DIST) {
         LVector zoneCenter = {};
         owner->activeZone->GetActiveZoneCenterPoint(zoneCenter);
         owner->FaceThingDesired(player);
         owner->FacePointDesired(zoneCenter);
-        owner->moveSpeed = (s16)self->animConfigPtr->strafingSpeed;
-        owner->RequestAction(6);
+        // GA_STRAFE(6) routes through AS_STRAFE, which has no locomotion of its
+        // own for Grontar (see Grontar::_Taunt/_DiveRoll dispatch); GA_MOVE(2)
+        // is what _Run() actually applies AddForce for, same as the far-distance
+        // approach branch below.
+        owner->moveSpeed = (s16)self->animConfigPtr->runningSpeed;
+        owner->RequestAction(2);
 
         resetComboState();
         return;
@@ -880,7 +875,8 @@ void Behaviour::GrontarDMS(Behaviour* self) {
             return;
         }
 
-        owner->RequestAction(1);
+        owner->moveSpeed = (s16)self->animConfigPtr->runningSpeed;
+        owner->RequestAction(2);
         return;
     }
 
@@ -894,7 +890,8 @@ void Behaviour::GrontarDMS(Behaviour* self) {
         return;
     }
 
-    owner->RequestAction(1);
+    owner->moveSpeed = (s16)self->animConfigPtr->runningSpeed;
+    owner->RequestAction(2);
 }
 
 // PSX: _PaulDMS__9Behaviour (BEHAVEB.CPP:950, 0x8001D7CC)
@@ -1196,7 +1193,13 @@ void Behaviour::OscarDMS(Behaviour* self) {
 
     const s32 ownerFacing = owner->orientation.y;
     const s32 ownerToPlayerFacing = PsxClipAngle360(ownerFacing - player->orientation.y);
-    if ((u32)(ownerToPlayerFacing - OSCAR_ANGLE_WINDOW_START) <= (u32)OSCAR_ANGLE_WINDOW_RANGE) {
+    // PSX (0x8001E294-0x8001E2B0): sltu against 0xC38E branches to the
+    // circling path when v1 <= 0xC38E, so the flag is set on the > side, not
+    // <=. This is a narrow ~85 deg window around 0 (nearly head-on), not the
+    // wide ~275 deg middle range the inverted comparison previously matched
+    // here, which made Oscar take the fast direct-chase branch almost always
+    // instead of mostly circling/feinting at half speed.
+    if ((u32)(ownerToPlayerFacing - OSCAR_ANGLE_WINDOW_START) > (u32)OSCAR_ANGLE_WINDOW_RANGE) {
         playerFacingFlag = 1;
     }
 
@@ -1207,7 +1210,10 @@ void Behaviour::OscarDMS(Behaviour* self) {
             const s32 distanceToHenchman = owner->DistanceFromPoint(henchmanPos);
             const s32 sideFacing = ownerFacing + 0x4000;
 
-            if (IsPointInFieldOf(henchmanPos, ownerPos, sideFacing, 0x38E, 0x38E)
+            // PSX (0x8001E294-0x8001E330): both field-of-view probes use
+            // ownerFacing, not sideFacing. sideFacing is only used by the
+            // navDecision probe below.
+            if (IsPointInFieldOf(henchmanPos, ownerPos, ownerFacing, 0x38E, 0x38E)
                 && IsPointInFieldOf(player->pos, ownerPos, ownerFacing, 0x38E, 0x38E)
                 && distanceToPlayer < distanceToHenchman) {
                 henchmanSupportFlag = 1;
@@ -1228,7 +1234,7 @@ void Behaviour::OscarDMS(Behaviour* self) {
             return;
         }
 
-        owner->moveSpeed = GetFaceAngleDataForwardAngle(owner);
+        owner->moveSpeed = GetFaceAngleDataForwardAngle(self);
 
         s32 floorDelta = self->LookAheadFloorCheck(0, 0x200, 0x100);
         if (floorDelta < 0) {
@@ -1257,13 +1263,19 @@ void Behaviour::OscarDMS(Behaviour* self) {
         targetingBossFlag = 1;
     }
 
-    if (playerFacingFlag != 0 || targetingBossFlag != 0 || OscarsHenchman != nullptr) {
+    // PSX (0x8001E45C-0x8001E48C): bnez branches to the henchman/circling
+    // path only when OscarsHenchman is non-null; falls through to this fast
+    // chase path otherwise. So the OR condition is henchman == nullptr, not
+    // != nullptr -- a solo Oscar (no henchman alive) goes straight to the
+    // relentless chase, while a backed-up Oscar gets the circling/retreat
+    // tree below.
+    if (playerFacingFlag != 0 || targetingBossFlag != 0 || OscarsHenchman == nullptr) {
         if (distanceToPlayer <= OSCAR_CLOSE_DIST) {
             owner->RequestAction(8);
             return;
         }
 
-        owner->moveSpeed = GetFaceAngleDataForwardAngle(owner);
+        owner->moveSpeed = GetFaceAngleDataForwardAngle(self);
 
         s32 floorDelta = self->LookAheadFloorCheck(0, 0x200, 0x100);
         if (floorDelta < 0) {
@@ -1272,7 +1284,7 @@ void Behaviour::OscarDMS(Behaviour* self) {
 
         if ((u32)(floorDelta - 0x100) < 0x100u) {
             owner->RequestAction(3);
-            owner->moveSpeed = GetFaceAngleDataForwardAngle(owner);
+            owner->moveSpeed = GetFaceAngleDataForwardAngle(self);
 
             self->nextHandlerThisOffset = 0;
             self->nextHandlerDispatch = -1;
@@ -1295,7 +1307,7 @@ void Behaviour::OscarDMS(Behaviour* self) {
     }
 
     if (distanceToPlayer <= OSCAR_MID_DIST) {
-        owner->moveSpeed = GetFaceAngleDataBackAngle(owner);
+        owner->moveSpeed = GetFaceAngleDataBackAngle(self);
         owner->SetDesiredMoveDirection(owner->faceAngle + 0x8000);
         owner->SetTarget(player);
         owner->RequestAction(6);
@@ -1332,7 +1344,7 @@ void Behaviour::OscarDMS(Behaviour* self) {
         }
 
         owner->RequestAction(3);
-        owner->moveSpeed = GetFaceAngleDataForwardAngle(owner);
+        owner->moveSpeed = GetFaceAngleDataForwardAngle(self);
 
         self->nextHandlerThisOffset = 0;
         self->nextHandlerDispatch = -1;
@@ -1347,23 +1359,20 @@ void Behaviour::OscarDMS(Behaviour* self) {
         return;
     }
 
-    if (self->navDecision == 2) {
-        if (wallCheck(owner, ownerFacing - 0x4000) != 0 || wallCheck(owner, ownerFacing - 0x6000) != 0) {
-            owner->FaceThingDesired(player);
-            owner->RequestAction(0x15);
-            return;
-        }
-    }
-    else {
-        if (wallCheck(owner, ownerFacing + 0x4000) != 0 || wallCheck(owner, ownerFacing + 0x6000) != 0) {
-            owner->FaceThingDesired(player);
-            owner->RequestAction(0x15);
-            return;
-        }
+    // PSX: this wall probe's navDecision==2 comparison reuses $v0 left over
+    // from the floor-delta range check above (always 0 here), not a fresh
+    // load of the sentinel 2 like the earlier navDecision branch has. So in
+    // the shipped binary this branch is dead code -- it always takes the
+    // +0x4000/+0x6000 probe, regardless of navDecision. Confirmed in both
+    // OscarDMS (0x8001E6E8) and OscarHenchmanDMS (0x8001ECEC).
+    if (wallCheck(owner, ownerFacing + 0x4000) != 0 || wallCheck(owner, ownerFacing + 0x6000) != 0) {
+        owner->FaceThingDesired(player);
+        owner->RequestAction(0x15);
+        return;
     }
 
     owner->SetTarget(player);
-    owner->moveSpeed = GetFaceAngleDataBackAngle(owner);
+    owner->moveSpeed = GetFaceAngleDataBackAngle(self);
     owner->RequestAction(6);
 
     s32 moveDirection = owner->faceAngle;
@@ -1464,7 +1473,7 @@ void Behaviour::OscarHenchmanDMS(Behaviour* self) {
             return;
         }
 
-        owner->moveSpeed = GetFaceAngleDataForwardAngle(owner);
+        owner->moveSpeed = GetFaceAngleDataForwardAngle(self);
 
         s32 floorDelta = self->LookAheadFloorCheck(0, 0x200, 0x100);
         if (floorDelta < 0) {
@@ -1473,7 +1482,7 @@ void Behaviour::OscarHenchmanDMS(Behaviour* self) {
 
         if ((u32)(floorDelta - 0x100) < 0x100u) {
             owner->RequestAction(3);
-            owner->moveSpeed = GetFaceAngleDataForwardAngle(owner);
+            owner->moveSpeed = GetFaceAngleDataForwardAngle(self);
 
             self->nextHandlerThisOffset = 0;
             self->nextHandlerDispatch = -1;
@@ -1496,7 +1505,7 @@ void Behaviour::OscarHenchmanDMS(Behaviour* self) {
     }
 
     if (distanceToPlayer <= OSCAR_MID_DIST) {
-        owner->moveSpeed = GetFaceAngleDataBackAngle(owner);
+        owner->moveSpeed = GetFaceAngleDataBackAngle(self);
         owner->SetDesiredMoveDirection(owner->faceAngle + 0x8000);
         owner->RequestAction(6);
         return;
@@ -1525,7 +1534,7 @@ void Behaviour::OscarHenchmanDMS(Behaviour* self) {
             owner->SetDesiredMoveDirection(ownerFacing + 0x4000);
         }
 
-        owner->moveSpeed = GetFaceAngleDataForwardAngle(owner);
+        owner->moveSpeed = GetFaceAngleDataForwardAngle(self);
         owner->RequestAction(3);
 
         self->nextHandlerThisOffset = 0;
@@ -1538,23 +1547,20 @@ void Behaviour::OscarHenchmanDMS(Behaviour* self) {
         return;
     }
 
-    if (self->navDecision == 2) {
-        if (wallCheck(owner, ownerFacing - 0x4000) != 0 || wallCheck(owner, ownerFacing - 0x6000) != 0) {
-            owner->FaceThingDesired(player);
-            owner->RequestAction(0x15);
-            return;
-        }
-    }
-    else {
-        if (wallCheck(owner, ownerFacing + 0x4000) != 0 || wallCheck(owner, ownerFacing + 0x6000) != 0) {
-            owner->FaceThingDesired(player);
-            owner->RequestAction(0x15);
-            return;
-        }
+    // PSX: this wall probe's navDecision==2 comparison reuses $v0 left over
+    // from the floor-delta range check above (always 0 here), not a fresh
+    // load of the sentinel 2 like the earlier navDecision branch has. So in
+    // the shipped binary this branch is dead code -- it always takes the
+    // +0x4000/+0x6000 probe, regardless of navDecision. Confirmed in both
+    // OscarDMS (0x8001E6E8) and OscarHenchmanDMS (0x8001ECEC).
+    if (wallCheck(owner, ownerFacing + 0x4000) != 0 || wallCheck(owner, ownerFacing + 0x6000) != 0) {
+        owner->FaceThingDesired(player);
+        owner->RequestAction(0x15);
+        return;
     }
 
     owner->SetTarget(player);
-    owner->moveSpeed = GetFaceAngleDataBackAngle(owner);
+    owner->moveSpeed = GetFaceAngleDataBackAngle(self);
     owner->RequestAction(6);
 }
 
@@ -1656,7 +1662,7 @@ void Behaviour::DanteDMS_Phase1(Behaviour* self) {
             return;
         }
 
-        owner->moveSpeed = GetFaceAngleDataForwardAngle(owner);
+        owner->moveSpeed = GetFaceAngleDataForwardAngle(self);
         owner->RequestAction(2);
         return;
     }
@@ -1867,7 +1873,7 @@ void Behaviour::DanteDMS_Phase3(Behaviour* self) {
 
     if (shouldBackAway != 0) {
         owner->SetDesiredMoveDirection(owner->faceAngle + 0x8000);
-        owner->moveSpeed = GetFaceAngleDataBackAngle(owner);
+        owner->moveSpeed = GetFaceAngleDataBackAngle(self);
         owner->RequestAction(6);
         return;
     }
@@ -1899,7 +1905,7 @@ void Behaviour::DanteDMS_Phase3(Behaviour* self) {
             owner->SetDesiredMoveDirection(owner->faceAngle + 0x8000);
         }
 
-        owner->moveSpeed = GetFaceAngleDataBackAngle(owner);
+        owner->moveSpeed = GetFaceAngleDataBackAngle(self);
         owner->RequestAction(6);
         return;
     }
@@ -3656,4 +3662,13 @@ void Behaviour::SubwayDodgeJump(Behaviour* b) {
     b->handlerThisOffset = 0;
     b->handlerDispatch = -1;
     b->handler = Behaviour::Jumping;
+}
+
+// PSX: Dead__8Humanoid (HUMANOID.CPP:5732, 0x800691FC)
+// Unconditional clear keyed on thingType, not pointer identity -- matches
+// "bne thingType,0x17,skip / sw zero,OscarsHenchman" exactly.
+void Behaviour::ClearOscarsHenchmanOnDeath(Humanoid* dying) {
+    if (dying && dying->thingType == (s32)AITypes::TT_OSCAR_HENCHMAN) {
+        OscarsHenchman = nullptr;
+    }
 }

@@ -23,9 +23,9 @@ public:
 
     void SetActionState(u32 state, s32 param) override;
 
-    void _Stomp();
-    void _Charge();
-    void _ThrowPot();
+    void _Stomp() override;
+    void _Charge() override;
+    void _ThrowPot() override;
 };
 
 class Grontar : public Boss {
@@ -69,9 +69,9 @@ public:
     s32 GetTargetingFrame(const PsxFightingMoveRaw* move) const override;
     void PlayCombatThrowDialog() override;
 
-    void _MissilePrepare();
-    void _MissileAttack();
-    void _TargetMissileAttack();
+    void _MissilePrepare() override;
+    void _MissileAttack() override;
+    void _TargetMissileAttack() override;
 
     s32 missileFrameIndex = 0;
     s32 missilePatternIndex = 0;

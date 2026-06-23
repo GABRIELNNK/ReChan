@@ -41,6 +41,7 @@ namespace AITypes {
         TT_OSCAR = 13,     // Oscar class (616 bytes)
         TT_DANTE = 15,     // Dante class (684 bytes)
         TT_BUTCH = 17,     // Butch class (620 bytes)
+        TT_OSCAR_HENCHMAN = 23, // "MIME" in g_charNameTable; checked by Dead__8Humanoid (0x800691FC)
         TT_HUMANOID_LAST = 28,
         // Pickup-backed collectible entry; PSX AddThingNoTagList routes 101 through Pickup.
         // This is distinct from TT_COLLECTIBLE_OBJ (436), which is the real Collectible class.
@@ -109,6 +110,7 @@ enum ThingFlags2 : u32 {
     TF2_NIS_ENTER = 0x0010,  // entered NIS control
     TF2_NIS_FROZEN = 0x0020,  // NIS frozen (no movement)
     TF2_NIS_MASK = 0x0070,  // mask for NIS state bits
+    TF2_TAUNT_PENDING = 0x0080,  // awaiting LoadPlayerTauntResponse (Think__8Humanoid step 4)
 };
 
 // Thing - base class for all game entities

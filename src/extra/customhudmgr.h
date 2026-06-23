@@ -46,11 +46,21 @@ private:
     f32 m_playerDamageHoldTimer = 0.0f;
     f32 m_playerHealthShakeTimer = 0.0f;
 
-    f32 m_enemyHealthRatio = -1.0f;
-    f32 m_enemyHealthDamageRatio = -1.0f;
-    f32 m_enemyDamageHoldTimer = 0.0f;
-    f32 m_enemyHealthShakeTimer = 0.0f;
-    const Thing* m_enemyAnimTarget = nullptr;
+    // Boss health bar: stays active for the whole boss fight.
+    f32 m_bossHealthRatio = -1.0f;
+    f32 m_bossHealthDamageRatio = -1.0f;
+    f32 m_bossDamageHoldTimer = 0.0f;
+    f32 m_bossHealthShakeTimer = 0.0f;
+    const Thing* m_bossAnimTarget = nullptr;
+
+    // Foe health bar: independent of the boss bar, shown only while the
+    // tracked regular enemy has been hit recently (existing behavior).
+    f32 m_foeHealthRatio = -1.0f;
+    f32 m_foeHealthDamageRatio = -1.0f;
+    f32 m_foeDamageHoldTimer = 0.0f;
+    f32 m_foeHealthShakeTimer = 0.0f;
+    const Thing* m_foeAnimTarget = nullptr;
+
     f32 m_gameplayHudAlpha = 1.0f;
 
     s32 m_prevRedDragonCount = -1;
@@ -98,7 +108,8 @@ private:
 
     void DrawGameplayHud(const HUD& hud);
     void DrawPlayerHealthCard(const HUD& hud);
-    void DrawEnemyHealthCards(const HUD& hud);
+    void DrawBossHealthCard(const HUD& hud);
+    void DrawFoeHealthCard(const HUD& hud);
     void DrawInventoryCard(const HUD& hud);
     void DrawHitsCard(const HUD& hud);
     void DrawDestinationBanner(const HUD& hud) const;

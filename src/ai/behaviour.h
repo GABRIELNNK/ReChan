@@ -135,4 +135,9 @@ struct Behaviour {
     static void SubwayDodgeRight(Behaviour* behaviour);
     static void SubwayDodgeLeft(Behaviour* behaviour);
     static void SubwayDodgeJump(Behaviour* behaviour);
+
+    // PSX (Dead__8Humanoid, 0x800691FC): clears the OscarsHenchman global
+    // when the dying humanoid is the active Oscar henchman, so a solo Oscar
+    // switches from the circling/backoff tree to his relentless chase.
+    static void ClearOscarsHenchmanOnDeath(Humanoid* dying);
 };

@@ -1137,8 +1137,49 @@ void Humanoid::Think() {
     if (humanoidSound) {
         humanoidSound->Think();
     }
-    // PSX step 2-3: random() + LoadEnemyTaunts (dialog system not yet implemented)
-    // PSX step 4: check flags2 bit 7 for dialog state (not yet implemented)
+    // PSX step 2-3 (0x80063834-0x80063934): boss types (Grontar/Paul/Oscar/
+    // Dante/Butch) call LoadEnemyTaunts unconditionally every Think tick;
+    // other types only roll for it while not AS_STAND_ANIM. PSX also gates
+    // non-boss rolls on a shared last-taunt-frame cooldown (gp+0x6E8/+0x6F8)
+    // that wasn't resolved to a named constant -- omitted here rather than
+    // guessed, so non-boss idle chatter may fire slightly more often than 1:1.
+    {
+        bool isBossTypeForTaunt = false;
+        switch (thingType) {
+            case AITypes::TT_GRONTAR:
+            case AITypes::TT_PAUL:
+            case AITypes::TT_OSCAR:
+            case AITypes::TT_DANTE:
+            case AITypes::TT_BUTCH:
+                isBossTypeForTaunt = true;
+                break;
+        }
+
+        if (isBossTypeForTaunt) {
+            LoadEnemyTaunts();
+        }
+        else if (actionState != (s32)AS_STAND_ANIM && (s32)rmRangedRandom(100) < 20) {
+            LoadEnemyTaunts();
+        }
+    }
+
+    // PSX step 4 (0x800638CC-0x80063944): if a taunt dialog request is
+    // pending (flags2 bit7) and the prior dialog handle is gone/invalid/done
+    // playing, clear the pending state and load the player's response line.
+    if (flags2 & TF2_TAUNT_PENDING) {
+        const bool needsResponse = !soundHandle
+            || !jcsValidateHandle(soundHandle)
+            || !jcsIsPlaying(soundHandle);
+
+        if (needsResponse) {
+            soundHandle = 0;
+            soundParam = 0;
+            flags2 &= ~TF2_TAUNT_PENDING;
+            if (Player::s_player) {
+                Player::s_player->LoadPlayerTauntResponse(this);
+            }
+        }
+    }
 
     // PSX step 6: clear flag bits
     if (model) {
@@ -3054,8 +3095,9 @@ void Humanoid::ProcessAction() {
         case SD_THROW_CHARACTER_RECEIVE: ThrowCharacterReceive(); break;
         case SD_THROW_FREE_FALL: ThrowFreeFall(); break;
         case SD_GOT_HIT_FREEFORM: GotHitFreeForm(); break;
-        case SD_DANTE_MISSILE_PREPARE: break;
-        case SD_DANTE_TARGET_MISSILE_ATTACK: break;
+        case SD_DANTE_MISSILE_PREPARE:        _MissilePrepare(); break;
+        case SD_DANTE_MISSILE_ATTACK:         _MissileAttack(); break;
+        case SD_DANTE_TARGET_MISSILE_ATTACK:  _TargetMissileAttack(); break;
         case SD_LEDGE_LATCH:  _LedgeLatch(); break;
         case SD_LEDGE_PULLUP: _LedgePullup(); break;
         case SD_LADDER_LATCH_TOP: _LadderLatchTop(); break;
@@ -3063,6 +3105,9 @@ void Humanoid::ProcessAction() {
         case SD_CLIMB_LADDER: _ClimbLadder(); break;
         case SD_LADDER_DISMOUNT: _LadderDismount(); break;
         case SD_NIS_MODE:     _NISMode(); break;
+        case SD_BUTCH_STOMP:      _Stomp(); break;
+        case SD_BUTCH_CHARGE:     _Charge(); break;
+        case SD_BUTCH_THROW_POT:  _ThrowPot(); break;
         default: break;
     }
 }
@@ -3790,8 +3835,10 @@ void Humanoid::_Stand() {
             SetActionState(AS_COMBAT_IDLE, 0);
             return;
 
+        // PSX (0x80066D10): SetActionState(this, 4, 0) -- vtable slot 0xE8 is
+        // SetActionState, and 4 is AS_TAUNT_ENTRY, not AS_STRAFE.
         case 21:
-            SetActionState(AS_STRAFE, 0);
+            SetActionState(AS_TAUNT_ENTRY, 0);
             return;
 
         case 30:
@@ -3978,6 +4025,26 @@ void Humanoid::_Taunt() {
     }
 }
 
+// PSX: Butch-only vtable slots; base Humanoid never reaches these (no-op).
+void Humanoid::_Stomp() {
+}
+
+void Humanoid::_Charge() {
+}
+
+void Humanoid::_ThrowPot() {
+}
+
+// PSX: Dante-only vtable slots; base Humanoid never reaches these (no-op).
+void Humanoid::_MissilePrepare() {
+}
+
+void Humanoid::_MissileAttack() {
+}
+
+void Humanoid::_TargetMissileAttack() {
+}
+
 // PSX: _Pause__8Humanoid (HUMANOID.CPP:4153)
 // Simple counter decrement, then return to stand.
 void Humanoid::_Pause() {
@@ -4053,9 +4120,10 @@ void Humanoid::_Run() {
         return;
     }
 
-    // Alternate strafe request (bit 21)
+    // PSX (0x800674DC): vtable SetActionState(this, 4, ...) -- 4 is
+    // AS_TAUNT_ENTRY, not AS_STRAFE.
     if (sd & 0x200000) {
-        SetActionState(AS_STRAFE, 0);
+        SetActionState(AS_TAUNT_ENTRY, 0);
         return;
     }
 
@@ -4190,10 +4258,11 @@ void Humanoid::_Straif() {
         return;
     }
 
-    // Alternate strafe request (bit 21)
+    // PSX (0x80067950): vtable SetActionState(this, 4, ...) -- 4 is
+    // AS_TAUNT_ENTRY, not AS_STRAFE.
     if (sd & 0x200000) {
         ReleaseTarget();
-        SetActionState(AS_STRAFE, 0);
+        SetActionState(AS_TAUNT_ENTRY, 0);
         return;
     }
 
@@ -5344,6 +5413,11 @@ void Humanoid::_Collapse() {
 void Humanoid::_Dead() {
     MARKFUNCTION(0x800691DC);
 
+    // PSX (0x800691FC): clear the OscarsHenchman global when an Oscar
+    // henchman dies, so a solo Oscar drops the circling/backoff tree and
+    // switches to his relentless chase.
+    Behaviour::ClearOscarsHenchmanOnDeath(this);
+
     // PSX: type check for respawn eligibility
     // Types 10, 12, 13, 15, 17 are boss types that don't signal player
     bool isBossType = false;
@@ -5496,6 +5570,59 @@ s32 Humanoid::LoadDialog(u32 dialogID, s32 priority) {
         soundParam = (s32)dialogID;
     }
     return 1;
+}
+
+// PSX: LoadEnemyTaunts__8Humanoid (HUMANOID.CPP:991, 0x80063690)
+void Humanoid::LoadEnemyTaunts() {
+    MARKFUNCTION(0x80063690);
+
+    Player* player = Player::s_player;
+    if (!player) {
+        return;
+    }
+
+    const s32 playerHealthRatio = rmDiv16i((s32)((u32)player->health << 16), (s32)((u32)player->maxHealth << 16));
+    const s32 selfHealthRatio = rmDiv16i((s32)((u32)health << 16), (s32)((u32)maxHealth << 16));
+
+    if (player->health == 0 || player->actionState == (s32)AS_DEAD) {
+        LoadDialog(9, 0xFF);
+        return;
+    }
+
+    // PSX (0x800637D0/0x800637E8): every path below loads at priority 0x31
+    // (49), not 0xFF -- only the player-dead gloat above uses 0xFF. 0x31 is
+    // what falls inside PlayDialogBasedOnPriority's [0,55] window that
+    // AS_TAUNT_ENTRY uses to actually start playback; loading at 0xFF here
+    // meant the dialog was queued but never played.
+    if (selfHealthRatio < playerHealthRatio) {
+        // PSX: losing -- self is worse off than the player.
+        if (player->encounterState == 2) {
+            if (!LoadDialog(3, 0x31)) {
+                LoadDialog(0, 0x31);
+            }
+            return;
+        }
+        LoadDialog(4, 0x31);
+        return;
+    }
+
+    if (playerHealthRatio < 0x4CCC) {
+        // PSX: winning big -- player is below ~30% health.
+        bool isBossType = false;
+        switch (thingType) {
+            case AITypes::TT_GRONTAR:
+            case AITypes::TT_PAUL:
+            case AITypes::TT_OSCAR:
+            case AITypes::TT_DANTE:
+            case AITypes::TT_BUTCH:
+                isBossType = true;
+                break;
+        }
+        LoadDialog(isBossType ? 9 : 5, 0x31);
+        return;
+    }
+
+    LoadDialog(player->encounterState == 2 ? 2 : 4, 0x31);
 }
 
 // PSX: PlayDialog__8HumanoidUlUl (HUMANOID.CPP, 0x8006CBA0)

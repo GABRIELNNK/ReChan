@@ -524,7 +524,11 @@ void Grontar::SetActionState(u32 state, s32 param) {
 
     if (model) {
         Model* m = static_cast<Model*>(model);
-        m->SetAnim(24, param, 0, 0);
+        // force=1: re-entering AS_STRAFE while anim 24 is already showing (held
+        // at its last frame from a prior ANIM_RUN_TO_LAST cycle) must not skip
+        // the reset, or AnimStructure::loopCount stays stuck nonzero and
+        // Humanoid::_Taunt() dispatches off stale state instead of replaying it.
+        m->SetAnim(24, param, 1, 0);
 
         if (m->drawableType == 2 && m->drawable) {
             DrawableSTree* drawable = static_cast<DrawableSTree*>(m->drawable);

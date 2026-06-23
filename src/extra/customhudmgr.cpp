@@ -1048,11 +1048,16 @@ void CustomHudMgr::OnLevelLoad() {
 void CustomHudMgr::OnLevelUnload() {
     m_levelLoaded = false;
     EndTallyPersistentRow(&m_debugTallyPersistentRow);
-    m_enemyAnimTarget = nullptr;
-    m_enemyHealthRatio = -1.0f;
-    m_enemyHealthDamageRatio = -1.0f;
-    m_enemyDamageHoldTimer = 0.0f;
-    m_enemyHealthShakeTimer = 0.0f;
+    m_bossAnimTarget = nullptr;
+    m_bossHealthRatio = -1.0f;
+    m_bossHealthDamageRatio = -1.0f;
+    m_bossDamageHoldTimer = 0.0f;
+    m_bossHealthShakeTimer = 0.0f;
+    m_foeAnimTarget = nullptr;
+    m_foeHealthRatio = -1.0f;
+    m_foeHealthDamageRatio = -1.0f;
+    m_foeDamageHoldTimer = 0.0f;
+    m_foeHealthShakeTimer = 0.0f;
     m_hitTextShakeTimer = 0.0f;
     m_tallyGradeDelayTimer = -1.0f;
     m_tallyGradeVisible = false;
@@ -1170,11 +1175,16 @@ void CustomHudMgr::Shutdown() {
     m_playerHealthDamageRatio = -1.0f;
     m_playerDamageHoldTimer = 0.0f;
     m_playerHealthShakeTimer = 0.0f;
-    m_enemyHealthRatio = -1.0f;
-    m_enemyHealthDamageRatio = -1.0f;
-    m_enemyDamageHoldTimer = 0.0f;
-    m_enemyHealthShakeTimer = 0.0f;
-    m_enemyAnimTarget = nullptr;
+    m_bossHealthRatio = -1.0f;
+    m_bossHealthDamageRatio = -1.0f;
+    m_bossDamageHoldTimer = 0.0f;
+    m_bossHealthShakeTimer = 0.0f;
+    m_bossAnimTarget = nullptr;
+    m_foeHealthRatio = -1.0f;
+    m_foeHealthDamageRatio = -1.0f;
+    m_foeDamageHoldTimer = 0.0f;
+    m_foeHealthShakeTimer = 0.0f;
+    m_foeAnimTarget = nullptr;
     m_gameplayHudAlpha = 1.0f;
 
     m_prevRedDragonCount = -1;
@@ -1347,19 +1357,35 @@ void CustomHudMgr::DrawGameplayHud(const HUD& hud) {
         m_playerHealthShakeTimer = 0.0f;
     }
 
-    const bool enemyVisible = hud.foeHealth.IsVisible() || hud.bossHealth.IsVisible();
-    const bool enemyHasData =
-        (IsLiveHumanoidHudTarget(static_cast<const Thing*>(hud.currentFoe)) && (hud.foeHealth.maxHealth > 0) && (hud.foeHealth.lastValue > 0)) ||
-        ((hud.bossHandle != nullptr) && (hud.bossHealth.maxHealth > 0) && (hud.bossHealth.lastValue > 0));
-    if (enemyVisible || enemyHasData) {
-        DrawEnemyHealthCards(hud);
+    // Boss and foe bars are independent: a boss fight keeps its bar active
+    // for the whole encounter, while the regular foe bar only shows up when
+    // that enemy has actually been hit. Both can be on screen at once.
+    const bool bossVisible = hud.bossHealth.IsVisible();
+    const bool bossHasData =
+        (hud.bossHandle != nullptr) && (hud.bossHealth.maxHealth > 0) && (hud.bossHealth.lastValue > 0);
+    if (bossVisible || bossHasData) {
+        DrawBossHealthCard(hud);
     }
     else {
-        m_enemyHealthRatio = -1.0f;
-        m_enemyHealthDamageRatio = -1.0f;
-        m_enemyDamageHoldTimer = 0.0f;
-        m_enemyHealthShakeTimer = 0.0f;
-        m_enemyAnimTarget = nullptr;
+        m_bossHealthRatio = -1.0f;
+        m_bossHealthDamageRatio = -1.0f;
+        m_bossDamageHoldTimer = 0.0f;
+        m_bossHealthShakeTimer = 0.0f;
+        m_bossAnimTarget = nullptr;
+    }
+
+    const bool foeVisible = hud.foeHealth.IsVisible();
+    const bool foeHasData =
+        IsLiveHumanoidHudTarget(static_cast<const Thing*>(hud.currentFoe)) && (hud.foeHealth.maxHealth > 0) && (hud.foeHealth.lastValue > 0);
+    if (foeVisible || foeHasData) {
+        DrawFoeHealthCard(hud);
+    }
+    else {
+        m_foeHealthRatio = -1.0f;
+        m_foeHealthDamageRatio = -1.0f;
+        m_foeDamageHoldTimer = 0.0f;
+        m_foeHealthShakeTimer = 0.0f;
+        m_foeAnimTarget = nullptr;
     }
 
     if (hud.visible || hud.takes.isPlaying || hud.dragon.isPlaying) {
@@ -1441,45 +1467,17 @@ void CustomHudMgr::DrawPlayerHealthCard(const HUD& hud) {
 
 }
 
-void CustomHudMgr::DrawEnemyHealthCards(const HUD& hud) {
-    const hdHealth* health = nullptr;
-    const char* name = nullptr;
-    const Thing* target = nullptr;
-    bool showBossLabel = false;
-
-    const bool bossHasData =
-        (hud.bossHandle != nullptr) && (hud.bossHealth.maxHealth > 0) && (hud.bossHealth.lastValue > 0);
-    const bool foeHasData =
-        (hud.currentFoe != nullptr) && (hud.foeHealth.maxHealth > 0) && (hud.foeHealth.lastValue > 0);
-
-    if (hud.bossHealth.IsVisible() || bossHasData) {
-        const char* bossLabelText = g_customText.GetString(kHudBossLabelToken);
-        if (!bossLabelText || bossLabelText[0] == 0) {
-            bossLabelText = "";
-        }
-
-        health = &hud.bossHealth;
-        name = (HUD::szBossStatic[0] != 0) ? HUD::szBossStatic : bossLabelText;
-        showBossLabel = true;
-        if (hud.bossHandle) {
-            target = hud.bossHandle->owner;
-        }
-    }
-    else if (hud.foeHealth.IsVisible() || foeHasData) {
-        health = &hud.foeHealth;
-        name = nullptr;
-        target = static_cast<const Thing*>(hud.currentFoe);
-    }
-
-    if (!health) {
-        return;
-    }
-
-    if (!target) {
-        return;
-    }
-
-    if (!IsLiveHumanoidHudTarget(target)) {
+// Shared by DrawBossHealthCard/DrawFoeHealthCard: animates and draws one
+// enemy health bar above `target`, using the caller's own animation state.
+static void DrawOneEnemyHealthCard(const hdHealth& health,
+                                    const Thing* target,
+                                    const char* label,
+                                    f32* healthRatio,
+                                    f32* healthDamageRatio,
+                                    f32* damageHoldTimer,
+                                    f32* healthShakeTimer,
+                                    const Thing** animTarget) {
+    if (!target || !IsLiveHumanoidHudTarget(target)) {
         return;
     }
 
@@ -1489,41 +1487,36 @@ void CustomHudMgr::DrawEnemyHealthCards(const HUD& hud) {
         return;
     }
 
-    const s32 maxHealth = (health->maxHealth > 0) ? health->maxHealth : 1;
-    const s32 curHealth = health->lastValue;
+    const s32 maxHealth = (health.maxHealth > 0) ? health.maxHealth : 1;
+    const s32 curHealth = health.lastValue;
     const f32 ratio = Clamp01((f32)curHealth / (f32)maxHealth);
 
-    if (target != m_enemyAnimTarget) {
-        m_enemyAnimTarget = target;
-        m_enemyHealthRatio = ratio;
+    if (target != *animTarget) {
+        *animTarget = target;
+        *healthRatio = ratio;
 
-        const bool initFromFull = (health->flashAlpha > 0) && (ratio < (1.0f - kHealthDamageTriggerEpsilon));
-        m_enemyHealthDamageRatio = initFromFull ? 1.0f : ratio;
-        m_enemyDamageHoldTimer = initFromFull ? kHealthDamageHoldSeconds : 0.0f;
+        const bool initFromFull = (health.flashAlpha > 0) && (ratio < (1.0f - kHealthDamageTriggerEpsilon));
+        *healthDamageRatio = initFromFull ? 1.0f : ratio;
+        *damageHoldTimer = initFromFull ? kHealthDamageHoldSeconds : 0.0f;
     }
 
     const f32 dt = GetHudDeltaSeconds();
 
     bool damageTriggered = false;
-    UpdateDelayedHealthRatio(ratio,
-                             dt,
-                             &m_enemyHealthRatio,
-                             &m_enemyHealthDamageRatio,
-                             &m_enemyDamageHoldTimer,
-                             &damageTriggered);
+    UpdateDelayedHealthRatio(ratio, dt, healthRatio, healthDamageRatio, damageHoldTimer, &damageTriggered);
 
-    UpdateDamageShakeTimer(dt, damageTriggered, &m_enemyHealthShakeTimer);
-    const f32 shakeX = GetDamageShakeOffset(m_enemyHealthShakeTimer, kEnemyHealthShakeAmpX, 0.0f);
-    const f32 shakeY = GetDamageShakeOffset(m_enemyHealthShakeTimer, kEnemyHealthShakeAmpY, kEnemyHealthShakePhaseY);
+    UpdateDamageShakeTimer(dt, damageTriggered, healthShakeTimer);
+    const f32 shakeX = GetDamageShakeOffset(*healthShakeTimer, kEnemyHealthShakeAmpX, 0.0f);
+    const f32 shakeY = GetDamageShakeOffset(*healthShakeTimer, kEnemyHealthShakeAmpY, kEnemyHealthShakePhaseY);
 
     const f32 barW = SCREEN_HEIGHT * kEnemyHealthBarWFromScreenH;
     const f32 barH = SCREEN_HEIGHT * kEnemyHealthBarHFromScreenH;
     const f32 barX = screenX - barW * 0.5f + shakeX;
     const f32 barY = screenY - SCREEN_HEIGHT * kEnemyHealthBarYOffsetFromScreenH + shakeY;
 
-    if (showBossLabel && name && name[0]) {
+    if (label && label[0]) {
         char displayName[48] = {};
-        CopyUpperAscii(displayName, (s32)sizeof(displayName), name);
+        CopyUpperAscii(displayName, (s32)sizeof(displayName), label);
         if (BeginHudText(kHudBodyFontName,
             kEnemyHealthLabelScale,
             TextAlign_Center,
@@ -1539,13 +1532,13 @@ void CustomHudMgr::DrawEnemyHealthCards(const HUD& hud) {
         }
     }
 
-    DrawProgressBar(barX, barY, barW, barH, m_enemyHealthRatio);
+    DrawProgressBar(barX, barY, barW, barH, *healthRatio);
     DrawHealthDamageDelta(barX,
                           barY,
                           barW,
                           barH,
-                          m_enemyHealthRatio,
-                          m_enemyHealthDamageRatio,
+                          *healthRatio,
+                          *healthDamageRatio,
                           kHealthDamageDeltaR,
                           kHealthDamageDeltaG,
                           kHealthDamageDeltaB,
@@ -1555,13 +1548,45 @@ void CustomHudMgr::DrawEnemyHealthCards(const HUD& hud) {
                           kHealthDamageDeltaTopB,
                           kHealthDamageDeltaTopA);
 
-    if (health->flashAlpha > 0) {
-        const f32 fillW = barW * Clamp01(m_enemyHealthRatio);
+    if (health.flashAlpha > 0) {
+        const f32 fillW = barW * Clamp01(*healthRatio);
         if (fillW > 0.0f) {
-            const u8 alpha = (health->flashAlpha > 255) ? 255 : (u8)health->flashAlpha;
+            const u8 alpha = (health.flashAlpha > 255) ? 255 : (u8)health.flashAlpha;
             DrawScreenFilledRect(barX, barY, fillW, barH, 255, 255, 255, alpha / 2);
         }
     }
+}
+
+void CustomHudMgr::DrawBossHealthCard(const HUD& hud) {
+    if (!hud.bossHandle) {
+        return;
+    }
+
+    const char* bossLabelText = g_customText.GetString(kHudBossLabelToken);
+    if (!bossLabelText || bossLabelText[0] == 0) {
+        bossLabelText = "";
+    }
+    const char* name = (HUD::szBossStatic[0] != 0) ? HUD::szBossStatic : bossLabelText;
+
+    DrawOneEnemyHealthCard(hud.bossHealth,
+                           hud.bossHandle->owner,
+                           name,
+                           &m_bossHealthRatio,
+                           &m_bossHealthDamageRatio,
+                           &m_bossDamageHoldTimer,
+                           &m_bossHealthShakeTimer,
+                           &m_bossAnimTarget);
+}
+
+void CustomHudMgr::DrawFoeHealthCard(const HUD& hud) {
+    DrawOneEnemyHealthCard(hud.foeHealth,
+                           static_cast<const Thing*>(hud.currentFoe),
+                           nullptr,
+                           &m_foeHealthRatio,
+                           &m_foeHealthDamageRatio,
+                           &m_foeDamageHoldTimer,
+                           &m_foeHealthShakeTimer,
+                           &m_foeAnimTarget);
 }
 
 void CustomHudMgr::DrawInventoryCard(const HUD& hud) {
