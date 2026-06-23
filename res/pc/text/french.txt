@@ -19,6 +19,18 @@ Fermeture...
 [FE_NWG]
 Nouvelle Partie
 
+[FE_CONT]
+Continuer
+
+[FE_AUTO_WARN]
+Ce jeu dispose d'une sauvegarde automatique. N'eteignez pas le jeu lorsque cette icone apparait.
+
+[FE_AUTO_FAIL]
+Echec de la sauvegarde automatique.
+
+[FE_WARN]
+Avertissement
+
 [FE_STG]
 Demarrer
 
@@ -78,6 +90,42 @@ Emplacement %d vide
 
 [FE_SLD]
 Emplacement %d - %s
+
+[FE_SLAE]
+Sauvegarde auto vide
+
+[FE_SLAD]
+Sauvegarde auto - %s
+
+[FE_SVAUTO]
+SAUVEGARDE AUTO
+
+[FE_SVAUTO_SHORT]
+AUTO
+
+[FE_SVMAN]
+EMPLACEMENTS
+
+[FE_SVEMPTY]
+VIDE
+
+[FE_SVC_SLOT]
+SLOT
+
+[FE_SVC_DATE]
+DATE
+
+[FE_SVC_LIVES]
+VIES
+
+[FE_SVC_RED]
+ROUGE
+
+[FE_SVC_GOLD]
+OR
+
+[FE_SVC_ZONE]
+ZONE SUIVANTE
 
 [FE_OPT]
 Options

@@ -19,6 +19,18 @@ Uscita...
 [FE_NWG]
 Nuova Partita
 
+[FE_CONT]
+Continua
+
+[FE_AUTO_WARN]
+Questo gioco dispone del salvataggio automatico. Non spegnere il gioco quando vedi questa icona.
+
+[FE_AUTO_FAIL]
+Salvataggio automatico non riuscito.
+
+[FE_WARN]
+Avviso
+
 [FE_STG]
 Avvia Gioco
 
@@ -78,6 +90,42 @@ Slot salvataggio %d vuoto
 
 [FE_SLD]
 Slot salvataggio %d - %s
+
+[FE_SLAE]
+Salvataggio auto vuoto
+
+[FE_SLAD]
+Salvataggio auto - %s
+
+[FE_SVAUTO]
+SALVATAGGIO AUTO
+
+[FE_SVAUTO_SHORT]
+AUTO
+
+[FE_SVMAN]
+SLOT SALVATAGGIO
+
+[FE_SVEMPTY]
+VUOTO
+
+[FE_SVC_SLOT]
+SLOT
+
+[FE_SVC_DATE]
+DATA
+
+[FE_SVC_LIVES]
+VITE
+
+[FE_SVC_RED]
+ROSSI
+
+[FE_SVC_GOLD]
+ORO
+
+[FE_SVC_ZONE]
+ZONA SUCCESSIVA
 
 [FE_OPT]
 Opzioni

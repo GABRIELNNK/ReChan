@@ -1286,10 +1286,49 @@ void CustomHudMgr::Render(const HUD& hud) {
         DrawDestinationBanner(hud);
     }
 
+    DrawAutosaveOverlay();
+
     SetHudDrawAlpha(1.0f);
 
     if (g_textManager) {
         g_textManager->PopState();
+    }
+}
+
+void CustomHudMgr::DrawAutosaveOverlay() const {
+    if (!g_game || (!g_game->IsAutosaveSpinnerVisible() && !g_game->IsAutosaveFailureVisible())) {
+        return;
+    }
+
+    if (g_game->IsAutosaveFailureVisible()) {
+        const char* text = g_customText.GetString("FE_AUTO_FAIL");
+        if (!text) text = "Auto save failed.";
+        if (BeginHudText(kHudBodyFontName, 0.30f, TextAlign_Right,
+                         255, 224, 160, 255, true, true)) {
+            g_textManager->PrintString(text, HudX(DEFAULT_SCREEN_WIDTH - 14.0f), HudY(14.0f));
+        }
+        return;
+    }
+
+    static constexpr s32 kSegments = 10;
+    static constexpr f32 kCenterX = DEFAULT_SCREEN_WIDTH - 20.0f;
+    static constexpr f32 kCenterY = DEFAULT_SCREEN_HEIGHT - 20.0f;
+    static constexpr f32 kRadius = 9.0f;
+    static constexpr f32 kSize = 2.8f;
+    const f32 hudScaleX = HudW(1.0f);
+    const f32 hudScaleY = HudH(1.0f);
+    const f32 xCompensation = (hudScaleX > 0.0f) ? (hudScaleY / hudScaleX) : 1.0f;
+    const f32 radiusX = kRadius * xCompensation;
+    const f32 sizeX = kSize * xCompensation;
+    const u32 frame = g_time ? g_time->GetFrameCounter() : 0u;
+    const s32 head = (s32)((frame / 2u) % kSegments);
+    for (s32 i = 0; i < kSegments; ++i) {
+        const f32 angle = ((f32)i / (f32)kSegments) * 6.2831853f;
+        const s32 distance = (head - i + kSegments) % kSegments;
+        const u8 alpha = (u8)(255 - distance * 18);
+        DrawFilledRect(kCenterX + std::cos(angle) * radiusX - sizeX * 0.5f,
+                       kCenterY + std::sin(angle) * kRadius - kSize * 0.5f,
+                       sizeX, kSize, 255, 224, 96, alpha);
     }
 }
 

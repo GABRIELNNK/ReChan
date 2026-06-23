@@ -19,6 +19,18 @@ Quitting...
 [FE_NWG]
 New Game
 
+[FE_CONT]
+Continue
+
+[FE_AUTO_WARN]
+This game has an auto save feature. Please don't turn off the game when you see this icon.
+
+[FE_AUTO_FAIL]
+Auto save failed.
+
+[FE_WARN]
+Warning
+
 [FE_STG]
 Start Game
 
@@ -78,6 +90,42 @@ Save Slot %d Empty
 
 [FE_SLD]
 Save Slot %d - %s
+
+[FE_SLAE]
+Autosave Empty
+
+[FE_SLAD]
+Autosave - %s
+
+[FE_SVAUTO]
+AUTOSAVE
+
+[FE_SVAUTO_SHORT]
+AUTO
+
+[FE_SVMAN]
+SAVE SLOTS
+
+[FE_SVEMPTY]
+EMPTY
+
+[FE_SVC_SLOT]
+SLOT
+
+[FE_SVC_DATE]
+SAVED
+
+[FE_SVC_LIVES]
+LIVES
+
+[FE_SVC_RED]
+RED
+
+[FE_SVC_GOLD]
+GOLD
+
+[FE_SVC_ZONE]
+NEXT ZONE
 
 [FE_OPT]
 Options

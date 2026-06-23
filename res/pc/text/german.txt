@@ -19,6 +19,18 @@ Beenden...
 [FE_NWG]
 Neues Spiel
 
+[FE_CONT]
+Fortsetzen
+
+[FE_AUTO_WARN]
+Dieses Spiel speichert automatisch. Schalte das Spiel nicht aus, wenn du dieses Symbol siehst.
+
+[FE_AUTO_FAIL]
+Automatisches Speichern fehlgeschlagen.
+
+[FE_WARN]
+Warnung
+
 [FE_STG]
 Spiel starten
 
@@ -78,6 +90,42 @@ Speicherplatz %d leer
 
 [FE_SLD]
 Speicherplatz %d - %s
+
+[FE_SLAE]
+Autosave leer
+
+[FE_SLAD]
+Autosave - %s
+
+[FE_SVAUTO]
+AUTOSAVE
+
+[FE_SVAUTO_SHORT]
+AUTO
+
+[FE_SVMAN]
+SPEICHERPLATZE
+
+[FE_SVEMPTY]
+LEER
+
+[FE_SVC_SLOT]
+PLATZ
+
+[FE_SVC_DATE]
+DATUM
+
+[FE_SVC_LIVES]
+LEBEN
+
+[FE_SVC_RED]
+ROT
+
+[FE_SVC_GOLD]
+GOLD
+
+[FE_SVC_ZONE]
+NAECHSTE ZONE
 
 [FE_OPT]
 Optionen

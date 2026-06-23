@@ -19,6 +19,18 @@ Saliendo...
 [FE_NWG]
 Nuevo Juego
 
+[FE_CONT]
+Continuar
+
+[FE_AUTO_WARN]
+Este juego tiene guardado automatico. No apagues el juego cuando veas este icono.
+
+[FE_AUTO_FAIL]
+Error al guardar automaticamente.
+
+[FE_WARN]
+Advertencia
+
 [FE_STG]
 Iniciar Juego
 
@@ -78,6 +90,42 @@ Ranura de guardado %d vacia
 
 [FE_SLD]
 Ranura de guardado %d - %s
+
+[FE_SLAE]
+Autoguardado vacio
+
+[FE_SLAD]
+Autoguardado - %s
+
+[FE_SVAUTO]
+AUTOGUARDADO
+
+[FE_SVAUTO_SHORT]
+AUTO
+
+[FE_SVMAN]
+RANURAS
+
+[FE_SVEMPTY]
+VACIO
+
+[FE_SVC_SLOT]
+RANURA
+
+[FE_SVC_DATE]
+FECHA
+
+[FE_SVC_LIVES]
+VIDAS
+
+[FE_SVC_RED]
+ROJO
+
+[FE_SVC_GOLD]
+ORO
+
+[FE_SVC_ZONE]
+ZONA SIGUIENTE
 
 [FE_OPT]
 Opciones

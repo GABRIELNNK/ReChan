@@ -95,6 +95,8 @@ public:
     s32 GetControlVal(s32 pad) const { return controlVal[pad]; }
     TitleScreen* GetTitleScreen() const { return titleScreen; }
     void QueueTitleNewGameStart() { titleAutoStart = true; }
+    bool IsAutosaveSpinnerVisible() const { return autosavePhase == 1 || autosavePhase == 2; }
+    bool IsAutosaveFailureVisible() const { return autosavePhase == 3; }
 
     // PSX: PlayMovie__4GamePcii (GAME.CPP:3309, 0x8002BBF0)
     void PlayMovie(const char* name, s32 skippable, s32 unloadLevel);
@@ -124,6 +126,7 @@ private:
     s32 introPhase = 0;                         // sub-phase within intro state
     f32 customIntroTimer = 0.0f;                // elapsed seconds within the current custom-intro sub-phase
     bool assetCheckDone = false;                // true once PSX assets are confirmed present during boot
+    bool autosaveNoticeShown = false;            // one-second notice shown once per launch
     tTexture* introTexture = nullptr;           // current intro screen texture (PSX: gp+24)
     World* worldManager = nullptr;
     TitleScreen* titleScreen = nullptr;         // PSX: gp+60
@@ -132,6 +135,10 @@ private:
     s32 titleIdleBase = 0;                      // PSX: gp+124
     bool titleStartLatch = false;               // PC: Start edge latch for title menu toggle
     bool titleAutoStart = false;                // PC: queue immediate title-loop transition into prolog/OpenFE
+    bool autosavePending = false;                // set only by normal level completion
+    s32 autosavePhase = 0;                       // 0 idle, 1 pre-write, 2 success display, 3 failure display
+    s32 autosaveDelayFrames = 0;
+    f32 autosaveTimer = 0.0f;
     s32 firstBoot = 1;                          // PSX: gp+80
 
     // PC: per-frame fade state (PSX uses blocking inline loops)

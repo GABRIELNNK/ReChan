@@ -17,6 +17,7 @@ static constexpr u32 kSaveMagic = 0x53415645u;    // SAVE
 static constexpr u32 kSaveVersion = 1;
 static constexpr const char* kSaveDir = "userfiles";
 static constexpr const char* kSavePathFmt = "userfiles/jcsSAVE%d.sav";
+static constexpr const char* kAutosavePath = "userfiles/jcsAUTOSAVE.sav";
 
 struct SaveGameBlob {
     u32 magic = kSaveMagic;
@@ -42,16 +43,6 @@ static u32 s_pendingPetalIndex = 0;
 static bool s_pendingLivesActive = false;
 static s32 s_pendingLivesLeft = Player::kMaxLives;
 
-static s32 ClampLivesForLoad(s32 lives) {
-    if (lives < 1) {
-        return 1;
-    }
-    if (lives > Player::kMaxLives) {
-        return Player::kMaxLives;
-    }
-    return lives;
-}
-
 static bool BuildSlotPath(s32 slotIndex, char* outPath, s32 outPathLen) {
     if (!outPath || outPathLen <= 0) {
         return false;
@@ -70,13 +61,12 @@ static void EnsureSaveDirectoryExists() {
     std::filesystem::create_directories(kSaveDir, ec);
 }
 
-static bool ReadSlotBlob(s32 slotIndex, SaveGameBlob* outBlob) {
+static bool ReadBlobAtPath(const char* path, SaveGameBlob* outBlob) {
     if (!outBlob) {
         return false;
     }
 
-    char path[64] = {};
-    if (!BuildSlotPath(slotIndex, path, (s32)sizeof(path))) {
+    if (!path || !path[0]) {
         return false;
     }
 
@@ -106,9 +96,8 @@ static bool ReadSlotBlob(s32 slotIndex, SaveGameBlob* outBlob) {
     return true;
 }
 
-static bool WriteSlotBlob(s32 slotIndex, const SaveGameBlob& blobIn) {
-    char path[64] = {};
-    if (!BuildSlotPath(slotIndex, path, (s32)sizeof(path))) {
+static bool WriteBlobAtPath(const char* path, const SaveGameBlob& blobIn) {
+    if (!path || !path[0]) {
         return false;
     }
 
@@ -123,6 +112,16 @@ static bool WriteSlotBlob(s32 slotIndex, const SaveGameBlob& blobIn) {
     const s32 bytesWritten = file.Write(&blob, (u32)sizeof(SaveGameBlob));
     file.Close();
     return bytesWritten == (s32)sizeof(SaveGameBlob);
+}
+
+static bool ReadSlotBlob(s32 slotIndex, SaveGameBlob* outBlob) {
+    char path[64] = {};
+    return BuildSlotPath(slotIndex, path, (s32)sizeof(path)) && ReadBlobAtPath(path, outBlob);
+}
+
+static bool WriteSlotBlob(s32 slotIndex, const SaveGameBlob& blob) {
+    char path[64] = {};
+    return BuildSlotPath(slotIndex, path, (s32)sizeof(path)) && WriteBlobAtPath(path, blob);
 }
 
 static void FormatSaveDate(s64 unixTime, char* outText, s32 outTextLen) {
@@ -216,22 +215,59 @@ static void ApplyLoadedScoreState(const SaveGameBlob& blob) {
     packed[2] = g_scoreManager->currentGoldDragons;
 }
 
+static bool PopulateSlotInfo(const SaveGameBlob& blob, SaveGameSlotInfo* outInfo) {
+    if (!outInfo) {
+        return false;
+    }
+
+    outInfo->occupied = true;
+    FormatSaveDate(blob.savedUnixTime, outInfo->dateText, (s32)sizeof(outInfo->dateText));
+    outInfo->livesLeft = blob.livesLeft;
+    u32 totalRedDragons = 0;
+    u32 totalGoldDragons = 0;
+    for (const PetalStats& stats : blob.petalStats) {
+        totalRedDragons += stats.collectCount;
+        totalGoldDragons += stats.goldDragons;
+    }
+    outInfo->redDragons = (u8)(totalRedDragons > 255 ? 255 : totalRedDragons);
+    outInfo->goldDragons = (u8)(totalGoldDragons > 255 ? 255 : totalGoldDragons);
+    // The serialized load target is commonly the destination-select hub. For
+    // menu metadata, report the furthest regular zone progression has unlocked
+    // instead: -2 is locked, while -1 or greater is playable/completed.
+    u32 playableLevelIndex = 0;
+    for (u32 level = 0; level < 5; ++level) {
+        if (blob.petalStats[level * 3].fightScore >= -1) {
+            playableLevelIndex = level;
+        }
+    }
+    outInfo->nextLevelIndex = playableLevelIndex;
+    outInfo->nextPetalIndex = 0;
+    return true;
+}
+
 bool SaveGameQuerySlotInfo(s32 slotIndex, SaveGameSlotInfo* outInfo) {
     if (!outInfo) {
         return false;
     }
 
-    outInfo->occupied = false;
-    outInfo->dateText[0] = '\0';
+    *outInfo = {};
 
     SaveGameBlob blob = {};
     if (!ReadSlotBlob(slotIndex, &blob)) {
         return false;
     }
 
-    outInfo->occupied = true;
-    FormatSaveDate(blob.savedUnixTime, outInfo->dateText, (s32)sizeof(outInfo->dateText));
-    return true;
+    return PopulateSlotInfo(blob, outInfo);
+}
+
+bool SaveGameQueryAutosaveInfo(SaveGameSlotInfo* outInfo) {
+    if (!outInfo) {
+        return false;
+    }
+
+    *outInfo = {};
+    SaveGameBlob blob = {};
+    return ReadBlobAtPath(kAutosavePath, &blob) && PopulateSlotInfo(blob, outInfo);
 }
 
 bool SaveGameWriteSlot(s32 slotIndex) {
@@ -241,6 +277,22 @@ bool SaveGameWriteSlot(s32 slotIndex) {
     }
 
     return WriteSlotBlob(slotIndex, blob);
+}
+
+bool SaveGameHasAutosave() {
+    SaveGameBlob blob = {};
+    return ReadBlobAtPath(kAutosavePath, &blob);
+}
+
+bool SaveGameWriteAutosave() {
+    SaveGameBlob blob = {};
+    return BuildRuntimeBlob(&blob) && WriteBlobAtPath(kAutosavePath, blob);
+}
+
+bool SaveGameDeleteAutosave() {
+    std::error_code ec;
+    std::filesystem::remove(kAutosavePath, ec);
+    return !ec;
 }
 
 bool SaveGameDeleteSlot(s32 slotIndex) {
@@ -267,7 +319,7 @@ bool SaveGameLoadSlot(s32 slotIndex) {
 
     s_pendingLevelIndex = blob.levelIndex;
     s_pendingPetalIndex = blob.petalIndex;
-    s_pendingLivesLeft = ClampLivesForLoad(blob.livesLeft);
+    s_pendingLivesLeft = blob.livesLeft;
     s_pendingLoadActive = true;
     s_pendingLivesActive = true;
 
@@ -275,6 +327,27 @@ bool SaveGameLoadSlot(s32 slotIndex) {
         Player::s_player->SetLivesLeft(s_pendingLivesLeft);
     }
 
+    return true;
+}
+
+bool SaveGameLoadAutosave() {
+    SaveGameBlob blob = {};
+    if (!ReadBlobAtPath(kAutosavePath, &blob)) {
+        return false;
+    }
+
+#if NEW_CHEATS
+    ResetCheats();
+#endif
+    ApplyLoadedScoreState(blob);
+    s_pendingLevelIndex = blob.levelIndex;
+    s_pendingPetalIndex = blob.petalIndex;
+    s_pendingLivesLeft = blob.livesLeft;
+    s_pendingLoadActive = true;
+    s_pendingLivesActive = true;
+    if (Player::s_player) {
+        Player::s_player->SetLivesLeft(s_pendingLivesLeft);
+    }
     return true;
 }
 
@@ -308,6 +381,6 @@ void SaveGameApplyPendingLives() {
         return;
     }
 
-    Player::s_player->SetLivesLeft(ClampLivesForLoad(s_pendingLivesLeft));
+    Player::s_player->SetLivesLeft(s_pendingLivesLeft);
     s_pendingLivesActive = false;
 }

@@ -103,6 +103,7 @@ private:
     void DrawHitsCard(const HUD& hud);
     void DrawDestinationBanner(const HUD& hud) const;
     void DrawTallyOverlay(const HUD& hud);
+    void DrawAutosaveOverlay() const;
 };
 
 extern CustomHudMgr g_customHudMgr;

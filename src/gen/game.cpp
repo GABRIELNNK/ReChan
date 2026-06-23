@@ -821,6 +821,26 @@ bool Game::gsIntroState(Game* game) {
     game->assetCheckDone = true;
 #endif
 
+#if CUSTOM_MENU
+    if (!game->autosaveNoticeShown) {
+        game->autosaveNoticeShown = true;
+        if (g_feCustomMenuMgr) {
+            g_feCustomMenuMgr->Activate(MenuPage_AutosaveNotice);
+        }
+    }
+    if (g_feCustomMenuMgr && g_feCustomMenuMgr->IsActive()
+        && g_feCustomMenuMgr->GetCurrentPage() == MenuPage_AutosaveNotice) {
+        const s32 menuResult = g_feCustomMenuMgr->Invoke();
+        g_display->BeginFrame();
+        g_feCustomMenuMgr->Render();
+        g_display->EndFrame();
+        if (menuResult == (s32)GameResult::ResumePlay) {
+            g_feCustomMenuMgr->Deactivate();
+        }
+        return true;
+    }
+#endif
+
 #if AUTO_UPDATER
     if (!g_autoUpdater) {
         g_autoUpdater = new AutoUpdater();
@@ -1241,6 +1261,14 @@ bool Game::gsFEState(Game* game) {
 bool Game::gsPrePlayState(Game* game) {
     MARKFUNCTION(0x80029AC0); // gsPrePlayState
 
+    World* autosaveWorld = game->GetWorld();
+    if (game->autosavePending && autosaveWorld && autosaveWorld->GetCurLevelID() == 7) {
+        game->autosavePending = false;
+        game->autosavePhase = 1;
+        game->autosaveDelayFrames = 1; // ensure the wheel is presented before the synchronous write
+        game->autosaveTimer = 0.0f;
+    }
+
     // PSX: 432 bytes, 27 blocks.
     // Loads overlay, shows menu, sets up the audio listener, checks checkpoint,
     // resets HUD/input mappings, then transitions to Play state.
@@ -1335,6 +1363,31 @@ bool Game::gsPrePlayState(Game* game) {
 
 bool Game::gsPlayState(Game* game) {
     MARKFUNCTION(0x80029C6C); // gsPlayState
+
+    if (game->autosavePhase != 0) {
+        const f32 dt = g_time ? g_time->GetDeltaTime() : (1.0f / 30.0f);
+        if (game->autosavePhase == 1) {
+            if (game->autosaveDelayFrames > 0) {
+                --game->autosaveDelayFrames;
+            }
+            else if (SaveGameWriteAutosave()) {
+                game->autosavePhase = 2;
+                game->autosaveTimer = 2.0f;
+            }
+            else {
+                LOG("[Autosave] Failed to write userfiles/jcsAUTOSAVE.sav");
+                game->autosavePhase = 3;
+                game->autosaveTimer = 2.0f;
+            }
+        }
+        else {
+            game->autosaveTimer -= dt;
+            if (game->autosaveTimer <= 0.0f) {
+                game->autosavePhase = 0;
+                game->autosaveTimer = 0.0f;
+            }
+        }
+    }
 
 #if HIGH_FPS_PLAY_PRESENTATION
     s32 logicSteps = 1;
@@ -1490,17 +1543,52 @@ bool Game::gsEndLevelExitState(Game* game) {
         return true;
     }
 
-    s32 nextPetal = (s32)world->GetCurrentPetalIndex() + 1;
-    s32 currentLevel = (s32)world->GetCurrentLevelIndex();
+    const s32 currentLevelID = world->GetCurLevelID();
+    const s32 nextPetal = (s32)world->GetCurrentPetalIndex() + 1;
+    bool returnToHub = true;
+
     if (nextPetal < world->GetCurLevelPetals()) {
         g_scoreManager->OpenPetal(world->GetCurrentLevelIndex(), nextPetal);
     }
-    else if ((u32)currentLevel < 4) {
-        g_scoreManager->OpenPetal((u32)(currentLevel + 1), 0);
+    else {
+        // Each regular zone's final petal flows directly into its boss level.
+        // Bosses use separate level IDs rather than another petal in the zone.
+        s32 bossLevelID = 0;
+        switch (currentLevelID) {
+            case 1: bossLevelID = 11; break; // Chinatown
+            case 2: bossLevelID = 12; break; // Waterfront
+            case 3: bossLevelID = 13; break; // Sewer
+            case 4: bossLevelID = 14; break; // Roof Top
+            case 5: bossLevelID = 8;  break; // Factory
+            default: break;
+        }
+
+        if (bossLevelID != 0) {
+            const s32 bossIndex = world->LevelIDToIndex(bossLevelID);
+            world->SetTargetLevelPetal((u32)bossIndex, 0);
+            returnToHub = false;
+        }
+
+        // Defeating a boss unlocks the first petal of the next regular zone.
+        s32 nextRegularLevelID = 0;
+        switch (currentLevelID) {
+            case 11: nextRegularLevelID = 2; break;
+            case 12: nextRegularLevelID = 3; break;
+            case 13: nextRegularLevelID = 4; break;
+            case 14: nextRegularLevelID = 5; break;
+            default: break;
+        }
+        if (nextRegularLevelID != 0) {
+            const s32 nextRegularIndex = world->LevelIDToIndex(nextRegularLevelID);
+            g_scoreManager->OpenPetal((u32)nextRegularIndex, 0);
+        }
     }
 
-    s32 hubIndex = world->LevelIDToIndex(7);
-    world->SetTargetLevelPetal((u32)hubIndex, 0);
+    if (returnToHub) {
+        const s32 hubIndex = world->LevelIDToIndex(7);
+        world->SetTargetLevelPetal((u32)hubIndex, 0);
+        game->autosavePending = true;
+    }
 
     game->SetState(GameState::QueueLevelLoad);
     return true;

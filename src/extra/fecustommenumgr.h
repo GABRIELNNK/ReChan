@@ -47,6 +47,7 @@ enum MenuPage : s32 {
     MenuPage_QuitConfirm,
     MenuPage_Quitting,
     MenuPage_Location,
+    MenuPage_AutosaveNotice,
     MenuPage_Update,
     MenuPage_CheckingUpdate,
     MenuPage_Changelog,
@@ -93,6 +94,7 @@ enum EntryEvent : u8 {
     EntryEvent_Resume,
     EntryEvent_Back,
     EntryEvent_NewGame,
+    EntryEvent_Continue,
     EntryEvent_ExitToHub,
     EntryEvent_QuitGame,
     EntryEvent_Credits,
@@ -176,6 +178,12 @@ enum EntryEvent : u8 {
 #define DEF_KEYBIND_ROW_TOP_PAD 2
 #define DEF_KEYBIND_CELL_PAD 2
 #define DEF_KEYBIND_X_PAD 18
+
+// Save/load/delete table tuning.
+#define DEF_SAVE_VISIBLE_ROWS 4
+#define DEF_SAVE_ROW_H 32
+#define DEF_SAVE_AUTOSAVE_GAP 12
+#define DEF_SAVE_TABLE_SIDE_PAD 12
 
 #ifdef MOD_LOADER
 #define DEF_MODS_WINDOW_W 400
@@ -287,6 +295,11 @@ enum EntryEvent : u8 {
 
 #define DEF_QUIT_TIMER_SEC 1.0f
 
+#define DEF_SCROLLBAR_FILL_R 215
+#define DEF_SCROLLBAR_FILL_G 135
+#define DEF_SCROLLBAR_FILL_B 0
+#define DEF_SCROLLBAR_FILL_A 255
+
 struct Entry {
     char token[MAX_CUSTOM_MENU_TOKEN + 1];
     EntryType type;
@@ -392,7 +405,10 @@ private:
     void ApplyValue(const Entry& e, s32 v);
     void PlaySound(s32 id) const;
     void RefreshSaveSlots();
-    void BuildSaveSlotLabel(s32 slotIndex, char* outText, s32 outTextLen) const;
+    void ClampSaveSlotScroll();
+    void RenderSaveSlotsPage(s32 panelX, s32 panelY, s32 panelW, s32 panelH,
+                             const xcColour1555& selectedColor) const;
+    void RenderAutosaveSpinner(s32 centerX, s32 centerY) const;
 
 #if AUTO_UPDATER
     void RefreshUpdatePageEntries();
@@ -416,7 +432,6 @@ private:
     void UpdateTitleDebrisParticles(f32 dt, f32 emitX, f32 emitY, f32 spanW);
     void DrawTitleDebrisParticles() const;
     void LoadSliderTextures();
-    void LoadScrollArrowTexture();
 
     // Center of the gold debris burst within the splash rect (0..1, UV-style).
     static constexpr f32 kTitleDebrisCenterU = 0.5f;
@@ -430,7 +445,6 @@ private:
     static constexpr const char* kTitleScreenLogoTexturePath = "pc/textures/frontend/jcslogo.png";
     static constexpr const char* kGameOverTexturePath = "pc/textures/frontend/game_over.png";
     static constexpr const char* kLoadingBarTexturePath = "pc/textures/frontend/loading_bar.png";
-    static constexpr const char* kScrollArrowTexturePath = "pc/textures/frontend/scroll_arrow.png";
     static constexpr const char* kSliderOTexturePath = "pc/textures/frontend/slider_o.png";
     static constexpr const char* kSliderFTexturePath = "pc/textures/frontend/slider_f.png";
 
@@ -449,6 +463,10 @@ private:
 
     void DrawRect(f32 x, f32 y, f32 w, f32 h, u8 r, u8 g, u8 b, u8 a) const;
     void DrawHighlight(f32 x, f32 y, f32 w, f32 h) const;
+    void DrawScrollBar(f32 x, f32 y, f32 h, s32 totalItems, s32 visibleItems, f32 scrollTop) const;
+    bool HandleScrollBarMouse(f32 x, f32 y, f32 h, s32 totalItems, s32 visibleItems,
+                              s32* scrollTop, f32* visualScrollTop, f32 mouseX, f32 mouseY,
+                              bool leftPressed, bool leftDown);
 
     const char* Localize(const char* token) const;
 
@@ -490,10 +508,10 @@ private:
     tTexture* m_loadingBarTexture = nullptr;
     mutable tTexture* m_controllerTexture = nullptr;
     tTexture* m_menuOrnamentTexture = nullptr;
-    tTexture* m_scrollArrowTexture = nullptr;
     mutable tTexture* m_redDragonTex = nullptr;
     mutable tTexture* m_goldDragonTex = nullptr;
     mutable tTexture* m_greyDragonTex = nullptr;
+    mutable tTexture* m_takeTex = nullptr;
     tTexture* m_sliderOTex = nullptr;
     tTexture* m_sliderFTex = nullptr;
     bool m_titleScreenTextureTried = false;
@@ -521,20 +539,26 @@ private:
     bool m_mousePosInitialized = false;
     double m_lastMouseX = 0.0;
     double m_lastMouseY = 0.0;
+    bool m_scrollBarDragging = false;
+    f32 m_scrollBarGrabOffset = 0.0f;
 
     // Key bindings page selection/capture state.
     s32 m_keyBindActionCursor = 0;
     s32 m_keyBindSlotCursor = 0;
     s32 m_keyBindScrollTop = 0;
+    f32 m_keyBindScrollVisual = 0.0f;
     bool m_keyBindCaptureActive = false;
     s32 m_keyBindCaptureBlockFrames = 0;
 
 #ifdef MOD_LOADER
     s32 m_modCursor = 0;
     s32 m_modScrollTop = 0;
+    f32 m_modScrollVisual = 0.0f;
 #endif
 
-    SaveGameSlotInfo m_saveSlots[SAVEGAME_SLOT_COUNT] = {};
+    SaveGameSlotInfo m_saveSlots[SAVEGAME_VISIBLE_SLOT_COUNT] = {};
+    s32 m_saveSlotScrollTop = 0;
+    f32 m_saveSlotScrollVisual = 0.0f;
     s32 m_pendingLoadSlot = -1;
     s32 m_pendingSaveSlot = -1;
     s32 m_pendingDeleteSlot = -1;
@@ -542,12 +566,14 @@ private:
     bool m_active = 0;
     f32 m_quitTimerSec = 0.0f; // seconds remaining before game actually closes
     f32 m_assetPopupMinTimer = 0.0f; // keeps Scanning/Extracting popups on screen long enough to read
+    f32 m_autosaveNoticeTimer = 0.0f;
 
 #if AUTO_UPDATER
     AutoUpdater::State m_lastUpdateState = AutoUpdater::State::Idle;
     f32 m_checkingPopupMinTimer = 0.0f;
     std::vector<std::string> m_changelogLines;
     s32 m_changelogScrollTop = 0;
+    f32 m_changelogScrollVisual = 0.0f;
     f32 m_updateAvailFadeTimer = 0.0f; // drives the "Update available" fade in/out
 #endif
 };

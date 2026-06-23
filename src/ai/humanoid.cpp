@@ -5367,6 +5367,11 @@ void Humanoid::_Dead() {
     static constexpr s32 HEAVEN_BOUND_ASCEND_SPEED = 44;
     if (!isBossType && IsCheatEnabled(CheatOption::HeavenBound)
         && thinkCounter < HEAVEN_BOUND_DELAY_FRAMES + HEAVEN_BOUND_ASCEND_FRAMES) {
+        // The ascent can carry a corpse outside the level's spatial blocks.
+        // Keep it active until the effect falls through to normal death cleanup;
+        // otherwise UpdatePosition deactivates it and its timer freezes in midair.
+        flags |= TF_BIT5;
+
         if (thinkCounter <= 1) {
             FightingCollision::RemoveHumanoid(this);
             ReleaseTarget();
