@@ -238,7 +238,8 @@ void ScoreManager::Step() {
     StepFighting();
 
     // PC
-    if (!g_directorActive)
+    const bool directorInputLocked = g_director && g_director->scriptState != 0 && g_director->enableInput == 0;
+    if (!g_directorActive && !directorInputLocked)
         secondsPassed += g_time->GetDeltaTime();
 }
 
