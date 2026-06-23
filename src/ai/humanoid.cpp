@@ -114,6 +114,8 @@ static constexpr u32 PLAYER_BACK_GRAB_KICK_ROOT_ADDRESS = 0x800CEE6Cu;
 // PSX gp+1948, data block default at 0x800DD0E8.
 static s32 freeFormFightingMode = 0;
 
+static constexpr u32 NON_BOSS_TAUNT_COOLDOWN_FRAMES = 90; // ~3s at 30fps; approximation
+
 #if HIGH_FPS_PLAY_PRESENTATION
 static constexpr s32 MAX_HUMANOID_RENDER_SMOOTH_STATES = 256;
 
@@ -1141,8 +1143,6 @@ void Humanoid::Think() {
     // Dante/Butch) call LoadEnemyTaunts unconditionally every Think tick;
     // other types only roll for it while not AS_STAND_ANIM. PSX also gates
     // non-boss rolls on a shared last-taunt-frame cooldown (gp+0x6E8/+0x6F8)
-    // that wasn't resolved to a named constant -- omitted here rather than
-    // guessed, so non-boss idle chatter may fire slightly more often than 1:1.
     {
         bool isBossTypeForTaunt = false;
         switch (thingType) {
@@ -1158,8 +1158,15 @@ void Humanoid::Think() {
         if (isBossTypeForTaunt) {
             LoadEnemyTaunts();
         }
-        else if (actionState != (s32)AS_STAND_ANIM && (s32)rmRangedRandom(100) < 20) {
-            LoadEnemyTaunts();
+        else {
+            static u32 s_lastNonBossTauntFrame = 0;
+            const u32 currentFrame = g_time ? g_time->GetFrameCounter() : 0;
+            if (actionState != (s32)AS_STAND_ANIM
+                && (s32)rmRangedRandom(100) < 20
+                && (currentFrame - s_lastNonBossTauntFrame) >= NON_BOSS_TAUNT_COOLDOWN_FRAMES) {
+                s_lastNonBossTauntFrame = currentFrame;
+                LoadEnemyTaunts();
+            }
         }
     }
 
@@ -5495,33 +5502,28 @@ void Humanoid::_Dead() {
             }
         }
 
-        // PSX: check if death animation complete + enough time elapsed
-        if (!model) {
-            goto cleanup;
-        }
-        {
+        bool stillAnimating = false;
+        if (model) {
             Model* m = static_cast<Model*>(model);
-            const bool deathAnimFinished = (m->modelFlags & 0x10) == 0;
-            if (!deathAnimFinished && thinkCounter < 41) {
-                return;
-            }
+            stillAnimating = (m->modelFlags & 0x10) != 0;
         }
 
-cleanup:
-        FightingCollision::RemoveHumanoid(this);
-        ReleaseTarget();
-        flags &= ~0x0080; // clear bit 7
+        if (!stillAnimating || thinkCounter >= 41) {
+            FightingCollision::RemoveHumanoid(this);
+            ReleaseTarget();
+            flags &= ~0x0080; // clear bit 7
 
-        if (field260 != 0) {
-            // PSX: set model flag for fade-out
-            if (model) {
-                Model* m = static_cast<Model*>(model);
-                m->modelFlags |= 0x20;
+            if (field260 != 0) {
+                // PSX: set model flag for fade-out
+                if (model) {
+                    Model* m = static_cast<Model*>(model);
+                    m->modelFlags |= 0x20;
+                }
             }
-        }
-        else {
-            // PSX: call Kill virtual to deactivate
-            Kill();
+            else {
+                // PSX: call Kill virtual to deactivate
+                Kill();
+            }
         }
     }
 
