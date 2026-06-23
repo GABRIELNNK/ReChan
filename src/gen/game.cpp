@@ -945,6 +945,7 @@ bool Game::gsTitleState(Game* game) {
         g_feCustomMenuMgr = new feCustomMenuMgr();
         g_feCustomMenuMgr->Init(&g_customText);
     }
+    g_feCustomMenuMgr->ResetTitleIntro();
 #endif
 
     if (g_inputManager) {
@@ -1089,6 +1090,12 @@ bool Game::gsTitleLoopState(Game* game) {
         if (menuResult == 8 || menuResult == 4) {
             renderMgr->Deactivate();
             renderMgr = nullptr;
+            if (menuResult == 8) {
+                g_feCustomMenuMgr->ResetTitleIntro();
+            }
+            else if (menuResult == 4) {
+                g_feCustomMenuMgr->HideTitleContent();
+            }
         }
 
         g_display->BeginFrame();
@@ -1107,6 +1114,24 @@ bool Game::gsTitleLoopState(Game* game) {
         }
         if (!startDown) {
             game->titleStartLatch = false;
+        }
+        return true;
+    }
+
+    // Press-start transition: fade the logo/Jackie out and zoom the prompt
+    // in over a short window before actually activating the menu, so the
+    // swap isn't an instant single-frame cut.
+    if (g_feCustomMenuMgr && g_feCustomMenuMgr->IsTitleStartTransitionRunning()) {
+        g_display->BeginFrame();
+        if (game->titleScreen) {
+            game->titleScreen->Update();
+            game->RenderTitleWithCustomBackground(true);
+        }
+        g_display->EndFrame();
+
+        if (g_feCustomMenuMgr->IsTitleStartTransitionFinished()) {
+            g_feCustomMenuMgr->EndTitleStartTransition();
+            g_feCustomMenuMgr->Activate(MenuPage_Title);
         }
         return true;
     }
@@ -1144,7 +1169,7 @@ bool Game::gsTitleLoopState(Game* game) {
                 if (g_frontEndSound) {
                     g_frontEndSound->ProcessSoundEvent(FE_SND_MENU_OPEN);
                 }
-                g_feCustomMenuMgr->Activate(MenuPage_Title);
+                g_feCustomMenuMgr->BeginTitleStartTransition();
                 game->titleIdleBase = game->titleIdleTimer;
                 game->titleStartLatch = true;
             }

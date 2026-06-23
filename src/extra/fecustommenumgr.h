@@ -362,6 +362,13 @@ public:
     bool DrawTitleScreen();
     bool DrawLoadingScreen(u8 fill, u8 pulseR8);
     void DrawTitleStartPrompt(s32 baseX, s32 baseY);
+
+    void ResetTitleIntro();
+    void HideTitleContent();
+    void BeginTitleStartTransition();
+    void EndTitleStartTransition();
+    bool IsTitleStartTransitionRunning() const { return m_titleTransitionActive; }
+    bool IsTitleStartTransitionFinished() const { return m_titleTransitionFinished; }
     bool DrawGameOverScreen();
     void DrawGameOverContinuePrompt(s32 baseX, s32 baseY, u8 r, u8 g, u8 b, u8 a);
     void DrawVersionOverlay();
@@ -437,6 +444,12 @@ private:
     static constexpr f32 kTitleDebrisCenterU = 0.5f;
     static constexpr f32 kTitleDebrisCenterV = 0.5f;
 
+    // Extra focused god-ray light source placed at Jackie's fist (0..1,
+    // UV-style within the splash rect). Tune these if it doesn't line up.
+    static constexpr f32 kTitleFistLightU = 0.62f;
+    static constexpr f32 kTitleFistLightV = 0.18f;
+    static constexpr f32 kTitleFistLightExposure = 3.0f;
+
     // frontend
     static constexpr const char* kControllerOverlayTexturePath = "pc/textures/frontend/controller_overlay_default.png";
     static constexpr const char* kMenuOrnamentTexturePath = "pc/textures/frontend/menu_ornament.png";
@@ -460,6 +473,7 @@ private:
     static constexpr f32 kSplashScreenAspect = 16.0f / 9.0f;
 
     void DrawMenuWindow(s32 x, s32 y, s32 w, s32 h, const char* title) const;
+    void DrawPopupWindow(s32 x, s32 y, s32 w, s32 h, const char* title) const;
 
     void DrawRect(f32 x, f32 y, f32 w, f32 h, u8 r, u8 g, u8 b, u8 a) const;
     void DrawHighlight(f32 x, f32 y, f32 w, f32 h) const;
@@ -500,6 +514,23 @@ private:
     f32 m_titleScreenAnimSec = 0.0f;
     s32 m_titleEffectTargetW = 0;
     s32 m_titleEffectTargetH = 0;
+
+    // Intro zoom: logo starts huge (near camera) and eases down to idle scale.
+    f32 m_titleIntroSec = 0.0f;
+    static constexpr f32 kTitleIntroDuration = 0.9f;
+
+    // Once the player confirms Continue/New Game from the title menu, the
+    // logo/Jackie/effects stay hidden (background only) through the
+    // subsequent fade into the game instead of popping back in.
+    bool m_titleContentHidden = false;
+
+    // Press-start transition: logo/Jackie fade out and the prompt zooms in
+    // briefly before the custom menu is actually activated, so the swap to
+    // the menu isn't an instant single-frame cut.
+    bool m_titleTransitionActive = false;
+    bool m_titleTransitionFinished = false;
+    f32 m_titleTransitionSec = 0.0f;
+    static constexpr f32 kTitleStartTransitionDuration = 0.5f;
     static constexpr s32 kMaxTitleDebrisParticles = 32;
     TitleDebrisParticle m_titleDebrisParticles[kMaxTitleDebrisParticles];
     f32 m_titleDebrisSpawnAccum = 0.0f;

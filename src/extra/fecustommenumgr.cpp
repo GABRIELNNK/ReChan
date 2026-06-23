@@ -3578,6 +3578,27 @@ bool feCustomMenuMgr::GetSplashScreenRect(f32* outX, f32* outY, f32* outW, f32* 
     return true;
 }
 
+void feCustomMenuMgr::ResetTitleIntro() {
+    m_titleIntroSec = 0.0f;
+    m_titleContentHidden = false;
+}
+
+void feCustomMenuMgr::HideTitleContent() {
+    m_titleContentHidden = true;
+}
+
+void feCustomMenuMgr::BeginTitleStartTransition() {
+    m_titleTransitionActive = true;
+    m_titleTransitionFinished = false;
+    m_titleTransitionSec = 0.0f;
+}
+
+void feCustomMenuMgr::EndTitleStartTransition() {
+    m_titleTransitionActive = false;
+    m_titleTransitionFinished = false;
+    m_titleTransitionSec = 0.0f;
+}
+
 bool feCustomMenuMgr::DrawTitleScreen() {
     LoadSplashTextures();
     if (!m_titleScreenBackgroundTexture || !m_titleScreenJackieTexture || !m_titleScreenLogoTexture) {
@@ -3596,7 +3617,31 @@ bool feCustomMenuMgr::DrawTitleScreen() {
     // unconditionally so the logo still feels alive even if the off-screen
     // effects are unavailable (see EnsureTitleScreenEffects).
     const f32 dt = g_time ? g_time->GetDeltaTime() : (1.0f / 30.0f);
-    m_titleScreenAnimSec += std::min(std::max(dt, 0.0f), 0.1f);
+    const f32 clampedDt = std::min(std::max(dt, 0.0f), 0.1f);
+    m_titleScreenAnimSec += clampedDt;
+
+    // Intro zoom: the logo starts very close to the camera (large) and eases
+    // out down to its idle scale over kTitleIntroDuration.
+    f32 introScale = 1.0f;
+    if (m_titleIntroSec < kTitleIntroDuration) {
+        m_titleIntroSec += clampedDt;
+        const f32 p = std::min(m_titleIntroSec / kTitleIntroDuration, 1.0f);
+        const f32 ease = 1.0f - (1.0f - p) * (1.0f - p) * (1.0f - p);
+        introScale = 3.0f - ease * 2.0f;
+    }
+
+    // Press-start transition: fades the logo/Jackie out over
+    // kTitleStartTransitionDuration before the menu actually activates.
+    if (m_titleTransitionActive && !m_titleTransitionFinished) {
+        m_titleTransitionSec += clampedDt;
+        if (m_titleTransitionSec >= kTitleStartTransitionDuration) {
+            m_titleTransitionSec = kTitleStartTransitionDuration;
+            m_titleTransitionFinished = true;
+        }
+    }
+    const f32 transitionP = m_titleTransitionActive
+        ? (m_titleTransitionSec / kTitleStartTransitionDuration) : 0.0f;
+    const u8 titleFadeAlpha = (u8)(255.0f * (1.0f - transitionP));
 
     // Idle logo motion: a gentle continuous sway plus a periodic little pop
     // (position + scale), and a true pseudo-3D pitch/yaw/roll tilt on top,
@@ -3607,7 +3652,7 @@ bool feCustomMenuMgr::DrawTitleScreen() {
     const f32 sway = std::sin(t * 0.9f);
     const f32 bump = std::pow(0.5f + 0.5f * std::sin(t * 1.7f + 0.6f), 2.0f);
     const f32 logoOffsetY = -(sway * 0.006f + bump * 0.014f) * drawH;
-    const f32 logoScale = 1.0f + bump * 0.05f;
+    const f32 logoScale = (1.0f + bump * 0.05f) * introScale;
     const f32 logoHalfW = (drawW * logoScale) * 0.5f;
     const f32 logoHalfH = (drawH * logoScale) * 0.5f;
     const f32 logoLocalCenterX = drawW * 0.5f;
@@ -3619,6 +3664,9 @@ bool feCustomMenuMgr::DrawTitleScreen() {
 
     ScreenDraw::DrawColoredRect(0.0f, 0.0f, SCREEN_WIDTH, SCREEN_HEIGHT, 0, 0, 0, 255);
     ScreenDraw::DrawQuad(m_titleScreenBackgroundTexture, drawX, drawY, drawW, drawH);
+
+    if (IsActive() || m_titleContentHidden)
+        return true;
 
     if (EnsureTitleScreenEffects(drawW, drawH)) {
         // Render the tilted/bobbing logo into its own small seed buffer so
@@ -3641,7 +3689,7 @@ bool feCustomMenuMgr::DrawTitleScreen() {
         // sample center over time, giving the halo a slow living swirl
         // instead of a static blur (intensity itself stays constant).
         if (p3d::context->SetRenderTarget(m_titleScreenGlow)) {
-            m_titleScreenGlowShader->SetVector("uGlowParams", 0.025f, 3.0f, 0.0f, 0.0f);
+            m_titleScreenGlowShader->SetVector("uGlowParams", 0.025f, 0.8f, 0.0f, 0.0f);
             m_titleScreenGlowShader->SetVector("uGlowMotion", 0.05f, 0.0f, 0.2f, 0.0f);
             m_titleScreenGlowShader->SetFloat("uTime", m_titleScreenAnimSec);
 
@@ -3658,6 +3706,7 @@ bool feCustomMenuMgr::DrawTitleScreen() {
             p3d::context->SetRenderTarget(nullptr);
 
             m_titleScreenCompositeShader->SetTexture(0, m_titleScreenGlow->GetTexture());
+            m_titleScreenCompositeShader->SetColour(0, pddiColour(titleFadeAlpha, titleFadeAlpha, titleFadeAlpha, 255));
             ScreenDraw::DrawShaderQuad(m_titleScreenCompositeShader, drawX, drawY, drawW, drawH,
                                        0.0f, 1.0f, 1.0f, 0.0f, PDDI_BLEND_ADD);
         }
@@ -3674,7 +3723,7 @@ bool feCustomMenuMgr::DrawTitleScreen() {
             // instead of the live screen size -- otherwise this pass
             // scales/positions wrong whenever the window isn't exactly 16:9
             // and the splash rect gets letterboxed.
-            m_titleScreenGodRaysShader->SetVector("uRayParams", 0.5f, 0.5f, 0.3f, 0.95f);
+            m_titleScreenGodRaysShader->SetVector("uRayParams", 0.5f, 0.5f, 0.3f, 0.94f);
             m_titleScreenGodRaysShader->SetVector("uRayMotion", 0.0f, 0.0f, 0.04f, 1.5f);
             m_titleScreenGodRaysShader->SetFloat("uExposure", 4.5f);
             m_titleScreenGodRaysShader->SetFloat("uTime", m_titleScreenAnimSec);
@@ -3684,6 +3733,11 @@ bool feCustomMenuMgr::DrawTitleScreen() {
             m_titleScreenGodRaysShader->SetTexture(0, m_titleScreenLogoSeed->GetTexture());
             ScreenDraw::DrawShaderQuad(m_titleScreenGodRaysShader, 0.0f, 0.0f, drawW, drawH,
                                        0.0f, 1.0f, 1.0f, 0.0f, PDDI_BLEND_NONE, drawW, drawH);
+
+            m_titleScreenGodRaysShader->SetVector("uRayParams", 0.55f, 0.45f, 1.9f, 0.92f);
+            m_titleScreenGodRaysShader->SetVector("uRayMotion", 0.0f, 0.0f, 0.01f, 1.0f);
+            m_titleScreenGodRaysShader->SetFloat("uExposure", 1.8f);
+            m_titleScreenGodRaysShader->SetFloat("uTime", m_titleScreenAnimSec);
 
             m_titleScreenGodRaysShader->SetTexture(0, m_titleScreenJackieTexture->GetTexture());
             ScreenDraw::DrawShaderQuad(m_titleScreenGodRaysShader, 0.0f, 0.0f, drawW, drawH,
@@ -3695,12 +3749,14 @@ bool feCustomMenuMgr::DrawTitleScreen() {
             // the rays buffer is added on top of the scene, then the crisp source
             // art is drawn over it below.
             m_titleScreenCompositeShader->SetTexture(0, m_titleScreenGodRays->GetTexture());
+            m_titleScreenCompositeShader->SetColour(0, pddiColour(titleFadeAlpha, titleFadeAlpha, titleFadeAlpha, 255));
             ScreenDraw::DrawShaderQuad(m_titleScreenCompositeShader, drawX, drawY, drawW, drawH,
                                        0.0f, 1.0f, 1.0f, 0.0f, PDDI_BLEND_ADD);
         }
     }
 
-    ScreenDraw::DrawQuad(m_titleScreenJackieTexture, drawX, drawY, drawW, drawH);
+    ScreenDraw::DrawQuad(m_titleScreenJackieTexture, drawX, drawY, drawW, drawH,
+                         0.0f, 0.0f, 1.0f, 1.0f, 255, 255, 255, titleFadeAlpha);
 
     if (m_titleScreenLogoTiltShader) {
         m_titleScreenLogoTiltShader->SetTexture(0, m_titleScreenLogoTexture->GetTexture());
@@ -3708,6 +3764,7 @@ bool feCustomMenuMgr::DrawTitleScreen() {
             drawX + logoLocalCenterX, drawY + logoLocalCenterY, logoHalfW, logoHalfH);
         m_titleScreenLogoTiltShader->SetVector("uTiltAngles",
             tiltPitch, tiltYaw, tiltRoll, tiltFocal);
+        m_titleScreenLogoTiltShader->SetColour(0, pddiColour(255, 255, 255, titleFadeAlpha));
         ScreenDraw::DrawShaderQuad(m_titleScreenLogoTiltShader, drawX, drawY, drawW, drawH,
                                    0.0f, 0.0f, 1.0f, 1.0f, PDDI_BLEND_ALPHA);
     }
@@ -3717,7 +3774,8 @@ bool feCustomMenuMgr::DrawTitleScreen() {
         const f32 logoH = logoHalfH * 2.0f;
         const f32 logoX = drawX - (logoW - drawW) * 0.5f;
         const f32 logoY = drawY + logoOffsetY - (logoH - drawH) * 0.5f;
-        ScreenDraw::DrawQuad(m_titleScreenLogoTexture, logoX, logoY, logoW, logoH);
+        ScreenDraw::DrawQuad(m_titleScreenLogoTexture, logoX, logoY, logoW, logoH,
+                             0.0f, 0.0f, 1.0f, 1.0f, 255, 255, 255, titleFadeAlpha);
     }
 
     // Gold debris: small fading dots sprayed left/right out of the screen
@@ -3755,11 +3813,24 @@ void feCustomMenuMgr::DrawTitleStartPrompt(s32 baseX, s32 baseY) {
     m_pulse.Update();
     const xcColour1555 pulseColor = m_pulse.GetColor();
 
+    // While the press-start transition is running, zoom the prompt in
+    // slightly and fade it out alongside the logo/Jackie.
+    f32 transitionP = 0.0f;
+    if (m_titleTransitionActive) {
+        transitionP = std::min(m_titleTransitionSec / kTitleStartTransitionDuration, 1.0f);
+    }
+    const f32 promptAlphaScale = 1.0f - transitionP;
+    if (promptAlphaScale <= 0.0f) {
+        return;
+    }
+    const f32 promptZoom = 1.0f + transitionP * 0.4f;
+
     const char* promptText = Localize("FE_PST");
     const f32 promptX = bgX + SCREEN_SCALE_X((f32)baseX) * splashScaleX;
     const f32 promptY = bgY + SCREEN_SCALE_Y((f32)baseY) * splashScaleY;
 
-    g_textManager->SetScale(SCREEN_SCALE_Y(DEF_MENU_TITLE_SCALE), SCREEN_SCALE_Y(DEF_MENU_TITLE_SCALE));
+    g_textManager->SetScale(SCREEN_SCALE_Y(DEF_MENU_TITLE_SCALE) * promptZoom,
+                            SCREEN_SCALE_Y(DEF_MENU_TITLE_SCALE) * promptZoom);
     g_textManager->SetAlignment(TextAlign_Center);
     g_textManager->SetWrapWidth(0.0f);
     g_textManager->SetLineSpacing(0);
@@ -3769,7 +3840,7 @@ void feCustomMenuMgr::DrawTitleStartPrompt(s32 baseX, s32 baseY) {
     g_textManager->SetColor(pulseColor.GetRed8(),
                             pulseColor.GetGreen8(),
                             pulseColor.GetBlue8(),
-                            255);
+                            (u8)(255.0f * promptAlphaScale));
     g_textManager->PrintString(promptText, promptX, promptY);
 }
 
@@ -4211,6 +4282,73 @@ void feCustomMenuMgr::DrawMenuWindow(s32 x, s32 y, s32 w, s32 h, const char* tit
         g_textManager->SetColor(DEF_TITLE_TEXT_R, DEF_TITLE_TEXT_G, DEF_TITLE_TEXT_B);
         g_textManager->PrintString(title, titleX, titleY);
     }
+}
+
+
+void feCustomMenuMgr::DrawPopupWindow(s32 x, s32 y, s32 w, s32 h, const char* title) const {
+    const s32 titleY0 = y;
+    const s32 titleY1 = y + DEF_TITLE_BAR_H;
+    const s32 bodyY0 = titleY1;
+    const s32 bodyY1 = y + h - DEF_BOTTOM_BAR_H;
+    const s32 bottomY0 = bodyY1;
+    const s32 titleInsetX = DEF_TITLE_INSET_X;
+    const s32 titleInsetY = DEF_TITLE_INSET_Y;
+    const s32 titleInsetH = DEF_TITLE_INSET_H;
+    const s32 titleInsetW = w - titleInsetX * 2;
+    const f32 framePx = GetMenuBorderPx();
+
+    // Gold bars: dark edge -> bright center -> dark edge (two quads per bar)
+    {
+        const s32 bx = x + DEF_BORDER_W;
+        const s32 bw = w - DEF_BORDER_W * 2;
+        const s32 titleInnerH = DEF_TITLE_BAR_H - DEF_BORDER_W;
+        const s32 titleHalf = titleInnerH / 2;
+        DrawGouraudRectPSX(bx, titleY0 + DEF_BORDER_W, bw, titleHalf,
+                           DEF_BAR_EDGE_R, DEF_BAR_EDGE_G, DEF_BAR_EDGE_B,
+                           DEF_BAR_MID_R, DEF_BAR_MID_G, DEF_BAR_MID_B,
+                           DEF_BAR_ALPHA);
+        DrawGouraudRectPSX(bx, titleY0 + DEF_BORDER_W + titleHalf, bw, titleInnerH - titleHalf,
+                           DEF_BAR_MID_R, DEF_BAR_MID_G, DEF_BAR_MID_B,
+                           DEF_BAR_EDGE_R, DEF_BAR_EDGE_G, DEF_BAR_EDGE_B,
+                           DEF_BAR_ALPHA);
+    }
+
+    // Body fill
+    DrawRect((f32)(x + DEF_BORDER_W), (f32)bodyY0, (f32)(w - DEF_BORDER_W * 2), (f32)(bodyY1 - bodyY0),
+             DEF_BODY_R, DEF_BODY_G, DEF_BODY_B, DEF_BODY_A);
+
+    // Frame
+    //DrawUniformHLinePSX(x + DEF_BORDER_W, bodyY0, w - DEF_BORDER_W * 2, framePx, DEF_FRAME_R, DEF_FRAME_G, DEF_FRAME_B, DEF_FRAME_A);
+    //DrawUniformHLinePSX(x + DEF_BORDER_W, bodyY1 - DEF_BORDER_W, w - DEF_BORDER_W * 2, framePx, DEF_FRAME_R, DEF_FRAME_G, DEF_FRAME_B, DEF_FRAME_A);
+
+    // Black inset title box
+    DrawUniformBorderFillRectPSX(x + titleInsetX, y + titleInsetY, titleInsetW, titleInsetH, framePx,
+                                 DEF_FRAME_R, DEF_FRAME_G, DEF_FRAME_B, DEF_FRAME_A,
+                                 DEF_TITLE_INSET_FILL_R, DEF_TITLE_INSET_FILL_G, DEF_TITLE_INSET_FILL_B, DEF_TITLE_INSET_FILL_A);
+
+    // Decorative bar marks
+    tTexture* ornamentTex = m_menuOrnamentTexture;
+    DrawMenuOrnament(ornamentTex, x + 18, y + 10);
+    DrawMenuOrnament(ornamentTex, x + w - 32, y + 10);
+
+    // Title text
+    if (title && g_textManager && g_textManager->SetFontByName(DEF_MENU_FONT_NAME)) {
+        g_textManager->SetScale(SCREEN_SCALE_Y(DEF_MENU_TEXT_SCALE), SCREEN_SCALE_Y(DEF_MENU_TEXT_SCALE));
+        g_textManager->SetAlignment(TextAlign_Center);
+        g_textManager->SetWrapWidth(0.0f);
+        g_textManager->SetLineSpacing(0);
+        g_textManager->SetPromptsEnabled(true);
+        g_textManager->SetShadow(false);
+        g_textManager->SetOutline(false);
+        const s32 titleTextY = y + titleInsetH / 2;
+        const f32 titleX = SCALE_AND_CENTER_X((f32)DEF_WINDOW_CENTER_X);
+        const f32 titleY = SCREEN_SCALE_Y((f32)titleTextY);
+        g_textManager->SetColor(DEF_TITLE_TEXT_R, DEF_TITLE_TEXT_G, DEF_TITLE_TEXT_B);
+        g_textManager->PrintString(title, titleX, titleY);
+    }
+
+    // Outer red frame
+    DrawUniformBorderRectPSX(x, y, w, h - DEF_BOTTOM_BAR_H, framePx, DEF_FRAME_R, DEF_FRAME_G, DEF_FRAME_B, DEF_FRAME_A);
 }
 
 void feCustomMenuMgr::RenderKeyBindingsPage(s32 panelX, s32 panelY, s32 panelW, s32 panelH,
@@ -4742,7 +4880,12 @@ void feCustomMenuMgr::Render() {
         }
     }
 
-    DrawMenuWindow(panelX, panelY, panelW, panelH, title);
+    bool isPopup = (m_currPage == MenuPage_AutosaveNotice || m_currPage == MenuPage_CheckingUpdate);
+
+    if (isPopup)
+        DrawPopupWindow(panelX, panelY, panelW, panelH, title);
+    else
+        DrawMenuWindow(panelX, panelY, panelW, panelH, title);
 
     // Build normalColor directly (PSX scale: 128 = neutral/1.0 for the tint shader)
     const xcColour1555 normalColor{ DEF_TEXT_NORM_R, DEF_TEXT_NORM_G, DEF_TEXT_NORM_B };
