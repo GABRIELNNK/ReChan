@@ -52,6 +52,8 @@ struct AnimationMatrices {
     // Returns prev/cur frame bone translations for attack collision sweep
     s32 GetAttack(u32 joint, LVector& outPrev, LVector& outCur) const;
     s32 GetWeaponAttack(u32 joint, const LVector& localOffset, LVector& outPrev, LVector& outCur) const;
+    // Returns full prev/cur 8-word (rotation+translation) joint matrices, for render-time interpolation.
+    s32 GetMatrixPair(u32 joint, s32 outPrev[8], s32 outCur[8]) const;
     void SetCaptureEnabled(s32 enable);
     s32 CaptureEnabled() const;
 

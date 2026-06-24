@@ -315,7 +315,12 @@ static s32 GetFrameRateSetting() {
     if (g_time) {
         return NormalizeFrameRateSetting(g_time->targetFPS);
     }
+
+#if HIGH_FPS_PLAY_PRESENTATION
+    return 60;
+#else
     return 30;
+#endif
 }
 
 static s32 GetLanguageSetting() {

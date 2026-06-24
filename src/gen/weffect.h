@@ -2,6 +2,7 @@
 
 #include "gen/effects.h"
 #include "core.h"
+#include "config.h"
 
 struct DBPoint;
 struct DBPath;
@@ -172,6 +173,9 @@ public:
 
     LVector pos = {};
     LVector spawnPos = {};
+#if HIGH_FPS_PLAY_PRESENTATION
+    LVector prevPos = {};
+#endif
 
     LVector rotation = {};
     LVector scale = { 0x10000, 0x10000, 0x10000 };
@@ -272,6 +276,10 @@ public:
     Thing* mentorLink = nullptr;
     LVector* mentorPosRef = nullptr;
     LVector mentorOffset = {};
+#if HIGH_FPS_PLAY_PRESENTATION
+    LVector prevMentorPos = {};
+    LVector curMentorPos = {};
+#endif
 
     LVector overridePos = {};
     LVector overrideScale = { 0x10000, 0x10000, 0x10000 };

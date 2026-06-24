@@ -8,6 +8,7 @@
 #include "p3d/matrix.h"
 #include "p3d/hash.h"
 #include <cmath>
+#include <cstring>
 
 static void BuildPsxIdentityMatrix(s32* matrixData) {
     std::memset(matrixData, 0, sizeof(s32) * 8);
@@ -185,6 +186,17 @@ s32 AnimationMatrices::GetWeaponAttack(u32 joint, const LVector& localOffset, LV
             + ((s64)localOffset.y * curRot[7])
             + ((s64)localOffset.z * curRot[8])) >> 12);
 
+    return 1;
+}
+
+s32 AnimationMatrices::GetMatrixPair(u32 joint, s32 outPrev[8], s32 outCur[8]) const {
+    if (joint >= 10 || !previous || !current) {
+        return 0;
+    }
+
+    const s32 offset = joint * 8;
+    std::memcpy(outPrev, previous + offset, sizeof(s32) * 8);
+    std::memcpy(outCur, current + offset, sizeof(s32) * 8);
     return 1;
 }
 

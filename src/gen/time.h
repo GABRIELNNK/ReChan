@@ -9,11 +9,19 @@
 class Time : public Manager {
 public:
     u32 frameCounter = 0; // +28: incremented each frame by Step()
+#if HIGH_FPS_PLAY_PRESENTATION
+    s32 targetFPS = 60;
+
+    // PC: measured real delta time (seconds) and FPS, updated each frame.
+    f32 deltaTime = 1.0f / 60.0f;
+    f32 fps = 60.0f;
+#else
     s32 targetFPS = 30;  // render frame rate cap (logic always runs at 30Hz)
 
     // PC: measured real delta time (seconds) and FPS, updated each frame.
     f32 deltaTime = 1.0f / 30.0f;
     f32 fps = 30.0f;
+#endif
 
     // PSX: __4Time (TIME.CPP, 0x80044950)
     Time();

@@ -11,6 +11,10 @@ public:
     MiscAnimNode* mAnimB = nullptr;
     TransformAnim* mBoundTransformAnim = nullptr;
     s32 mCurrentFrame = 0;
+#if HIGH_FPS_PLAY_PRESENTATION
+    // Render-only: frame value at the start of the last logic tick, for Draw()-time interpolation.
+    s32 mRenderPrevFrame = 0;
+#endif
     s32 mModelIndex = -1;
     s32 mFloatAngle = 0;
     s32 mFloatRadius = 0;
@@ -30,6 +34,7 @@ public:
     void DeleteModel() override;
     void Reset() override;
     void Think() override;
+    void Draw() override;
     void UpdatePosition() override;
     void HandlePickupCollision(Thing* pickup) override;
     void HandleHumanoidCollision(Humanoid* hum) override;

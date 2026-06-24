@@ -3,6 +3,7 @@
 #include "gen/particle.h"
 
 #include "gen/camera.h"
+#include "gen/game.h"
 #include "gen/model.h"
 #include "gen/psxmath_helpers.h"
 #include "gen/time.h"
@@ -36,6 +37,12 @@ public:
     s16 posX = 0;
     s16 posY = 0;
     s16 posZ = 0;
+
+#if HIGH_FPS_PLAY_PRESENTATION
+    s16 prevPosX = 0;
+    s16 prevPosY = 0;
+    s16 prevPosZ = 0;
+#endif
 
     s16 velX = 0;
     s16 velY = 0;
@@ -1010,6 +1017,11 @@ s32 ParticleSystem::InitParticles(const LVector& origin) {
         info->posX = static_cast<s16>(origin.x);
         info->posY = static_cast<s16>(origin.y);
         info->posZ = static_cast<s16>(origin.z);
+#if HIGH_FPS_PLAY_PRESENTATION
+        info->prevPosX = info->posX;
+        info->prevPosY = info->posY;
+        info->prevPosZ = info->posZ;
+#endif
 
         if ((stats->flags & 0x10u) != 0u && meshCounter < static_cast<s32>(stats->spawnPerBurst)) {
             info->meshIndex = static_cast<u16>(meshCounter++);
@@ -1149,6 +1161,12 @@ s32 ParticleSystem::Update() {
         ParticleInfo* info = static_cast<ParticleInfo*>(node);
         node = node->next;
         hadAnyNode = true;
+
+#if HIGH_FPS_PLAY_PRESENTATION
+        info->prevPosX = info->posX;
+        info->prevPosY = info->posY;
+        info->prevPosZ = info->posZ;
+#endif
 
         if (particleLife < static_cast<s16>(info->frameAge)) {
             const u8 prevHold = info->animHoldCounter;
@@ -1348,6 +1366,18 @@ void ParticleSystem::Display() {
             static_cast<s32>(info->posY),
             static_cast<s32>(info->posZ),
         };
+#if HIGH_FPS_PLAY_PRESENTATION
+        // particle posX/Y/Z only advances once per fixed 30Hz logic tick, so
+        // without interpolation particles visibly step at HIGH_FPS render rates.
+        // Lerp from the tick-start snapshot using the same presentation alpha
+        // Humanoid/Obstacle draw uses (see HumanoidRenderSmoothState).
+        if (g_time && g_game && g_game->GetState() == GameState::Play) {
+            const f32 alpha = g_time->GetPlayPresentationAlpha();
+            renderPos.x = static_cast<s32>(info->prevPosX) + static_cast<s32>(static_cast<f32>(info->posX - info->prevPosX) * alpha);
+            renderPos.y = static_cast<s32>(info->prevPosY) + static_cast<s32>(static_cast<f32>(info->posY - info->prevPosY) * alpha);
+            renderPos.z = static_cast<s32>(info->prevPosZ) + static_cast<s32>(static_cast<f32>(info->posZ - info->prevPosZ) * alpha);
+        }
+#endif
         if (kDebugFreezeParticleRenderAtSpawn) {
             renderPos = basePos;
         }

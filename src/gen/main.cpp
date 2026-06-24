@@ -305,13 +305,13 @@ int main(int argc, char** argv) {
 
         g_time->WaitForFrameEnd(frameStart);
 
-        // Update title bar with FPS every 30 frames
-        static u32 titleCounter = 30;
-        if (++titleCounter >= 30) {
+        static f32 titleAccumSec = 0.0f;
+        titleAccumSec += g_time->deltaTime;
+        if (titleAccumSec >= 1.0f) {
             char titleBuf[128];
             snprintf(titleBuf, sizeof(titleBuf), "%s - %.1f fps (%.2f ms)", JCSM_TITLE, g_time->fps, g_time->deltaTime * 1000.0f);
             p3d::display->SetTitle(titleBuf);
-            titleCounter = 0;
+            titleAccumSec = 0.0f;
         }
     }
 

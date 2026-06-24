@@ -980,6 +980,7 @@ bool Game::gsTitleState(Game* game) {
     // PSX: reset idle timers
     game->titleIdleTimer = 0;
     game->titleIdleBase = 0;
+    game->titleIdleAccumSec = 0.0f;
     game->titleStartLatch = false;
 
     // PSX: ClearEasterEggs()
@@ -1039,6 +1040,7 @@ bool Game::gsTitleLoopState(Game* game) {
                 LOG("[Game] TitleLoop: attract fade complete");
                 game->titleIdleBase = 0;
                 game->titleIdleTimer = 0;
+                game->titleIdleAccumSec = 0.0f;
                 game->titleFadeType = 0;
                 if (!g_oxFontFile) g_oxFontFile = new oxFontFile();
                 g_oxFontFile->ReloadFont("XC/FONTS.1");
@@ -1170,6 +1172,7 @@ bool Game::gsTitleLoopState(Game* game) {
     }
     g_display->EndFrame();
 
+#if !CUSTOM_MENU
     // PSX: attract mode timer check (gp+128 - gp+124) >= 900
     s32 elapsed = game->titleIdleTimer - game->titleIdleBase;
     if (elapsed >= 900) {
@@ -1178,6 +1181,7 @@ bool Game::gsTitleLoopState(Game* game) {
         game->titleFadeType = 2;
         return true;
     }
+#endif
 
     if (startDown) {
 #if CUSTOM_MENU
@@ -1204,7 +1208,13 @@ bool Game::gsTitleLoopState(Game* game) {
     }
     else {
         game->titleStartLatch = false;
-        game->titleIdleTimer++;
+
+        game->titleIdleAccumSec += g_time ? g_time->GetDeltaTime() : 0.0f;
+        const f32 kIdleFrameSec = 1.0f / 30.0f;
+        while (game->titleIdleAccumSec >= kIdleFrameSec) {
+            game->titleIdleAccumSec -= kIdleFrameSec;
+            game->titleIdleTimer++;
+        }
     }
 
     return true;

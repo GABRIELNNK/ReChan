@@ -149,9 +149,9 @@ static const f32 kHudGlobalFadeSpeed = 6.0f;
 
 // Hit combo text shake on increase.
 static const f32 kHitTextShakeDurationSeconds = 0.36f;
-static const f32 kHitTextShakeFrequency = 72.0f;
-static const f32 kHitTextShakeAmpX = 5.2f;
-static const f32 kHitTextShakeAmpY = 3.4f;
+static const f32 kHitTextShakeFrequency = 16.0f;
+static const f32 kHitTextShakeAmpX = 2.6f;
+static const f32 kHitTextShakeAmpY = 1.7f;
 static const f32 kHitTextShakePhaseY = 1.5707963f;
 
 // Tally layout and style tuning.

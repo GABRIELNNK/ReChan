@@ -12,6 +12,8 @@
 #include "gen/scoremgr.h"
 #include "gen/colsect.h"
 #include "gen/blockmgr.h"
+#include "gen/game.h"
+#include "gen/time.h"
 #include "p3d/hash.h"
 #include "p3d/p3dmath.h"
 #include "ai/obstacle_shared.h"
@@ -852,9 +854,33 @@ Stack::~Stack() {
 void Stack::Draw() {
     MARKFUNCTION(0x8001E820);
 
-    if (state != 3) {
-        Obstacle::Draw();
+    if (state == 3) {
+        return;
     }
+
+#if HIGH_FPS_PLAY_PRESENTATION
+    const bool stackInPlay = (g_time && g_game && g_game->GetState() == GameState::Play);
+    if (stackInPlay && anim && anim->flip) {
+        f32 alpha = g_time->GetPlayPresentationAlpha();
+        if (alpha < 0.0f) alpha = 0.0f;
+        if (alpha > 1.0f) alpha = 1.0f;
+
+        const s32 frameStep = currentFrame - renderPrevFrame;
+        const s32 interpFrameInt = renderPrevFrame + (s32)((f32)frameStep * alpha);
+        const s32 interpFrameReal = interpFrameInt << 16;
+
+        const LVector savedJoint0 = jointPositions[0];
+        const LVector savedJoint1 = jointPositions[1];
+
+        anim->flip->SetFrameReal(interpFrameReal);
+        anim->flip->UpdateJoints();
+
+        jointPositions[0] = savedJoint0;
+        jointPositions[1] = savedJoint1;
+    }
+#endif
+
+    Obstacle::Draw();
 }
 
 void Stack::AnalyzeMesh(DBRoot* root) {
@@ -1059,6 +1085,10 @@ void Stack::FinishStack() {
 void Stack::Think() {
     MARKFUNCTION(0x8001EE28);
 
+#if HIGH_FPS_PLAY_PRESENTATION
+    const s32 frameBeforeTick = currentFrame;
+#endif
+
     if (state == 1) {
         Wobble();
     }
@@ -1073,6 +1103,10 @@ void Stack::Think() {
 
     flip->SetFrame(currentFrame);
     flip->UpdateJoints();
+
+#if HIGH_FPS_PLAY_PRESENTATION
+    renderPrevFrame = frameBeforeTick;
+#endif
 
     if (knockDownSound) {
         knockDownSound->Think();

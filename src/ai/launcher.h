@@ -27,6 +27,10 @@ public:
     s32 animPlaying = 0;
     // PSX +144 (s32): animation index for GetAnimation lookup (DB attrib 21)
     s32 animIndex = 0;
+#if HIGH_FPS_PLAY_PRESENTATION
+    // Render-only: frame value at the start of the last logic tick, for Draw()-time interpolation.
+    s32 renderPrevFrame = 0;
+#endif
 
     Launcher(const LVector* pos, u16 type);
     ~Launcher() override;

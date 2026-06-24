@@ -8,7 +8,9 @@
 #include "gen/control.h"
 #include "gen/colvol.h"
 #include "gen/database.h"
+#include "gen/game.h"
 #include "gen/model.h"
+#include "gen/time.h"
 #include "p3d/flip.h"
 #include "p3d/p3dmath.h"
 #include "snd/snddrct.h"
@@ -132,6 +134,22 @@ void Launcher::Draw() {
     mdl->rotY = (u16)(drawOrient.y & 0xFFFF);
     mdl->rotZ = (u16)(drawOrient.z & 0xFFFF);
 
+#if HIGH_FPS_PLAY_PRESENTATION
+    const bool launcherInPlay = (g_time && g_game && g_game->GetState() == GameState::Play);
+    if (launcherInPlay && animPlaying && animStruct && animStruct->flip) {
+        f32 alpha = g_time->GetPlayPresentationAlpha();
+        if (alpha < 0.0f) alpha = 0.0f;
+        if (alpha > 1.0f) alpha = 1.0f;
+
+        const s32 frameStep = animFrame - renderPrevFrame;
+        const s32 interpFrameInt = renderPrevFrame + (s32)((f32)frameStep * alpha);
+        const s32 interpFrameReal = interpFrameInt << 16;
+
+        animStruct->flip->SetFrameReal(interpFrameReal);
+        animStruct->flip->UpdateJoints();
+    }
+#endif
+
     mdl->Show(0);
 }
 
@@ -167,6 +185,9 @@ void Launcher::Think() {
     if (!animPlaying) {
         animFrame = 0;
         animPlaying = 0;
+#if HIGH_FPS_PLAY_PRESENTATION
+        renderPrevFrame = 0;
+#endif
         return;
     }
 
@@ -190,6 +211,9 @@ void Launcher::Think() {
         animFrame = oldFrame + 1;
         flip->SetFrame(oldFrame);
         flip->UpdateJoints();
+#if HIGH_FPS_PLAY_PRESENTATION
+        renderPrevFrame = oldFrame;
+#endif
     }
     else {
         animFrame = 0;

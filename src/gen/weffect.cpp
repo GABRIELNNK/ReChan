@@ -10,6 +10,7 @@
 #include "gen/colsect.h"
 #include "gen/database.h"
 #include "gen/display.h"
+#include "gen/game.h"
 #include "gen/geffect.h"
 #include "gen/levelmgr.h"
 #include "gen/model.h"
@@ -18,6 +19,7 @@
 #include "gen/psxmath_helpers.h"
 #include "gen/pweffect.h"
 #include "gen/scaledata.h"
+#include "gen/time.h"
 #include "gen/uvdata.h"
 
 #include "ai/activezn.h"
@@ -44,6 +46,21 @@ static s32 g_wEffectOwnedCount = 0;
 // (WEffect, SpotLight, FWEffect, GEffect, LensFlare) depth-align with
 // block geometry that has already been shifted by OffsetToPreventSeams.
 static LVector s_comEffectSeamOffset = { 0, 0, 0 };
+
+#if HIGH_FPS_PLAY_PRESENTATION
+static LVector LerpWEffectPos(const LVector& prev, const LVector& cur) {
+    if (!g_time || !g_game || g_game->GetState() != GameState::Play) {
+        return cur;
+    }
+
+    const f32 alpha = g_time->GetPlayPresentationAlpha();
+    LVector result;
+    result.x = prev.x + static_cast<s32>(static_cast<f32>(cur.x - prev.x) * alpha);
+    result.y = prev.y + static_cast<s32>(static_cast<f32>(cur.y - prev.y) * alpha);
+    result.z = prev.z + static_cast<s32>(static_cast<f32>(cur.z - prev.z) * alpha);
+    return result;
+}
+#endif
 
 struct LateComEffectRender {
     s32 blockNum = -1;
@@ -4764,6 +4781,10 @@ s32 WEffect::Create() {
         blockNum = ResolveStableEffectBlock(pos, blockNum);
     }
 
+#if HIGH_FPS_PLAY_PRESENTATION
+    prevPos = pos;
+#endif
+
     CreateSound(nullptr);
 
     return 1;
@@ -4771,6 +4792,10 @@ s32 WEffect::Create() {
 
 s32 WEffect::Update() {
     MARKFUNCTION(0x8008BA24);
+
+#if HIGH_FPS_PLAY_PRESENTATION
+    prevPos = pos;
+#endif
 
     if (triggerFWHash && g_ai) {
         for (ccMinNode* node = g_ai->humanoidList.head; node; node = node->next) {
@@ -4873,7 +4898,13 @@ void WEffect::Display(s32 inBlockNum) {
         return;
     }
 
-    const bool clipPass = (clipDistance < 0) || comEffect->PointInView(pos, clipDistance);
+#if HIGH_FPS_PLAY_PRESENTATION
+    const LVector renderPos = LerpWEffectPos(prevPos, pos);
+#else
+    const LVector& renderPos = pos;
+#endif
+
+    const bool clipPass = (clipDistance < 0) || comEffect->PointInView(renderPos, clipDistance);
 
     if (!clipPass) {
         return;
@@ -4890,11 +4921,11 @@ void WEffect::Display(s32 inBlockNum) {
     comEffect->SetFrame(frame);
 
     const LVector* scalePtr = hasScale ? &scale : nullptr;
-    comEffect->Render(pos, scalePtr, &rotation, renderFlags);
+    comEffect->Render(renderPos, scalePtr, &rotation, renderFlags);
 
     if (kDebugRenderUntexturedBillboard
         && (kDebugBillboardEffectHashFilter == 0u || nameCRC == kDebugBillboardEffectHashFilter)) {
-        DrawDebugUntexturedBillboard(pos, 160.0f);
+        DrawDebugUntexturedBillboard(renderPos, 160.0f);
     }
 
     if (paletteData) {
@@ -4924,6 +4955,9 @@ s32 SpotLight::Create() {
     visible = 1;
     zOffset = 0;
     basePos = pos;
+#if HIGH_FPS_PLAY_PRESENTATION
+    prevPos = pos;
+#endif
 
     linkedEffect = WEffect::Find(linkedEffectHash);
 
@@ -4940,6 +4974,9 @@ s32 SpotLight::Update() {
         return 0;
     }
 
+#if HIGH_FPS_PLAY_PRESENTATION
+    prevPos = pos;
+#endif
     visible = 1;
 
     pos = linkedEffect->pos;
@@ -5003,7 +5040,11 @@ void SpotLight::Display(s32 inBlockNum) {
 
     comEffect->SetFrame(frame);
 
+#if HIGH_FPS_PLAY_PRESENTATION
+    LVector renderPos = LerpWEffectPos(prevPos, pos);
+#else
     LVector renderPos = pos;
+#endif
     renderPos.z += zOffset;
 
     const LVector* scalePtr = hasScale ? &scale : nullptr;
@@ -5485,6 +5526,10 @@ s32 FWEffect::SetMentor() {
 
             if (pathMode != 5) {
                 mentorPosRef = &mentorLink->pos;
+#if HIGH_FPS_PLAY_PRESENTATION
+                curMentorPos = *mentorPosRef;
+                prevMentorPos = curMentorPos;
+#endif
                 LVector* soundPos = mentorLink->GetSoundPosPtr();
                 mentorOffset.x = pos.x - soundPos->x;
                 mentorOffset.y = pos.y - soundPos->y;
@@ -5513,6 +5558,14 @@ s32 FWEffect::Continue() {
 
 s32 FWEffect::Update() {
     MARKFUNCTION(0x8008C47C);
+
+#if HIGH_FPS_PLAY_PRESENTATION
+    prevPos = pos;
+    if (mentorPosRef) {
+        prevMentorPos = curMentorPos;
+        curMentorPos = *mentorPosRef;
+    }
+#endif
 
     if (mentor) {
         mentor->Update();
@@ -5709,8 +5762,18 @@ void FWEffect::Display(s32 inBlockNum) {
 
     comEffect->SetFrame(frame);
 
+#if HIGH_FPS_PLAY_PRESENTATION
+    LVector renderPos = LerpWEffectPos(prevPos, pos);
+#else
     LVector renderPos = pos;
+#endif
     if (mentorPosRef) {
+#if HIGH_FPS_PLAY_PRESENTATION
+        const LVector mentorPos = LerpWEffectPos(prevMentorPos, curMentorPos);
+#else
+        const LVector& mentorPos = *mentorPosRef;
+#endif
+
         if (mentorLink
             && (mentorLink->orientation.x || mentorLink->orientation.y || mentorLink->orientation.z)
             && createMode == 0)
@@ -5727,14 +5790,14 @@ void FWEffect::Display(s32 inBlockNum) {
                      static_cast<f32>(mentorOffset.z)),
                 rotMatrix);
 
-            renderPos.x = mentorPosRef->x + static_cast<s32>(rotatedOffset.x);
-            renderPos.y = mentorPosRef->y + static_cast<s32>(rotatedOffset.y);
-            renderPos.z = mentorPosRef->z + static_cast<s32>(rotatedOffset.z);
+            renderPos.x = mentorPos.x + static_cast<s32>(rotatedOffset.x);
+            renderPos.y = mentorPos.y + static_cast<s32>(rotatedOffset.y);
+            renderPos.z = mentorPos.z + static_cast<s32>(rotatedOffset.z);
         }
         else {
-            renderPos.x = mentorPosRef->x + mentorOffset.x;
-            renderPos.y = mentorPosRef->y + mentorOffset.y;
-            renderPos.z = mentorPosRef->z + mentorOffset.z;
+            renderPos.x = mentorPos.x + mentorOffset.x;
+            renderPos.y = mentorPos.y + mentorOffset.y;
+            renderPos.z = mentorPos.z + mentorOffset.z;
         }
     }
 

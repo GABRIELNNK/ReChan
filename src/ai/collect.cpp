@@ -8,7 +8,9 @@
 #include "gen/animstruct.h"
 #include "gen/colvol.h"
 #include "gen/database.h"
+#include "gen/game.h"
 #include "gen/model.h"
+#include "gen/time.h"
 #include "gen/scoremgr.h"
 #include "snd/snddrct.h"
 
@@ -538,6 +540,10 @@ void Collectible::Think() {
         mTimer--;
     }
 
+#if HIGH_FPS_PLAY_PRESENTATION
+    const s32 frameBeforeTick = mCurrentFrame;
+#endif
+
     if (Collectible_ShouldDriveMiscAnim(mAnimB)) {
         const s32 frameCount = Collectible_GetMiscAnimFrameCount(mAnimB);
         if (frameCount > 0 && mCurrentFrame < frameCount) {
@@ -564,6 +570,10 @@ void Collectible::Think() {
     else {
         mCurrentFrame = 0;
     }
+
+#if HIGH_FPS_PLAY_PRESENTATION
+    mRenderPrevFrame = frameBeforeTick;
+#endif
 
     const s32 bobOffset = MulShift16(rmSin16(mFloatAngle + 0x4000), 16);
     const s32 waveRadius = bobOffset + 32;
@@ -595,6 +605,32 @@ void Collectible::Think() {
 
     pos.z = mInitialPos.z;
     UpdateShadowFloorHeight();
+}
+
+// PC
+void Collectible::Draw() {
+#if HIGH_FPS_PLAY_PRESENTATION
+    const bool collectibleInPlay = (g_time && g_game && g_game->GetState() == GameState::Play);
+    if (collectibleInPlay) {
+        f32 alpha = g_time->GetPlayPresentationAlpha();
+        if (alpha < 0.0f) alpha = 0.0f;
+        if (alpha > 1.0f) alpha = 1.0f;
+
+        const s32 frameStep = mCurrentFrame - mRenderPrevFrame;
+
+        if (Collectible_ShouldDriveMiscAnim(mAnimB)) {
+            const s32 interpFrame = mRenderPrevFrame + (s32)((f32)frameStep * alpha + 0.5f);
+            Collectible_ApplyMiscAnimFrame(this, mAnimB, interpFrame, true);
+        }
+        else if (mAnim && mAnim->flip && mAnim->flip->anim) {
+            const s32 interpFrameInt = mRenderPrevFrame + (s32)((f32)frameStep * alpha);
+            mAnim->flip->SetFrameReal(interpFrameInt << 16);
+            mAnim->flip->UpdateJoints();
+        }
+    }
+#endif
+
+    Obstacle::Draw();
 }
 
 void Collectible::UpdatePosition() {

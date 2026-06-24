@@ -130,6 +130,10 @@ public:
     s32 timesToWobble = 0;
     // PSX +152 (s32): current frame counter.
     s32 currentFrame = 0;
+#if HIGH_FPS_PLAY_PRESENTATION
+    // Render-only: frame value at the start of the last logic tick, for Draw()-time interpolation.
+    s32 renderPrevFrame = 0;
+#endif
     // PSX +156 (ptr): knockdown sound object.
     CKnockDownSound* knockDownSound = nullptr;
     // PSX +160 (char[50]): generated pushable model name.

@@ -7,6 +7,7 @@
 #include "gen/geffect.h"
 #include "gen/levelmgr.h"
 #include "gen/model.h"
+#include "gen/time.h"
 #include "gen/world.h"
 #include "p3d/hash.h"
 #include "p3d/p3dmath.h"
@@ -659,11 +660,44 @@ void Pickup::UpdatePosition() {
 
         AnimationMatrices* animMatrices = modelPtr ? modelPtr->animMatrices : nullptr;
         if (animMatrices) {
-            const s32* matrix = AnimationMatrices::GetMatrix(animMatrices, static_cast<u32>(attachJoint));
-            if (matrix) {
-                s32 modelMatrix[8] = {};
-                std::memcpy(modelMatrix, matrix, sizeof(modelMatrix));
+            s32 modelMatrix[8] = {};
+            bool haveMatrix = false;
 
+#if HIGH_FPS_PLAY_PRESENTATION
+            const bool pickupInPlay = (g_time && g_game && g_game->GetState() == GameState::Play);
+            if (pickupInPlay) {
+                s32 prevMatrix[8] = {};
+                s32 curMatrix[8] = {};
+                if (animMatrices->GetMatrixPair(static_cast<u32>(attachJoint), prevMatrix, curMatrix)) {
+                    f32 alpha = g_time->GetPlayPresentationAlpha();
+                    if (alpha < 0.0f) alpha = 0.0f;
+                    if (alpha > 1.0f) alpha = 1.0f;
+
+                    const s16* prevRot = reinterpret_cast<const s16*>(prevMatrix);
+                    const s16* curRot = reinterpret_cast<const s16*>(curMatrix);
+                    s16* outRot = reinterpret_cast<s16*>(modelMatrix);
+                    for (s32 i = 0; i < 9; i++) {
+                        outRot[i] = (s16)(prevRot[i] + (s32)((f32)(curRot[i] - prevRot[i]) * alpha));
+                    }
+
+                    for (s32 i = 5; i <= 7; i++) {
+                        modelMatrix[i] = prevMatrix[i] + (s32)((f32)(curMatrix[i] - prevMatrix[i]) * alpha);
+                    }
+
+                    haveMatrix = true;
+                }
+            }
+#endif
+
+            if (!haveMatrix) {
+                const s32* matrix = AnimationMatrices::GetMatrix(animMatrices, static_cast<u32>(attachJoint));
+                if (matrix) {
+                    std::memcpy(modelMatrix, matrix, sizeof(modelMatrix));
+                    haveMatrix = true;
+                }
+            }
+
+            if (haveMatrix) {
                 const s32 ownerScale = modelPtr->scale;
                 if (ownerScale != FIX16_ONE) {
                     const s32 invScale = rmDiv16i(FIX16_ONE, ownerScale);
@@ -674,7 +708,7 @@ void Pickup::UpdatePosition() {
                 }
 
                 LVector attachWorld = {};
-                TransformVectorByPsxMatrix(matrix, attachOffset, attachWorld);
+                TransformVectorByPsxMatrix(modelMatrix, attachOffset, attachWorld);
                 modelMatrix[5] = attachWorld.x;
                 modelMatrix[6] = attachWorld.y;
                 modelMatrix[7] = attachWorld.z;
