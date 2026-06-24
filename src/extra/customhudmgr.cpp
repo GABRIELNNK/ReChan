@@ -9,6 +9,7 @@
 #include "gen/camera.h"
 #include "gen/display.h"
 #include "gen/game.h"
+#include "gen/model.h"
 #include "gen/scoremgr.h"
 #include "gen/time.h"
 #include "gen/world.h"
@@ -312,6 +313,10 @@ static f32 GetHudDeltaSeconds() {
         dt = 1.0f / 30.0f;
     }
     return dt;
+}
+
+static f32 HudAnimSeconds() {
+    return (f32)Time::GetTimeInSeconds();
 }
 
 static void UpdateDelayedHealthRatio(f32 targetRatio,
@@ -885,6 +890,12 @@ static bool ProjectThingToScreen(const Thing* thing, s32 yOffset, f32* outX, f32
     }
 
     LVector world = thing->pos;
+    if (thing->model) {
+        const Model* m = static_cast<const Model*>(thing->model);
+        world.x = m->posX;
+        world.y = m->posY;
+        world.z = m->posZ;
+    }
     world.y += yOffset;
 
     if (!camera->WorldToScreen(world, outX, outY)) {
@@ -1236,6 +1247,10 @@ void CustomHudMgr::Render(const HUD& hud) {
     EnsureAssetsLoaded();
     EnsureFontsLoaded();
 
+    // One overlay batch for the whole HUD pass: collapses redundant per-quad
+    // projection/state churn across every meter, icon and text string.
+    ScreenDraw::Batch uiBatch;
+
     const f32 dt = GetHudDeltaSeconds();
     const f32 targetHudAlpha = (hud.visible != 0) ? 1.0f : 0.0f;
     const f32 fadeStep = kHudGlobalFadeSpeed * dt;
@@ -1330,8 +1345,8 @@ void CustomHudMgr::DrawAutosaveOverlay() const {
     const f32 xCompensation = (hudScaleX > 0.0f) ? (hudScaleY / hudScaleX) : 1.0f;
     const f32 radiusX = kRadius * xCompensation;
     const f32 sizeX = kSize * xCompensation;
-    const u32 frame = g_time ? g_time->GetFrameCounter() : 0u;
-    const s32 head = (s32)((frame / 2u) % kSegments);
+
+    const s32 head = (s32)((s64)(HudAnimSeconds() * 15.0f) % kSegments);
     for (s32 i = 0; i < kSegments; ++i) {
         const f32 angle = ((f32)i / (f32)kSegments) * 6.2831853f;
         const s32 distance = (head - i + kSegments) % kSegments;

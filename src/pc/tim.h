@@ -32,6 +32,18 @@ namespace Tim {
 // 2D overlay drawing
 // Creates/caches an internal shader on first use.
 namespace ScreenDraw {
+    void BeginBatch(f32 canvasW = 0.0f, f32 canvasH = 0.0f);
+    void EndBatch();
+
+    // RAII helper: opens a batch for the lifetime of the scope. Safe for
+    // functions with multiple return paths (menu/HUD render).
+    struct Batch {
+        explicit Batch(f32 canvasW = 0.0f, f32 canvasH = 0.0f) { BeginBatch(canvasW, canvasH); }
+        ~Batch() { EndBatch(); }
+        Batch(const Batch&) = delete;
+        Batch& operator=(const Batch&) = delete;
+    };
+
     // Draw a texture filling the entire screen (opaque, no alpha).
     void DrawFullscreen(tTexture* tex);
 

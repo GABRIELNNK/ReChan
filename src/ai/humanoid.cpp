@@ -1284,21 +1284,20 @@ void Humanoid::Draw() {
 
     if (model) {
         HumanoidModel* hm = static_cast<HumanoidModel*>(model);
-        // PSX: draw path swaps matrices; high-FPS mode moves authoritative
-        // swap/capture to HumanoidModel::Animate (logic phase).
-        if (hm->animMatrices) {
 #if HIGH_FPS_PLAY_PRESENTATION
-            if (humanoidInPlay) {
-                // Visual high-FPS pose updates should not mutate gameplay matrix buffers.
-                hm->animMatrices->SetCaptureEnabled(0);
-            }
-            else {
-                hm->animMatrices->SetCaptureEnabled(1);
-            }
-#else
-            hm->animMatrices->Swap();
-#endif
+        // High-FPS path: the authoritative attack-joint capture + buffer swap is
+        // driven once per logic tick by CaptureHumanoidAttackJointsLoop, NOT here.
+        // Draw() runs at render rate on an interpolated pose, so capture is
+        // disabled during the in-play Show() to keep render-only/interpolated
+        // joint positions out of the gameplay hit-detection buffers.
+        if (hm->animMatrices) {
+            hm->animMatrices->SetCaptureEnabled(humanoidInPlay ? 0 : 1);
         }
+#else
+        if (hm->animMatrices) {
+            hm->animMatrices->Swap();
+        }
+#endif
         // PSX: copy pos/orientation to model, then Show(0)
         Model* m = static_cast<Model*>(model);
         m->posX = drawPos.x;

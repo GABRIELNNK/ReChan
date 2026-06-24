@@ -38,6 +38,19 @@
 
 feCustomMenuMgr* g_feCustomMenuMgr = nullptr;
 
+static f32 UiAnimSeconds() {
+    return (f32)Time::GetTimeInSeconds();
+}
+
+// Symmetric 0 -> 1 -> 0 triangle wave with the given period in seconds.
+static f32 UiTriangle01(f32 periodSeconds) {
+    if (periodSeconds <= 0.0f) {
+        return 0.0f;
+    }
+    const f32 t = std::fmod(UiAnimSeconds(), periodSeconds) / periodSeconds;
+    return (t < 0.5f) ? (t * 2.0f) : (2.0f - t * 2.0f);
+}
+
 static constexpr s32 kFrameRateOptionValues[] = { 30, 60, 120, 0 };
 static constexpr s32 kMsaaOptionValues[] = { 0, 2, 4, 8, 16 };
 static constexpr s32 kKeyBindingActionCount = ACTION_OPEN_CLOSE_MENU;
@@ -4813,6 +4826,12 @@ void feCustomMenuMgr::Render() {
     if (!page)
         return;
 
+    // One overlay batch for the whole menu page: collapses the per-quad
+    // projection rebuilds / GL state toggles across every border rect and text
+    // string into a single setup, which is what restores high frame rates on
+    // text-heavy menu pages.
+    ScreenDraw::Batch uiBatch;
+
     m_pulse.Update();
 
     const s32 panelX = DEF_WINDOW_CENTER_X - page->frameW / 2;
@@ -5396,8 +5415,8 @@ void feCustomMenuMgr::RenderAutosaveSpinner(s32 centerX, s32 centerY) const {
     const f32 xCompensation = (scaleX > 0.0f) ? (scaleY / scaleX) : 1.0f;
     const f32 radiusX = kRadius * xCompensation;
     const f32 sizeX = kSize * xCompensation;
-    const u32 frame = g_time ? g_time->GetFrameCounter() : 0u;
-    const s32 head = (s32)((frame / 2u) % kSegments);
+    // 15 segments/sec (matches the original frame/2 advance at 30 fps), wall-clock paced.
+    const s32 head = (s32)((s64)(UiAnimSeconds() * 15.0f) % kSegments);
     for (s32 i = 0; i < kSegments; ++i) {
         const f32 angle = ((f32)i / (f32)kSegments) * 6.2831853f;
         const s32 distance = (head - i + kSegments) % kSegments;
@@ -5809,12 +5828,9 @@ void feCustomMenuMgr::RenderUpdateIndeterminateBar(s32 panelX, s32 panelW, s32 r
              DEF_SLIDER_TRACK_R, DEF_SLIDER_TRACK_G, DEF_SLIDER_TRACK_B, DEF_SLIDER_TRACK_A);
 
     // No real progress to report yet, so sweep a block back and forth across the track.
+    // 2.0s round-trip (matches the original 60-frame cycle at 30 fps), wall-clock paced.
     const s32 blockW = barW / 3;
-    const u32 frameCounter = g_time ? g_time->GetFrameCounter() : 0u;
-    const u32 cycleFrames = 60u;
-    const u32 phase = frameCounter % cycleFrames;
-    const f32 half = (f32)(cycleFrames / 2);
-    const f32 frac = (phase < cycleFrames / 2) ? ((f32)phase / half) : (2.0f - (f32)phase / half);
+    const f32 frac = UiTriangle01(2.0f);
     const s32 blockX = barX + (s32)((f32)(barW - blockW) * frac);
 
     DrawRect((f32)blockX, (f32)barY, (f32)blockW, (f32)barH,
@@ -5953,12 +5969,9 @@ void feCustomMenuMgr::RenderAssetScanSweep(s32 panelX, s32 panelW, s32 rowTop) c
 
     // Scanning a single folder is effectively instant - sweep a block, same as the
     // update-checker's indeterminate bar, rather than faking a 0..1 progress value.
+    // 2.0s round-trip (matches the original 60-frame cycle at 30 fps), wall-clock paced.
     const s32 blockW = barW / 3;
-    const u32 frameCounter = g_time ? g_time->GetFrameCounter() : 0u;
-    const u32 cycleFrames = 60u;
-    const u32 phase = frameCounter % cycleFrames;
-    const f32 half = (f32)(cycleFrames / 2);
-    const f32 frac = (phase < cycleFrames / 2) ? ((f32)phase / half) : (2.0f - (f32)phase / half);
+    const f32 frac = UiTriangle01(2.0f);
     const s32 blockX = barX + (s32)((f32)(barW - blockW) * frac);
 
     DrawRect((f32)blockX, (f32)barY, (f32)blockW, (f32)barH,

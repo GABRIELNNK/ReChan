@@ -483,6 +483,15 @@ public:
     void SetupModelCallbacks() override;
     void SetAnim(s32 animEnum, s32 a3, s32 force, s32 extra) override;
 
+    // Evaluates the active skeleton to world space with the joint post-callbacks
+    // enabled, populating animMatrices->current with the AUTHORITATIVE attack-joint
+    // world positions for hit detection. Normally this capture is a side effect of
+    // Show() during rendering, but under HIGH_FPS_PLAY_PRESENTATION rendering is
+    // decoupled (interpolated, capture disabled), so gameplay must drive this once
+    // per logic tick instead. Safe to call independent of rendering: the skeleton
+    // traversal restores joint state per joint.
+    void CaptureAttackJointMatrices();
+
     // Only loops when mode == 0 (normal animation playback).
     void HandleLoop(AnimStructure* anim) override;
 };

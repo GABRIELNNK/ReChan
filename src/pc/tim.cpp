@@ -206,12 +206,22 @@ static void EnsureShader() {
     s_screenShader = p3d::device->NewShader("simple");
 }
 
+// Overlay batching
+static s32 s_overlayBatchDepth = 0;
+static Mat4 s_overlayBatchPrevProj;
+
 // Internal: begin 2D overlay rendering (saves projection, sets ortho).
 // canvasW/canvasH default to the live screen size; pass the actual render
 // target's size when drawing off-screen so the projection matches the
 // buffer being rendered to instead of the main window.
 static Mat4 BeginOverlay(f32 canvasW = 0.0f, f32 canvasH = 0.0f) {
     EnsureShader();
+
+    // Inside an active batch the overlay state is already set; don't touch it.
+    if (s_overlayBatchDepth > 0) {
+        return s_overlayBatchPrevProj;
+    }
+
     Mat4 prev = p3d::context->GetProjectionMatrix();
 
     const f32 w = canvasW > 0.0f ? canvasW : SCREEN_WIDTH;
@@ -226,10 +236,39 @@ static Mat4 BeginOverlay(f32 canvasW = 0.0f, f32 canvasH = 0.0f) {
 
 // Internal: end 2D overlay rendering (restores previous state).
 static void EndOverlay(const Mat4& prev) {
+    // Inside an active batch the state is restored once by EndBatch, not per quad.
+    if (s_overlayBatchDepth > 0) {
+        return;
+    }
     p3d::context->SetProjectionMatrix(prev);
     p3d::context->EnableZBuffer(true);
     p3d::context->SetBlendMode(PDDI_BLEND_NONE);
     p3d::context->SetMultisampleEnabled(true);
+}
+
+void ScreenDraw::BeginBatch(f32 canvasW, f32 canvasH) {
+    EnsureShader();
+    if (s_overlayBatchDepth++ == 0) {
+        s_overlayBatchPrevProj = p3d::context->GetProjectionMatrix();
+        const f32 w = canvasW > 0.0f ? canvasW : SCREEN_WIDTH;
+        const f32 h = canvasH > 0.0f ? canvasH : SCREEN_HEIGHT;
+        p3d::context->SetProjectionMatrix(Ortho(0.0f, w, h, 0.0f, -1.0f, 1.0f));
+        p3d::context->EnableZBuffer(false);
+        p3d::context->SetCullMode(PDDI_CULL_NONE);
+        p3d::context->SetMultisampleEnabled(false);
+    }
+}
+
+void ScreenDraw::EndBatch() {
+    if (s_overlayBatchDepth <= 0) {
+        return;
+    }
+    if (--s_overlayBatchDepth == 0) {
+        p3d::context->SetProjectionMatrix(s_overlayBatchPrevProj);
+        p3d::context->EnableZBuffer(true);
+        p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+        p3d::context->SetMultisampleEnabled(true);
+    }
 }
 
 void ScreenDraw::DrawFullscreen(tTexture* tex) {

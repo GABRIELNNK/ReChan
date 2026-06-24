@@ -31,6 +31,7 @@
 #include "fe/xcfont.h"
 #include "gen/animmgr.h"
 #include "gen/animstruct.h"
+#include "gen/animmat.h"
 #include "fe/hud.h"
 #include "radmovie/movieplayer.h"
 #include "pc/inputaction.h"
@@ -348,6 +349,19 @@ static void AnimateLoop(ccList& list) {
     }
 }
 
+#if HIGH_FPS_PLAY_PRESENTATION
+static void CaptureHumanoidAttackJointsLoop(ccList& list) {
+    for (ccMinNode* node = list.head; node != nullptr; node = node->next) {
+        Thing* thing = static_cast<Thing*>(node);
+        HumanoidModel* hm = thing->model ? dynamic_cast<HumanoidModel*>(static_cast<Model*>(thing->model)) : nullptr;
+        if (hm && hm->animMatrices) {
+            hm->animMatrices->Swap();
+            hm->CaptureAttackJointMatrices();
+        }
+    }
+}
+#endif
+
 static void SyncAnimationTicksLoop(ccList& list, s32 tick) {
     for (ccMinNode* node = list.head; node != nullptr; node = node->next) {
         Thing* thing = static_cast<Thing*>(node);
@@ -394,15 +408,22 @@ static void animLoopDSTACK() {
         AnimateLoop(g_ai->pickupList);
         AnimateLoop(g_ai->inactivePickupList);
         AnimateLoop(g_ai->moveList);
+#if HIGH_FPS_PLAY_PRESENTATION
+        CaptureHumanoidAttackJointsLoop(g_ai->humanoidList);
+#endif
     }
 
     Effects_UpdateAll();
 }
 
+static void AdvanceGameplayAnimationOneTick() {
+    animLoopDSTACK();
+}
+
 void Game::AnimateEverythingHandler(Handler*) {
     MARKFUNCTION(0x8002B2F0);
 #if HIGH_FPS_PLAY_PRESENTATION
-    if (g_game && g_game->GetState() == GameState::Play && g_time && !g_time->DidPlayLogicStepThisFrame()) {
+    if (g_game && g_game->GetState() == GameState::Play) {
         return;
     }
 #endif
@@ -1436,6 +1457,7 @@ bool Game::gsPlayState(Game* game) {
             if (g_director) {
                 g_director->Process();
             }
+            AdvanceGameplayAnimationOneTick();
         }
 
         if (g_display && g_display->GetCamera()) {
@@ -1459,6 +1481,7 @@ bool Game::gsPlayState(Game* game) {
             g_time->Step();
         }
         ProcessHandlerList(game->handlerSet1.handlerList);
+        AdvanceGameplayAnimationOneTick();
     }
 
     // PSX pause gate: director script must be idle. Keep this on logic ticks only.

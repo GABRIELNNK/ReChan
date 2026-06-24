@@ -225,6 +225,27 @@ static void BuildModelWorldMatrix(const Model* model, Mat4& worldMatrix) {
     worldMatrix.SetTranslation((f32)model->posX, (f32)model->posY, (f32)model->posZ);
 }
 
+// Builds the world matrix from the Humanoid's own authoritative pos/orientation
+// rather than the model's render-only posX/Y/Z/rotX/Y/Z. Those model fields are
+// only written once per render frame from Humanoid::Draw() (and, under
+// HIGH_FPS_PLAY_PRESENTATION, hold an interpolated/render-only pose) - using
+// them to build the attack-joint capture matrix made the captured matrix go
+// stale or freeze whenever multiple logic ticks ran between two Draw() calls.
+static void BuildHumanoidWorldMatrix(const Humanoid* owner, Mat4& worldMatrix) {
+    worldMatrix = Mat4();
+    if (!owner) {
+        return;
+    }
+
+    p3dBuildRotMatrixZYX(owner->orientation.x, owner->orientation.y, owner->orientation.z, worldMatrix);
+
+    const SModel* skeletalModel = owner->model ? static_cast<const SModel*>(static_cast<const Model*>(owner->model)) : nullptr;
+    if (skeletalModel) {
+        worldMatrix.ScaleRotation(FIX16_TO_FLOAT(skeletalModel->scale));
+    }
+    worldMatrix.SetTranslation((f32)owner->pos.x, (f32)owner->pos.y, (f32)owner->pos.z);
+}
+
 
 static void BuildHeadTrackOverrideMatrix(const LVector& col0, const LVector& col1, const LVector& col2,
     const STreeJoint* joint, Mat4& overrideMatrix) {
@@ -606,22 +627,21 @@ s32 AnimationMatrices::CopyMatrix(u32 joint, const Mat4& jointMatrix) {
         return 1;
     }
 
-    // PSX CopyMatrix pulls the active port world matrix at callback time.
-    // Prefer the live render context world matrix over rebuilding from model fields.
-    if (p3d::context) {
-        WritePsxMatrix(matrixData, p3d::context->GetWorldMatrix() * jointMatrix);
+    // This capture feeds attack-joint hit detection, which must reflect the
+    // humanoid's authoritative simulation pos/orientation - never the render
+    // context's currently-active world matrix (which reflects whatever was
+    // last drawn, not necessarily this humanoid, and isn't updated at all
+    // between repeated logic-tick captures within the same render frame) and
+    // never the model's render-only posX/Y/Z (which only updates once per
+    // Draw() call and can be an interpolated render-only pose).
+    Humanoid* owner = static_cast<Humanoid*>(GetHumanoid());
+    if (owner) {
+        Mat4 worldMatrix;
+        BuildHumanoidWorldMatrix(owner, worldMatrix);
+        WritePsxMatrix(matrixData, worldMatrix * jointMatrix);
     }
     else {
-        Humanoid* owner = static_cast<Humanoid*>(GetHumanoid());
-        Model* model = owner ? static_cast<Model*>(owner->model) : nullptr;
-        if (model) {
-            Mat4 worldMatrix;
-            BuildModelWorldMatrix(model, worldMatrix);
-            WritePsxMatrix(matrixData, worldMatrix * jointMatrix);
-        }
-        else {
-            WritePsxMatrix(matrixData, jointMatrix);
-        }
+        WritePsxMatrix(matrixData, jointMatrix);
     }
 
     copied = 1;

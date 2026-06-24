@@ -331,9 +331,11 @@ static void SetLanguageSetting(s32 v) {
 }
 
 static void SetFrameRateSetting(s32 v) {
+#if HIGH_FPS_PLAY_PRESENTATION
     if (g_time) {
         g_time->targetFPS = NormalizeFrameRateSetting(v);
     }
+#endif
 }
 
 static const SettingDef kSettingDefs[] = {

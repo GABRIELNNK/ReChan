@@ -2316,6 +2316,34 @@ void HumanoidModel::Animate() {
     }
 }
 
+void HumanoidModel::CaptureAttackJointMatrices() {
+    if (!animMatrices || !drawable) {
+        return;
+    }
+
+    OriginalSTree* active = GetActiveSTree(drawable);
+    if (!active || !active->skeleton) {
+        return;
+    }
+
+    STreeData* skel = active->skeleton;
+    if (!skel->joints || skel->numJoints == 0) {
+        return;
+    }
+
+    // Force capture on regardless of the render-side gate: this evaluation is the
+    // authoritative gameplay snapshot. CopyMatrix builds each joint's world matrix
+    // from the owning Humanoid's authoritative pos/orientation, so the captured
+    // attack-joint positions are independent of the render context world matrix.
+    const s32 savedCapture = animMatrices->CaptureEnabled();
+    animMatrices->SetCaptureEnabled(1);
+
+    std::vector<Mat4> jointWorld(skel->numJoints);
+    skel->ComputeWorldMatricesWithCallbacks(jointWorld.data());
+
+    animMatrices->SetCaptureEnabled(savedCapture);
+}
+
 // PSX: SetupModelCallbacks__13HumanoidModel (MHUMAN.CPP:69, 0x8006E114)
 void HumanoidModel::SetupModelCallbacks() {
     MARKFUNCTION(0x8006E114);

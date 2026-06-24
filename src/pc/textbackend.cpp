@@ -288,6 +288,8 @@ public:
         bool atWordStart = true;
         f32 pendingSpace = 0.0f;
 
+        ScreenDraw::BeginBatch();
+
         while (cursor < text.length) {
             const s32 tokenStart = cursor;
             const char c = text.data[cursor];
@@ -449,6 +451,8 @@ public:
             lineConsumed += advance;
             atWordStart = false;
         }
+
+        ScreenDraw::EndBatch();
     }
 
 private:
