@@ -252,6 +252,9 @@ public:
                   float x, float y, float w, float h,
                   float u0, float v0, float u1, float v1) override;
 
+    void DrawQuadBatch(pddiTexture* tex, pddiBlendMode blend,
+                       const pddiBatchVertex* verts, s32 vertCount) override;
+
     void DrawPrimBuffer(pddiPrimBuffer* buffer, u32 indexOffset = 0, u32 indexCount = 0) override;
 
     void SetTexture(pddiTexture* tex) override;
@@ -291,6 +294,12 @@ private:
     u32 gouraudVAO = 0;
     u32 gouraudVBO = 0;
     u32 gouraudProgram = 0;
+    u32 batchVAO = 0;
+    u32 batchVBO = 0;
+    u32 batchProgram = 0;
+    s32 batchUProjLoc = -1;
+    s32 batchUTexLoc = -1;
+    size_t batchVBOCapacityBytes = 0;
     u32 msaaFbo = 0;
     u32 msaaColorRbo = 0;
     u32 msaaDepthStencilRbo = 0;
@@ -320,6 +329,7 @@ private:
 
     void InitQuadMesh();
     void InitGouraudMesh();
+    void InitBatchMesh();
     void Init3DShader();
     void UpdateMultisampleState();
     void EnsureMSAAFramebuffer(s32 samples, s32 width, s32 height);

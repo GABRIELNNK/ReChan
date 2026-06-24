@@ -12,6 +12,7 @@
 #include "pddi/pddishad.h"
 #include "pddi/pdditex.h"
 #include "xclib/xcfile.h"
+#include <vector>
 #ifdef MOD_LOADER
 #include "extra/modloader.h"
 #include "p3d/hash.h"
@@ -209,6 +210,44 @@ static void EnsureShader() {
 // Overlay batching
 static s32 s_overlayBatchDepth = 0;
 static Mat4 s_overlayBatchPrevProj;
+static std::vector<pddiBatchVertex> s_pendingQuadVerts;
+static tTexture* s_pendingQuadTex = nullptr;
+static bool s_pendingQuadActive = false;
+
+static void FlushPendingQuadBatch() {
+    if (s_pendingQuadVerts.empty()) {
+        s_pendingQuadActive = false;
+        return;
+    }
+    p3d::context->DrawQuadBatch(
+        s_pendingQuadTex ? s_pendingQuadTex->GetTexture() : nullptr,
+        PDDI_BLEND_ALPHA,
+        s_pendingQuadVerts.data(),
+        (s32)s_pendingQuadVerts.size());
+    s_pendingQuadVerts.clear();
+    s_pendingQuadActive = false;
+}
+
+static void QueueBatchedQuad(tTexture* tex, f32 x, f32 y, f32 w, f32 h,
+                              f32 u0, f32 v0, f32 u1, f32 v1,
+                              u8 r, u8 g, u8 b, u8 a) {
+    if (s_pendingQuadActive && s_pendingQuadTex != tex) {
+        FlushPendingQuadBatch();
+    }
+    s_pendingQuadTex = tex;
+    s_pendingQuadActive = true;
+
+    const f32 yTop = y, yBottom = y + h;
+    const pddiBatchVertex verts[6] = {
+        { x,     yBottom, u0, v1, r, g, b, a },
+        { x + w, yBottom, u1, v1, r, g, b, a },
+        { x + w, yTop,    u1, v0, r, g, b, a },
+        { x,     yBottom, u0, v1, r, g, b, a },
+        { x + w, yTop,    u1, v0, r, g, b, a },
+        { x,     yTop,    u0, v0, r, g, b, a },
+    };
+    s_pendingQuadVerts.insert(s_pendingQuadVerts.end(), verts, verts + 6);
+}
 
 // Internal: begin 2D overlay rendering (saves projection, sets ortho).
 // canvasW/canvasH default to the live screen size; pass the actual render
@@ -264,6 +303,7 @@ void ScreenDraw::EndBatch() {
         return;
     }
     if (--s_overlayBatchDepth == 0) {
+        FlushPendingQuadBatch();
         p3d::context->SetProjectionMatrix(s_overlayBatchPrevProj);
         p3d::context->EnableZBuffer(true);
         p3d::context->SetBlendMode(PDDI_BLEND_NONE);
@@ -272,6 +312,10 @@ void ScreenDraw::EndBatch() {
 }
 
 void ScreenDraw::DrawFullscreen(tTexture* tex) {
+    if (s_overlayBatchDepth > 0) {
+        FlushPendingQuadBatch();
+    }
+
     Mat4 prev = BeginOverlay();
     p3d::context->SetBlendMode(PDDI_BLEND_NONE);
 
@@ -285,6 +329,12 @@ void ScreenDraw::DrawFullscreen(tTexture* tex) {
 void ScreenDraw::DrawQuad(tTexture* tex, f32 x, f32 y, f32 w, f32 h,
                           f32 u0, f32 v0, f32 u1, f32 v1,
                           u8 r, u8 g, u8 b, u8 a) {
+    if (s_overlayBatchDepth > 0) {
+        EnsureShader();
+        QueueBatchedQuad(tex, x, y, w, h, u0, v0, u1, v1, r, g, b, a);
+        return;
+    }
+
     Mat4 prev = BeginOverlay();
     p3d::context->SetBlendMode(PDDI_BLEND_ALPHA);
 
@@ -303,6 +353,10 @@ void ScreenDraw::DrawShaderQuad(pddiBaseShader* shader, f32 x, f32 y, f32 w, f32
         return;
     }
 
+    if (s_overlayBatchDepth > 0) {
+        FlushPendingQuadBatch();
+    }
+
     Mat4 prev = BeginOverlay(canvasW, canvasH);
     p3d::context->SetBlendMode(blendMode);
     p3d::context->DrawQuad(shader, x, y, w, h, u0, v0, u1, v1);
@@ -315,6 +369,12 @@ void ScreenDraw::DrawColoredQuad(u8 r, u8 g, u8 b, u8 a) {
 
 void ScreenDraw::DrawColoredRect(f32 x, f32 y, f32 w, f32 h,
                                  u8 r, u8 g, u8 b, u8 a) {
+    if (s_overlayBatchDepth > 0) {
+        EnsureShader();
+        QueueBatchedQuad(nullptr, x, y, w, h, 0.0f, 0.0f, 1.0f, 1.0f, r, g, b, a);
+        return;
+    }
+
     Mat4 prev = BeginOverlay();
     p3d::context->SetBlendMode(PDDI_BLEND_ALPHA);
 
@@ -329,6 +389,10 @@ void ScreenDraw::DrawGouraudQuad(f32 x0, f32 y0, u8 r0, u8 g0, u8 b0, u8 a0,
                                  f32 x1, f32 y1, u8 r1, u8 g1, u8 b1, u8 a1,
                                  f32 x2, f32 y2, u8 r2, u8 g2, u8 b2, u8 a2,
                                  f32 x3, f32 y3, u8 r3, u8 g3, u8 b3, u8 a3) {
+    if (s_overlayBatchDepth > 0) {
+        FlushPendingQuadBatch();
+    }
+
     Mat4 prev = BeginOverlay();
     p3d::context->SetBlendMode(PDDI_BLEND_ALPHA);
 

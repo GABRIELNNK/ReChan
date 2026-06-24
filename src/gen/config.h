@@ -32,7 +32,7 @@
 #define CUSTOM_MENU 1
 
 // Experimental: Keep simulation fixed at 30 fps while rendering at higher frame rates, with interpolation for smoothness.
-#define HIGH_FPS_PLAY_PRESENTATION 0
+#define HIGH_FPS_PLAY_PRESENTATION 1
 
 // Mod loader support: when enabled, the game checks the ~mods/ directory for
 // replacement assets (PNG textures, GLB models, WAV sounds, JSON data) before

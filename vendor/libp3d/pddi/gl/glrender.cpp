@@ -328,6 +328,36 @@ void main() {
 }
 )";
 
+// Batched 2D quad shader: like kSimpleVert/kSimpleFrag, but tint comes from a
+// per-vertex colour attribute instead of a uniform, so a single draw call can
+// contain many quads with different tints/alphas (e.g. a whole run of glyphs
+// with different colours, or mixed UI rects).
+static const char* kBatchVert = R"(
+#version 450 core
+layout(location=0) in vec2 aPos;
+layout(location=1) in vec2 aUV;
+layout(location=2) in vec4 aColor;
+uniform mat4 uProj;
+out vec2 vUV;
+out vec4 vColor;
+void main() {
+    vUV = aUV;
+    vColor = aColor;
+    gl_Position = uProj * vec4(aPos, 0.0, 1.0);
+}
+)";
+
+static const char* kBatchFrag = R"(
+#version 450 core
+in vec2 vUV;
+in vec4 vColor;
+uniform sampler2D uTex;
+out vec4 FragColor;
+void main() {
+    FragColor = texture(uTex, vUV) * vColor;
+}
+)";
+
 static pddiTexture* s_defaultWhiteTexture = nullptr;
 static s32 s_defaultWhiteTextureUsers = 0;
 
@@ -692,20 +722,29 @@ void glShader::PreRender() {
     glUseProgram(program);
 
     pddiTexture* fallback = GetDefaultWhiteTexture();
-    for (s32 slot = 0; slot < kMaxTextureSlots; slot++) {
-        pddiTexture* boundTexture = texSlots[slot] ? texSlots[slot] : fallback;
-        if (!boundTexture) {
+    pddiTexture* slot0 = texSlots[0] ? texSlots[0] : fallback;
+    if (slot0) {
+        slot0->Bind(0);
+        int baseSamplerLoc = FindUniform("uTex");
+        if (baseSamplerLoc >= 0) {
+            glUniform1i(baseSamplerLoc, 0);
+        }
+
+        int samplerLoc = FindUniform("uTex0");
+        if (samplerLoc < 0) {
+            samplerLoc = FindUniform("uTex[0]");
+        }
+        if (samplerLoc >= 0) {
+            glUniform1i(samplerLoc, 0);
+        }
+    }
+
+    for (s32 slot = 1; slot < kMaxTextureSlots; slot++) {
+        if (!texSlots[slot]) {
             continue;
         }
 
-        boundTexture->Bind(slot);
-
-        if (slot == 0) {
-            int baseSamplerLoc = FindUniform("uTex");
-            if (baseSamplerLoc >= 0) {
-                glUniform1i(baseSamplerLoc, 0);
-            }
-        }
+        texSlots[slot]->Bind(slot);
 
         char samplerName[32];
         std::snprintf(samplerName, sizeof(samplerName), "uTex%d", slot);
@@ -1321,6 +1360,7 @@ glContext::glContext(glDisplay* disp)
     s_defaultWhiteTextureUsers++;
     InitQuadMesh();
     InitGouraudMesh();
+    InitBatchMesh();
     Init3DShader();
 }
 
@@ -1331,6 +1371,9 @@ glContext::~glContext() {
     if (gouraudVBO) glDeleteBuffers(1, &gouraudVBO);
     if (gouraudVAO) glDeleteVertexArrays(1, &gouraudVAO);
     if (gouraudProgram) glDeleteProgram(gouraudProgram);
+    if (batchVBO) glDeleteBuffers(1, &batchVBO);
+    if (batchVAO) glDeleteVertexArrays(1, &batchVAO);
+    if (batchProgram) glDeleteProgram(batchProgram);
     if (program3D) glDeleteProgram(program3D);
 
     if (s_defaultWhiteTextureUsers > 0) {
@@ -1773,6 +1816,75 @@ void glContext::InitGouraudMesh() {
     }
     if (vs) glDeleteShader(vs);
     if (fs) glDeleteShader(fs);
+}
+
+void glContext::InitBatchMesh() {
+    glGenVertexArrays(1, &batchVAO);
+    glGenBuffers(1, &batchVBO);
+    glBindVertexArray(batchVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, batchVBO);
+    // No fixed capacity up front - DrawQuadBatch grows/reallocates on demand.
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(pddiBatchVertex),
+                          (void*)offsetof(pddiBatchVertex, x));
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(pddiBatchVertex),
+                          (void*)offsetof(pddiBatchVertex, u));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(2, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(pddiBatchVertex),
+                          (void*)offsetof(pddiBatchVertex, r));
+    glEnableVertexAttribArray(2);
+    glBindVertexArray(0);
+
+    u32 vs = CompileGLShader(GL_VERTEX_SHADER, kBatchVert);
+    u32 fs = CompileGLShader(GL_FRAGMENT_SHADER, kBatchFrag);
+    if (vs && fs) {
+        batchProgram = glCreateProgram();
+        glAttachShader(batchProgram, vs);
+        glAttachShader(batchProgram, fs);
+        glLinkProgram(batchProgram);
+        batchUProjLoc = glGetUniformLocation(batchProgram, "uProj");
+        batchUTexLoc = glGetUniformLocation(batchProgram, "uTex");
+    }
+    if (vs) glDeleteShader(vs);
+    if (fs) glDeleteShader(fs);
+}
+
+void glContext::DrawQuadBatch(pddiTexture* tex, pddiBlendMode blend,
+                              const pddiBatchVertex* verts, s32 vertCount) {
+    if (!batchProgram || !verts || vertCount <= 0) {
+        return;
+    }
+
+    SetBlendMode(blend);
+    glUseProgram(batchProgram);
+    if (batchUProjLoc >= 0) {
+        glUniformMatrix4fv(batchUProjLoc, 1, GL_FALSE, projection.Data());
+    }
+
+    pddiTexture* boundTex = tex ? tex : GetDefaultWhiteTexture();
+    if (boundTex) {
+        boundTex->Bind(0);
+    }
+    if (batchUTexLoc >= 0) {
+        glUniform1i(batchUTexLoc, 0);
+    }
+
+    glBindVertexArray(batchVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, batchVBO);
+
+    const size_t neededBytes = sizeof(pddiBatchVertex) * (size_t)vertCount;
+    if (neededBytes > batchVBOCapacityBytes) {
+        // Grow with headroom so a typical frame doesn't reallocate every batch.
+        batchVBOCapacityBytes = neededBytes + neededBytes / 2;
+        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)batchVBOCapacityBytes, nullptr, GL_STREAM_DRAW);
+    }
+    else {
+        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)batchVBOCapacityBytes, nullptr, GL_STREAM_DRAW);
+    }
+    glBufferSubData(GL_ARRAY_BUFFER, 0, (GLsizeiptr)neededBytes, verts);
+
+    glDrawArrays(GL_TRIANGLES, 0, vertCount);
+    glUseProgram(0);
 }
 
 void glContext::DrawGouraudQuad(float x0, float y0, float r0, float g0, float b0, float a0,

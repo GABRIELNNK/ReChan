@@ -515,6 +515,9 @@ private:
     s32 m_titleEffectTargetW = 0;
     s32 m_titleEffectTargetH = 0;
 
+    f32 m_titleEffectsLastUpdateSec = -1.0f;
+    static constexpr f32 kTitleEffectsUpdateHz = 30.0f;
+
     // Intro zoom: logo starts huge (near camera) and eases down to idle scale.
     f32 m_titleIntroSec = 0.0f;
     static constexpr f32 kTitleIntroDuration = 0.9f;

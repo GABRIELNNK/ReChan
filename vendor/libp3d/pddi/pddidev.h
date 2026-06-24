@@ -24,6 +24,12 @@ public:
     virtual bool IsValid() const = 0;
 };
 
+struct pddiBatchVertex {
+    float x = 0.0f, y = 0.0f;
+    float u = 0.0f, v = 0.0f;
+    u8 r = 255, g = 255, b = 255, a = 255;
+};
+
 // Video mode description
 
 struct pddiVideoMode {
@@ -210,6 +216,9 @@ public:
                           float x, float y, float w, float h,
                           float u0 = 0, float v0 = 0,
                           float u1 = 1, float v1 = 1) = 0;
+
+    virtual void DrawQuadBatch(pddiTexture* tex, pddiBlendMode blend,
+                               const pddiBatchVertex* verts, s32 vertCount) = 0;
 
     // Draw a retained-mode primitive buffer. indexCount=0 draws the full buffer
     // (buffer->GetIndexCount()); otherwise draws indexCount indices starting at indexOffset.

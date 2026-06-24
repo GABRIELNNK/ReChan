@@ -567,8 +567,6 @@ void Game::RenderTitleWithCustomBackground(bool drawPressStartOverlay) {
         return;
     }
 
-    titleScreen->Render();
-
     if (!g_feCustomMenuMgr || !g_feCustomMenuMgr->DrawTitleScreen()) {
         return;
     }
@@ -589,8 +587,6 @@ void Game::RenderGameOverWithCustomBackground() {
     if (!gameOverScreen) {
         return;
     }
-
-    gameOverScreen->Render();
 
     if (!g_feCustomMenuMgr || !g_feCustomMenuMgr->DrawGameOverScreen()) {
         return;

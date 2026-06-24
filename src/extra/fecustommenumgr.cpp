@@ -992,6 +992,10 @@ bool feCustomMenuMgr::EnsureTitleScreenEffects(f32 drawW, f32 drawH) {
 
     m_titleEffectTargetW = targetW;
     m_titleEffectTargetH = targetH;
+    // Freshly (re)created render targets hold undefined GPU memory - force an
+    // immediate refresh on the next draw instead of compositing garbage for up
+    // to one throttle interval.
+    m_titleEffectsLastUpdateSec = -1.0f;
     return true;
 }
 
@@ -3682,90 +3686,87 @@ bool feCustomMenuMgr::DrawTitleScreen() {
         return true;
 
     if (EnsureTitleScreenEffects(drawW, drawH)) {
-        // Render the tilted/bobbing logo into its own small seed buffer so
-        // the glow and rays below sample the same animated shape as the
-        // on-screen logo instead of its static source texture.
-        if (p3d::context->SetRenderTarget(m_titleScreenLogoSeed)) {
-            m_titleScreenLogoTiltShader->SetTexture(0, m_titleScreenLogoTexture->GetTexture());
-            m_titleScreenLogoTiltShader->SetVector("uTiltRect",
-                logoLocalCenterX, logoLocalCenterY, logoHalfW, logoHalfH);
-            m_titleScreenLogoTiltShader->SetVector("uTiltAngles",
-                tiltPitch, tiltYaw, tiltRoll, tiltFocal);
-            ScreenDraw::DrawShaderQuad(m_titleScreenLogoTiltShader, 0.0f, 0.0f, drawW, drawH,
-                                       0.0f, 0.0f, 1.0f, 1.0f, PDDI_BLEND_NONE, drawW, drawH);
-            p3d::context->SetRenderTarget(nullptr);
+        const bool firstRun = (m_titleEffectsLastUpdateSec < 0.0f);
+        const bool refreshEffects = firstRun
+            || (m_titleScreenAnimSec - m_titleEffectsLastUpdateSec) >= (1.0f / kTitleEffectsUpdateHz);
+
+        if (refreshEffects) {
+            m_titleEffectsLastUpdateSec = m_titleScreenAnimSec;
+
+            // Render the tilted/bobbing logo into its own small seed buffer so
+            // the glow and rays below sample the same animated shape as the
+            // on-screen logo instead of its static source texture.
+            if (p3d::context->SetRenderTarget(m_titleScreenLogoSeed)) {
+                m_titleScreenLogoTiltShader->SetTexture(0, m_titleScreenLogoTexture->GetTexture());
+                m_titleScreenLogoTiltShader->SetVector("uTiltRect",
+                    logoLocalCenterX, logoLocalCenterY, logoHalfW, logoHalfH);
+                m_titleScreenLogoTiltShader->SetVector("uTiltAngles",
+                    tiltPitch, tiltYaw, tiltRoll, tiltFocal);
+                ScreenDraw::DrawShaderQuad(m_titleScreenLogoTiltShader, 0.0f, 0.0f, drawW, drawH,
+                                           0.0f, 0.0f, 1.0f, 1.0f, PDDI_BLEND_NONE, drawW, drawH);
+                p3d::context->SetRenderTarget(nullptr);
+            }
+
+            // Pass 1: soft halo glow behind Jackie and the logo
+            if (p3d::context->SetRenderTarget(m_titleScreenGlow)) {
+                m_titleScreenGlowShader->SetVector("uGlowParams", 0.025f, 0.8f, 0.0f, 0.0f);
+                m_titleScreenGlowShader->SetVector("uGlowMotion", 0.05f, 0.0f, 0.2f, 0.0f);
+                m_titleScreenGlowShader->SetFloat("uTime", m_titleScreenAnimSec);
+
+                // The logo seed is a render target (vertically inverted relative
+                // to image textures), hence the flipped v0/v1 here.
+                m_titleScreenGlowShader->SetTexture(0, m_titleScreenLogoSeed->GetTexture());
+                ScreenDraw::DrawShaderQuad(m_titleScreenGlowShader, 0.0f, 0.0f, drawW, drawH,
+                                           0.0f, 1.0f, 1.0f, 1.0f, PDDI_BLEND_NONE, drawW, drawH);
+
+                m_titleScreenGlowShader->SetTexture(0, m_titleScreenJackieTexture->GetTexture());
+                ScreenDraw::DrawShaderQuad(m_titleScreenGlowShader, 0.0f, 0.0f, drawW, drawH,
+                                           0.0f, 0.0f, 1.0f, 1.0f, PDDI_BLEND_ADD, drawW, drawH);
+
+                p3d::context->SetRenderTarget(nullptr);
+            }
+
+            // Pass 2: god rays on top of the glow
+            if (p3d::context->SetRenderTarget(m_titleScreenGodRays)) {
+                // The render target's pixel size is capped (see
+                // EnsureTitleScreenEffects) and can differ from drawW/drawH, so
+                // the quad's projection must use drawW/drawH as its own canvas
+                // instead of the live screen size -- otherwise this pass
+                // scales/positions wrong whenever the window isn't exactly 16:9
+                // and the splash rect gets letterboxed.
+                m_titleScreenGodRaysShader->SetVector("uRayParams", 0.5f, 0.5f, 0.3f, 0.94f);
+                m_titleScreenGodRaysShader->SetVector("uRayMotion", 0.0f, 0.0f, 0.04f, 1.5f);
+                m_titleScreenGodRaysShader->SetFloat("uExposure", 4.5f);
+                m_titleScreenGodRaysShader->SetFloat("uTime", m_titleScreenAnimSec);
+
+                // The logo seed is a render target (vertically inverted relative
+                // to image textures), hence the flipped v0/v1 here.
+                m_titleScreenGodRaysShader->SetTexture(0, m_titleScreenLogoSeed->GetTexture());
+                ScreenDraw::DrawShaderQuad(m_titleScreenGodRaysShader, 0.0f, 0.0f, drawW, drawH,
+                                           0.0f, 1.0f, 1.0f, 0.0f, PDDI_BLEND_NONE, drawW, drawH);
+
+                m_titleScreenGodRaysShader->SetVector("uRayParams", 0.55f, 0.45f, 1.9f, 0.92f);
+                m_titleScreenGodRaysShader->SetVector("uRayMotion", 0.0f, 0.0f, 0.01f, 1.0f);
+                m_titleScreenGodRaysShader->SetFloat("uExposure", 1.8f);
+                m_titleScreenGodRaysShader->SetFloat("uTime", m_titleScreenAnimSec);
+
+                m_titleScreenGodRaysShader->SetTexture(0, m_titleScreenJackieTexture->GetTexture());
+                ScreenDraw::DrawShaderQuad(m_titleScreenGodRaysShader, 0.0f, 0.0f, drawW, drawH,
+                                           0.0f, 0.0f, 1.0f, 1.0f, PDDI_BLEND_ADD, drawW, drawH);
+
+                p3d::context->SetRenderTarget(nullptr);
+            }
         }
 
-        // Pass 1: soft halo glow behind Jackie and the logo, rendered before
-        // the god rays so the rays sit on top of it in the final composite.
-        // uGlowMotion rotates the ring sampling pattern and drifts the
-        // sample center over time, giving the halo a slow living swirl
-        // instead of a static blur (intensity itself stays constant).
-        if (p3d::context->SetRenderTarget(m_titleScreenGlow)) {
-            m_titleScreenGlowShader->SetVector("uGlowParams", 0.025f, 0.8f, 0.0f, 0.0f);
-            m_titleScreenGlowShader->SetVector("uGlowMotion", 0.05f, 0.0f, 0.2f, 0.0f);
-            m_titleScreenGlowShader->SetFloat("uTime", m_titleScreenAnimSec);
+        m_titleScreenCompositeShader->SetTexture(0, m_titleScreenGlow->GetTexture());
+        m_titleScreenCompositeShader->SetColour(0, pddiColour(titleFadeAlpha, titleFadeAlpha, titleFadeAlpha, 255));
+        ScreenDraw::DrawShaderQuad(m_titleScreenCompositeShader, drawX, drawY, drawW, drawH,
+                                   0.0f, 1.0f, 1.0f, 0.0f, PDDI_BLEND_ADD);
 
-            // The logo seed is a render target (vertically inverted relative
-            // to image textures), hence the flipped v0/v1 here.
-            m_titleScreenGlowShader->SetTexture(0, m_titleScreenLogoSeed->GetTexture());
-            ScreenDraw::DrawShaderQuad(m_titleScreenGlowShader, 0.0f, 0.0f, drawW, drawH,
-                                       0.0f, 1.0f, 1.0f, 1.0f, PDDI_BLEND_NONE, drawW, drawH);
-
-            m_titleScreenGlowShader->SetTexture(0, m_titleScreenJackieTexture->GetTexture());
-            ScreenDraw::DrawShaderQuad(m_titleScreenGlowShader, 0.0f, 0.0f, drawW, drawH,
-                                       0.0f, 0.0f, 1.0f, 1.0f, PDDI_BLEND_ADD, drawW, drawH);
-
-            p3d::context->SetRenderTarget(nullptr);
-
-            m_titleScreenCompositeShader->SetTexture(0, m_titleScreenGlow->GetTexture());
-            m_titleScreenCompositeShader->SetColour(0, pddiColour(titleFadeAlpha, titleFadeAlpha, titleFadeAlpha, 255));
-            ScreenDraw::DrawShaderQuad(m_titleScreenCompositeShader, drawX, drawY, drawW, drawH,
-                                       0.0f, 1.0f, 1.0f, 0.0f, PDDI_BLEND_ADD);
-        }
-
-        // Pass 2: god rays on top of the glow. uRayParams is hand-tuned --
-        // leave it alone. uRayMotion twists each marching step by a slowly
-        // evolving angle (the whole fan of rays swirls around the source)
-        // and orbits the light source itself a little, so the rays have
-        // continuous movement instead of sitting still.
-        if (p3d::context->SetRenderTarget(m_titleScreenGodRays)) {
-            // The render target's pixel size is capped (see
-            // EnsureTitleScreenEffects) and can differ from drawW/drawH, so
-            // the quad's projection must use drawW/drawH as its own canvas
-            // instead of the live screen size -- otherwise this pass
-            // scales/positions wrong whenever the window isn't exactly 16:9
-            // and the splash rect gets letterboxed.
-            m_titleScreenGodRaysShader->SetVector("uRayParams", 0.5f, 0.5f, 0.3f, 0.94f);
-            m_titleScreenGodRaysShader->SetVector("uRayMotion", 0.0f, 0.0f, 0.04f, 1.5f);
-            m_titleScreenGodRaysShader->SetFloat("uExposure", 4.5f);
-            m_titleScreenGodRaysShader->SetFloat("uTime", m_titleScreenAnimSec);
-
-            // The logo seed is a render target (vertically inverted relative
-            // to image textures), hence the flipped v0/v1 here.
-            m_titleScreenGodRaysShader->SetTexture(0, m_titleScreenLogoSeed->GetTexture());
-            ScreenDraw::DrawShaderQuad(m_titleScreenGodRaysShader, 0.0f, 0.0f, drawW, drawH,
-                                       0.0f, 1.0f, 1.0f, 0.0f, PDDI_BLEND_NONE, drawW, drawH);
-
-            m_titleScreenGodRaysShader->SetVector("uRayParams", 0.55f, 0.45f, 1.9f, 0.92f);
-            m_titleScreenGodRaysShader->SetVector("uRayMotion", 0.0f, 0.0f, 0.01f, 1.0f);
-            m_titleScreenGodRaysShader->SetFloat("uExposure", 1.8f);
-            m_titleScreenGodRaysShader->SetFloat("uTime", m_titleScreenAnimSec);
-
-            m_titleScreenGodRaysShader->SetTexture(0, m_titleScreenJackieTexture->GetTexture());
-            ScreenDraw::DrawShaderQuad(m_titleScreenGodRaysShader, 0.0f, 0.0f, drawW, drawH,
-                                       0.0f, 0.0f, 1.0f, 1.0f, PDDI_BLEND_ADD, drawW, drawH);
-
-            p3d::context->SetRenderTarget(nullptr);
-
-            // fragColor = texture(GOD_RAYS_TEXTURE, uv) + texture(LIGHT_SOURCE_TEXTURE, uv):
-            // the rays buffer is added on top of the scene, then the crisp source
-            // art is drawn over it below.
-            m_titleScreenCompositeShader->SetTexture(0, m_titleScreenGodRays->GetTexture());
-            m_titleScreenCompositeShader->SetColour(0, pddiColour(titleFadeAlpha, titleFadeAlpha, titleFadeAlpha, 255));
-            ScreenDraw::DrawShaderQuad(m_titleScreenCompositeShader, drawX, drawY, drawW, drawH,
-                                       0.0f, 1.0f, 1.0f, 0.0f, PDDI_BLEND_ADD);
-        }
+        m_titleScreenCompositeShader->SetTexture(0, m_titleScreenGodRays->GetTexture());
+        m_titleScreenCompositeShader->SetColour(0, pddiColour(titleFadeAlpha, titleFadeAlpha, titleFadeAlpha, 255));
+        ScreenDraw::DrawShaderQuad(m_titleScreenCompositeShader, drawX, drawY, drawW, drawH,
+                                   0.0f, 1.0f, 1.0f, 0.0f, PDDI_BLEND_ADD);
     }
 
     ScreenDraw::DrawQuad(m_titleScreenJackieTexture, drawX, drawY, drawW, drawH,
