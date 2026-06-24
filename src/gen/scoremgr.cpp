@@ -239,8 +239,13 @@ void ScoreManager::Step() {
 
     // PC
     const bool directorInputLocked = g_director && g_director->scriptState != 0 && g_director->enableInput == 0;
-    if (!g_directorActive && !directorInputLocked)
+    if (!g_directorActive && !directorInputLocked) {
+#if HIGH_FPS_PLAY_PRESENTATION
+        secondsPassed += 1.0f / 30.0f;
+#else
         secondsPassed += g_time->GetDeltaTime();
+#endif
+    }
 }
 
 // PSX: HandleLevelBegin__12ScoreManager (SCOREMGR.CPP:429, 0x8004CFA4)

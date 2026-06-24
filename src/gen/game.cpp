@@ -115,6 +115,11 @@ Game::Game() {
     handlerSet2.AddHandler(AnimateEverythingHandler, -48);
     handlerSet2.AddHandler(DrawEverythingHandlerCB, -16);
     handlerSet2.AddHandler(EndFrameHandler, -64);
+#if CUSTOM_MENU
+    // PC: runs after world/HUD/director-overlay draws (-16/-31/-40) but before
+    // dispEndFrameHandler (-62) swaps the frame, so the overlay is visible.
+    handlerSet2.AddHandler(PlayFadeInHandlerCB, -55);
+#endif
 
     SetState(GameState::Null);
     g_game = this;
@@ -1376,7 +1381,12 @@ bool Game::gsPrePlayState(Game* game) {
     // PC
     if (g_display)
         g_display->SetCursorCaptured(true);
-    
+
+#if CUSTOM_MENU
+    game->playFadeInActive = true;
+    FadeBegin();
+#endif
+
     // PSX: SetState(Play=8)
     game->SetState(GameState::Play);
 
@@ -2328,12 +2338,17 @@ void Game::LoadXconFE() {
 u8 Game::s_fadeStep = 17;
 u8 Game::s_fadeCounter = 0;
 
+static f32 s_fadeAccumSec = 0.0f;
+static f64 s_fadeLastTimeSec = -1.0;
+
 // PSX: FadeBegin__4Game (GAME.CPP:3869, 0x8002C9A0)
 void Game::FadeBegin() {
     MARKFUNCTION(0x8002C9A0);
     // PSX: fadeStep = 17, fadeCounter = 0
     s_fadeStep = 17;
     s_fadeCounter = 0;
+    s_fadeAccumSec = 0.0f;
+    s_fadeLastTimeSec = -1.0;
 }
 
 // PSX: FadeEnd__4Game (GAME.CPP:3875, 0x8002C9B4)
@@ -2346,14 +2361,27 @@ void Game::FadeEnd() {
 // Returns 1 if fade still in progress, 0 when complete (counter >= 255).
 s32 Game::FadeUpdate() {
     MARKFUNCTION(0x8002C9BC);
-    // PSX: fadeCounter += fadeStep; clamp to 255; return (fadeCounter < 255)
-    s32 newVal = (s32)s_fadeCounter + (s32)s_fadeStep;
-    if (newVal < 255) {
-        s_fadeCounter = (u8)newVal;
+
+    constexpr f32 kFadeFrameSec = 1.0f / 30.0f;
+
+    const f64 now = Time::GetTimeInSeconds();
+    f32 dt = kFadeFrameSec;
+    if (s_fadeLastTimeSec >= 0.0) {
+        dt = (f32)(now - s_fadeLastTimeSec);
+        if (dt < 0.0f) dt = 0.0f;
+        if (dt > 0.25f) dt = 0.25f;
     }
-    else {
-        s_fadeCounter = 255;
+    s_fadeLastTimeSec = now;
+
+    s_fadeAccumSec += dt;
+    while (s_fadeAccumSec >= kFadeFrameSec && s_fadeCounter < 255) {
+        s_fadeAccumSec -= kFadeFrameSec;
+
+        // PSX: fadeCounter += fadeStep; clamp to 255
+        const s32 newVal = (s32)s_fadeCounter + (s32)s_fadeStep;
+        s_fadeCounter = (newVal < 255) ? (u8)newVal : 255;
     }
+
     return (s_fadeCounter < 255) ? 1 : 0;
 }
 
@@ -2366,3 +2394,20 @@ void Game::FadeRender() {
     // PC: draw a fullscreen colored quad with alpha blending
     ScreenDraw::DrawColoredQuad(0, 0, 0, s_fadeCounter);
 }
+
+#if CUSTOM_MENU
+// PC: fades gameplay in from black (reuses the same FadeUpdate pacing as
+// FadeRender, just inverted
+void Game::PlayFadeInHandlerCB(Handler*) {
+    if (!g_game || !g_game->playFadeInActive) {
+        return;
+    }
+
+    if (!FadeUpdate()) {
+        g_game->playFadeInActive = false;
+        return;
+    }
+
+    ScreenDraw::DrawColoredQuad(0, 0, 0, (u8)(255 - s_fadeCounter));
+}
+#endif

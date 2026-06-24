@@ -508,12 +508,16 @@ bool AudioEngine::IsInitialized() {
 AudioSample AudioEngine::LoadSample(const s16* data, u32 numFrames, u32 sampleRate, u32 channels) {
     if (!g_initialized || !data || numFrames == 0) return AUDIO_SAMPLE_INVALID;
 
+    u32 totalSamples = numFrames * channels;
+    s16* buffer = new s16[totalSamples];
+    memcpy(buffer, data, totalSamples * sizeof(s16));
+
+    std::lock_guard<std::mutex> lock(g_voiceMutex);
+
     // Find free slot
     for (u32 i = 0; i < MAX_SAMPLES; i++) {
         if (g_samples[i].data == nullptr) {
-            u32 totalSamples = numFrames * channels;
-            g_samples[i].data = new s16[totalSamples];
-            memcpy(g_samples[i].data, data, totalSamples * sizeof(s16));
+            g_samples[i].data = buffer;
             g_samples[i].numFrames = numFrames;
             g_samples[i].sampleRate = sampleRate;
             g_samples[i].channels = channels;
@@ -521,19 +525,27 @@ AudioSample AudioEngine::LoadSample(const s16* data, u32 numFrames, u32 sampleRa
         }
     }
 
+    delete[] buffer;
     LOG("AudioEngine: no free sample slots");
     return AUDIO_SAMPLE_INVALID;
 }
 
 void AudioEngine::UnloadSample(AudioSample handle) {
     if (handle == AUDIO_SAMPLE_INVALID || handle > MAX_SAMPLES) return;
-    InternalSample& smp = g_samples[handle - 1];
-    delete[] smp.data;
-    smp.data = nullptr;
-    smp.numFrames = 0;
+
+    s16* oldData = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_voiceMutex);
+        InternalSample& smp = g_samples[handle - 1];
+        oldData = smp.data;
+        smp.data = nullptr;
+        smp.numFrames = 0;
+    }
+    delete[] oldData;
 }
 
 void AudioEngine::UnloadAllSamples() {
+    std::lock_guard<std::mutex> lock(g_voiceMutex);
     for (u32 i = 0; i < MAX_SAMPLES; i++) {
         delete[] g_samples[i].data;
         g_samples[i].data = nullptr;

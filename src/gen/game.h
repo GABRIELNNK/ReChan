@@ -147,6 +147,12 @@ private:
     s32 gameOverFadeType = 0;
 
 #if CUSTOM_MENU
+    // PC: fades gameplay in from black once Play starts
+    bool playFadeInActive = false;
+    static void PlayFadeInHandlerCB(Handler* h);
+#endif
+
+#if CUSTOM_MENU
     void RenderTitleWithCustomBackground(bool drawPressStartOverlay);
     void RenderGameOverWithCustomBackground();
 #endif

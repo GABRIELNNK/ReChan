@@ -1167,6 +1167,8 @@ Director::Director() {
     wsAlphaStep = 10;
     wsAlphaCurrent = 0;
     wsAlphaTarget = 0;
+    wsLastTimeSec = -1.0;
+    wsAccumSec = 0.0f;
     field68 = 0;
     enableInput = 0;
 }
@@ -1215,6 +1217,8 @@ void Director::InternalReset() {
     wsAlphaStep = 10;
     wsAlphaCurrent = 0;
     wsAlphaTarget = 0;
+    wsLastTimeSec = -1.0;
+    wsAccumSec = 0.0f;
 
     handlerSetB.PurgeHandlers();
     enableInput = 1;
@@ -3328,49 +3332,64 @@ void Director::ProcessDynamicAnimFunc() {
 void Director::HandleWideScreen() {
     MARKFUNCTION(0x8003ECD4);
 
-    s32& barCurrent = wsBarCurrent;
-    const s32 barDesired = wsBarTarget;
-
-    if (barCurrent != barDesired) {
-        const s32 barStep = wsBarStep;
-        if (barStep == 256) {
-            barCurrent = barDesired;
-        }
-        else if (barCurrent >= barDesired) {
-            barCurrent -= barStep;
-            if (barCurrent < barDesired) {
-                barCurrent = barDesired;
-            }
-        }
-        else {
-            barCurrent += barStep;
-            if (barCurrent > barDesired) {
-                barCurrent = barDesired;
-            }
-        }
+    constexpr f32 kTickSec = 1.0f / 30.0f;
+    const f64 now = Time::GetTimeInSeconds();
+    f32 dt = kTickSec;
+    if (wsLastTimeSec >= 0.0) {
+        dt = (f32)(now - wsLastTimeSec);
+        if (dt < 0.0f) dt = 0.0f;
+        if (dt > 0.25f) dt = 0.25f; // clamp stalls
     }
+    wsLastTimeSec = now;
+    wsAccumSec += dt;
 
-    if (barCurrent) {
-        s32& alphaCurrent = wsAlphaCurrent;
-        const s32 alphaDesired = wsAlphaTarget;
-        if (alphaCurrent != alphaDesired) {
-            const s32 alphaStep = wsAlphaStep;
-            if (alphaCurrent < alphaDesired) {
-                alphaCurrent += alphaStep;
-                if (alphaCurrent > alphaDesired) {
-                    alphaCurrent = alphaDesired;
+    while (wsAccumSec >= kTickSec) {
+        wsAccumSec -= kTickSec;
+
+        s32& barCurrent = wsBarCurrent;
+        const s32 barDesired = wsBarTarget;
+
+        if (barCurrent != barDesired) {
+            const s32 barStep = wsBarStep;
+            if (barStep == 256) {
+                barCurrent = barDesired;
+            }
+            else if (barCurrent >= barDesired) {
+                barCurrent -= barStep;
+                if (barCurrent < barDesired) {
+                    barCurrent = barDesired;
                 }
             }
             else {
-                alphaCurrent -= alphaStep;
-                if (alphaCurrent < alphaDesired) {
-                    alphaCurrent = alphaDesired;
+                barCurrent += barStep;
+                if (barCurrent > barDesired) {
+                    barCurrent = barDesired;
                 }
             }
         }
-    }
-    else {
-        wsAlphaCurrent = 0;
+
+        if (barCurrent) {
+            s32& alphaCurrent = wsAlphaCurrent;
+            const s32 alphaDesired = wsAlphaTarget;
+            if (alphaCurrent != alphaDesired) {
+                const s32 alphaStep = wsAlphaStep;
+                if (alphaCurrent < alphaDesired) {
+                    alphaCurrent += alphaStep;
+                    if (alphaCurrent > alphaDesired) {
+                        alphaCurrent = alphaDesired;
+                    }
+                }
+                else {
+                    alphaCurrent -= alphaStep;
+                    if (alphaCurrent < alphaDesired) {
+                        alphaCurrent = alphaDesired;
+                    }
+                }
+            }
+        }
+        else {
+            wsAlphaCurrent = 0;
+        }
     }
 }
 

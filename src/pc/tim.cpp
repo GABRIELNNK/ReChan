@@ -228,6 +228,15 @@ static void FlushPendingQuadBatch() {
     s_pendingQuadActive = false;
 }
 
+void ScreenDraw::SetScissor(s32 x, s32 y, s32 w, s32 h) {
+    if (s_overlayBatchDepth > 0) {
+        FlushPendingQuadBatch();
+    }
+    if (p3d::context) {
+        p3d::context->SetScissor(x, y, w, h);
+    }
+}
+
 static void QueueBatchedQuad(tTexture* tex, f32 x, f32 y, f32 w, f32 h,
                               f32 u0, f32 v0, f32 u1, f32 v1,
                               u8 r, u8 g, u8 b, u8 a) {

@@ -1273,6 +1273,9 @@ static s32 rsDialogEvent(s32 event, s32 param1, s32 param2, s32 param3) {
             if (!handle) {
                 return 0;
             }
+
+            g_dialogLoadReadyFrame = GetDialogFrameCounter();
+            PromotePendingDialogLoadState();
             return rsDialogEvent(RS_PLAY_DIALOG, handle, param3, 360);
         }
 
@@ -1489,7 +1492,7 @@ s32 jcsHandleControlEvent(s32 event, s32 param1, s32 param2, s32 param3) {
         case RS_MUTE: // 10
             LOG("[rsEvent] Mute");
             if (!g_muteFlag) {
-                jcsFadeOutEngine(14);
+                jcsFadeOutEngine(15);
                 g_muteFlag = 1;
             }
             break;
@@ -1498,7 +1501,7 @@ s32 jcsHandleControlEvent(s32 event, s32 param1, s32 param2, s32 param3) {
             LOG("[rsEvent] Unmute");
             if (g_muteFlag) {
                 if (!g_pauseFlag) {
-                    jcsFadeInEngine(14);
+                    jcsFadeInEngine(15);
                 }
                 g_muteFlag = 0;
             }

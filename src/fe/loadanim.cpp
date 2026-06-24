@@ -3,10 +3,13 @@
 #include "gen/display.h"
 #include "pc/tim.h"
 #include "gen/config.h"
+#include "gen/time.h"
 #include "p3d/context.h"
 #include "p3d/texture.h"
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
+
+#include <cmath>
 
 #if CUSTOM_MENU
 #include "extra/fecustommenumgr.h"
@@ -22,9 +25,20 @@ static struct {
 
 // PSX: color pulse state (gp+1360..gp+1364)
 // gp+1360 = R channel (5-bit, pulses 5-28), gp+1361 = G (0), gp+1362 = B (0)
-// gp+1364 = direction flag (0=decrement, 1=increment)
+// PSX advanced this +-1 per VBlank (~30Hz), a 23-wide range each way. Now that
+// the present loop isn't throttled to a fixed cadence (see PresentLoadingFrameFaded),
+// a per-call increment would pulse at whatever rate the loop actually runs -
+// drive it from wall-clock time instead so the glow speed is fps-independent.
 static u8 s_pulseR = 28;
-static s32 s_pulseDir = 0;
+
+static u8 ComputePulseR() {
+    constexpr f32 kPulseMin = 5.0f;
+    constexpr f32 kPulseMax = 28.0f;
+    constexpr f32 kHalfCycleSec = 23.0f / 30.0f; // matches the original 1-unit/VBlank cadence
+    const f32 t = std::fmod((f32)Time::GetTimeInSeconds(), kHalfCycleSec * 2.0f) / kHalfCycleSec;
+    const f32 tri = (t < 1.0f) ? t : (2.0f - t); // 0 -> 1 -> 0
+    return (u8)(kPulseMin + (kPulseMax - kPulseMin) * tri);
+}
 
 // PSX bar position from Update__10VBlankLogoP6_RTASK math:
 // Y = dispEnv.y + 140, tile 8x6, scale gp+3540 = 2.28 (16.16)
@@ -37,6 +51,8 @@ static constexpr f32 kBarMaxW = 229.0f;
 
 // PSX: Update__10VBlankLogoP6_RTASK (LOADANIM.CPP:85, 0x80047778)
 static void DrawLoadingScreen(u8 fill) {
+    s_pulseR = ComputePulseR();
+
     bool usedCustomScreen = false;
 #if CUSTOM_MENU
     if (g_feCustomMenuMgr) {
@@ -64,24 +80,27 @@ static void DrawLoadingScreen(u8 fill) {
         u8 r8 = s_pulseR << 3;
         ScreenDraw::DrawColoredRect(nx, ny, nw, nh, r8, 0, 0, 255);
     }
+}
 
-    // PSX: pulse R channel each VBlank
-    if (s_pulseDir) {
-        s_pulseR++;
-        if (s_pulseR >= 28)
-            s_pulseDir = 0;
+// fill/blackAlpha are driven by elapsed real time at each call site (see
+// FillMeter, StartLogo, StopLogo), so this just presents as fast as the
+// display allows (vsync-limited in the common case) - no artificial per-call
+// throttle, which would otherwise cap how many distinct fill/alpha values
+// actually get sampled and shown during a fixed-duration animation, making it
+// look stepped rather than smooth. blackAlpha overlays a black quad on top
+// (255 = fully black), used to fade the loading screen in/out instead of
+// cutting to/from it instantly.
+static void PresentLoadingFrameFaded(u8 fill, u8 blackAlpha) {
+    g_display->BeginFrame();
+    DrawLoadingScreen(fill);
+    if (blackAlpha > 0) {
+        ScreenDraw::DrawColoredQuad(0, 0, 0, blackAlpha);
     }
-    else {
-        s_pulseR--;
-        if (s_pulseR < 5)
-            s_pulseDir = 1;
-    }
+    g_display->EndFrame();
 }
 
 static void PresentLoadingFrame(u8 fill) {
-    g_display->BeginFrame();
-    DrawLoadingScreen(fill);
-    g_display->EndFrame();
+    PresentLoadingFrameFaded(fill, 0);
 }
 
 static void PresentLoadingFrame_Tex(tTexture* tex) {
@@ -110,34 +129,60 @@ void StartLogo(const char* timFile) {
 
     // PSX: initial data values from SLUS binary at gp+1360/1364
     s_pulseR = 28;
-    s_pulseDir = 0;
+
+#if CUSTOM_MENU
+    // Fade in from black instead of cutting straight to the loading screen.
+    // Matches Game::FadeBegin's pacing (s_fadeStep=17, 255/17 steps @ 30Hz =
+    // 0.5s) so this reads as the same fade the rest of the game already uses.
+    constexpr f64 kFadeInSec = 0.5;
+    const f64 fadeStart = Time::GetTimeInSeconds();
+    for (;;) {
+        const f32 t = (f32)((Time::GetTimeInSeconds() - fadeStart) / kFadeInSec);
+        if (t >= 1.0f) {
+            break;
+        }
+        PresentLoadingFrameFaded(0, (u8)(255.0f * (1.0f - t)));
+    }
+#endif
 
     // Present initial loading screen with empty bar
     PresentLoadingFrame(0);
 }
 
+// PSX advanced the bar by 1 unit per VBlank call, so a 0->100 fill took
+// ~3.3s of real PSX disc-load time. The only caller in this codebase is
+// FillMeter(100) run once before the (now near-instant on PC) level Load(),
+// so pacing 1 unit/frame just adds a flat multi-second stall with nothing
+// real happening underneath it. Animate over a short fixed real duration
+// instead - still a visible eased fill, never a hard block.
+static constexpr f64 kFillMeterDurationSec = 0.35;
+
 // PSX: FillMeter__10VBlankLogoUc (LOADANIM.CPP:207, 0x80047A68)
 void FillMeter(u8 target) {
     MARKFUNCTION(0x80047A68);
 
-    while (true) {
-        if (s_logo.targetFill == target)
-            break;
-
-        // PSX: target increments by +1 each call until it reaches the requested value
-        if (s_logo.targetFill < target) {
-            s_logo.currentFill++;
-            s_logo.targetFill++;
-        }
-        else {
-            s_logo.currentFill--;
-            s_logo.targetFill--;
-        }
-
-        // PSX: Update is called each VBlank until target is reached, so we present a new frame here
-        PresentLoadingFrame(s_logo.targetFill);
+    const s32 startFill = s_logo.currentFill;
+    const s32 delta = (s32)target - startFill;
+    if (delta == 0) {
+        s_logo.targetFill = target;
+        return;
     }
-    s_logo.targetFill = target;
+
+    const f64 fillStart = Time::GetTimeInSeconds();
+    for (;;) {
+        f32 t = (f32)((Time::GetTimeInSeconds() - fillStart) / kFillMeterDurationSec);
+        if (t >= 1.0f) {
+            s_logo.currentFill = target;
+            s_logo.targetFill = target;
+            PresentLoadingFrame(target);
+            break;
+        }
+
+        t = 1.0f - (1.0f - t) * (1.0f - t); // ease-out
+        s_logo.currentFill = (u8)(startFill + (s32)((f32)delta * t));
+        s_logo.targetFill = s_logo.currentFill;
+        PresentLoadingFrame(s_logo.currentFill);
+    }
 }
 
 // PSX: StopLogo__10VBlankLogo (LOADANIM.CPP:183, 0x800479BC)
@@ -147,17 +192,36 @@ void StopLogo() {
     if (!s_logo.active)
         return;
 
-    // PSX: fast-fill loop increments +8 by 0x10000 each iteration until >= +12,
-    // calling Update + VSync(0) each step.
-    for (s32 i = 0; i < 20; i++) {
-        u8 fill = (u8)(s_logo.currentFill + (s_logo.targetFill - s_logo.currentFill) * (i + 1) / 20);
-        PresentLoadingFrame(fill);
+    // Snap to the final value (no-op if FillMeter already got there).
+    if (s_logo.currentFill != s_logo.targetFill) {
+        FillMeter(s_logo.targetFill);
     }
 
-    // Hold the completed bar for a moment (~10 frames)
-    for (s32 i = 0; i < 10; i++) {
+    // Brief hold so the completed bar registers before the screen cuts away.
+    // PSX held for ~10 VBlanks (1/3s); kept short here for the same reason
+    // FillMeter is duration-based now, not a fixed PSX frame count.
+    constexpr f64 kHoldSec = 0.2;
+    const f64 holdStart = Time::GetTimeInSeconds();
+    do {
         PresentLoadingFrame(s_logo.targetFill);
+    } while (Time::GetTimeInSeconds() - holdStart < kHoldSec);
+
+#if CUSTOM_MENU
+    // Fade to black before cutting away, mirroring the fade-in in StartLogo
+    // (and matching Game::FadeBegin's 0.5s pacing - see StartLogo's comment).
+    constexpr f64 kFadeOutSec = 0.5;
+    const f64 fadeStart = Time::GetTimeInSeconds();
+    for (;;) {
+        const f32 t = (f32)((Time::GetTimeInSeconds() - fadeStart) / kFadeOutSec);
+        if (t >= 1.0f) {
+            break;
+        }
+        PresentLoadingFrameFaded(s_logo.targetFill, (u8)(255.0f * t));
     }
+    g_display->BeginFrame();
+    ScreenDraw::DrawColoredQuad(0, 0, 0, 255);
+    g_display->EndFrame();
+#endif
 
     // PSX: SetActive(0), destructor frees tile buffer + removes VBlank task
     if (s_logo.bgTexture) {

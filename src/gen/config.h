@@ -52,4 +52,4 @@
 // resolution/palette cap for ModLoader texture overrides.
 #define REAL_TEXTURE_RENDERING 1
 
-#define AUTO_UPDATER 1
+#define AUTO_UPDATER (CUSTOM_MENU && 1)

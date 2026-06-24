@@ -390,6 +390,9 @@ public:
     s32 wsAlphaCurrent = 0;         // +60: current alpha (0..255)
     s32 wsAlphaTarget = 0;          // +64: target alpha
 
+    f64 wsLastTimeSec = -1.0;
+    f32 wsAccumSec = 0.0f;
+
     s32 field68 = 0;                // +68: script loop blocked flag
     s32 enableInput = 0;            // +72: player input enabled (1=yes, 0=NIS disabled)
 

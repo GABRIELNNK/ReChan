@@ -71,6 +71,8 @@ namespace ScreenDraw {
     // Draw a fullscreen colored quad (used for fade transitions).
     void DrawColoredQuad(u8 r, u8 g, u8 b, u8 a);
 
+    void SetScissor(s32 x, s32 y, s32 w, s32 h);
+
 
     // Draw a Gouraud-shaded quad with 4 per-vertex colors (PSX POLYG4).
     void DrawGouraudQuad(f32 x0, f32 y0, u8 r0, u8 g0, u8 b0, u8 a0,

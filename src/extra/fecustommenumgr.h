@@ -415,21 +415,27 @@ private:
     void ClampSaveSlotScroll();
     void RenderSaveSlotsPage(s32 panelX, s32 panelY, s32 panelW, s32 panelH,
                              const xcColour1555& selectedColor) const;
-    void RenderAutosaveSpinner(s32 centerX, s32 centerY) const;
+    void RenderAutosaveSpinner(s32 centerX, s32 centerY, f32 alpha01 = 1.0f) const;
 
 #if AUTO_UPDATER
     void RefreshUpdatePageEntries();
     void RenderUpdateProgressBar(s32 panelX, s32 panelW, s32 rowTop) const;
-    void RenderUpdateIndeterminateBar(s32 panelX, s32 panelW, s32 rowTop) const;
+    void RenderUpdateIndeterminateBar(s32 panelX, s32 panelW, s32 rowTop, f32 alpha01 = 1.0f) const;
     bool BuildUpdateInfoText(const char* token, char* outText, s32 outTextLen) const;
     void RebuildChangelogLines();
     void RenderChangelogBody(s32 panelX, s32 panelY, s32 panelW, s32 panelH, s32 contentTop) const;
 #endif
 
     void RefreshAssetPageEntries();
-    void RenderAssetExtractProgressBar(s32 panelX, s32 panelW, s32 rowTop) const;
-    void RenderAssetScanSweep(s32 panelX, s32 panelW, s32 rowTop) const;
+    void RenderAssetExtractProgressBar(s32 panelX, s32 panelW, s32 rowTop, f32 alpha01 = 1.0f) const;
+    void RenderAssetScanSweep(s32 panelX, s32 panelW, s32 rowTop, f32 alpha01 = 1.0f) const;
     bool BuildAssetInfoText(const char* token, char* outText, s32 outTextLen) const;
+
+    // Fade in/out for the no-input "popup" pages (AutosaveNotice, CheckingUpdate,
+    // AssetScanning, AssetExtracting) instead of an instant cut on enter/exit.
+    static bool IsPopupFadePage(MenuPage page);
+    void BeginPopupClose(bool goToPage, MenuPage target);
+    f32 GetPopupFadeAlpha() const;
 
     void LoadControllerOverlayTexture();
     void LoadMenuOrnamentTexture();
@@ -472,8 +478,8 @@ private:
 
     static constexpr f32 kSplashScreenAspect = 16.0f / 9.0f;
 
-    void DrawMenuWindow(s32 x, s32 y, s32 w, s32 h, const char* title) const;
-    void DrawPopupWindow(s32 x, s32 y, s32 w, s32 h, const char* title) const;
+    void DrawMenuWindow(s32 x, s32 y, s32 w, s32 h, const char* title, f32 alpha01 = 1.0f) const;
+    void DrawPopupWindow(s32 x, s32 y, s32 w, s32 h, const char* title, f32 alpha01 = 1.0f) const;
 
     void DrawRect(f32 x, f32 y, f32 w, f32 h, u8 r, u8 g, u8 b, u8 a) const;
     void DrawHighlight(f32 x, f32 y, f32 w, f32 h) const;
@@ -601,6 +607,12 @@ private:
     f32 m_quitTimerSec = 0.0f; // seconds remaining before game actually closes
     f32 m_assetPopupMinTimer = 0.0f; // keeps Scanning/Extracting popups on screen long enough to read
     f32 m_autosaveNoticeTimer = 0.0f;
+
+    // Popup page (AutosaveNotice/CheckingUpdate/AssetScanning/AssetExtracting) fade in/out.
+    f32 m_popupFadeSec = 0.0f;
+    bool m_popupClosing = false;
+    bool m_popupCloseGoToPage = false;
+    MenuPage m_popupCloseTarget = MenuPage_None;
 
 #if AUTO_UPDATER
     AutoUpdater::State m_lastUpdateState = AutoUpdater::State::Idle;

@@ -95,7 +95,7 @@ static void SetVerticalScissorPSX(f32 topY, f32 h) {
     const f32 bottom = SCREEN_SCALE_Y(topY + h);
     const s32 sy = (s32)top;
     const s32 sBottom = (s32)bottom + ((bottom > (f32)(s32)bottom) ? 1 : 0);
-    p3d::context->SetScissor(0, sy, (s32)(SCREEN_WIDTH + 0.5f), sBottom - sy);
+    ScreenDraw::SetScissor(0, sy, (s32)(SCREEN_WIDTH + 0.5f), sBottom - sy);
 }
 
 #if AUTO_UPDATER
@@ -1140,6 +1140,33 @@ void feCustomMenuMgr::UpdateMouseCursorVisibility() {
     }
 }
 
+static constexpr f32 kPopupFadeSec = 0.15f;
+static constexpr f32 kPopupCloseGapSec = 0.2f;
+
+bool feCustomMenuMgr::IsPopupFadePage(MenuPage page) {
+    return page == MenuPage_AutosaveNotice || page == MenuPage_CheckingUpdate
+        || page == MenuPage_AssetScanning || page == MenuPage_AssetExtracting;
+}
+
+void feCustomMenuMgr::BeginPopupClose(bool goToPage, MenuPage target) {
+    if (m_popupClosing)
+        return;
+    m_popupClosing = true;
+    m_popupFadeSec = 0.0f;
+    m_popupCloseGoToPage = goToPage;
+    m_popupCloseTarget = target;
+}
+
+f32 feCustomMenuMgr::GetPopupFadeAlpha() const {
+    if (!IsPopupFadePage(m_currPage))
+        return 1.0f;
+
+    f32 t = (kPopupFadeSec > 0.0f) ? (m_popupFadeSec / kPopupFadeSec) : 1.0f;
+    if (t < 0.0f) t = 0.0f;
+    if (t > 1.0f) t = 1.0f;
+    return m_popupClosing ? (1.0f - t) : t;
+}
+
 s32 feCustomMenuMgr::Invoke() {
     if (!m_active)
         return (s32)GameResult::ResumePlay;
@@ -1147,12 +1174,39 @@ s32 feCustomMenuMgr::Invoke() {
     m_result = 1;
     UpdateMouseCursorVisibility();
 
+    // Closing fade (+ post-fade gap) in progress: hold the popup-specific logic
+    // below until it finishes, then apply whatever the close condition decided
+    // to do. GetPopupFadeAlpha() clamps its ratio to kPopupFadeSec, so alpha
+    // stays at 0 (fully black) for the gap portion - nothing extra to draw.
+    if (m_popupClosing) {
+        const f32 dt = g_time ? g_time->GetDeltaTime() : (1.0f / 30.0f);
+        m_popupFadeSec += dt;
+        if (m_popupFadeSec >= kPopupFadeSec + kPopupCloseGapSec) {
+            m_popupClosing = false;
+            m_popupFadeSec = 0.0f;
+            if (m_popupCloseGoToPage) {
+                SetPage(m_popupCloseTarget);
+            }
+            else {
+                m_result = (s32)GameResult::ResumePlay;
+            }
+        }
+        return m_result;
+    }
+
+    // Fade-in ramp while the popup is open and not yet closing (harmless once
+    // it overshoots kPopupFadeSec - GetPopupFadeAlpha() clamps to 1.0).
+    if (IsPopupFadePage(m_currPage)) {
+        const f32 dt = g_time ? g_time->GetDeltaTime() : (1.0f / 30.0f);
+        m_popupFadeSec += dt;
+    }
+
     if (m_currPage == MenuPage_AutosaveNotice) {
         const f32 dt = g_time ? g_time->GetDeltaTime() : (1.0f / 30.0f);
         m_autosaveNoticeTimer -= dt;
         if (m_autosaveNoticeTimer <= 0.0f) {
             m_autosaveNoticeTimer = 0.0f;
-            m_result = (s32)GameResult::ResumePlay;
+            BeginPopupClose(false, MenuPage_None);
         }
         return m_result;
     }
@@ -1182,10 +1236,10 @@ s32 feCustomMenuMgr::Invoke() {
         }
         if (m_checkingPopupMinTimer <= 0.0f && g_autoUpdater && g_autoUpdater->IsCheckComplete()) {
             if (m_pages[MenuPage_CheckingUpdate].parentPage == MenuPage_Update) {
-                SetPage(MenuPage_Update);
+                BeginPopupClose(true, MenuPage_Update);
             }
             else {
-                m_result = (s32)GameResult::ResumePlay;
+                BeginPopupClose(false, MenuPage_None);
             }
         }
         return m_result;
@@ -1241,7 +1295,7 @@ s32 feCustomMenuMgr::Invoke() {
             PlaySound(FE_SND_MENU_7);
         }
         else if (scroll != 0) {
-            const s32 oldScrollTop = m_changelogScrollTop;
+            // Mouse-wheel scrolling plays no sound (unlike Up/Down keys above).
             const s32 dir = (scroll > 0) ? -1 : 1;
             const s32 scrollSteps = (scroll > 0) ? scroll : -scroll;
 
@@ -1249,10 +1303,6 @@ s32 feCustomMenuMgr::Invoke() {
                 const s32 next = m_changelogScrollTop + dir;
                 if (next < 0 || next > maxScrollTop) break;
                 m_changelogScrollTop = next;
-            }
-
-            if (m_changelogScrollTop != oldScrollTop) {
-                PlaySound(FE_SND_MENU_7);
             }
         }
         else if (g_actionInput->JustPressed(ACTION_MENU_BACK) || g_actionInput->JustPressed(ACTION_MENU_CONFIRM)
@@ -1276,7 +1326,7 @@ s32 feCustomMenuMgr::Invoke() {
             m_assetPopupMinTimer -= dt;
         }
         if (m_assetPopupMinTimer <= 0.0f && g_psxDiscExtractor && g_psxDiscExtractor->GetState() != PsxDiscExtractor::State::Scanning) {
-            SetPage(MenuPage_AssetMissing);
+            BeginPopupClose(true, MenuPage_AssetMissing);
         }
         return m_result;
     }
@@ -1289,10 +1339,10 @@ s32 feCustomMenuMgr::Invoke() {
         if (m_assetPopupMinTimer <= 0.0f && g_psxDiscExtractor) {
             const PsxDiscExtractor::State state = g_psxDiscExtractor->GetState();
             if (state == PsxDiscExtractor::State::Done) {
-                m_result = (s32)GameResult::ResumePlay;
+                BeginPopupClose(false, MenuPage_None);
             }
             else if (state == PsxDiscExtractor::State::Error) {
-                SetPage(MenuPage_AssetMissing);
+                BeginPopupClose(true, MenuPage_AssetMissing);
             }
         }
         return m_result;
@@ -1450,7 +1500,7 @@ s32 feCustomMenuMgr::Invoke() {
                 if (!autosaveSelectable && m_cursor == SAVEGAME_AUTOSAVE_SLOT) {
                     m_cursor = 0;
                 }
-                PlaySound(FE_SND_MENU_7);
+                // Mouse-wheel scrolling plays no sound (unlike keyboard/gamepad nav below).
             }
         }
         if (nonMouseInput && g_actionInput->JustPressed(ACTION_MENU_UP)) {
@@ -1763,7 +1813,7 @@ s32 feCustomMenuMgr::Invoke() {
                         m_keyBindActionCursor = kKeyBindingActionCount - 1;
                     }
 
-                    PlaySound(FE_SND_MENU_7);
+                    // Mouse-wheel scrolling plays no sound (unlike keyboard/gamepad nav).
                 }
             }
 
@@ -1960,12 +2010,12 @@ s32 feCustomMenuMgr::Invoke() {
         }
 
         if (scroll != 0 && count > 0) {
+            // Mouse-wheel scrolling plays no sound (unlike keyboard/gamepad nav below).
             m_cursor = -1;
             m_modCursor += (scroll > 0) ? -1 : 1;
             if (m_modCursor < 0) m_modCursor = 0;
             if (m_modCursor >= count) m_modCursor = count - 1;
             ClampModsScroll();
-            PlaySound(FE_SND_MENU_7);
         }
 
         if (nonMouseInput && g_actionInput->JustPressed(ACTION_MENU_UP)) {
@@ -2152,6 +2202,8 @@ void feCustomMenuMgr::SetPage(MenuPage page) {
     m_prevPage = m_currPage;
     m_currPage = page;
     m_cursor = 0;
+    m_popupFadeSec = 0.0f;
+    m_popupClosing = false;
     m_result = 1;
     m_pendingResolutionActive = false;
     m_pendingScreenModeActive = false;
@@ -2285,7 +2337,7 @@ void feCustomMenuMgr::Activate(MenuPage startPage) {
     m_mouseInputActive = false;
     m_mousePosInitialized = false;
     if (startPage == MenuPage_AutosaveNotice) {
-        m_autosaveNoticeTimer = 3.0f;
+        m_autosaveNoticeTimer = 2.5f;
     }
     if (startPage != MenuPage_Title) {
         rsEvent(RS_MUTE, 0, 0, 0);
@@ -2293,7 +2345,7 @@ void feCustomMenuMgr::Activate(MenuPage startPage) {
 
 #if AUTO_UPDATER
     if (startPage == MenuPage_CheckingUpdate) {
-        m_checkingPopupMinTimer = 2.0f;
+        m_checkingPopupMinTimer = 1.0f;
     }
 #endif
 
@@ -2632,7 +2684,7 @@ void feCustomMenuMgr::Confirm() {
                 g_autoUpdater->CheckAsync();
                 m_pages[MenuPage_CheckingUpdate].parentPage = MenuPage_Update;
                 m_pages[MenuPage_CheckingUpdate].parentEntry = 0;
-                m_checkingPopupMinTimer = 2.0f;
+                m_checkingPopupMinTimer = 1.0f;
                 SetPage(MenuPage_CheckingUpdate);
                 PlaySound(FE_SND_MENU_OPEN);
             }
@@ -3198,7 +3250,7 @@ void feCustomMenuMgr::RenderChangelogBody(s32 panelX, s32 panelY, s32 panelW, s3
                                        SCALE_AND_CENTER_X((f32)textX),
                                        SCREEN_SCALE_Y(rowY));
         }
-        if (p3d::context) p3d::context->SetScissor(0, 0, (s32)(SCREEN_WIDTH + 0.5f), (s32)(SCREEN_HEIGHT + 0.5f));
+        ScreenDraw::SetScissor(0, 0, (s32)(SCREEN_WIDTH + 0.5f), (s32)(SCREEN_HEIGHT + 0.5f));
     }
     g_textManager->SetPromptsEnabled(true);
 
@@ -3991,6 +4043,19 @@ void feCustomMenuMgr::DrawLegalScreen(f32 alpha01) {
     g_textManager->SetPromptsEnabled(true);
 }
 
+// PC: scales an alpha constant by a 0..1 fade multiplier, e.g. for popup-page
+// fade in/out (DrawPopupWindow and its content render functions below).
+static u8 ScaleAlphaU8(u8 a, f32 alpha01) {
+    if (a == 0 || alpha01 >= 1.0f) {
+        return a;
+    }
+    if (alpha01 <= 0.0f) {
+        return 0;
+    }
+    const s32 scaled = (s32)((f32)a * alpha01 + 0.5f);
+    return (scaled < 0) ? 0 : ((scaled > 255) ? 255 : (u8)scaled);
+}
+
 static void DrawGouraudRectPSX(f32 x, f32 y, f32 w, f32 h,
                                u8 topR, u8 topG, u8 topB,
                                u8 bottomR, u8 bottomG, u8 bottomB,
@@ -4194,7 +4259,7 @@ static void DrawGouraudRectPSXVertical(f32 x, f32 y, f32 w, f32 h,
         x1, y1, rightR, rightG, rightB, alpha);
 }
 
-static void DrawMenuOrnament(tTexture* symbolTex, f32 x, f32 y) {
+static void DrawMenuOrnament(tTexture* symbolTex, f32 x, f32 y, u8 alpha = DEF_ORN_A) {
     if (!symbolTex) {
         return;
     }
@@ -4206,14 +4271,14 @@ static void DrawMenuOrnament(tTexture* symbolTex, f32 x, f32 y) {
         SCREEN_SCALE_X((f32)DEF_ORN_W),
         SCREEN_SCALE_Y((f32)DEF_ORN_H),
         0.0f, 0.0f, 1.0f, 1.0f,
-        DEF_ORN_R, DEF_ORN_G, DEF_ORN_B, DEF_ORN_A);
+        DEF_ORN_R, DEF_ORN_G, DEF_ORN_B, alpha);
 }
 
-static void DrawMenuOrnament(tTexture* symbolTex, s32 x, s32 y) {
-    DrawMenuOrnament(symbolTex, (f32)x, (f32)y);
+static void DrawMenuOrnament(tTexture* symbolTex, s32 x, s32 y, u8 alpha = DEF_ORN_A) {
+    DrawMenuOrnament(symbolTex, (f32)x, (f32)y, alpha);
 }
 
-void feCustomMenuMgr::DrawMenuWindow(s32 x, s32 y, s32 w, s32 h, const char* title) const {
+void feCustomMenuMgr::DrawMenuWindow(s32 x, s32 y, s32 w, s32 h, const char* title, f32 alpha01) const {
     const s32 titleY0 = y;
     const s32 titleY1 = y + DEF_TITLE_BAR_H;
     const s32 bodyY0 = titleY1;
@@ -4226,7 +4291,7 @@ void feCustomMenuMgr::DrawMenuWindow(s32 x, s32 y, s32 w, s32 h, const char* tit
     const f32 framePx = GetMenuBorderPx();
 
     // Outer red frame
-    DrawUniformBorderRectPSX(x, y, w, h, framePx, DEF_FRAME_R, DEF_FRAME_G, DEF_FRAME_B, DEF_FRAME_A);
+    DrawUniformBorderRectPSX(x, y, w, h, framePx, DEF_FRAME_R, DEF_FRAME_G, DEF_FRAME_B, ScaleAlphaU8(DEF_FRAME_A, alpha01));
 
     // Gold bars: dark edge -> bright center -> dark edge (two quads per bar)
     {
@@ -4234,51 +4299,53 @@ void feCustomMenuMgr::DrawMenuWindow(s32 x, s32 y, s32 w, s32 h, const char* tit
         const s32 bw = w - DEF_BORDER_W * 2;
         const s32 titleInnerH = DEF_TITLE_BAR_H - DEF_BORDER_W;
         const s32 titleHalf = titleInnerH / 2;
+        const u8 barAlpha = ScaleAlphaU8(DEF_BAR_ALPHA, alpha01);
         DrawGouraudRectPSX(bx, titleY0 + DEF_BORDER_W, bw, titleHalf,
                            DEF_BAR_EDGE_R, DEF_BAR_EDGE_G, DEF_BAR_EDGE_B,
                            DEF_BAR_MID_R, DEF_BAR_MID_G, DEF_BAR_MID_B,
-                           DEF_BAR_ALPHA);
+                           barAlpha);
         DrawGouraudRectPSX(bx, titleY0 + DEF_BORDER_W + titleHalf, bw, titleInnerH - titleHalf,
                            DEF_BAR_MID_R, DEF_BAR_MID_G, DEF_BAR_MID_B,
                            DEF_BAR_EDGE_R, DEF_BAR_EDGE_G, DEF_BAR_EDGE_B,
-                           DEF_BAR_ALPHA);
+                           barAlpha);
 
         const s32 botInnerH = DEF_BOTTOM_BAR_H - DEF_BORDER_W;
         const s32 botHalf = botInnerH / 2;
         DrawGouraudRectPSX(bx, bottomY0, bw, botHalf,
                            DEF_BAR_EDGE_R, DEF_BAR_EDGE_G, DEF_BAR_EDGE_B,
                            DEF_BAR_MID_R, DEF_BAR_MID_G, DEF_BAR_MID_B,
-                           DEF_BAR_ALPHA);
+                           barAlpha);
         DrawGouraudRectPSX(bx, bottomY0 + botHalf, bw, botInnerH - botHalf,
                            DEF_BAR_MID_R, DEF_BAR_MID_G, DEF_BAR_MID_B,
                            DEF_BAR_EDGE_R, DEF_BAR_EDGE_G, DEF_BAR_EDGE_B,
-                           DEF_BAR_ALPHA);
+                           barAlpha);
     }
 
     // Body fill
     DrawRect((f32)(x + DEF_BORDER_W), (f32)bodyY0, (f32)(w - DEF_BORDER_W * 2), (f32)(bodyY1 - bodyY0),
-             DEF_BODY_R, DEF_BODY_G, DEF_BODY_B, DEF_BODY_A);
+             DEF_BODY_R, DEF_BODY_G, DEF_BODY_B, ScaleAlphaU8(DEF_BODY_A, alpha01));
 
     // Frame
-    DrawUniformHLinePSX(x + DEF_BORDER_W, bodyY0, w - DEF_BORDER_W * 2, framePx, DEF_FRAME_R, DEF_FRAME_G, DEF_FRAME_B, DEF_FRAME_A);
-    DrawUniformHLinePSX(x + DEF_BORDER_W, bodyY1 - DEF_BORDER_W, w - DEF_BORDER_W * 2, framePx, DEF_FRAME_R, DEF_FRAME_G, DEF_FRAME_B, DEF_FRAME_A);
+    DrawUniformHLinePSX(x + DEF_BORDER_W, bodyY0, w - DEF_BORDER_W * 2, framePx, DEF_FRAME_R, DEF_FRAME_G, DEF_FRAME_B, ScaleAlphaU8(DEF_FRAME_A, alpha01));
+    DrawUniformHLinePSX(x + DEF_BORDER_W, bodyY1 - DEF_BORDER_W, w - DEF_BORDER_W * 2, framePx, DEF_FRAME_R, DEF_FRAME_G, DEF_FRAME_B, ScaleAlphaU8(DEF_FRAME_A, alpha01));
 
     // Black inset title box
     DrawUniformBorderFillRectPSX(x + titleInsetX, y + titleInsetY, titleInsetW, titleInsetH, framePx,
-                                 DEF_FRAME_R, DEF_FRAME_G, DEF_FRAME_B, DEF_FRAME_A,
-                                 DEF_TITLE_INSET_FILL_R, DEF_TITLE_INSET_FILL_G, DEF_TITLE_INSET_FILL_B, DEF_TITLE_INSET_FILL_A);
+                                 DEF_FRAME_R, DEF_FRAME_G, DEF_FRAME_B, ScaleAlphaU8(DEF_FRAME_A, alpha01),
+                                 DEF_TITLE_INSET_FILL_R, DEF_TITLE_INSET_FILL_G, DEF_TITLE_INSET_FILL_B, ScaleAlphaU8(DEF_TITLE_INSET_FILL_A, alpha01));
 
     // Decorative bar marks
     tTexture* ornamentTex = m_menuOrnamentTexture;
-    DrawMenuOrnament(ornamentTex, x + 18, y + 10);
-    DrawMenuOrnament(ornamentTex, x + w - 32, y + 10);
+    const u8 ornAlpha = ScaleAlphaU8(DEF_ORN_A, alpha01);
+    DrawMenuOrnament(ornamentTex, x + 18, y + 10, ornAlpha);
+    DrawMenuOrnament(ornamentTex, x + w - 32, y + 10, ornAlpha);
     for (s32 i = 0; i < DEF_BOTTOM_ORN_COUNT; i++) {
         const s32 leftX = x + 18 + i * DEF_BOTTOM_ORN_STEP;
-        DrawMenuOrnament(ornamentTex, leftX, bottomY0 + DEF_BOTTOM_ORN_Y_OFF);
+        DrawMenuOrnament(ornamentTex, leftX, bottomY0 + DEF_BOTTOM_ORN_Y_OFF, ornAlpha);
     }
     for (s32 i = 0; i < DEF_BOTTOM_ORN_COUNT; i++) {
         const s32 rightX = x + w - (i * DEF_BOTTOM_ORN_STEP) - 32;
-        DrawMenuOrnament(ornamentTex, rightX, bottomY0 + DEF_BOTTOM_ORN_Y_OFF);
+        DrawMenuOrnament(ornamentTex, rightX, bottomY0 + DEF_BOTTOM_ORN_Y_OFF, ornAlpha);
     }
 
     // Title text
@@ -4293,13 +4360,13 @@ void feCustomMenuMgr::DrawMenuWindow(s32 x, s32 y, s32 w, s32 h, const char* tit
         const s32 titleTextY = y + titleInsetH / 2;
         const f32 titleX = SCALE_AND_CENTER_X((f32)DEF_WINDOW_CENTER_X);
         const f32 titleY = SCREEN_SCALE_Y((f32)titleTextY);
-        g_textManager->SetColor(DEF_TITLE_TEXT_R, DEF_TITLE_TEXT_G, DEF_TITLE_TEXT_B);
+        g_textManager->SetColor(DEF_TITLE_TEXT_R, DEF_TITLE_TEXT_G, DEF_TITLE_TEXT_B, ScaleAlphaU8(255, alpha01));
         g_textManager->PrintString(title, titleX, titleY);
     }
 }
 
 
-void feCustomMenuMgr::DrawPopupWindow(s32 x, s32 y, s32 w, s32 h, const char* title) const {
+void feCustomMenuMgr::DrawPopupWindow(s32 x, s32 y, s32 w, s32 h, const char* title, f32 alpha01) const {
     const s32 titleY0 = y;
     const s32 titleY1 = y + DEF_TITLE_BAR_H;
     const s32 bodyY0 = titleY1;
@@ -4320,30 +4387,26 @@ void feCustomMenuMgr::DrawPopupWindow(s32 x, s32 y, s32 w, s32 h, const char* ti
         DrawGouraudRectPSX(bx, titleY0 + DEF_BORDER_W, bw, titleHalf,
                            DEF_BAR_EDGE_R, DEF_BAR_EDGE_G, DEF_BAR_EDGE_B,
                            DEF_BAR_MID_R, DEF_BAR_MID_G, DEF_BAR_MID_B,
-                           DEF_BAR_ALPHA);
+                           ScaleAlphaU8(DEF_BAR_ALPHA, alpha01));
         DrawGouraudRectPSX(bx, titleY0 + DEF_BORDER_W + titleHalf, bw, titleInnerH - titleHalf,
                            DEF_BAR_MID_R, DEF_BAR_MID_G, DEF_BAR_MID_B,
                            DEF_BAR_EDGE_R, DEF_BAR_EDGE_G, DEF_BAR_EDGE_B,
-                           DEF_BAR_ALPHA);
+                           ScaleAlphaU8(DEF_BAR_ALPHA, alpha01));
     }
 
     // Body fill
     DrawRect((f32)(x + DEF_BORDER_W), (f32)bodyY0, (f32)(w - DEF_BORDER_W * 2), (f32)(bodyY1 - bodyY0),
-             DEF_BODY_R, DEF_BODY_G, DEF_BODY_B, DEF_BODY_A);
-
-    // Frame
-    //DrawUniformHLinePSX(x + DEF_BORDER_W, bodyY0, w - DEF_BORDER_W * 2, framePx, DEF_FRAME_R, DEF_FRAME_G, DEF_FRAME_B, DEF_FRAME_A);
-    //DrawUniformHLinePSX(x + DEF_BORDER_W, bodyY1 - DEF_BORDER_W, w - DEF_BORDER_W * 2, framePx, DEF_FRAME_R, DEF_FRAME_G, DEF_FRAME_B, DEF_FRAME_A);
+             DEF_BODY_R, DEF_BODY_G, DEF_BODY_B, ScaleAlphaU8(DEF_BODY_A, alpha01));
 
     // Black inset title box
     DrawUniformBorderFillRectPSX(x + titleInsetX, y + titleInsetY, titleInsetW, titleInsetH, framePx,
-                                 DEF_FRAME_R, DEF_FRAME_G, DEF_FRAME_B, DEF_FRAME_A,
-                                 DEF_TITLE_INSET_FILL_R, DEF_TITLE_INSET_FILL_G, DEF_TITLE_INSET_FILL_B, DEF_TITLE_INSET_FILL_A);
+                                 DEF_FRAME_R, DEF_FRAME_G, DEF_FRAME_B, ScaleAlphaU8(DEF_FRAME_A, alpha01),
+                                 DEF_TITLE_INSET_FILL_R, DEF_TITLE_INSET_FILL_G, DEF_TITLE_INSET_FILL_B, ScaleAlphaU8(DEF_TITLE_INSET_FILL_A, alpha01));
 
     // Decorative bar marks
     tTexture* ornamentTex = m_menuOrnamentTexture;
-    DrawMenuOrnament(ornamentTex, x + 18, y + 10);
-    DrawMenuOrnament(ornamentTex, x + w - 32, y + 10);
+    DrawMenuOrnament(ornamentTex, x + 18, y + 10, ScaleAlphaU8(DEF_ORN_A, alpha01));
+    DrawMenuOrnament(ornamentTex, x + w - 32, y + 10, ScaleAlphaU8(DEF_ORN_A, alpha01));
 
     // Title text
     if (title && g_textManager && g_textManager->SetFontByName(DEF_MENU_FONT_NAME)) {
@@ -4357,12 +4420,12 @@ void feCustomMenuMgr::DrawPopupWindow(s32 x, s32 y, s32 w, s32 h, const char* ti
         const s32 titleTextY = y + titleInsetH / 2;
         const f32 titleX = SCALE_AND_CENTER_X((f32)DEF_WINDOW_CENTER_X);
         const f32 titleY = SCREEN_SCALE_Y((f32)titleTextY);
-        g_textManager->SetColor(DEF_TITLE_TEXT_R, DEF_TITLE_TEXT_G, DEF_TITLE_TEXT_B);
+        g_textManager->SetColor(DEF_TITLE_TEXT_R, DEF_TITLE_TEXT_G, DEF_TITLE_TEXT_B, ScaleAlphaU8(255, alpha01));
         g_textManager->PrintString(title, titleX, titleY);
     }
 
     // Outer red frame
-    DrawUniformBorderRectPSX(x, y, w, h - DEF_BOTTOM_BAR_H, framePx, DEF_FRAME_R, DEF_FRAME_G, DEF_FRAME_B, DEF_FRAME_A);
+    DrawUniformBorderRectPSX(x, y, w, h - DEF_BOTTOM_BAR_H, framePx, DEF_FRAME_R, DEF_FRAME_G, DEF_FRAME_B, ScaleAlphaU8(DEF_FRAME_A, alpha01));
 }
 
 void feCustomMenuMgr::RenderKeyBindingsPage(s32 panelX, s32 panelY, s32 panelW, s32 panelH,
@@ -4478,7 +4541,7 @@ void feCustomMenuMgr::RenderKeyBindingsPage(s32 panelX, s32 panelY, s32 panelW, 
                                 selectedSlot1 ? selectedColor.GetBlue8() : normalColor.GetBlue8());
         g_textManager->PrintString(slot1Label, SCALE_AND_CENTER_X((slot2Left + slotW / 2)), rowScreenY);
     }
-    if (p3d::context) p3d::context->SetScissor(0, 0, (s32)(SCREEN_WIDTH + 0.5f), (s32)(SCREEN_HEIGHT + 0.5f));
+    ScreenDraw::SetScissor(0, 0, (s32)(SCREEN_WIDTH + 0.5f), (s32)(SCREEN_HEIGHT + 0.5f));
 
     char scrollText[32] = {};
     snprintf(scrollText, (s32)sizeof(scrollText), "%d-%d/%d",
@@ -4683,9 +4746,7 @@ void feCustomMenuMgr::RenderSaveSlotsPage(s32 panelX, s32 panelY, s32 panelW, s3
         }
         drawSlotRow(slotIndex, rowTop, (displayIndex & 1) != 0, disabled);
     }
-    if (p3d::context) {
-        p3d::context->SetScissor(0, 0, (s32)(SCREEN_WIDTH + 0.5f), (s32)(SCREEN_HEIGHT + 0.5f));
-    }
+    ScreenDraw::SetScissor(0, 0, (s32)(SCREEN_WIDTH + 0.5f), (s32)(SCREEN_HEIGHT + 0.5f));
 
     char rangeText[24] = {};
     snprintf(rangeText, sizeof(rangeText), "%d-%d / %d", m_saveSlotScrollTop + 1,
@@ -4804,7 +4865,7 @@ void feCustomMenuMgr::RenderModsPage(s32 panelX, s32 panelY, s32 panelW, s32 pan
         g_textManager->PrintString(stateText ? stateText : (mod.enabled ? "ON" : "OFF"),
                                    SCALE_AND_CENTER_X(valueX), SCREEN_SCALE_Y(rowY));
     }
-    if (p3d::context) p3d::context->SetScissor(0, 0, (s32)(SCREEN_WIDTH + 0.5f), (s32)(SCREEN_HEIGHT + 0.5f));
+    ScreenDraw::SetScissor(0, 0, (s32)(SCREEN_WIDTH + 0.5f), (s32)(SCREEN_HEIGHT + 0.5f));
 
     char range[32] = {};
     snprintf(range, sizeof(range), "%d-%d/%d", m_modScrollTop + 1, m_modScrollTop + visibleRows, count);
@@ -4900,12 +4961,13 @@ void feCustomMenuMgr::Render() {
         }
     }
 
-    bool isPopup = (m_currPage == MenuPage_AutosaveNotice || m_currPage == MenuPage_CheckingUpdate);
+    bool isPopup = IsPopupFadePage();
+    const f32 popupAlpha = GetPopupFadeAlpha();
 
     if (isPopup)
-        DrawPopupWindow(panelX, panelY, panelW, panelH, title);
+        DrawPopupWindow(panelX, panelY, panelW, panelH, title, popupAlpha);
     else
-        DrawMenuWindow(panelX, panelY, panelW, panelH, title);
+        DrawMenuWindow(panelX, panelY, panelW, panelH, title, popupAlpha);
 
     // Build normalColor directly (PSX scale: 128 = neutral/1.0 for the tint shader)
     const xcColour1555 normalColor{ DEF_TEXT_NORM_R, DEF_TEXT_NORM_G, DEF_TEXT_NORM_B };
@@ -4951,7 +5013,7 @@ void feCustomMenuMgr::Render() {
             }
             const s32 spinnerY = firstY + DEF_ROW_TEXT_H
                 + (lines - 1) * DEF_ROW_STEP + DEF_INFO_ROW_EXTRA + 12;
-            RenderAutosaveSpinner(panelX + panelW / 2, spinnerY);
+            RenderAutosaveSpinner(panelX + panelW / 2, spinnerY, popupAlpha);
             break;
         }
         case MenuPage_KeyBindings:
@@ -4980,17 +5042,17 @@ void feCustomMenuMgr::Render() {
             }
             break;
         case MenuPage_CheckingUpdate:
-            RenderUpdateIndeterminateBar(panelX, panelW, firstY);
+            RenderUpdateIndeterminateBar(panelX, panelW, firstY, popupAlpha);
             break;
         case MenuPage_Changelog:
             RenderChangelogBody(panelX, panelY, panelW, panelH, contentTop);
             break;
 #endif
         case MenuPage_AssetScanning:
-            RenderAssetScanSweep(panelX, panelW, firstY);
+            RenderAssetScanSweep(panelX, panelW, firstY, popupAlpha);
             break;
         case MenuPage_AssetExtracting:
-            RenderAssetExtractProgressBar(panelX, panelW, firstY);
+            RenderAssetExtractProgressBar(panelX, panelW, firstY, popupAlpha);
             break;
         default:
             break;
@@ -5044,7 +5106,7 @@ void feCustomMenuMgr::Render() {
                 const f32 wrapWidth = SCREEN_SCALE_X((f32)(page->frameW - DEF_LABEL_X_PAD * 2));
                 g_textManager->SetAlignment(TextAlign_Center);
                 g_textManager->SetWrapWidth(wrapWidth);
-                g_textManager->SetColor(DEF_INFO_TEXT_R, DEF_INFO_TEXT_G, DEF_INFO_TEXT_B);
+                g_textManager->SetColor(DEF_INFO_TEXT_R, DEF_INFO_TEXT_G, DEF_INFO_TEXT_B, ScaleAlphaU8(255, popupAlpha));
                 g_textManager->PrintString(label, centerScreenX, rowScreenY);
                 g_textManager->SetWrapWidth(0.0f);
             }
@@ -5407,7 +5469,7 @@ void feCustomMenuMgr::Render() {
 #endif
 }
 
-void feCustomMenuMgr::RenderAutosaveSpinner(s32 centerX, s32 centerY) const {
+void feCustomMenuMgr::RenderAutosaveSpinner(s32 centerX, s32 centerY, f32 alpha01) const {
     static constexpr s32 kSegments = 10;
     static constexpr f32 kRadius = 10.0f;
     static constexpr f32 kSize = 3.0f;
@@ -5421,7 +5483,7 @@ void feCustomMenuMgr::RenderAutosaveSpinner(s32 centerX, s32 centerY) const {
     for (s32 i = 0; i < kSegments; ++i) {
         const f32 angle = ((f32)i / (f32)kSegments) * 6.2831853f;
         const s32 distance = (head - i + kSegments) % kSegments;
-        const u8 alpha = (u8)(255 - distance * 18);
+        const u8 alpha = ScaleAlphaU8((u8)(255 - distance * 18), alpha01);
         const f32 x = (f32)centerX + std::cos(angle) * radiusX - sizeX * 0.5f;
         const f32 y = (f32)centerY + std::sin(angle) * kRadius - kSize * 0.5f;
         DrawRect(x, y, sizeX, kSize, 255, 224, 96, alpha);
@@ -5806,7 +5868,7 @@ void feCustomMenuMgr::RenderUpdateProgressBar(s32 panelX, s32 panelW, s32 rowTop
     }
 }
 
-void feCustomMenuMgr::RenderUpdateIndeterminateBar(s32 panelX, s32 panelW, s32 rowTop) const {
+void feCustomMenuMgr::RenderUpdateIndeterminateBar(s32 panelX, s32 panelW, s32 rowTop, f32 alpha01) const {
     // Offset below the "FE_UPD_CHK" Info row by however many lines it actually
     // wrapped to, so longer translated text doesn't overlap the bar.
     const PageDef& page = m_pages[MenuPage_CheckingUpdate];
@@ -5824,9 +5886,9 @@ void feCustomMenuMgr::RenderUpdateIndeterminateBar(s32 panelX, s32 panelW, s32 r
     const s32 barH = DEF_METER_H;
 
     DrawUniformBorderRectPSX(barX, barY, barW, barH, GetMenuBorderPx(),
-                             DEF_FRAME_R, DEF_FRAME_G, DEF_FRAME_B, DEF_FRAME_A);
+                             DEF_FRAME_R, DEF_FRAME_G, DEF_FRAME_B, ScaleAlphaU8(DEF_FRAME_A, alpha01));
     DrawRect((f32)barX, (f32)barY, (f32)barW, (f32)barH,
-             DEF_SLIDER_TRACK_R, DEF_SLIDER_TRACK_G, DEF_SLIDER_TRACK_B, DEF_SLIDER_TRACK_A);
+             DEF_SLIDER_TRACK_R, DEF_SLIDER_TRACK_G, DEF_SLIDER_TRACK_B, ScaleAlphaU8(DEF_SLIDER_TRACK_A, alpha01));
 
     // No real progress to report yet, so sweep a block back and forth across the track.
     // 2.0s round-trip (matches the original 60-frame cycle at 30 fps), wall-clock paced.
@@ -5835,7 +5897,7 @@ void feCustomMenuMgr::RenderUpdateIndeterminateBar(s32 panelX, s32 panelW, s32 r
     const s32 blockX = barX + (s32)((f32)(barW - blockW) * frac);
 
     DrawRect((f32)blockX, (f32)barY, (f32)blockW, (f32)barH,
-             DEF_SLIDER_FILL_R, DEF_SLIDER_FILL_G, DEF_SLIDER_FILL_B, DEF_SLIDER_FILL_A);
+             DEF_SLIDER_FILL_R, DEF_SLIDER_FILL_G, DEF_SLIDER_FILL_B, ScaleAlphaU8(DEF_SLIDER_FILL_A, alpha01));
 }
 #endif
 
@@ -5907,7 +5969,7 @@ bool feCustomMenuMgr::BuildAssetInfoText(const char* token, char* outText, s32 o
     return false;
 }
 
-void feCustomMenuMgr::RenderAssetExtractProgressBar(s32 panelX, s32 panelW, s32 rowTop) const {
+void feCustomMenuMgr::RenderAssetExtractProgressBar(s32 panelX, s32 panelW, s32 rowTop, f32 alpha01) const {
     if (!g_psxDiscExtractor) return;
 
     // Offset below the "FE_ASSET_EXTG" Info row by however many lines it actually
@@ -5931,9 +5993,9 @@ void feCustomMenuMgr::RenderAssetExtractProgressBar(s32 panelX, s32 panelW, s32 
     const s32 barH = DEF_METER_H;
 
     DrawUniformBorderRectPSX(barX, barY, barW, barH, GetMenuBorderPx(),
-                             DEF_FRAME_R, DEF_FRAME_G, DEF_FRAME_B, DEF_FRAME_A);
+                             DEF_FRAME_R, DEF_FRAME_G, DEF_FRAME_B, ScaleAlphaU8(DEF_FRAME_A, alpha01));
     DrawRect((f32)barX, (f32)barY, (f32)barW, (f32)barH,
-             DEF_SLIDER_TRACK_R, DEF_SLIDER_TRACK_G, DEF_SLIDER_TRACK_B, DEF_SLIDER_TRACK_A);
+             DEF_SLIDER_TRACK_R, DEF_SLIDER_TRACK_G, DEF_SLIDER_TRACK_B, ScaleAlphaU8(DEF_SLIDER_TRACK_A, alpha01));
 
     f32 progress = g_psxDiscExtractor->GetProgress();
     if (progress < 0.0f) progress = 0.0f;
@@ -5942,11 +6004,11 @@ void feCustomMenuMgr::RenderAssetExtractProgressBar(s32 panelX, s32 panelW, s32 
     const s32 fillW = (s32)((f32)barW * progress);
     if (fillW > 0) {
         DrawRect((f32)barX, (f32)barY, (f32)fillW, (f32)barH,
-                 DEF_SLIDER_FILL_R, DEF_SLIDER_FILL_G, DEF_SLIDER_FILL_B, DEF_SLIDER_FILL_A);
+                 DEF_SLIDER_FILL_R, DEF_SLIDER_FILL_G, DEF_SLIDER_FILL_B, ScaleAlphaU8(DEF_SLIDER_FILL_A, alpha01));
     }
 }
 
-void feCustomMenuMgr::RenderAssetScanSweep(s32 panelX, s32 panelW, s32 rowTop) const {
+void feCustomMenuMgr::RenderAssetScanSweep(s32 panelX, s32 panelW, s32 rowTop, f32 alpha01) const {
     // Offset below the "FE_ASSET_SCAN" Info row by however many lines it actually
     // wrapped to, so longer translated text doesn't overlap the bar.
     const PageDef& page = m_pages[MenuPage_AssetScanning];
@@ -5964,9 +6026,9 @@ void feCustomMenuMgr::RenderAssetScanSweep(s32 panelX, s32 panelW, s32 rowTop) c
     const s32 barH = DEF_METER_H;
 
     DrawUniformBorderRectPSX(barX, barY, barW, barH, GetMenuBorderPx(),
-                             DEF_FRAME_R, DEF_FRAME_G, DEF_FRAME_B, DEF_FRAME_A);
+                             DEF_FRAME_R, DEF_FRAME_G, DEF_FRAME_B, ScaleAlphaU8(DEF_FRAME_A, alpha01));
     DrawRect((f32)barX, (f32)barY, (f32)barW, (f32)barH,
-             DEF_SLIDER_TRACK_R, DEF_SLIDER_TRACK_G, DEF_SLIDER_TRACK_B, DEF_SLIDER_TRACK_A);
+             DEF_SLIDER_TRACK_R, DEF_SLIDER_TRACK_G, DEF_SLIDER_TRACK_B, ScaleAlphaU8(DEF_SLIDER_TRACK_A, alpha01));
 
     // Scanning a single folder is effectively instant - sweep a block, same as the
     // update-checker's indeterminate bar, rather than faking a 0..1 progress value.
@@ -5976,5 +6038,5 @@ void feCustomMenuMgr::RenderAssetScanSweep(s32 panelX, s32 panelW, s32 rowTop) c
     const s32 blockX = barX + (s32)((f32)(barW - blockW) * frac);
 
     DrawRect((f32)blockX, (f32)barY, (f32)blockW, (f32)barH,
-             DEF_SLIDER_FILL_R, DEF_SLIDER_FILL_G, DEF_SLIDER_FILL_B, DEF_SLIDER_FILL_A);
+             DEF_SLIDER_FILL_R, DEF_SLIDER_FILL_G, DEF_SLIDER_FILL_B, ScaleAlphaU8(DEF_SLIDER_FILL_A, alpha01));
 }
