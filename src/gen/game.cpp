@@ -1832,6 +1832,10 @@ bool Game::gsQueueLevelLoad(Game* game) {
     // PSX: BossAI overlay switch for levels 1-7 vs 8,11-14
     // Not applicable on PC - all code is statically linked
 
+#if CUSTOM_MENU
+    g_deferLevelBeginMusic = true;
+#endif
+
     // PSX: LoadLevel(world, targetLevelIndex) - internally calls Construct
     // which spawns AI entities, resets Director, sets level script
     if (!world->LoadLevelIndex(world->GetTargetLevelIndex())) {
@@ -1914,6 +1918,10 @@ bool Game::gsQueuePetalLoad(Game* game) {
     if (g_gameMenu) {
         g_gameMenu->ShowLoadingScreenText(world->GetCurrentLevelIndex(), world->GetTargetPetalIndex());
     }
+
+#if CUSTOM_MENU
+    g_deferLevelBeginMusic = true;
+#endif
 
     // PSX: LoadPetal(world, targetPetalIndex)
     world->LoadPetal(world->GetTargetPetalIndex());
@@ -2403,7 +2411,17 @@ void Game::PlayFadeInHandlerCB(Handler*) {
         return;
     }
 
-    if (!FadeUpdate()) {
+    const s32 stillFading = FadeUpdate();
+
+    // Start the music partway through the reveal (halfway) rather than
+    // waiting for the screen to be fully visible, so it doesn't feel like
+    // it's trailing behind the picture. s_fadeCounter runs 0..255.
+    if (g_deferLevelBeginMusic && s_fadeCounter >= 128) {
+        g_deferLevelBeginMusic = false;
+        rsEvent(RS_LEVEL_BEGIN, 0, 0, 0);
+    }
+
+    if (!stillFading) {
         g_game->playFadeInActive = false;
         return;
     }

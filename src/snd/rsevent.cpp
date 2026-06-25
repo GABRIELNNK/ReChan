@@ -1303,6 +1303,8 @@ static s32 g_muteFlag = 0;
 // which determines which music track plays when RS_LEVEL_BEGIN fires.
 s32 g_currentSoundLocation = 0;
 
+bool g_deferLevelBeginMusic = false;
+
 // PSX: gp[0x2E8] - current ambience space (set by jcsSetAmbienceSpace)
 static s32 g_currentAmbienceSpace = 0;
 
@@ -1454,7 +1456,6 @@ s32 jcsHandleControlEvent(s32 event, s32 param1, s32 param2, s32 param3) {
 
         case RS_LEVEL_BEGIN: // 5 - start music for current location
         {
-            LOG("[rsEvent] LevelBegin - start music (location=%d, musicVol=%.2f)", g_currentSoundLocation, g_sound->musicVolume);
             g_pauseFlag = 0;
             g_muteFlag = 0;
             if (g_currentSoundLocation >= 0 && g_currentSoundLocation < MUSIC_TABLE_COUNT) {
