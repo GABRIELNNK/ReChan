@@ -418,6 +418,12 @@ public:
 
     void Teleport(const LVector& newPos);
 
+    // PC: call after any direct (non-physics-integrated) write to pos/orientation
+    // so the HIGH_FPS render interpolation doesn't slide from the pre-snap
+    // position/pose instead of cutting straight to it. No-op when the
+    // HIGH_FPS presentation layer is disabled.
+    void ResetRenderInterpolation();
+
     virtual void SetActionState(u32 state, s32 param);
     virtual void ProcessAction();
     virtual void ProcessControl();

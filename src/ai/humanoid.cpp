@@ -119,6 +119,13 @@ static constexpr u32 NON_BOSS_TAUNT_COOLDOWN_FRAMES = 90; // ~3s at 30fps; appro
 #if HIGH_FPS_PLAY_PRESENTATION
 static constexpr s32 MAX_HUMANOID_RENDER_SMOOTH_STATES = 256;
 
+// Draw() lerps render position/orientation/anim-frame between the previous
+// and current logic tick's values. Any code that writes pos/orientation
+// directly instead of through normal velocity integration (ledge latch,
+// Teleport, root-motion realignment, etc.) must call
+// Humanoid::ResetRenderInterpolation() right after, or the lerp will slide
+// through the discontinuity and the model will visibly snap through empty
+// space for a frame or two.
 struct HumanoidRenderSmoothState {
     Humanoid* owner = nullptr;
     bool initialized = false;
@@ -324,6 +331,12 @@ static void UpdateHumanoidRenderAnimPose(HumanoidModel* model, HumanoidRenderSmo
     anim->flip->SetFrameReal(frameReal);
     anim->flip->UpdateJoints();
 }
+
+void Humanoid::ResetRenderInterpolation() {
+    ClearHumanoidRenderSmoothState(this);
+}
+#else
+void Humanoid::ResetRenderInterpolation() {}
 #endif
 
 // PSX gp+1764 (0x800DD030): gravityReduction
@@ -1026,6 +1039,7 @@ s32 Humanoid::HandleAnimationControl() {
     if (loopCount == 0 && frame == 0) {
         if (actionState == AS_THROW_CHARACTER_RECEIVE) {
             pos.y = nextHome.y;
+            ResetRenderInterpolation();
         }
     }
 
@@ -1516,6 +1530,7 @@ s32 Humanoid::RestorePositionFromBip01() {
     homePos.x = nextX;
     homePos.y = nextY;
     homePos.z = nextZ;
+    ResetRenderInterpolation();
 
     if (((flags2 >> 6) & 1) != 0) {
         return nextY;
@@ -1574,6 +1589,7 @@ void Humanoid::PrepareLedgeLatch(const LVector& correctionPos, const LVector& no
     pos.y = correctionPos.y;
     pos.z = correctionPos.z + offsetZ;
     homePos = pos;
+    ResetRenderInterpolation();
 }
 
 // PSX: CheckForLedges__8Humanoid (HUMANOID.CPP:6644)
@@ -2315,6 +2331,7 @@ void Humanoid::Teleport(const LVector& newPos) {
     UpdatePosition();
     g_blockManager->DemandLoading();
     g_game->GetWorld()->CheckThingSwitches(this);
+    ResetRenderInterpolation();
 }
 
 // PSX: SubtractHitPoints__8HumanoidUs (HUMANOID.CPP:9388, 0x8006CEB4)
@@ -5080,6 +5097,7 @@ s32 Humanoid::LetGoOfLedge() {
         homePos.x = newX;
         homePos.y = newY;
         homePos.z = newZ;
+        ResetRenderInterpolation();
     }
 
     return ok;

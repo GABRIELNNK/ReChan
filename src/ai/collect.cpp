@@ -623,8 +623,10 @@ void Collectible::Draw() {
             Collectible_ApplyMiscAnimFrame(this, mAnimB, interpFrame, true);
         }
         else if (mAnim && mAnim->flip && mAnim->flip->anim) {
-            const s32 interpFrameInt = mRenderPrevFrame + (s32)((f32)frameStep * alpha);
-            mAnim->flip->SetFrameReal(interpFrameInt << 16);
+            const s32 prevFrameReal = mRenderPrevFrame << 16;
+            const s32 curFrameReal = mCurrentFrame << 16;
+            const s32 interpFrameReal = prevFrameReal + (s32)((f32)(curFrameReal - prevFrameReal) * alpha);
+            mAnim->flip->SetFrameReal(interpFrameReal);
             mAnim->flip->UpdateJoints();
         }
     }

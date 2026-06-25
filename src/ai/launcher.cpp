@@ -141,9 +141,9 @@ void Launcher::Draw() {
         if (alpha < 0.0f) alpha = 0.0f;
         if (alpha > 1.0f) alpha = 1.0f;
 
-        const s32 frameStep = animFrame - renderPrevFrame;
-        const s32 interpFrameInt = renderPrevFrame + (s32)((f32)frameStep * alpha);
-        const s32 interpFrameReal = interpFrameInt << 16;
+        const s32 prevFrameReal = renderPrevFrame << 16;
+        const s32 curFrameReal = animFrame << 16;
+        const s32 interpFrameReal = prevFrameReal + (s32)((f32)(curFrameReal - prevFrameReal) * alpha);
 
         animStruct->flip->SetFrameReal(interpFrameReal);
         animStruct->flip->UpdateJoints();

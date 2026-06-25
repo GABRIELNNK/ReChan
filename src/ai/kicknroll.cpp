@@ -865,9 +865,13 @@ void Stack::Draw() {
         if (alpha < 0.0f) alpha = 0.0f;
         if (alpha > 1.0f) alpha = 1.0f;
 
-        const s32 frameStep = currentFrame - renderPrevFrame;
-        const s32 interpFrameInt = renderPrevFrame + (s32)((f32)frameStep * alpha);
-        const s32 interpFrameReal = interpFrameInt << 16;
+        // Lerp in 16.16 fixed-point ("real" frame) space, not integer frame
+        // space, or the fraction gets truncated away and the anim looks
+        // like it's stepping at the 30Hz logic rate instead of smoothly
+        // blending between ticks.
+        const s32 prevFrameReal = renderPrevFrame << 16;
+        const s32 curFrameReal = currentFrame << 16;
+        const s32 interpFrameReal = prevFrameReal + (s32)((f32)(curFrameReal - prevFrameReal) * alpha);
 
         const LVector savedJoint0 = jointPositions[0];
         const LVector savedJoint1 = jointPositions[1];
