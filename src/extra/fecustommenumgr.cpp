@@ -4961,7 +4961,7 @@ void feCustomMenuMgr::Render() {
         }
     }
 
-    bool isPopup = IsPopupFadePage();
+    bool isPopup = IsPopupFadePage(m_currPage);
     const f32 popupAlpha = GetPopupFadeAlpha();
 
     if (isPopup)
