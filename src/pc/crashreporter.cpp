@@ -120,9 +120,46 @@ static void WriteCrashReport(EXCEPTION_POINTERS* exceptionInfo, const char* reas
     WriteHandle(report, "\r\nStack addresses:\r\n");
     void* frames[64] = {};
     const USHORT frameCount = CaptureStackBackTrace(0, 64, frames, nullptr);
+
+    const BOOL symInitialized = SymInitialize(GetCurrentProcess(), nullptr, TRUE);
+    if (symInitialized) {
+        SymSetOptions(SymGetOptions() | SYMOPT_LOAD_LINES | SYMOPT_UNDNAME);
+    }
+
     for (USHORT i = 0; i < frameCount; ++i) {
-        std::snprintf(buffer, sizeof(buffer), "  #%02u %p\r\n", i, frames[i]);
-        WriteHandle(report, buffer);
+        bool resolved = false;
+        if (symInitialized) {
+            alignas(SYMBOL_INFO) char symBuffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME];
+            SYMBOL_INFO* symbol = reinterpret_cast<SYMBOL_INFO*>(symBuffer);
+            symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+            symbol->MaxNameLen = MAX_SYM_NAME;
+            DWORD64 displacement = 0;
+            const DWORD64 address = reinterpret_cast<DWORD64>(frames[i]);
+            if (SymFromAddr(GetCurrentProcess(), address, &displacement, symbol)) {
+                IMAGEHLP_LINE64 line = {};
+                line.SizeOfStruct = sizeof(IMAGEHLP_LINE64);
+                DWORD lineDisplacement = 0;
+                if (SymGetLineFromAddr64(GetCurrentProcess(), address, &lineDisplacement, &line)) {
+                    std::snprintf(buffer, sizeof(buffer), "  #%02u %p %s+0x%llx (%s:%lu)\r\n", i,
+                                  frames[i], symbol->Name, static_cast<unsigned long long>(displacement),
+                                  line.FileName, line.LineNumber);
+                }
+                else {
+                    std::snprintf(buffer, sizeof(buffer), "  #%02u %p %s+0x%llx\r\n", i, frames[i],
+                                  symbol->Name, static_cast<unsigned long long>(displacement));
+                }
+                WriteHandle(report, buffer);
+                resolved = true;
+            }
+        }
+        if (!resolved) {
+            std::snprintf(buffer, sizeof(buffer), "  #%02u %p\r\n", i, frames[i]);
+            WriteHandle(report, buffer);
+        }
+    }
+
+    if (symInitialized) {
+        SymCleanup(GetCurrentProcess());
     }
 
     WriteHandle(report,
