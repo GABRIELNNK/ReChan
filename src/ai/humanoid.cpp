@@ -280,6 +280,41 @@ static void UpdateHumanoidRenderAnimPose(HumanoidModel* model, HumanoidRenderSmo
         alpha = 1.0f;
     }
 
+    if (anim->sequence) {
+        s32 prevLocalFrame = 0;
+        s32 curLocalFrame = 0;
+        TransformAnim* prevPart = anim->sequence->ResolvePart(smoothState->prevAnimFrame >> 16, prevLocalFrame);
+        TransformAnim* curPart = anim->sequence->ResolvePart(smoothState->curAnimFrame >> 16, curLocalFrame);
+
+        TransformAnim* part = curPart ? curPart : prevPart;
+        if (!part) {
+            return;
+        }
+
+        const s32 prevFrameReal = (prevPart == curPart)
+            ? (prevLocalFrame << 16 | (smoothState->prevAnimFrame & 0xFFFF))
+            : 0;
+        const s32 curFrameReal = curLocalFrame << 16 | (smoothState->curAnimFrame & 0xFFFF);
+
+        s32 frameReal = prevFrameReal + (s32)((f32)(curFrameReal - prevFrameReal) * alpha);
+
+        const s32 maxFrameReal = (part->numFrames > 0) ? ((part->numFrames - 1) << 16) : 0;
+        if (frameReal < 0) {
+            frameReal = 0;
+        }
+        if (frameReal > maxFrameReal) {
+            frameReal = maxFrameReal;
+        }
+
+        if (part != anim->flip->anim) {
+            anim->flip->anim = part;
+            anim->flip->dirty = 1;
+        }
+        anim->flip->SetFrameReal(frameReal);
+        anim->flip->UpdateJoints();
+        return;
+    }
+
     const s32 frameReal = BuildInterpolatedAnimFrameReal(
         anim,
         smoothState->prevAnimFrame,
