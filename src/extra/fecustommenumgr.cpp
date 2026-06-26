@@ -61,6 +61,7 @@ static constexpr u32 HASH_TEXT_LEVELNAME = 0x39AA5899;
 
 static constexpr f32 DEF_MENU_TITLE_SCALE = 0.34f;
 static constexpr f32 DEF_MENU_TEXT_SCALE = 0.4f;
+static constexpr f32 DEF_MENU_WINDOW_TITLE_SCALE = 0.4f;
 static constexpr f32 DEF_REDEFINE_KEY_TEXT_SCALE = 0.3f;
 static constexpr f32 DEF_MENU_PROMPT_SCALE = 0.3f;
 static constexpr f32 DEF_MENU_DRAGON_COUNT_SCALE = 0.5f;
@@ -68,7 +69,7 @@ static constexpr f32 DEF_CONTROLLER_ACTION_SCALE = 0.2f;
 
 static f32 GetSaveDisplayRowOffset(s32 displayIndex) {
     return (f32)(displayIndex * DEF_SAVE_ROW_H
-        + (displayIndex > 0 ? DEF_SAVE_AUTOSAVE_GAP : 0));
+                 + (displayIndex > 0 ? DEF_SAVE_AUTOSAVE_GAP : 0));
 }
 
 static f32 GetSaveDisplayScrollOffset(f32 displayPosition) {
@@ -777,19 +778,9 @@ void feCustomMenuMgr::BuildPages() {
         Button("", EntryEvent_LocationSelect),
                });
 
-    auto& feAutosaveNotice = AddPage(MenuPage_AutosaveNotice, "FE_WARN", "Menu_GameOption", MenuPage_None, 0, false, 380, -1);
-    SetEntries(feAutosaveNotice, {
-        Info("FE_AUTO_WARN"),
-               });
-
 #if AUTO_UPDATER
     AddPage(MenuPage_Update, "FE_UPD", "Menu_GameOption", MenuPage_Title, 0, false, 380, -1);
     RefreshUpdatePageEntries();
-
-    auto& feCheckingUpdate = AddPage(MenuPage_CheckingUpdate, "FE_UPD", "Menu_GameOption", MenuPage_None, 0, false, 280, -1);
-    SetEntries(feCheckingUpdate, {
-        Info("FE_UPD_CHK"),
-               });
 
     // Fully custom page: body text + scrollbar are hand-drawn in RenderChangelogBody,
     // and input is handled in its own Invoke() block, so it carries no real entries.
@@ -800,13 +791,27 @@ void feCustomMenuMgr::BuildPages() {
     // Entries are populated by RefreshAssetPageEntries() via SetPage()'s refresh hook the
     // first time this page is actually shown - g_psxDiscExtractor doesn't exist yet here.
     AddPage(MenuPage_AssetMissing, "FE_ASSET_TITLE", "Menu_GameOption", MenuPage_None, 0, false, 380, -1);
+}
 
-    auto& feAssetScanning = AddPage(MenuPage_AssetScanning, "FE_ASSET_TITLE", "Menu_GameOption", MenuPage_None, 0, false, 280, -1);
+void feCustomMenuMgr::BuildPopups() {
+    auto& feAutosaveNotice = AddPopup(PopupKind_AutosaveNotice, "FE_WARN", "Menu_GameOption", 380);
+    SetEntries(feAutosaveNotice, {
+        Info("FE_AUTO_WARN"),
+               });
+
+#if AUTO_UPDATER
+    auto& feCheckingUpdate = AddPopup(PopupKind_CheckingUpdate, "FE_UPD", "Menu_GameOption", 280);
+    SetEntries(feCheckingUpdate, {
+        Info("FE_UPD_CHK"),
+               });
+#endif
+
+    auto& feAssetScanning = AddPopup(PopupKind_AssetScanning, "FE_ASSET_TITLE", "Menu_GameOption", 280);
     SetEntries(feAssetScanning, {
         Info("FE_ASSET_SCAN"),
                });
 
-    auto& feAssetExtracting = AddPage(MenuPage_AssetExtracting, "FE_ASSET_TITLE", "Menu_GameOption", MenuPage_None, 0, false, 320, -1);
+    auto& feAssetExtracting = AddPopup(PopupKind_AssetExtracting, "FE_ASSET_TITLE", "Menu_GameOption", 320);
     SetEntries(feAssetExtracting, {
         Info("FE_ASSET_EXTG"),
                });
@@ -816,6 +821,7 @@ void feCustomMenuMgr::Init(CustomText* textSystem) {
     m_text = textSystem;
 
     BuildPages();
+    BuildPopups();
     LoadControllerOverlayTexture();
     LoadMenuOrnamentTexture();
     LoadSplashTextures();
@@ -955,8 +961,8 @@ bool feCustomMenuMgr::EnsureTitleScreenEffects(f32 drawW, f32 drawH) {
     // display resolution. Preserve the splash rect's aspect while capping
     // the size.
     const f32 targetScale = std::min(1.0f,
-        std::min(960.0f / std::max(drawW, 1.0f),
-                 540.0f / std::max(drawH, 1.0f)));
+                                     std::min(960.0f / std::max(drawW, 1.0f),
+                                     540.0f / std::max(drawH, 1.0f)));
     const s32 targetW = std::max(1, (s32)(drawW * targetScale + 0.5f));
     const s32 targetH = std::max(1, (s32)(drawH * targetScale + 0.5f));
 
@@ -1143,22 +1149,24 @@ void feCustomMenuMgr::UpdateMouseCursorVisibility() {
 static constexpr f32 kPopupFadeSec = 0.15f;
 static constexpr f32 kPopupCloseGapSec = 0.2f;
 
-bool feCustomMenuMgr::IsPopupFadePage(MenuPage page) {
-    return page == MenuPage_AutosaveNotice || page == MenuPage_CheckingUpdate
-        || page == MenuPage_AssetScanning || page == MenuPage_AssetExtracting;
+void feCustomMenuMgr::OpenPopup(PopupKind kind, f32 minTimerSec, std::function<s32()> poll) {
+    m_activePopup = kind;
+    m_popupFadeSec = 0.0f;
+    m_popupClosing = false;
+    m_popupMinTimer = minTimerSec;
+    m_popupPoll = std::move(poll);
 }
 
-void feCustomMenuMgr::BeginPopupClose(bool goToPage, MenuPage target) {
+void feCustomMenuMgr::ClosePopup(s32 closeResult) {
     if (m_popupClosing)
         return;
     m_popupClosing = true;
     m_popupFadeSec = 0.0f;
-    m_popupCloseGoToPage = goToPage;
-    m_popupCloseTarget = target;
+    m_popupCloseResult = closeResult;
 }
 
 f32 feCustomMenuMgr::GetPopupFadeAlpha() const {
-    if (!IsPopupFadePage(m_currPage))
+    if (m_activePopup == PopupKind_None)
         return 1.0f;
 
     f32 t = (kPopupFadeSec > 0.0f) ? (m_popupFadeSec / kPopupFadeSec) : 1.0f;
@@ -1174,39 +1182,34 @@ s32 feCustomMenuMgr::Invoke() {
     m_result = 1;
     UpdateMouseCursorVisibility();
 
-    // Closing fade (+ post-fade gap) in progress: hold the popup-specific logic
-    // below until it finishes, then apply whatever the close condition decided
-    // to do. GetPopupFadeAlpha() clamps its ratio to kPopupFadeSec, so alpha
-    // stays at 0 (fully black) for the gap portion - nothing extra to draw.
-    if (m_popupClosing) {
+    // Popup overlay active: hold all normal page input/navigation until it
+    // closes. Closing fade (+ post-fade gap) plays out first; GetPopupFadeAlpha()
+    // clamps its ratio to kPopupFadeSec, so alpha stays at 0 for the gap portion.
+    if (m_activePopup != PopupKind_None) {
         const f32 dt = g_time ? g_time->GetDeltaTime() : (1.0f / 30.0f);
-        m_popupFadeSec += dt;
-        if (m_popupFadeSec >= kPopupFadeSec + kPopupCloseGapSec) {
-            m_popupClosing = false;
-            m_popupFadeSec = 0.0f;
-            if (m_popupCloseGoToPage) {
-                SetPage(m_popupCloseTarget);
+        if (m_popupClosing) {
+            m_popupFadeSec += dt;
+            if (m_popupFadeSec >= kPopupFadeSec + kPopupCloseGapSec) {
+                m_popupClosing = false;
+                m_popupFadeSec = 0.0f;
+                m_activePopup = PopupKind_None;
+                m_result = m_popupCloseResult;
+                m_popupPoll = nullptr;
             }
-            else {
-                m_result = (s32)GameResult::ResumePlay;
-            }
+            return m_result;
         }
-        return m_result;
-    }
 
-    // Fade-in ramp while the popup is open and not yet closing (harmless once
-    // it overshoots kPopupFadeSec - GetPopupFadeAlpha() clamps to 1.0).
-    if (IsPopupFadePage(m_currPage)) {
-        const f32 dt = g_time ? g_time->GetDeltaTime() : (1.0f / 30.0f);
+        // Fade-in ramp while open and not yet closing (harmless once it
+        // overshoots kPopupFadeSec - GetPopupFadeAlpha() clamps to 1.0).
         m_popupFadeSec += dt;
-    }
-
-    if (m_currPage == MenuPage_AutosaveNotice) {
-        const f32 dt = g_time ? g_time->GetDeltaTime() : (1.0f / 30.0f);
-        m_autosaveNoticeTimer -= dt;
-        if (m_autosaveNoticeTimer <= 0.0f) {
-            m_autosaveNoticeTimer = 0.0f;
-            BeginPopupClose(false, MenuPage_None);
+        if (m_popupMinTimer > 0.0f) {
+            m_popupMinTimer -= dt;
+        }
+        if (m_popupMinTimer <= 0.0f && m_popupPoll) {
+            const s32 r = m_popupPoll();
+            if (r >= 0) {
+                ClosePopup(r);
+            }
         }
         return m_result;
     }
@@ -1226,25 +1229,6 @@ s32 feCustomMenuMgr::Invoke() {
     }
 
 #if AUTO_UPDATER
-    // Checking popup: no input processed, no prompts - just wait for the check to finish.
-    // Reached either at boot (resume into the title screen once done) or from the Game
-    // Update page's "Check for Updates" button (return there once done instead).
-    if (m_currPage == MenuPage_CheckingUpdate) {
-        if (m_checkingPopupMinTimer > 0.0f) {
-            const f32 dt = g_time ? g_time->GetDeltaTime() : (1.0f / 30.0f);
-            m_checkingPopupMinTimer -= dt;
-        }
-        if (m_checkingPopupMinTimer <= 0.0f && g_autoUpdater && g_autoUpdater->IsCheckComplete()) {
-            if (m_pages[MenuPage_CheckingUpdate].parentPage == MenuPage_Update) {
-                BeginPopupClose(true, MenuPage_Update);
-            }
-            else {
-                BeginPopupClose(false, MenuPage_None);
-            }
-        }
-        return m_result;
-    }
-
     // Changelog: read-only scrolling text, no cursor/selection - handle Up/Down/Back directly.
     if (m_currPage == MenuPage_Changelog) {
         if (!g_actionInput)
@@ -1276,11 +1260,11 @@ s32 feCustomMenuMgr::Invoke() {
             const s32 panelY = DEF_WINDOW_CENTER_Y - page.frameH / 2;
             const s32 contentTop = panelY + DEF_TITLE_BAR_H + DEF_CONTENT_TOP_PAD;
             scrollBarUsed = HandleScrollBarMouse((f32)(panelX + page.frameW - 12),
-                                                  (f32)(contentTop + DEF_CONTENT_PAD),
-                                                  (f32)(visibleLines * 8), totalLines, visibleLines,
-                                                  &m_changelogScrollTop, &m_changelogScrollVisual, psxX, psxY,
-                                                  g_actionInput->IsMouseButtonTriggered(MouseBtn::Left),
-                                                  g_actionInput->IsMouseButtonDown(MouseBtn::Left));
+                                                 (f32)(contentTop + DEF_CONTENT_PAD),
+                                                 (f32)(visibleLines * 8), totalLines, visibleLines,
+                                                 &m_changelogScrollTop, &m_changelogScrollVisual, psxX, psxY,
+                                                 g_actionInput->IsMouseButtonTriggered(MouseBtn::Left),
+                                                 g_actionInput->IsMouseButtonDown(MouseBtn::Left));
         }
 
         if (scrollBarUsed) {
@@ -1317,36 +1301,6 @@ s32 feCustomMenuMgr::Invoke() {
         RefreshUpdatePageEntries();
     }
 #endif
-
-    // Asset-scan/extract popups: no input processed, no prompts - just wait for the
-    // background work to finish, same shape as the update-checker's CheckingUpdate popup.
-    if (m_currPage == MenuPage_AssetScanning) {
-        if (m_assetPopupMinTimer > 0.0f) {
-            const f32 dt = g_time ? g_time->GetDeltaTime() : (1.0f / 30.0f);
-            m_assetPopupMinTimer -= dt;
-        }
-        if (m_assetPopupMinTimer <= 0.0f && g_psxDiscExtractor && g_psxDiscExtractor->GetState() != PsxDiscExtractor::State::Scanning) {
-            BeginPopupClose(true, MenuPage_AssetMissing);
-        }
-        return m_result;
-    }
-
-    if (m_currPage == MenuPage_AssetExtracting) {
-        if (m_assetPopupMinTimer > 0.0f) {
-            const f32 dt = g_time ? g_time->GetDeltaTime() : (1.0f / 30.0f);
-            m_assetPopupMinTimer -= dt;
-        }
-        if (m_assetPopupMinTimer <= 0.0f && g_psxDiscExtractor) {
-            const PsxDiscExtractor::State state = g_psxDiscExtractor->GetState();
-            if (state == PsxDiscExtractor::State::Done) {
-                BeginPopupClose(false, MenuPage_None);
-            }
-            else if (state == PsxDiscExtractor::State::Error) {
-                BeginPopupClose(true, MenuPage_AssetMissing);
-            }
-        }
-        return m_result;
-    }
 
     if (!g_actionInput)
         return m_result;
@@ -1403,12 +1357,12 @@ s32 feCustomMenuMgr::Invoke() {
             const s32 panelY = DEF_WINDOW_CENTER_Y - page.frameH / 2;
             s32 hovered = -1;
             scrollBarUsed = HandleScrollBarMouse((f32)(panelX + page.frameW - 12),
-                                                  (f32)(panelY + 48),
-                                                  (f32)(DEF_SAVE_VISIBLE_ROWS * DEF_SAVE_ROW_H
-                                                      + DEF_SAVE_AUTOSAVE_GAP),
-                                                  SAVEGAME_VISIBLE_SLOT_COUNT, DEF_SAVE_VISIBLE_ROWS,
-                                                  &m_saveSlotScrollTop, &m_saveSlotScrollVisual, psxX, psxY,
-                                                  leftClick, leftDown);
+                                                 (f32)(panelY + 48),
+                                                 (f32)(DEF_SAVE_VISIBLE_ROWS * DEF_SAVE_ROW_H
+                                                 + DEF_SAVE_AUTOSAVE_GAP),
+                                                 SAVEGAME_VISIBLE_SLOT_COUNT, DEF_SAVE_VISIBLE_ROWS,
+                                                 &m_saveSlotScrollTop, &m_saveSlotScrollVisual, psxX, psxY,
+                                                 leftClick, leftDown);
             if (scrollBarUsed && m_cursor >= 0 && m_cursor < SAVEGAME_VISIBLE_SLOT_COUNT) {
                 s32 displayIndex = SaveSlotToDisplayIndex(m_cursor);
                 if (displayIndex < m_saveSlotScrollTop) displayIndex = m_saveSlotScrollTop;
@@ -1425,7 +1379,7 @@ s32 feCustomMenuMgr::Invoke() {
                 && psxX < panelX + page.frameW - DEF_SAVE_TABLE_SIDE_PAD) {
                 const s32 manualTop = panelY + 48;
                 const f32 viewportBottom = (f32)(manualTop + DEF_SAVE_VISIBLE_ROWS * DEF_SAVE_ROW_H
-                    + DEF_SAVE_AUTOSAVE_GAP);
+                                                 + DEF_SAVE_AUTOSAVE_GAP);
                 for (s32 displayIndex = 0; displayIndex < SAVEGAME_VISIBLE_SLOT_COUNT; ++displayIndex) {
                     const f32 rowTop = (f32)manualTop + GetSaveDisplayRowOffset(displayIndex)
                         - GetSaveDisplayScrollOffset(m_saveSlotScrollVisual);
@@ -1686,11 +1640,11 @@ s32 feCustomMenuMgr::Invoke() {
             const s32 slot1Left = slot1Right - slotW;
             const s32 actionLabelRight = slot1Left - DEF_KEYBIND_ACTION_COL_GAP;
             scrollBarUsed = HandleScrollBarMouse((f32)(panelX + page->frameW - 12),
-                                                  (f32)(firstRowY - DEF_KEYBIND_ROW_TOP_PAD),
-                                                  (f32)(DEF_KEYBIND_VISIBLE_ROWS * DEF_KEYBIND_ROW_STEP),
-                                                  kKeyBindingActionCount, DEF_KEYBIND_VISIBLE_ROWS,
-                                                  &m_keyBindScrollTop, &m_keyBindScrollVisual, psxX, psxY,
-                                                  leftClick, leftDown);
+                                                 (f32)(firstRowY - DEF_KEYBIND_ROW_TOP_PAD),
+                                                 (f32)(DEF_KEYBIND_VISIBLE_ROWS * DEF_KEYBIND_ROW_STEP),
+                                                 kKeyBindingActionCount, DEF_KEYBIND_VISIBLE_ROWS,
+                                                 &m_keyBindScrollTop, &m_keyBindScrollVisual, psxX, psxY,
+                                                 leftClick, leftDown);
             if (scrollBarUsed) {
                 if (m_keyBindActionCursor < m_keyBindScrollTop) m_keyBindActionCursor = m_keyBindScrollTop;
                 if (m_keyBindActionCursor >= m_keyBindScrollTop + DEF_KEYBIND_VISIBLE_ROWS) {
@@ -1962,10 +1916,10 @@ s32 feCustomMenuMgr::Invoke() {
             const s32 panelY = DEF_WINDOW_CENTER_Y - page.frameH / 2;
             const f32 firstRowY = static_cast<f32>(panelY + DEF_TITLE_BAR_H + DEF_CONTENT_PAD + 8);
             scrollBarUsed = HandleScrollBarMouse((f32)(panelX + page.frameW - 12),
-                                                  firstRowY - DEF_KEYBIND_ROW_TOP_PAD,
-                                                  (f32)(DEF_MODS_VISIBLE_ROWS * DEF_MODS_ROW_STEP),
-                                                  count, DEF_MODS_VISIBLE_ROWS, &m_modScrollTop, &m_modScrollVisual,
-                                                  psxX, psxY, leftClick, leftDown);
+                                                 firstRowY - DEF_KEYBIND_ROW_TOP_PAD,
+                                                 (f32)(DEF_MODS_VISIBLE_ROWS * DEF_MODS_ROW_STEP),
+                                                 count, DEF_MODS_VISIBLE_ROWS, &m_modScrollTop, &m_modScrollVisual,
+                                                 psxX, psxY, leftClick, leftDown);
             if (scrollBarUsed && count > 0) {
                 if (m_modCursor < m_modScrollTop) m_modCursor = m_modScrollTop;
                 if (m_modCursor >= m_modScrollTop + DEF_MODS_VISIBLE_ROWS) {
@@ -2336,18 +2290,9 @@ void feCustomMenuMgr::Activate(MenuPage startPage) {
 
     m_mouseInputActive = false;
     m_mousePosInitialized = false;
-    if (startPage == MenuPage_AutosaveNotice) {
-        m_autosaveNoticeTimer = 2.5f;
-    }
     if (startPage != MenuPage_Title) {
         rsEvent(RS_MUTE, 0, 0, 0);
     }
-
-#if AUTO_UPDATER
-    if (startPage == MenuPage_CheckingUpdate) {
-        m_checkingPopupMinTimer = 1.0f;
-    }
-#endif
 
     if (startPage == MenuPage_Pause && g_game && g_game->GetState() == GameState::Play) {
         s32 track = 23;
@@ -2682,10 +2627,11 @@ void feCustomMenuMgr::Confirm() {
         case EntryEvent_CheckForUpdate:
             if (g_autoUpdater) {
                 g_autoUpdater->CheckAsync();
-                m_pages[MenuPage_CheckingUpdate].parentPage = MenuPage_Update;
-                m_pages[MenuPage_CheckingUpdate].parentEntry = 0;
-                m_checkingPopupMinTimer = 1.0f;
-                SetPage(MenuPage_CheckingUpdate);
+                OpenPopup(PopupKind_CheckingUpdate, 1.0f, [this]() -> s32 {
+                    if (!g_autoUpdater || !g_autoUpdater->IsCheckComplete())
+                        return -1;
+                    return (m_currPage == MenuPage_None) ? (s32)GameResult::ResumePlay : 1;
+                });
                 PlaySound(FE_SND_MENU_OPEN);
             }
             break;
@@ -2698,16 +2644,27 @@ void feCustomMenuMgr::Confirm() {
         case EntryEvent_ScanForAssets:
             if (g_psxDiscExtractor) {
                 g_psxDiscExtractor->ScanAsync();
-                m_assetPopupMinTimer = 2.0f;
-                SetPage(MenuPage_AssetScanning);
+                OpenPopup(PopupKind_AssetScanning, 2.0f, [this]() -> s32 {
+                    if (!g_psxDiscExtractor || g_psxDiscExtractor->GetState() == PsxDiscExtractor::State::Scanning)
+                        return -1;
+                    return 1;
+                });
                 PlaySound(FE_SND_MENU_OPEN);
             }
             break;
         case EntryEvent_ExtractAssets:
             if (g_psxDiscExtractor) {
                 g_psxDiscExtractor->StartExtractAsync();
-                m_assetPopupMinTimer = 2.0f;
-                SetPage(MenuPage_AssetExtracting);
+                OpenPopup(PopupKind_AssetExtracting, 2.0f, [this]() -> s32 {
+                    if (!g_psxDiscExtractor)
+                        return -1;
+                    const PsxDiscExtractor::State state = g_psxDiscExtractor->GetState();
+                    if (state == PsxDiscExtractor::State::Done)
+                        return (s32)GameResult::ResumePlay;
+                    if (state == PsxDiscExtractor::State::Error)
+                        return 1;
+                    return -1;
+                });
                 PlaySound(FE_SND_MENU_OPEN);
             }
             break;
@@ -3296,6 +3253,25 @@ PageDef& feCustomMenuMgr::AddPage(
     return m_pages[id];
 }
 
+PageDef& feCustomMenuMgr::AddPopup(PopupKind id, const char* title, const char* overlay,
+                                   s32 frameW, s32 frameH) {
+    PageDef def;
+    std::snprintf(def.titleToken, sizeof(def.titleToken), "%s", title);
+    std::snprintf(def.overlayName, sizeof(def.overlayName), "%s", overlay);
+    def.parentPage = MenuPage_None;
+    def.parentEntry = 0;
+    def.isPause = false;
+    def.autoFrameH = (frameH == -1);
+    def.frameW = (frameW == -1) ? DEF_WINDOW_W : frameW;
+    def.frameH = def.autoFrameH ? DEF_WINDOW_H : frameH;
+    def.entriesOffsetX = 0;
+    def.entriesOffsetY = 0;
+    def.numEntries = 0;
+
+    m_popups[id] = def;
+    return m_popups[id];
+}
+
 void feCustomMenuMgr::SetEntries(PageDef& page, std::initializer_list<Entry> list,
                                  s32 entriesOffsetX, s32 entriesOffsetY) {
     s32 n = 0;
@@ -3388,11 +3364,13 @@ s32 feCustomMenuMgr::CalcAutoFrameHeight(s32 numEntries, s32 extraH) {
     return DEF_TITLE_BAR_H + DEF_BOTTOM_BAR_H + bodyHeight;
 }
 
-s32 feCustomMenuMgr::GetWrappedLineCount(const PageDef& page, const char* label) const {
+s32 feCustomMenuMgr::GetWrappedLineCount(const PageDef& page, const char* label,
+                                         const char* fontName, f32 scale) const {
     const f32 wrapWidth = SCREEN_SCALE_X((f32)(page.frameW - DEF_LABEL_X_PAD * 2));
+    const f32 useScale = (scale > 0.0f) ? scale : DEF_MENU_TEXT_SCALE;
     s32 lines = 1;
-    if (g_textManager && g_textManager->SetFontByName(DEF_MENU_FONT_NAME)) {
-        g_textManager->SetScale(SCREEN_SCALE_Y(DEF_MENU_TEXT_SCALE), SCREEN_SCALE_Y(DEF_MENU_TEXT_SCALE));
+    if (g_textManager && g_textManager->SetFontByName(fontName ? fontName : DEF_MENU_FONT_NAME)) {
+        g_textManager->SetScale(SCREEN_SCALE_Y(useScale), SCREEN_SCALE_Y(useScale));
         g_textManager->SetWrapWidth(wrapWidth);
         g_textManager->SetLineSpacing(0);
         g_textManager->SetPromptsEnabled(true);
@@ -3751,9 +3729,9 @@ bool feCustomMenuMgr::DrawTitleScreen() {
             if (p3d::context->SetRenderTarget(m_titleScreenLogoSeed)) {
                 m_titleScreenLogoTiltShader->SetTexture(0, m_titleScreenLogoTexture->GetTexture());
                 m_titleScreenLogoTiltShader->SetVector("uTiltRect",
-                    logoLocalCenterX, logoLocalCenterY, logoHalfW, logoHalfH);
+                                                       logoLocalCenterX, logoLocalCenterY, logoHalfW, logoHalfH);
                 m_titleScreenLogoTiltShader->SetVector("uTiltAngles",
-                    tiltPitch, tiltYaw, tiltRoll, tiltFocal);
+                                                       tiltPitch, tiltYaw, tiltRoll, tiltFocal);
                 ScreenDraw::DrawShaderQuad(m_titleScreenLogoTiltShader, 0.0f, 0.0f, drawW, drawH,
                                            0.0f, 0.0f, 1.0f, 1.0f, PDDI_BLEND_NONE, drawW, drawH);
                 p3d::context->SetRenderTarget(nullptr);
@@ -3827,9 +3805,9 @@ bool feCustomMenuMgr::DrawTitleScreen() {
     if (m_titleScreenLogoTiltShader) {
         m_titleScreenLogoTiltShader->SetTexture(0, m_titleScreenLogoTexture->GetTexture());
         m_titleScreenLogoTiltShader->SetVector("uTiltRect",
-            drawX + logoLocalCenterX, drawY + logoLocalCenterY, logoHalfW, logoHalfH);
+                                               drawX + logoLocalCenterX, drawY + logoLocalCenterY, logoHalfW, logoHalfH);
         m_titleScreenLogoTiltShader->SetVector("uTiltAngles",
-            tiltPitch, tiltYaw, tiltRoll, tiltFocal);
+                                               tiltPitch, tiltYaw, tiltRoll, tiltFocal);
         m_titleScreenLogoTiltShader->SetColour(0, pddiColour(255, 255, 255, titleFadeAlpha));
         ScreenDraw::DrawShaderQuad(m_titleScreenLogoTiltShader, drawX, drawY, drawW, drawH,
                                    0.0f, 0.0f, 1.0f, 1.0f, PDDI_BLEND_ALPHA);
@@ -4350,7 +4328,7 @@ void feCustomMenuMgr::DrawMenuWindow(s32 x, s32 y, s32 w, s32 h, const char* tit
 
     // Title text
     if (title && g_textManager && g_textManager->SetFontByName(DEF_MENU_FONT_NAME)) {
-        g_textManager->SetScale(SCREEN_SCALE_Y(DEF_MENU_TEXT_SCALE), SCREEN_SCALE_Y(DEF_MENU_TEXT_SCALE));
+        g_textManager->SetScale(SCREEN_SCALE_Y(DEF_MENU_WINDOW_TITLE_SCALE), SCREEN_SCALE_Y(DEF_MENU_WINDOW_TITLE_SCALE));
         g_textManager->SetAlignment(TextAlign_Center);
         g_textManager->SetWrapWidth(0.0f);
         g_textManager->SetLineSpacing(0);
@@ -4410,7 +4388,7 @@ void feCustomMenuMgr::DrawPopupWindow(s32 x, s32 y, s32 w, s32 h, const char* ti
 
     // Title text
     if (title && g_textManager && g_textManager->SetFontByName(DEF_MENU_FONT_NAME)) {
-        g_textManager->SetScale(SCREEN_SCALE_Y(DEF_MENU_TEXT_SCALE), SCREEN_SCALE_Y(DEF_MENU_TEXT_SCALE));
+        g_textManager->SetScale(SCREEN_SCALE_Y(DEF_MENU_WINDOW_TITLE_SCALE), SCREEN_SCALE_Y(DEF_MENU_WINDOW_TITLE_SCALE));
         g_textManager->SetAlignment(TextAlign_Center);
         g_textManager->SetWrapWidth(0.0f);
         g_textManager->SetLineSpacing(0);
@@ -4884,17 +4862,25 @@ void feCustomMenuMgr::Render() {
     if (!m_active)
         return;
 
-    const PageDef* page = &m_pages[m_currPage];
-    if (!page)
-        return;
-
-    // One overlay batch for the whole menu page: collapses the per-quad
-    // projection rebuilds / GL state toggles across every border rect and text
-    // string into a single setup, which is what restores high frame rates on
-    // text-heavy menu pages.
+    // One overlay batch for the whole menu page + any popup overlay: collapses
+    // the per-quad projection rebuilds / GL state toggles across every border
+    // rect and text string into a single setup, which is what restores high
+    // frame rates on text-heavy menu pages.
     ScreenDraw::Batch uiBatch;
 
     m_pulse.Update();
+
+    if (m_currPage != MenuPage_None) {
+        RenderCurrentPage();
+    }
+
+    if (m_activePopup != PopupKind_None) {
+        RenderActivePopup();
+    }
+}
+
+void feCustomMenuMgr::RenderCurrentPage() {
+    const PageDef* page = &m_pages[m_currPage];
 
     const s32 panelX = DEF_WINDOW_CENTER_X - page->frameW / 2;
     s32 panelY = DEF_WINDOW_CENTER_Y - page->frameH / 2;
@@ -4961,15 +4947,7 @@ void feCustomMenuMgr::Render() {
         }
     }
 
-    bool isPopup = IsPopupFadePage(m_currPage);
-    const f32 popupAlpha = GetPopupFadeAlpha();
-
-    if (isPopup) {
-        panelY += 10;
-        DrawPopupWindow(panelX, panelY, panelW, panelH, title, popupAlpha);
-    }
-    else
-        DrawMenuWindow(panelX, panelY, panelW, panelH, title, popupAlpha);
+    DrawMenuWindow(panelX, panelY, panelW, panelH, title, 1.0f);
 
     // Build normalColor directly (PSX scale: 128 = neutral/1.0 for the tint shader)
     const xcColour1555 normalColor{ DEF_TEXT_NORM_R, DEF_TEXT_NORM_G, DEF_TEXT_NORM_B };
@@ -5006,18 +4984,6 @@ void feCustomMenuMgr::Render() {
         : DEF_WINDOW_CENTER_X;
 
     switch (m_currPage) {
-        case MenuPage_AutosaveNotice: {
-            s32 lines = 1;
-            if (page->numEntries > 0) {
-                const char* notice = Localize(page->entries[0].token);
-                if (!notice) notice = page->entries[0].token;
-                lines = GetWrappedLineCount(*page, notice);
-            }
-            const s32 spinnerY = firstY + DEF_ROW_TEXT_H
-                + (lines - 1) * DEF_ROW_STEP + DEF_INFO_ROW_EXTRA + 12;
-            RenderAutosaveSpinner(panelX + panelW / 2, spinnerY, popupAlpha);
-            break;
-        }
         case MenuPage_KeyBindings:
             RenderKeyBindingsPage(panelX, panelY, panelW, panelH, normalColor, selectedColor);
             break;
@@ -5043,19 +5009,10 @@ void feCustomMenuMgr::Render() {
                 RenderUpdateProgressBar(panelX, panelW, firstY);
             }
             break;
-        case MenuPage_CheckingUpdate:
-            RenderUpdateIndeterminateBar(panelX, panelW, firstY, popupAlpha);
-            break;
         case MenuPage_Changelog:
             RenderChangelogBody(panelX, panelY, panelW, panelH, contentTop);
             break;
 #endif
-        case MenuPage_AssetScanning:
-            RenderAssetScanSweep(panelX, panelW, firstY, popupAlpha);
-            break;
-        case MenuPage_AssetExtracting:
-            RenderAssetExtractProgressBar(panelX, panelW, firstY, popupAlpha);
-            break;
         default:
             break;
     }
@@ -5108,7 +5065,7 @@ void feCustomMenuMgr::Render() {
                 const f32 wrapWidth = SCREEN_SCALE_X((f32)(page->frameW - DEF_LABEL_X_PAD * 2));
                 g_textManager->SetAlignment(TextAlign_Center);
                 g_textManager->SetWrapWidth(wrapWidth);
-                g_textManager->SetColor(DEF_INFO_TEXT_R, DEF_INFO_TEXT_G, DEF_INFO_TEXT_B, ScaleAlphaU8(255, popupAlpha));
+                g_textManager->SetColor(DEF_INFO_TEXT_R, DEF_INFO_TEXT_G, DEF_INFO_TEXT_B);
                 g_textManager->PrintString(label, centerScreenX, rowScreenY);
                 g_textManager->SetWrapWidth(0.0f);
             }
@@ -5337,15 +5294,9 @@ void feCustomMenuMgr::Render() {
         g_textManager->PrintString(dragonCountStr, SCALE_AND_CENTER_X((f32)dragonCenterX), SCREEN_SCALE_Y((f32)(dragonCountY + DEF_TEXT_Y_OFF)));
     }
 
-    // Help prompts in the bottom bar
-    if (g_textManager && g_textManager->SetFontByName(DEF_MENU_FONT_NAME) && m_currPage != MenuPage_Quitting
-        && m_currPage != MenuPage_AutosaveNotice
-#if AUTO_UPDATER
-        && m_currPage != MenuPage_CheckingUpdate
-#endif
-        && m_currPage != MenuPage_AssetScanning
-        && m_currPage != MenuPage_AssetExtracting
-        ) {
+    // Help prompts in the bottom bar (hidden while a popup overlay covers the page).
+    if (g_textManager && g_textManager->SetFontByName(DEF_MENU_FONT_NAME)
+        && m_currPage != MenuPage_Quitting && m_activePopup == PopupKind_None) {
         f32 helpScale = DEF_MENU_PROMPT_SCALE;
         f32 promptGap = DEF_HELP_GROUP_GAP_PX;
 
@@ -5471,10 +5422,110 @@ void feCustomMenuMgr::Render() {
 #endif
 }
 
+void feCustomMenuMgr::RenderActivePopup() {
+    const PageDef& popup = m_popups[m_activePopup];
+
+    const s32 panelX = DEF_WINDOW_CENTER_X - popup.frameW / 2;
+    const s32 panelY = DEF_WINDOW_CENTER_Y - popup.frameH / 2 + 10;
+    const s32 panelW = popup.frameW;
+    const s32 panelH = popup.frameH;
+    const f32 popupAlpha = GetPopupFadeAlpha();
+
+    const char* title = Localize(popup.titleToken);
+    if (!title)
+        title = popup.titleToken;
+
+    DrawPopupWindow(panelX, panelY, panelW, panelH, title, popupAlpha);
+
+    if (!g_textManager || !g_textManager->SetFontByName(DEF_MENU_FONT_NAME))
+        return;
+
+    g_textManager->SetScale(SCREEN_SCALE_Y(DEF_MENU_TEXT_SCALE), SCREEN_SCALE_Y(DEF_MENU_TEXT_SCALE));
+    g_textManager->SetWrapWidth(0.0f);
+    g_textManager->SetLineSpacing(0);
+    g_textManager->SetPromptsEnabled(true);
+    g_textManager->SetShadow(false);
+    g_textManager->SetOutline(true);
+
+    const s32 contentTop = panelY + DEF_TITLE_BAR_H + DEF_CONTENT_TOP_PAD;
+    const s32 extraH = CalcPageExtraHeight(popup);
+    const s32 entryBlockH = DEF_CONTENT_PAD + DEF_ROW_TEXT_H + extraH;
+    const s32 bodyAvailH = panelH - DEF_TITLE_BAR_H - DEF_BOTTOM_BAR_H - DEF_CONTENT_TOP_PAD - DEF_CONTENT_BOTTOM_PAD;
+    const s32 bodyCenterPad = (bodyAvailH > entryBlockH) ? ((bodyAvailH - entryBlockH) / 2) : 0;
+    const s32 firstY = contentTop + bodyCenterPad + DEF_CONTENT_PAD;
+
+    if (popup.numEntries > 0) {
+        const Entry& infoEntry = popup.entries[0];
+        const char* label = Localize(infoEntry.token);
+        if (!label) label = infoEntry.token;
+#if AUTO_UPDATER
+        char updateInfoText[256];
+        if (BuildUpdateInfoText(infoEntry.token, updateInfoText, (s32)sizeof(updateInfoText))) {
+            label = updateInfoText;
+        }
+#endif
+        char assetInfoText[256];
+        if (BuildAssetInfoText(infoEntry.token, assetInfoText, (s32)sizeof(assetInfoText))) {
+            label = assetInfoText;
+        }
+
+        const f32 wrapWidth = SCREEN_SCALE_X((f32)(popup.frameW - DEF_LABEL_X_PAD * 2));
+        if (g_textManager->SetFontByName(DEF_MENU_FONT_NAME)) {
+            g_textManager->SetScale(SCREEN_SCALE_Y(DEF_MENU_TEXT_SCALE), SCREEN_SCALE_Y(DEF_MENU_TEXT_SCALE));
+            g_textManager->SetShadow(false);
+            g_textManager->SetOutline(false);
+            g_textManager->SetAlignment(TextAlign_Center);
+            g_textManager->SetWrapWidth(wrapWidth);
+            g_textManager->SetColor(DEF_INFO_TEXT_R, DEF_INFO_TEXT_G, DEF_INFO_TEXT_B, ScaleAlphaU8(255, popupAlpha));
+            g_textManager->PrintString(label, SCALE_AND_CENTER_X((f32)DEF_WINDOW_CENTER_X), SCREEN_SCALE_Y((f32)firstY));
+            g_textManager->SetWrapWidth(0.0f);
+            g_textManager->SetFontByName(DEF_MENU_FONT_NAME);
+        }
+    }
+
+    RenderActivePopupContent(panelX, panelW, firstY, popupAlpha);
+
+    g_textManager->SetScale(SCREEN_SCALE_Y(DEF_MENU_TEXT_SCALE), SCREEN_SCALE_Y(DEF_MENU_TEXT_SCALE));
+}
+
+void feCustomMenuMgr::RenderActivePopupContent(s32 panelX, s32 panelW, s32 firstY, f32 popupAlpha) const {
+    static constexpr s32 kPopupBarExtraGap = 6;
+
+    switch (m_activePopup) {
+        case PopupKind_AutosaveNotice:
+        {
+            const PageDef& popup = m_popups[PopupKind_AutosaveNotice];
+            s32 lines = 1;
+            if (popup.numEntries > 0) {
+                const char* notice = Localize(popup.entries[0].token);
+                if (!notice) notice = popup.entries[0].token;
+                lines = GetWrappedLineCount(popup, notice, DEF_MENU_FONT_NAME, DEF_MENU_TEXT_SCALE);
+            }
+            const s32 spinnerY = firstY + DEF_ROW_TEXT_H
+                + (lines - 1) * DEF_ROW_STEP + DEF_INFO_ROW_EXTRA + 12;
+            RenderAutosaveSpinner(panelX + panelW / 2, spinnerY, popupAlpha);
+            break;
+        }
+#if AUTO_UPDATER
+        case PopupKind_CheckingUpdate:
+            RenderUpdateIndeterminateBar(panelX, panelW, firstY + kPopupBarExtraGap, popupAlpha);
+            break;
+#endif
+        case PopupKind_AssetScanning:
+            RenderAssetScanSweep(panelX, panelW, firstY + kPopupBarExtraGap, popupAlpha);
+            break;
+        case PopupKind_AssetExtracting:
+            RenderAssetExtractProgressBar(panelX, panelW, firstY + kPopupBarExtraGap, popupAlpha);
+            break;
+        default:
+            break;
+    }
+}
+
 void feCustomMenuMgr::RenderAutosaveSpinner(s32 centerX, s32 centerY, f32 alpha01) const {
-    static constexpr s32 kSegments = 10;
-    static constexpr f32 kRadius = 10.0f;
-    static constexpr f32 kSize = 3.0f;
+    static constexpr s32 kSegments = 8;
+    static constexpr f32 kRadius = 5.0f;
+    static constexpr f32 kSize = 2.0f;
     const f32 scaleX = SCREEN_SCALE_X(1.0f);
     const f32 scaleY = SCREEN_SCALE_Y(1.0f);
     const f32 xCompensation = (scaleX > 0.0f) ? (scaleY / scaleX) : 1.0f;
@@ -5871,15 +5922,13 @@ void feCustomMenuMgr::RenderUpdateProgressBar(s32 panelX, s32 panelW, s32 rowTop
 }
 
 void feCustomMenuMgr::RenderUpdateIndeterminateBar(s32 panelX, s32 panelW, s32 rowTop, f32 alpha01) const {
-    // Offset below the "FE_UPD_CHK" Info row by however many lines it actually
-    // wrapped to, so longer translated text doesn't overlap the bar.
-    const PageDef& page = m_pages[MenuPage_CheckingUpdate];
+    const PageDef& page = m_popups[PopupKind_CheckingUpdate];
     s32 lines = 1;
     if (page.numEntries > 0) {
         const Entry& infoEntry = page.entries[0];
         const char* label = Localize(infoEntry.token);
         if (!label) label = infoEntry.token;
-        lines = GetWrappedLineCount(page, label);
+        lines = GetWrappedLineCount(page, label, DEF_MENU_FONT_NAME, DEF_MENU_TEXT_SCALE);
     }
 
     const s32 barX = panelX + DEF_LABEL_X_PAD;
@@ -5976,7 +6025,7 @@ void feCustomMenuMgr::RenderAssetExtractProgressBar(s32 panelX, s32 panelW, s32 
 
     // Offset below the "FE_ASSET_EXTG" Info row by however many lines it actually
     // wrapped to, so longer translated text doesn't overlap the bar.
-    const PageDef& page = m_pages[MenuPage_AssetExtracting];
+    const PageDef& page = m_popups[PopupKind_AssetExtracting];
     s32 lines = 1;
     if (page.numEntries > 0) {
         const Entry& infoEntry = page.entries[0];
@@ -5986,7 +6035,7 @@ void feCustomMenuMgr::RenderAssetExtractProgressBar(s32 panelX, s32 panelW, s32 
         if (BuildAssetInfoText(infoEntry.token, assetInfoText, (s32)sizeof(assetInfoText))) {
             label = assetInfoText;
         }
-        lines = GetWrappedLineCount(page, label);
+        lines = GetWrappedLineCount(page, label, DEF_MENU_FONT_NAME, DEF_MENU_TEXT_SCALE);
     }
 
     const s32 barX = panelX + DEF_LABEL_X_PAD;
@@ -6013,13 +6062,13 @@ void feCustomMenuMgr::RenderAssetExtractProgressBar(s32 panelX, s32 panelW, s32 
 void feCustomMenuMgr::RenderAssetScanSweep(s32 panelX, s32 panelW, s32 rowTop, f32 alpha01) const {
     // Offset below the "FE_ASSET_SCAN" Info row by however many lines it actually
     // wrapped to, so longer translated text doesn't overlap the bar.
-    const PageDef& page = m_pages[MenuPage_AssetScanning];
+    const PageDef& page = m_popups[PopupKind_AssetScanning];
     s32 lines = 1;
     if (page.numEntries > 0) {
         const Entry& infoEntry = page.entries[0];
         const char* label = Localize(infoEntry.token);
         if (!label) label = infoEntry.token;
-        lines = GetWrappedLineCount(page, label);
+        lines = GetWrappedLineCount(page, label, DEF_MENU_FONT_NAME, DEF_MENU_TEXT_SCALE);
     }
 
     const s32 barX = panelX + DEF_LABEL_X_PAD;

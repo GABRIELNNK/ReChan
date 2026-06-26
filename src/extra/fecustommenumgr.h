@@ -3,6 +3,7 @@
 #include "gen/savegame.h"
 #include "extra/customtext.h"
 #include "extra/colorpulse.h"
+#include <functional>
 #include <initializer_list>
 #include <vector>
 
@@ -47,14 +48,23 @@ enum MenuPage : s32 {
     MenuPage_QuitConfirm,
     MenuPage_Quitting,
     MenuPage_Location,
-    MenuPage_AutosaveNotice,
     MenuPage_Update,
-    MenuPage_CheckingUpdate,
     MenuPage_Changelog,
     MenuPage_AssetMissing,
-    MenuPage_AssetScanning,
-    MenuPage_AssetExtracting,
     MenuPage_Count,
+};
+
+// Fade-popup overlays: drawn on top of whatever page (or nothing) is
+// currently active, never via SetPage(). Adding a new one only needs an
+// AddPopup() entry plus an OpenPopup() call with a completion lambda - no
+// MenuPage enum value, no m_pages slot, no Invoke()/Render() switch case.
+enum PopupKind : s32 {
+    PopupKind_None,
+    PopupKind_AutosaveNotice,
+    PopupKind_CheckingUpdate,
+    PopupKind_AssetScanning,
+    PopupKind_AssetExtracting,
+    PopupKind_Count,
 };
 
 enum EntryType : u8 {
@@ -377,6 +387,12 @@ public:
 
     void Activate(MenuPage startPage = MenuPage_Frontend);
     void Deactivate();
+
+    // Fade-popup overlay (AutosaveNotice/CheckingUpdate/AssetScanning/AssetExtracting):
+    // drawn on top of whatever page (or nothing) is active, never via SetPage().
+    void OpenPopup(PopupKind kind, f32 minTimerSec, std::function<s32()> poll);
+    bool IsPopupActive() const { return m_activePopup != PopupKind_None; }
+    PopupKind GetActivePopup() const { return m_activePopup; }
     bool IsActive() const { return m_active; }
     MenuPage GetCurrentPage() const { return m_currPage; }
 
@@ -385,9 +401,13 @@ private:
     PageDef& AddPage(MenuPage id, const char* title,
                      const char* overlay, MenuPage parent, s32 parentEntry, bool pause,
                      s32 frameW = 260, s32 frameH = 150);
+    PageDef& AddPopup(PopupKind id, const char* title, const char* overlay,
+                      s32 frameW, s32 frameH = -1);
+    void BuildPopups();
     static s32 CalcAutoFrameHeight(s32 numEntries, s32 extraH = 0);
     s32 GetEntryExtraHeight(const PageDef& page, const Entry& entry) const;
-    s32 GetWrappedLineCount(const PageDef& page, const char* label) const;
+    s32 GetWrappedLineCount(const PageDef& page, const char* label,
+                            const char* fontName = nullptr, f32 scale = -1.0f) const;
     s32 CalcEntryYExtra(const PageDef& page, s32 upToIndex) const;
     s32 CalcPageExtraHeight(const PageDef& page) const;
     void ResolveEntryLayout(const PageDef& page, s32 entryIndex,
@@ -431,11 +451,13 @@ private:
     void RenderAssetScanSweep(s32 panelX, s32 panelW, s32 rowTop, f32 alpha01 = 1.0f) const;
     bool BuildAssetInfoText(const char* token, char* outText, s32 outTextLen) const;
 
-    // Fade in/out for the no-input "popup" pages (AutosaveNotice, CheckingUpdate,
-    // AssetScanning, AssetExtracting) instead of an instant cut on enter/exit.
-    static bool IsPopupFadePage(MenuPage page);
-    void BeginPopupClose(bool goToPage, MenuPage target);
+    // Fade in/out for the no-input popup overlays (AutosaveNotice, CheckingUpdate,
+    // AssetScanning, AssetExtracting) instead of an instant cut on open/close.
+    void ClosePopup(s32 closeResult);
     f32 GetPopupFadeAlpha() const;
+    void RenderCurrentPage();
+    void RenderActivePopup();
+    void RenderActivePopupContent(s32 panelX, s32 panelW, s32 firstY, f32 popupAlpha) const;
 
     void LoadControllerOverlayTexture();
     void LoadMenuOrnamentTexture();
@@ -506,6 +528,7 @@ private:
 
     CustomText* m_text = nullptr;
     PageDef m_pages[MenuPage_Count];
+    PageDef m_popups[PopupKind_Count];
     tTexture* m_titleScreenBackgroundTexture = nullptr;
     tTexture* m_titleScreenJackieTexture = nullptr;
     tTexture* m_titleScreenLogoTexture = nullptr;
@@ -605,18 +628,19 @@ private:
 
     bool m_active = 0;
     f32 m_quitTimerSec = 0.0f; // seconds remaining before game actually closes
-    f32 m_assetPopupMinTimer = 0.0f; // keeps Scanning/Extracting popups on screen long enough to read
-    f32 m_autosaveNoticeTimer = 0.0f;
 
-    // Popup page (AutosaveNotice/CheckingUpdate/AssetScanning/AssetExtracting) fade in/out.
+    // Popup overlay (AutosaveNotice/CheckingUpdate/AssetScanning/AssetExtracting) state.
+    PopupKind m_activePopup = PopupKind_None;
     f32 m_popupFadeSec = 0.0f;
     bool m_popupClosing = false;
-    bool m_popupCloseGoToPage = false;
-    MenuPage m_popupCloseTarget = MenuPage_None;
+    f32 m_popupMinTimer = 0.0f;
+    // Polled once m_popupMinTimer elapses: returns -1 while still waiting, else
+    // the m_result value Invoke() should resolve to once the close-fade ends.
+    std::function<s32()> m_popupPoll;
+    s32 m_popupCloseResult = 1;
 
 #if AUTO_UPDATER
     AutoUpdater::State m_lastUpdateState = AutoUpdater::State::Idle;
-    f32 m_checkingPopupMinTimer = 0.0f;
     std::vector<std::string> m_changelogLines;
     s32 m_changelogScrollTop = 0;
     f32 m_changelogScrollVisual = 0.0f;

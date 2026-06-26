@@ -860,11 +860,14 @@ bool Game::gsIntroState(Game* game) {
     if (!game->autosaveNoticeShown) {
         game->autosaveNoticeShown = true;
         if (g_feCustomMenuMgr) {
-            g_feCustomMenuMgr->Activate(MenuPage_AutosaveNotice);
+            g_feCustomMenuMgr->Activate(MenuPage_None);
+            g_feCustomMenuMgr->OpenPopup(PopupKind_AutosaveNotice, 2.5f, []() -> s32 {
+                return (s32)GameResult::ResumePlay;
+            });
         }
     }
     if (g_feCustomMenuMgr && g_feCustomMenuMgr->IsActive()
-        && g_feCustomMenuMgr->GetCurrentPage() == MenuPage_AutosaveNotice) {
+        && g_feCustomMenuMgr->GetActivePopup() == PopupKind_AutosaveNotice) {
         const s32 menuResult = g_feCustomMenuMgr->Invoke();
         g_display->BeginFrame();
         g_feCustomMenuMgr->Render();
@@ -883,7 +886,12 @@ bool Game::gsIntroState(Game* game) {
         g_autoUpdater->CheckAsync();
 #if CUSTOM_MENU
         if (g_feCustomMenuMgr) {
-            g_feCustomMenuMgr->Activate(MenuPage_CheckingUpdate);
+            g_feCustomMenuMgr->Activate(MenuPage_None);
+            g_feCustomMenuMgr->OpenPopup(PopupKind_CheckingUpdate, 1.0f, []() -> s32 {
+                if (!g_autoUpdater || !g_autoUpdater->IsCheckComplete())
+                    return -1;
+                return (g_feCustomMenuMgr->GetCurrentPage() == MenuPage_None) ? (s32)GameResult::ResumePlay : 1;
+            });
         }
 #endif
     }
