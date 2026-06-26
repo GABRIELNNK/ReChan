@@ -62,6 +62,14 @@ public:
     // PC: music control
     bool PlayMusicTrack(const char* fagPath, f32 volume = 1.0f);
     bool PlayMusicTrackSong(const char* fagPath, u32 songIndex, f32 volume = 1.0f);
+
+    // PC: decode/load a track without starting playback (so the slow file
+    // read + decode can happen while still hidden behind a loading screen),
+    // then start it cheaply later with StartPreloadedMusic().
+    AudioSample pendingMusicSample = AUDIO_SAMPLE_INVALID;
+    f32 pendingMusicVolume = 1.0f;
+    bool PreloadMusicTrack(const char* fagPath, f32 volume = 1.0f);
+    bool StartPreloadedMusic();
 #ifdef MOD_LOADER
     bool TryPlayMusicOverride(const char* fagPath, f32 volume);
 #endif

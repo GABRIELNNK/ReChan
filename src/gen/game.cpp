@@ -543,7 +543,16 @@ static bool PumpMenuFadeFrame(f64 frameStart) {
 void Game::MenuFade() {
     MARKFUNCTION(0x80029E34);
 
+    // Safety bound: if the dialogue gate never clears (e.g. a stuck load
+    // state), don't hang the game forever waiting for it - proceed with
+    // the fade anyway after a couple of seconds.
+    constexpr f64 kMaxDialogWaitSec = 2.0;
+    const f64 dialogWaitStart = Time::GetTimeInSeconds();
     while (jcsIsPlaying()) {
+        if (Time::GetTimeInSeconds() - dialogWaitStart > kMaxDialogWaitSec) {
+            LOG("[Game] MenuFade: jcsIsPlaying() stuck past %.1fs, proceeding with fade anyway", kMaxDialogWaitSec);
+            break;
+        }
         const f64 frameStart = Time::GetTimeInSeconds();
         if (!PumpMenuFadeFrame(frameStart)) {
             return;
@@ -680,7 +689,10 @@ void Game::SetState(GameState s) {
     state = s;
 
 #if HIGH_FPS_PLAY_PRESENTATION
-    if (state == GameState::Play || prevState == GameState::Play) {
+    auto usesFixedLogicStep = [](GameState s) {
+        return s == GameState::Play || s == GameState::EndLevelLoop;
+    };
+    if (usesFixedLogicStep(state) || usesFixedLogicStep(prevState)) {
         if (g_time) {
             g_time->ResetPlayPresentationState();
         }
@@ -759,7 +771,8 @@ bool Game::gsIntroState(Game* game) {
                     game->introPhase = 2;
                 }
                 break;
-            case 2: { // hold at full visibility
+            case 2:
+            { // hold at full visibility
                 alpha = 1.0f;
                 const bool skipPressed = g_actionInput &&
                     (g_actionInput->AnyJustPressed() ||
@@ -1583,7 +1596,14 @@ bool Game::gsEndLevelState(Game* game) {
 bool Game::gsEndLevelLoopState(Game* game) {
     MARKFUNCTION(0x8002B6B0); // gsEndLevelLoopState
 
+#if HIGH_FPS_PLAY_PRESENTATION
+    const s32 logicSteps = g_time ? g_time->GetLogicStepCount() : 1;
+    for (s32 i = 0; i < logicSteps; ++i) {
+        animLoopDSTACK();
+    }
+#else
     animLoopDSTACK();
+#endif
 
     MenuDraw(nullptr);
 
@@ -1607,53 +1627,91 @@ bool Game::gsEndLevelExitState(Game* game) {
         return true;
     }
 
-    const s32 currentLevelID = world->GetCurLevelID();
+    s32 targetLevelID = 7;
     const s32 nextPetal = (s32)world->GetCurrentPetalIndex() + 1;
-    bool returnToHub = true;
 
     if (nextPetal < world->GetCurLevelPetals()) {
-        g_scoreManager->OpenPetal(world->GetCurrentLevelIndex(), nextPetal);
+        g_scoreManager->OpenPetal(
+            (u32)world->GetCurrentLevelIndex(),
+            (u32)nextPetal
+        );
     }
     else {
-        // Each regular zone's final petal flows directly into its boss level.
-        // Bosses use separate level IDs rather than another petal in the zone.
-        s32 bossLevelID = 0;
+        const s32 currentLevelID = world->GetCurLevelID();
         switch (currentLevelID) {
-            case 1: bossLevelID = 11; break; // Chinatown
-            case 2: bossLevelID = 12; break; // Waterfront
-            case 3: bossLevelID = 13; break; // Sewer
-            case 4: bossLevelID = 14; break; // Roof Top
-            case 5: bossLevelID = 8;  break; // Factory
-            default: break;
-        }
+            case 1:
+                targetLevelID = 11;
+                break;
+            case 2:
+                targetLevelID = 12;
+                break;
+            case 3:
+                targetLevelID = 13;
+                break;
+            case 4:
+                targetLevelID = 14;
+                break;
+            case 5:
+                rsEvent((rsSoundEvent)6, 0, 0, 0);
+                MenuFade();
+                targetLevelID = 8;
+                game->PlayMovie("factory.str", 1, 1);
+                break;
+            case 6:
+                if (g_scoreManager->GetTotalGoldDragon() >= 20) {
+                    rsEvent((rsSoundEvent)6, 0, 0, 0);
+                    MenuFade();
+                    game->PlayMovie("making.str", 1, 1);
+                }
+                break;
+            case 8:
+            {
+                const s32 level6Index = world->LevelIDToIndex(6);
+                g_scoreManager->OpenPetal((u32)level6Index, 0);
 
-        if (bossLevelID != 0) {
-            const s32 bossIndex = world->LevelIDToIndex(bossLevelID);
-            world->SetTargetLevelPetal((u32)bossIndex, 0);
-            returnToHub = false;
-        }
+                rsEvent((rsSoundEvent)6, 0, 0, 0);
+                MenuFade();
 
-        // Defeating a boss unlocks the first petal of the next regular zone.
-        s32 nextRegularLevelID = 0;
-        switch (currentLevelID) {
-            case 11: nextRegularLevelID = 2; break;
-            case 12: nextRegularLevelID = 3; break;
-            case 13: nextRegularLevelID = 4; break;
-            case 14: nextRegularLevelID = 5; break;
-            default: break;
-        }
-        if (nextRegularLevelID != 0) {
-            const s32 nextRegularIndex = world->LevelIDToIndex(nextRegularLevelID);
-            g_scoreManager->OpenPetal((u32)nextRegularIndex, 0);
+                game->PlayMovie("victory.str", 1, 1);
+                game->PlayMovie("credits.str", 1, 1);
+                targetLevelID = 7;
+                break;
+            }
+            case 11:
+            {
+                const s32 level2Index = world->LevelIDToIndex(2);
+                g_scoreManager->OpenPetal((u32)level2Index, 0);
+                break;
+            }
+            case 12:
+            {
+                const s32 level3Index = world->LevelIDToIndex(3);
+                g_scoreManager->OpenPetal((u32)level3Index, 0);
+                break;
+            }
+            case 13:
+            {
+                const s32 level4Index = world->LevelIDToIndex(4);
+                g_scoreManager->OpenPetal((u32)level4Index, 0);
+                break;
+            }
+            case 14:
+            {
+                const s32 level5Index = world->LevelIDToIndex(5);
+                g_scoreManager->OpenPetal((u32)level5Index, 0);
+                break;
+            }
+            default:
+                targetLevelID = 7;
+                break;
         }
     }
 
-    if (returnToHub) {
-        const s32 hubIndex = world->LevelIDToIndex(7);
-        world->SetTargetLevelPetal((u32)hubIndex, 0);
+    const s32 targetLevelIndex = world->LevelIDToIndex(targetLevelID);
+    world->SetTargetLevelPetal((u32)targetLevelIndex, 0);
+
+    if (targetLevelID == 7)
         game->autosavePending = true;
-    }
-
     game->SetState(GameState::QueueLevelLoad);
     return true;
 }
@@ -2418,7 +2476,13 @@ void Game::PlayFadeInHandlerCB(Handler*) {
     // it's trailing behind the picture. s_fadeCounter runs 0..255.
     if (g_deferLevelBeginMusic && s_fadeCounter >= 128) {
         g_deferLevelBeginMusic = false;
-        rsEvent(RS_LEVEL_BEGIN, 0, 0, 0);
+        // The track was already decoded by RS_LEVEL_BEGIN's deferred path
+        // (Sound::PreloadMusicTrack) back during the loading screen, so
+        // this is just a cheap voice start - no file I/O/decode here, so it
+        // can't stall the fade.
+        if (g_sound) {
+            g_sound->StartPreloadedMusic();
+        }
     }
 
     if (!stillFading) {

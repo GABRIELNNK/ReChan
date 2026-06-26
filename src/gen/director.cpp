@@ -2787,6 +2787,7 @@ void Director::ProcessHumanoidFunc() {
                     position.y -= 400;
                     humanoid->pos = position;
                     humanoid->homePos = position;
+                    humanoid->ResetRenderInterpolation();
                 }
                 break;
 

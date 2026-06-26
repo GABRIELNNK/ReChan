@@ -5931,6 +5931,13 @@ s32 Humanoid::SetCurrentFightingNode() {
 
     Model* m = static_cast<Model*>(model);
 
+    if (m->drawableType == 2 && m->drawable) {
+        DrawableSTree* drawable = static_cast<DrawableSTree*>(m->drawable);
+        if ((drawable->mirrorFlags & 1u) != 0) {
+            static_cast<SModel*>(m)->MirrorTree();
+        }
+    }
+
     combatFlag = 0;
     m->SetAnim(static_cast<s32>(move->anim), nextNode->field07, 1, nextNode->field06);
 

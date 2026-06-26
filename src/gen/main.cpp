@@ -250,7 +250,14 @@ int main(int argc, char** argv) {
         prevTime = frameStart;
         g_time->Tick(realDt);
 #if HIGH_FPS_PLAY_PRESENTATION
-        if (game.GetState() != GameState::Play) {
+        const GameState curState = game.GetState();
+        if (curState == GameState::EndLevelLoop) {
+            const s32 fixedLogicSteps = g_time->BeginPlayFixedStep();
+            for (s32 i = 0; i < fixedLogicSteps; ++i) {
+                g_time->Step();
+            }
+        }
+        else if (curState != GameState::Play) {
             g_time->Step();
         }
 #else

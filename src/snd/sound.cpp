@@ -290,6 +290,62 @@ bool Sound::PlayMusicTrack(const char* fagPath, f32 volume) {
     return musicPlaying;
 }
 
+// PC: same decode work as PlayMusicTrack, but stops at LoadSample - playback
+// is kicked off later (and cheaply) via StartPreloadedMusic().
+bool Sound::PreloadMusicTrack(const char* fagPath, f32 volume) {
+    if (pendingMusicSample != AUDIO_SAMPLE_INVALID) {
+        AudioEngine::UnloadSample(pendingMusicSample);
+        pendingMusicSample = AUDIO_SAMPLE_INVALID;
+    }
+
+    u32 fileSize = 0;
+    u8* fileData = ReadFileBytes(fagPath, fileSize);
+    if (!fileData) {
+        LOG("Sound: failed to load music '%s'", fagPath);
+        return false;
+    }
+
+    RsdFormat::FagTrack track = RsdFormat::LoadFag(fileData, fileSize);
+    delete[] fileData;
+
+    if (track.pcmData.empty()) {
+        LOG("Sound: failed to decode music '%s'", fagPath);
+        return false;
+    }
+
+    pendingMusicSample = AudioEngine::LoadSample(
+        track.pcmData.data(), track.numFrames, PSX_MUSIC_RATE, track.channels);
+    if (pendingMusicSample == AUDIO_SAMPLE_INVALID) {
+        LOG("Sound: failed to load music sample (preload)");
+        return false;
+    }
+
+    pendingMusicVolume = volume;
+    LOG("Sound: preloaded music '%s' (%u frames, %u ch @ %u Hz, sample=%u)",
+        fagPath, track.numFrames, track.channels, PSX_MUSIC_RATE, pendingMusicSample);
+    return true;
+}
+
+// PC: start music that was already decoded by PreloadMusicTrack - no file
+// IO or decode here, so it's safe to call from inside a fade-in.
+bool Sound::StartPreloadedMusic() {
+    if (pendingMusicSample == AUDIO_SAMPLE_INVALID) {
+        return false;
+    }
+
+    StopMusic();
+    musicSample = pendingMusicSample;
+    pendingMusicSample = AUDIO_SAMPLE_INVALID;
+
+    musicVolume = pendingMusicVolume;
+    f32 playVol = musicMuted ? 0.0f : musicVolume;
+    musicVoice = AUDIO_VOICE_INVALID;
+    musicPlaying = AudioEngine::PlayMusicSample(musicSample, playVol, true);
+
+    LOG("Sound: starting preloaded music (sample=%u, dedicated=%d)", musicSample, musicPlaying ? 1 : 0);
+    return musicPlaying;
+}
+
 void Sound::StopMusic() {
     AudioEngine::StopMusic();
 

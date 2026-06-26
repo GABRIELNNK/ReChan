@@ -55,6 +55,7 @@ public:
     void ResetPlayPresentationState();
     s32 BeginPlayFixedStep();
     bool DidPlayLogicStepThisFrame() const { return playLogicStepCount > 0; }
+    s32 GetLogicStepCount() const { return playLogicStepCount; }
     f32 GetPlayPresentationAlpha() const { return playPresentationAlpha; }
 #endif
 

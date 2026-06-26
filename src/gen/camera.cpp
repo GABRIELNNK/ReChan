@@ -364,10 +364,7 @@ void Camera::Think() {
 
     if (cameraAnim == nullptr) {
         bool skipModeFunc = false;
-#if IMPROVED_DEBUG_CAM
-        // UpdateHighFPS() drives DebugCam every render frame instead (see
-        // its comment); calling it again here on tick frames would double
-        // up the per-frame mouse delta and apply it twice.
+#if IMPROVED_DEBUG_CAM && HIGH_FPS_PLAY_PRESENTATION
         skipModeFunc = (modeFunc == &Camera::DebugCam);
 #endif
         if (modeFunc != nullptr && !skipModeFunc) {

@@ -1460,7 +1460,17 @@ s32 jcsHandleControlEvent(s32 event, s32 param1, s32 param2, s32 param3) {
             g_pauseFlag = 0;
             g_muteFlag = 0;
             if (g_deferLevelBeginMusic) {
-                LOG("[rsEvent] LevelBegin - deferred (location=%d)", g_currentSoundLocation);
+                // Decode now, while still hidden behind the loading screen -
+                // only the (cheap) actual playback start is deferred to the
+                // fade-in via Sound::StartPreloadedMusic(), so the fade
+                // doesn't stall on file I/O/decode.
+                LOG("[rsEvent] LevelBegin - preloading for deferred start (location=%d)", g_currentSoundLocation);
+                if (g_currentSoundLocation >= 0 && g_currentSoundLocation < MUSIC_TABLE_COUNT) {
+                    const char* path = s_musicTable[g_currentSoundLocation];
+                    if (path) {
+                        g_sound->PreloadMusicTrack(path, g_sound->musicVolume);
+                    }
+                }
                 break;
             }
             LOG("[rsEvent] LevelBegin - start music (location=%d, musicVol=%.2f)", g_currentSoundLocation, g_sound->musicVolume);

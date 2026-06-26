@@ -4897,7 +4897,7 @@ void feCustomMenuMgr::Render() {
     m_pulse.Update();
 
     const s32 panelX = DEF_WINDOW_CENTER_X - page->frameW / 2;
-    const s32 panelY = DEF_WINDOW_CENTER_Y - page->frameH / 2;
+    s32 panelY = DEF_WINDOW_CENTER_Y - page->frameH / 2;
     const s32 panelW = page->frameW;
     const s32 panelH = page->frameH;
 
@@ -4964,8 +4964,10 @@ void feCustomMenuMgr::Render() {
     bool isPopup = IsPopupFadePage(m_currPage);
     const f32 popupAlpha = GetPopupFadeAlpha();
 
-    if (isPopup)
+    if (isPopup) {
+        panelY += 10;
         DrawPopupWindow(panelX, panelY, panelW, panelH, title, popupAlpha);
+    }
     else
         DrawMenuWindow(panelX, panelY, panelW, panelH, title, popupAlpha);
 
