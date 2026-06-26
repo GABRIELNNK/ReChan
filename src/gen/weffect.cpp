@@ -3357,6 +3357,18 @@ void ComEffect::Render(const LVector& pos, const LVector* scale, const LVector* 
         world.m[14] += static_cast<f32>(s_comEffectSeamOffset.z);
     }
 
+    // HACK: fix NISROOF1WIN
+    if (resourceHash == 0x046B83AEu && g_display && g_display->GetCamera()) {
+        const LVector& camPos = g_display->GetCamera()->GetPosition();
+        LVector toCam = { camPos.x - pos.x, camPos.y - pos.y, camPos.z - pos.z };
+        LVector dir = {};
+        rmV3Normalize(&dir, &toCam);
+        static constexpr f32 kTowardCameraNudge = 64.0f;
+        world.m[12] += FIX16_TO_FLOAT(dir.x) * kTowardCameraNudge;
+        world.m[13] += FIX16_TO_FLOAT(dir.y) * kTowardCameraNudge;
+        world.m[14] += FIX16_TO_FLOAT(dir.z) * kTowardCameraNudge;
+    }
+
     p3d::context->SetWorldMatrix(world);
     model->drawable->Display(flags);
     p3d::context->SetWorldMatrix(savedWorld);
