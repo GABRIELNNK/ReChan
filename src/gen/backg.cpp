@@ -297,7 +297,7 @@ BackG::BackG() {
         entry->field4 = 0;
 
         bool haveVertexData = false;
-        if (entry->geo) {
+        if (entry->geo && entry->geo->primList) {
             const u8* vertices = entry->geo->GetVertexList();
             if (vertices) {
                 for (s32 i = 0; i < 4; i++) {
