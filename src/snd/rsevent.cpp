@@ -1345,6 +1345,7 @@ static constexpr s32 MUSIC_TABLE_COUNT = 25;
 // Other locations with interactive music decoded similarly.
 void InteractiveMusicControllerThink() {
     if (!g_sound || !g_blockManager || !Player::s_player) return;
+    if (g_deferLevelBeginMusic) return;
 
     const s32 loc = g_currentSoundLocation;
     if (loc < 0 || loc >= MUSIC_TABLE_COUNT) return;
@@ -1458,6 +1459,11 @@ s32 jcsHandleControlEvent(s32 event, s32 param1, s32 param2, s32 param3) {
         {
             g_pauseFlag = 0;
             g_muteFlag = 0;
+            if (g_deferLevelBeginMusic) {
+                LOG("[rsEvent] LevelBegin - deferred (location=%d)", g_currentSoundLocation);
+                break;
+            }
+            LOG("[rsEvent] LevelBegin - start music (location=%d, musicVol=%.2f)", g_currentSoundLocation, g_sound->musicVolume);
             if (g_currentSoundLocation >= 0 && g_currentSoundLocation < MUSIC_TABLE_COUNT) {
                 const char* path = s_musicTable[g_currentSoundLocation];
                 if (path) {

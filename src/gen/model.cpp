@@ -788,6 +788,8 @@ static void DrawGeoPartMesh(OriginalGeo* geo, bool applyLighting) {
         return;
     }
 
+    p3d::context->SetCullMode(PDDI_CULL_NONE);
+
     if (geo->usesSemiTrans) {
         pddiBlendMode blendMode = PDDI_BLEND_ALPHA;
         switch (geo->semiTransMode & 3u) {
