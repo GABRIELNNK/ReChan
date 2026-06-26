@@ -224,6 +224,14 @@ void Camera::BeginLogicStepHighFPS() {
 }
 
 void Camera::UpdateHighFPS() {
+#if IMPROVED_DEBUG_CAM
+    if (modeFunc == &Camera::DebugCam) {
+        DebugCam();
+        Update();
+        return;
+    }
+#endif
+
     if (!highFpsSampleValid || !g_time) {
         Update();
         return;
@@ -355,7 +363,14 @@ void Camera::Think() {
     MARKFUNCTION(0x80047F28);
 
     if (cameraAnim == nullptr) {
-        if (modeFunc != nullptr) {
+        bool skipModeFunc = false;
+#if IMPROVED_DEBUG_CAM
+        // UpdateHighFPS() drives DebugCam every render frame instead (see
+        // its comment); calling it again here on tick frames would double
+        // up the per-frame mouse delta and apply it twice.
+        skipModeFunc = (modeFunc == &Camera::DebugCam);
+#endif
+        if (modeFunc != nullptr && !skipModeFunc) {
             (this->*modeFunc)();
         }
 
@@ -711,9 +726,9 @@ void Camera::DebugCam() {
         camAngleX -= (s32)(mdy * MOUSE_SENSITIVITY);
     }
 
-    s32 speed = 125;
+    s32 speed = 4000;
     if (p3d::input->IsKeyDown(KEY_LEFT_SHIFT)) {
-        speed = 300;
+        speed = 14000;
     }
 
     s32 ddx = 0;
@@ -721,22 +736,22 @@ void Camera::DebugCam() {
     s32 ddz = 0;
 
     if (p3d::input->IsKeyDown(KEY_W)) {
-        ddz += speed;
+        ddz += speed * g_time->GetDeltaTime();;
     }
     if (p3d::input->IsKeyDown(KEY_S)) {
-        ddz -= speed;
+        ddz -= speed * g_time->GetDeltaTime();;
     }
     if (p3d::input->IsKeyDown(KEY_A)) {
-        ddx -= speed;
+        ddx -= speed * g_time->GetDeltaTime();;
     }
     if (p3d::input->IsKeyDown(KEY_D)) {
-        ddx += speed;
+        ddx += speed * g_time->GetDeltaTime();;
     }
     if (p3d::input->IsKeyDown(KEY_E)) {
-        ddy += speed;
+        ddy += speed * g_time->GetDeltaTime();;
     }
     if (p3d::input->IsKeyDown(KEY_Q)) {
-        ddy -= speed;
+        ddy -= speed * g_time->GetDeltaTime();;
     }
 
     if (ddx != 0 || ddy != 0 || ddz != 0) {
