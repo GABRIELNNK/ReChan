@@ -143,7 +143,7 @@ static const f32 kInventoryGoldShakePhaseY = 2.3561945f;
 static const f32 kInventoryLivesShakePhaseX = 3.1415926f;
 static const f32 kInventoryLivesShakePhaseY = 0.7853982f;
 static const f32 kInventoryTextShakePhaseOffsetX = 0.35f;
-static const f32 kInventoryTextGapFromIcon = 2.0f;
+static const f32 kInventoryTextGapFromIcon = 1.0f;
 static const f32 kInventoryTextCenterToPrintYOffset = 5.0f;
 static const f32 kHudGlobalFadeSpeed = 6.0f;
 
@@ -810,9 +810,8 @@ static void DrawPanelFrame(f32 x, f32 y, f32 w, f32 h) {
     DrawOutlineRect(x + 1.0f, y + 1.0f, w - 2.0f, h - 2.0f, 24, 34, 46, 255, 1.0f);
 }
 
-static void DrawIconQuad(tTexture* tex, f32 x, f32 y, f32 size,
-                         u8 r = 255, u8 g = 255, u8 b = 255, u8 a = 255) {
-    const f32 drawX = HudX(x);
+static void DrawIconQuadAtScreenX(tTexture* tex, f32 drawX, f32 y, f32 size,
+                                  u8 r = 255, u8 g = 255, u8 b = 255, u8 a = 255) {
     const f32 drawY = HudY(y);
     const f32 drawSize = SCREEN_SCALE_Y(size);
     const u8 drawA = ApplyHudAlphaU8(a);
@@ -835,6 +834,26 @@ static void DrawIconQuad(tTexture* tex, f32 x, f32 y, f32 size,
                          r, g, b, drawA);
 }
 
+static void DrawIconQuad(tTexture* tex, f32 x, f32 y, f32 size,
+                         u8 r = 255, u8 g = 255, u8 b = 255, u8 a = 255) {
+    DrawIconQuadAtScreenX(tex, HudX(x), y, size, r, g, b, a);
+}
+
+static void DrawPulsingIconQuadAtScreenX(tTexture* tex,
+                                         f32 screenX,
+                                         f32 y,
+                                         f32 baseSize,
+                                         f32 pulseAmount,
+                                         f32 shakeX = 0.0f,
+                                         f32 shakeY = 0.0f) {
+    const f32 scale = 1.0f + pulseAmount * kInventoryPulseIconScale;
+    const f32 drawSize = baseSize * scale;
+    const f32 offset = (baseSize - drawSize) * 0.5f;
+    const f32 lift = pulseAmount * kInventoryPulseIconLift;
+
+    DrawIconQuadAtScreenX(tex, screenX + SCREEN_SCALE_Y(offset + shakeX), y + offset - lift + shakeY, drawSize);
+}
+
 static void DrawPulsingIconQuad(tTexture* tex,
                                 f32 x,
                                 f32 y,
@@ -842,12 +861,7 @@ static void DrawPulsingIconQuad(tTexture* tex,
                                 f32 pulseAmount,
                                 f32 shakeX = 0.0f,
                                 f32 shakeY = 0.0f) {
-    const f32 scale = 1.0f + pulseAmount * kInventoryPulseIconScale;
-    const f32 drawSize = baseSize * scale;
-    const f32 offset = (baseSize - drawSize) * 0.5f;
-    const f32 lift = pulseAmount * kInventoryPulseIconLift;
-
-    DrawIconQuad(tex, x + offset + shakeX, y + offset - lift + shakeY, drawSize);
+    DrawPulsingIconQuadAtScreenX(tex, HudX(x), y, baseSize, pulseAmount, shakeX, shakeY);
 }
 
 static void DrawProgressBar(f32 x, f32 y, f32 w, f32 h, f32 progress) {
@@ -1614,14 +1628,22 @@ void CustomHudMgr::DrawInventoryCard(const HUD& hud) {
     const s32 slotCount = showRedDragonCounter ? 3 : 2;
     const f32 timerW = showRedDragonCounter ? 28.0f : 0.0f;
 
-    const f32 panelW = (slotW * (f32)slotCount + panelPadX * 2.0f);
-    const f32 panelX = rightEdge - panelW;
     const f32 dt = GetHudDeltaSeconds();
 
-    const f32 timerX = panelX + panelPadX + slotW * (f32)(slotCount - 1) - timerW;
-    const f32 livesX = timerX - timerW;
-    const f32 goldX = livesX - slotW;
-    const f32 redX = goldX - slotW;
+    const f32 screenRightEdge = HudX(rightEdge);
+    const f32 screenSlotW = SCREEN_SCALE_Y(slotW);
+    const f32 screenPanelPadX = SCREEN_SCALE_Y(panelPadX);
+    const f32 screenTimerW = SCREEN_SCALE_Y(timerW);
+    const f32 screenIconSize = SCREEN_SCALE_Y(iconSize);
+    const f32 screenTextGap = SCREEN_SCALE_Y(kInventoryTextGapFromIcon);
+
+    const f32 screenPanelW = (screenSlotW * (f32)slotCount + screenPanelPadX * 2.0f);
+    const f32 screenPanelX = screenRightEdge - screenPanelW;
+
+    const f32 screenTimerX = screenPanelX + screenPanelPadX + screenSlotW * (f32)(slotCount - 1) - screenTimerW;
+    const f32 screenLivesX = screenTimerX - screenTimerW;
+    const f32 screenGoldX = screenLivesX - screenSlotW;
+    const f32 screenRedX = screenGoldX - screenSlotW;
 
     s32 redDragons = hud.dragon.dragonCount;
     if (redDragons < 0) {
@@ -1681,37 +1703,37 @@ void CustomHudMgr::DrawInventoryCard(const HUD& hud) {
     std::snprintf(goldBuf, sizeof(goldBuf), "%d", goldDragons);
 
     if (showRedDragonCounter) {
-        DrawPulsingIconQuad(m_redDragonTex ? m_redDragonTex : m_greyDragonTex,
-                            redX,
-                            topY,
-                            iconSize,
-                            redPulse,
-                            redIconShakeX,
-                            redIconShakeY);
+        DrawPulsingIconQuadAtScreenX(m_redDragonTex ? m_redDragonTex : m_greyDragonTex,
+                                    screenRedX,
+                                    topY,
+                                    iconSize,
+                                    redPulse,
+                                    redIconShakeX,
+                                    redIconShakeY);
     }
-    DrawPulsingIconQuad(m_goldDragonTex ? m_goldDragonTex : m_redDragonTex,
-                        goldX,
-                        topY,
-                        iconSize,
-                        goldPulse,
-                        goldIconShakeX,
-                        goldIconShakeY);
-    DrawPulsingIconQuad(m_takeTex,
-                        livesX,
-                        topY,
-                        iconSize,
-                        livesPulse,
-                        livesIconShakeX,
-                        livesIconShakeY);
+    DrawPulsingIconQuadAtScreenX(m_goldDragonTex ? m_goldDragonTex : m_redDragonTex,
+                                screenGoldX,
+                                topY,
+                                iconSize,
+                                goldPulse,
+                                goldIconShakeX,
+                                goldIconShakeY);
+    DrawPulsingIconQuadAtScreenX(m_takeTex,
+                                screenLivesX,
+                                topY,
+                                iconSize,
+                                livesPulse,
+                                livesIconShakeX,
+                                livesIconShakeY);
 
     if (showRedDragonCounter)
-        DrawPulsingIconQuad(m_clockTex,
-                            timerX,
-                            topY,
-                            iconSize,
-                            0.0f,
-                            0.0f,
-                            0.0f);
+        DrawPulsingIconQuadAtScreenX(m_clockTex,
+                                    screenTimerX,
+                                    topY,
+                                    iconSize,
+                                    0.0f,
+                                    0.0f,
+                                    0.0f);
 
     if (showRedDragonCounter) {
         const s32 redBoost = (s32)(redPulse * kInventoryPulseTextColorBoost);
@@ -1726,7 +1748,7 @@ void CustomHudMgr::DrawInventoryCard(const HUD& hud) {
             true,
             false)) {
             g_textManager->PrintString(redBuf,
-                                       HudX(redX + iconSize + kInventoryTextGapFromIcon + redTextShakeX),
+                                       screenRedX + screenIconSize + screenTextGap + SCREEN_SCALE_Y(redTextShakeX),
                                        HudY(redCenterY - kInventoryTextCenterToPrintYOffset * redTextScale));
         }
     }
@@ -1743,7 +1765,7 @@ void CustomHudMgr::DrawInventoryCard(const HUD& hud) {
         true,
         false)) {
         g_textManager->PrintString(goldBuf,
-                                   HudX(goldX + iconSize + kInventoryTextGapFromIcon + goldTextShakeX),
+                                   screenGoldX + screenIconSize + screenTextGap + SCREEN_SCALE_Y(goldTextShakeX),
                                    HudY(goldCenterY - kInventoryTextCenterToPrintYOffset * goldTextScale));
     }
 
@@ -1759,7 +1781,7 @@ void CustomHudMgr::DrawInventoryCard(const HUD& hud) {
         true,
         false)) {
         g_textManager->PrintString(livesText,
-                                   HudX(livesX + iconSize + kInventoryTextGapFromIcon + livesTextShakeX),
+                                   screenLivesX + screenIconSize + screenTextGap + SCREEN_SCALE_Y(livesTextShakeX),
                                    HudY(livesCenterY - kInventoryTextCenterToPrintYOffset * livesTextScale));
     }
 
@@ -1786,7 +1808,7 @@ void CustomHudMgr::DrawInventoryCard(const HUD& hud) {
             true,
             false)) {
             g_textManager->PrintString(timerBuf,
-                                       HudX(timerX + iconSize + kInventoryTextGapFromIcon),
+                                       screenTimerX + screenIconSize + screenTextGap,
                                        HudY(clockCenterY - kInventoryTextCenterToPrintYOffset));
         }
     }
