@@ -133,7 +133,7 @@ public:
     // gp+476: turn delay threshold (s16, frames before turn-around completes)
     s16 turnDelayThreshold = 2;
     // gp+478: idle anim threshold (s16, frames before idle animation change)
-    s16 idleAnimThreshold = 1800;
+    s16 idleAnimThreshold = 300;
     // gp+3436: stored turn target angle
     s32 turnTargetAngle = 0;
     // gp+3440: turn-around timer (s16)

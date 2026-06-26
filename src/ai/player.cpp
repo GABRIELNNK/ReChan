@@ -1515,7 +1515,7 @@ void Player::PlayPlayerTauntResponse() {
 // PSX: _InactiveIdle__6Player (PLAYER.CPP:2331, 0x8003123C)
 // Waits for the inactive idle animation callback. When triggered, plays
 // currentAnimEnum with RUN_TO_LAST, then plays dialog. When animation
-// completes or guard bit released, transitions to Stand.
+// completes or guard bit released, sets AS_STAND and calls _Stand() directly.
 void Player::_InactiveIdle() {
     MARKFUNCTION(0x8003123C);
 
@@ -1548,7 +1548,7 @@ void Player::_InactiveIdle() {
             g_characterManager->UnloadAnimationBatch(0, currentAnimEnum);
         }
         SetActionState(AS_STAND, 0);
-        CheckForLanding();
+        _Stand();
     }
 }
 
