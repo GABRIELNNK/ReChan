@@ -1,6 +1,7 @@
 #include "gen/common.h"
 #include "snd/rsevent.h"
 #include "snd/sound.h"
+#include "snd/soundid.h"
 #include "snd/rsdworld.h"
 #include "snd/adpcm.h"
 #include "gen/time.h"
@@ -32,10 +33,10 @@ static u32 GetDialogPhonographIndexForActiveBank() {
     }
 
     const s32 bank = g_sound->activeSfxBank;
-    if (bank == 3 || bank == 11) {
+    if (bank == SND_LOC_CHINA_BOSS || bank == SND_LOC_SEWER_BOSS) {
         return 48;
     }
-    if (bank == 15) {
+    if (bank == SND_LOC_ROOF_BOSS) {
         return 47;
     }
     return 46;

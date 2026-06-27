@@ -7,6 +7,7 @@
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 
@@ -69,14 +70,119 @@ layout(location=1) in vec3 aColor;
 layout(location=2) in vec2 aUV;
 layout(location=3) in vec2 aTexInfo;
 uniform mat4 uMVP;
+uniform mat4 uWorldMatrix;
+uniform mat4 uViewMatrix;
+uniform vec3 uCameraPos;
 noperspective out vec3 vColor;
 noperspective out vec2 vUV;
 flat out vec2 vTexInfo;
+out vec3 vWorldPos;
+out float vViewDepth;
 void main() {
     vColor = aColor;
     vUV = aUV;
     vTexInfo = aTexInfo;
+    vWorldPos = (uWorldMatrix * vec4(aPos, 1.0)).xyz;
+    vec4 viewPos = uViewMatrix * vec4(vWorldPos, 1.0);
+    vViewDepth = max(-viewPos.z, 0.0);
     gl_Position = uMVP * vec4(aPos, 1.0);
+}
+)";
+
+// Depth-only shader for shadow-map cascade passes (MODERN_GRAPHICS).
+static const char* kShadowDepthVert = R"(
+#version 450 core
+layout(location=0) in vec3 aPos;
+layout(location=2) in vec2 aUV;
+layout(location=3) in vec2 aTexInfo;
+uniform mat4 uLightMVP;
+noperspective out vec2 vShadowUV;
+flat out vec2 vShadowTexInfo;
+void main() {
+    vShadowUV = aUV;
+    vShadowTexInfo = aTexInfo;
+    gl_Position = uLightMVP * vec4(aPos, 1.0);
+}
+)";
+
+static const char* kShadowDepthFrag = R"(
+#version 450 core
+noperspective in vec2 vShadowUV;
+flat in vec2 vShadowTexInfo;
+uniform usampler2D uVRAM;
+uniform int uHasVRAM;
+uniform int uHasUV;
+uniform int uHasTexInfo;
+uniform int uUseZeroTexelKey;
+uniform int uTexInfoOverrideEnabled;
+uniform vec2 uTexInfoOverride;
+uniform int uRealTextureMode;
+uniform sampler2D uRealTex;
+uniform vec2 uRealTexOffset;
+uniform vec2 uRealTexSize;
+void main() {
+    if (uRealTextureMode != 0 && uHasUV != 0) {
+        vec2 puv = mod(vShadowUV + vec2(256.0), vec2(256.0));
+        vec2 ruv = (puv - uRealTexOffset) / uRealTexSize;
+        vec4 texColor = texture(uRealTex, ruv);
+        if (texColor.a < 0.01) discard;
+        return;
+    }
+
+    float tpageF = vShadowTexInfo.x;
+    float cbaF = vShadowTexInfo.y;
+    if (uTexInfoOverrideEnabled != 0) {
+        tpageF = uTexInfoOverride.x;
+        cbaF = uTexInfoOverride.y;
+    }
+
+    if (uHasVRAM == 0 || uHasUV == 0 || uHasTexInfo == 0 || tpageF < 0.0) {
+        return;
+    }
+
+    uint tpage = uint(tpageF);
+    uint cba = uint(cbaF);
+
+    uint tx = tpage & 0xFu;
+    uint ty = (tpage >> 4u) & 1u;
+    uint depth = (tpage >> 7u) & 3u;
+
+    uint pageX = tx * 64u;
+    uint pageY = ty * 256u;
+
+    uint clutX = (cba & 0x3Fu) * 16u;
+    uint clutY = (cba >> 6u) & 0x1FFu;
+
+    uint px = uint(mod(vShadowUV.x + 256.0, 256.0));
+    uint py = uint(mod(vShadowUV.y + 256.0, 256.0));
+
+    uint clutWord;
+    bool zeroTexel = false;
+    if (depth == 0u) {
+        uint wordX = pageX + px / 4u;
+        uint word = texelFetch(uVRAM, ivec2(wordX, pageY + py), 0).r;
+        uint palIdx = (word >> ((px % 4u) * 4u)) & 0xFu;
+        zeroTexel = (palIdx == 0u);
+        clutWord = texelFetch(uVRAM, ivec2(clutX + palIdx, clutY), 0).r;
+    }
+    else if (depth == 1u) {
+        uint wordX = pageX + px / 2u;
+        uint word = texelFetch(uVRAM, ivec2(wordX, pageY + py), 0).r;
+        uint palIdx = (px & 1u) != 0u ? (word >> 8u) & 0xFFu : word & 0xFFu;
+        zeroTexel = (palIdx == 0u);
+        clutWord = texelFetch(uVRAM, ivec2(clutX + palIdx, clutY), 0).r;
+    }
+    else {
+        clutWord = texelFetch(uVRAM, ivec2(pageX + px, pageY + py), 0).r;
+        zeroTexel = (clutWord == 0u);
+    }
+
+    if (uUseZeroTexelKey != 0) {
+        if (zeroTexel) discard;
+    }
+    else {
+        if ((clutWord & 0x7FFFu) == 0x7C1Fu) discard;
+    }
 }
 )";
 
@@ -85,6 +191,8 @@ static const char* k3DFrag = R"(
 noperspective in vec3 vColor;
 noperspective in vec2 vUV;
 flat in vec2 vTexInfo;
+in vec3 vWorldPos;
+in float vViewDepth;
 uniform usampler2D uVRAM;
 uniform int uHasVRAM;
 uniform float uAlphaScale;
@@ -96,13 +204,116 @@ uniform sampler2D uRealTex;
 uniform vec2 uRealTexOffset;
 uniform vec2 uRealTexSize;
 out vec4 FragColor;
+
+uniform int uReceiveShadows;
+uniform int uShadowCascadeCount;
+uniform mat4 uLightVP[3];
+uniform float uCascadeSplits[3];
+uniform float uCascadeBlendDistances[3];
+uniform sampler2D uShadowMap0;
+uniform sampler2D uShadowMap1;
+uniform sampler2D uShadowMap2;
+uniform int uShadowFilterQuality;
+uniform float uShadowBias[3];
+// Debug visualization (DebugUI Shadows panel): 0=off, 1=tint receivers by
+// selected cascade index, 2=force-darken every receiver fragment.
+uniform int uShadowDebugMode;
+int gShadowCascade = -1;
+
+// Cascade depth textures use this renderer's reversed-Z convention (near=1,
+// far=0; see glContext::EnableZBuffer's GL_GEQUAL + glClearDepth(0.0)), so a
+// surface is shadowed when the stored occluder depth is *greater* (closer to
+// the light) than the receiver's own light-space depth.
+float ReadShadowDepth(int cascade, vec2 uv) {
+    if (cascade == 0) return texture(uShadowMap0, uv).r;
+    if (cascade == 1) return texture(uShadowMap1, uv).r;
+    return texture(uShadowMap2, uv).r;
+}
+
+ivec2 ShadowTextureSize(int cascade) {
+    if (cascade == 0) return textureSize(uShadowMap0, 0);
+    if (cascade == 1) return textureSize(uShadowMap1, 0);
+    return textureSize(uShadowMap2, 0);
+}
+
+float SampleShadowCascade(int cascade, vec4 lightClip) {
+    vec3 ndc = lightClip.xyz / lightClip.w;
+    vec2 uv = ndc.xy * 0.5 + 0.5;
+    // The GL backend uses glClipControl(..., GL_ZERO_TO_ONE), so NDC Z is
+    // already the depth texture's 0..1 range. Do not remap it as -1..1.
+    float receiverDepth = ndc.z;
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || receiverDepth < 0.0 || receiverDepth > 1.0) {
+        return 1.0;
+    }
+    float bias = uShadowBias[cascade];
+    if (uShadowFilterQuality <= 0) {
+        float shadowMapDepth = ReadShadowDepth(cascade, uv);
+        return (shadowMapDepth - bias > receiverDepth) ? 0.45 : 1.0;
+    }
+
+    ivec2 mapSize = ShadowTextureSize(cascade);
+    vec2 texel = 1.0 / vec2(max(mapSize.x, 1), max(mapSize.y, 1));
+    int radius = (uShadowFilterQuality >= 2) ? 2 : 1;
+    float lit = 0.0;
+    float taps = 0.0;
+    for (int y = -2; y <= 2; y++) {
+        for (int x = -2; x <= 2; x++) {
+            if (abs(x) > radius || abs(y) > radius) {
+                continue;
+            }
+            float shadowMapDepth = ReadShadowDepth(cascade, uv + vec2(x, y) * texel);
+            float weight = float((radius + 1 - abs(x)) * (radius + 1 - abs(y)));
+            lit += ((shadowMapDepth - bias > receiverDepth) ? 0.45 : 1.0) * weight;
+            taps += weight;
+        }
+    }
+    return lit / max(taps, 1.0);
+}
+
+float ComputeShadowFactor() {
+    if (uReceiveShadows == 0 || uShadowCascadeCount <= 0) {
+        return 1.0;
+    }
+
+    for (int i = 0; i < uShadowCascadeCount; i++) {
+        if (vViewDepth <= uCascadeSplits[i] || i == uShadowCascadeCount - 1) {
+            gShadowCascade = i;
+            if (uShadowDebugMode == 2) {
+                return 0.3;
+            }
+            float shadow = SampleShadowCascade(i, uLightVP[i] * vec4(vWorldPos, 1.0));
+            if (i < uShadowCascadeCount - 1) {
+                float blendDistance = max(uCascadeBlendDistances[i], 0.0);
+                float blendStart = uCascadeSplits[i] - blendDistance;
+                if (blendDistance > 0.0 && vViewDepth > blendStart) {
+                    float nextShadow = SampleShadowCascade(i + 1, uLightVP[i + 1] * vec4(vWorldPos, 1.0));
+                    float blend = smoothstep(blendStart, uCascadeSplits[i], vViewDepth);
+                    shadow = mix(shadow, nextShadow, blend);
+                }
+            }
+            return shadow;
+        }
+    }
+    return 1.0;
+}
+
+vec3 ApplyShadowDebugTint(vec3 baseColor) {
+    if (uShadowDebugMode != 1 || uReceiveShadows == 0 || gShadowCascade < 0) {
+        return baseColor;
+    }
+    if (gShadowCascade == 0) return vec3(1.0, 0.25, 0.25);
+    if (gShadowCascade == 1) return vec3(0.25, 1.0, 0.25);
+    return vec3(0.25, 0.25, 1.0);
+}
+
 void main() {
+    float shadowFactor = ComputeShadowFactor();
     if (uRealTextureMode != 0) {
         vec2 puv = mod(vUV + vec2(256.0), vec2(256.0));
         vec2 ruv = (puv - uRealTexOffset) / uRealTexSize;
         vec4 texColor = texture(uRealTex, ruv);
         if (texColor.a < 0.01) discard;
-        FragColor = vec4(texColor.rgb, uAlphaScale * texColor.a) * vec4(vColor, 1.0);
+        FragColor = vec4(ApplyShadowDebugTint(texColor.rgb * shadowFactor), uAlphaScale * texColor.a) * vec4(vColor, 1.0);
         return;
     }
 
@@ -114,7 +325,7 @@ void main() {
     }
 
     if (uHasVRAM == 0 || tpageF < 0.0) {
-        FragColor = vec4(vColor, uAlphaScale);
+        FragColor = vec4(ApplyShadowDebugTint(vColor * shadowFactor), uAlphaScale);
         return;
     }
 
@@ -168,7 +379,7 @@ void main() {
     float g = float((clutWord >> 5u) & 0x1Fu) / 31.0;
     float b = float((clutWord >> 10u) & 0x1Fu) / 31.0;
 
-    FragColor = vec4(r, g, b, uAlphaScale) * vec4(vColor, 1.0);
+    FragColor = vec4(ApplyShadowDebugTint(vec3(r, g, b) * shadowFactor), uAlphaScale) * vec4(vColor, 1.0);
 }
 )";
 
@@ -569,6 +780,28 @@ bool glTexture::SetRenderTargetStorage(int w, int h, pddiRenderTargetFormat form
     if (w <= 0 || h <= 0) return false;
     width = w;
     height = h;
+    if (format == PDDI_RENDER_TARGET_DEPTH) {
+        bpp = 24;
+        alphaDepth = 0;
+        if (handle) glDeleteTextures(1, &handle);
+        glGenTextures(1, &handle);
+        glBindTexture(GL_TEXTURE_2D, handle);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, w, h, 0,
+                     GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        // Replicate depth into G/B so debug-UI previews (ImGui::Image) show
+        // grayscale instead of red-only; doesn't affect the .r sampling the
+        // shadow shader uses.
+        const GLint depthSwizzle[4] = { GL_RED, GL_RED, GL_RED, GL_ONE };
+        glTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_RGBA, depthSwizzle);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        filterMode = PDDI_FILTER_NONE;
+        return handle != 0;
+    }
+
     bpp = (format == PDDI_RENDER_TARGET_RGBA16F) ? 64 : 32;
     alphaDepth = (format == PDDI_RENDER_TARGET_RGBA16F) ? 16 : 8;
     if (handle) glDeleteTextures(1, &handle);
@@ -606,8 +839,16 @@ bool glRenderTarget::Resize(int w, int h) {
     GLint previous = 0;
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previous);
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-                           texture->GetGLHandle(), 0);
+    if (format == PDDI_RENDER_TARGET_DEPTH) {
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D,
+                               texture->GetGLHandle(), 0);
+        glDrawBuffer(GL_NONE);
+        glReadBuffer(GL_NONE);
+    }
+    else {
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                               texture->GetGLHandle(), 0);
+    }
     const bool complete = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
     glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)previous);
     if (!complete) {
@@ -1362,6 +1603,7 @@ glContext::glContext(glDisplay* disp)
     InitGouraudMesh();
     InitBatchMesh();
     Init3DShader();
+    InitShadowDepthShader();
 }
 
 glContext::~glContext() {
@@ -1375,6 +1617,7 @@ glContext::~glContext() {
     if (batchVAO) glDeleteVertexArrays(1, &batchVAO);
     if (batchProgram) glDeleteProgram(batchProgram);
     if (program3D) glDeleteProgram(program3D);
+    if (shadowDepthProgram) glDeleteProgram(shadowDepthProgram);
 
     if (s_defaultWhiteTextureUsers > 0) {
         s_defaultWhiteTextureUsers--;
@@ -1937,6 +2180,64 @@ void glContext::Init3DShader() {
     glDeleteShader(fs);
 }
 
+void glContext::InitShadowDepthShader() {
+    u32 vs = CompileGLShader(GL_VERTEX_SHADER, kShadowDepthVert);
+    u32 fs = CompileGLShader(GL_FRAGMENT_SHADER, kShadowDepthFrag);
+
+    if (!vs || !fs)
+        return;
+
+    shadowDepthProgram = glCreateProgram();
+    glAttachShader(shadowDepthProgram, vs);
+    glAttachShader(shadowDepthProgram, fs);
+    glLinkProgram(shadowDepthProgram);
+
+    int ok;
+    glGetProgramiv(shadowDepthProgram, GL_LINK_STATUS, &ok);
+    if (!ok) {
+        char log[512];
+        glGetProgramInfoLog(shadowDepthProgram, sizeof(log), nullptr, log);
+        std::fprintf(stderr, "Shadow depth shader link error:\n%s\n", log);
+    }
+
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+}
+
+void glContext::SetShadowCasterPass(bool enable, const Mat4& lightVP) {
+    shadowCasterPassActive = enable;
+    shadowCasterLightVP = lightVP;
+}
+
+void glContext::SetShadowCascades(pddiTexture* const* depthTextures, const Mat4* lightVPs,
+                                  const float* splits, int count) {
+    shadowCascadeCount = (count < 0) ? 0 : (count > kShadowCascadeCount ? kShadowCascadeCount : count);
+    shadowFilterQuality = 0;
+    for (s32 i = 0; i < shadowCascadeCount; i++) {
+        shadowDepthTextures[i] = depthTextures[i];
+        shadowLightVP[i] = lightVPs[i];
+        shadowCascadeSplits[i] = splits[i];
+        const float previousSplit = (i > 0) ? shadowCascadeSplits[i - 1] : 0.0f;
+        const float cascadeRange = std::max(shadowCascadeSplits[i] - previousSplit, 1.0f);
+        shadowCascadeBlendDistances[i] = std::min(std::max(cascadeRange * 0.12f, 384.0f), 1536.0f);
+        if (depthTextures[i] && depthTextures[i]->GetWidth() >= 4096) {
+            shadowFilterQuality = 2;
+        }
+        else if (depthTextures[i] && depthTextures[i]->GetWidth() >= 2048) {
+            shadowFilterQuality = 1;
+        }
+    }
+    const float* biasSet = (shadowFilterQuality >= 2) ? shadowBiasHigh : shadowBiasMedium;
+    for (s32 i = 0; i < kShadowCascadeCount; i++) {
+        shadowBias[i] = biasSet[i];
+    }
+    for (s32 i = shadowCascadeCount; i < kShadowCascadeCount; i++) {
+        shadowDepthTextures[i] = nullptr;
+        shadowCascadeSplits[i] = 0.0f;
+        shadowCascadeBlendDistances[i] = 0.0f;
+    }
+}
+
 void glContext::SetTexture(pddiTexture* t) {
     currentTexture = t;
 }
@@ -1979,6 +2280,68 @@ void glContext::DrawPrimBuffer(pddiPrimBuffer* buffer, u32 indexOffset, u32 inde
     if (!buffer)
         return;
 
+    if (shadowCasterPassActive) {
+        if (!shadowDepthProgram) {
+            return;
+        }
+        glUseProgram(shadowDepthProgram);
+        Mat4 lightMvp = shadowCasterLightVP * worldMatrix;
+        glUniformMatrix4fv(glGetUniformLocation(shadowDepthProgram, "uLightMVP"),
+                           1, GL_FALSE, lightMvp.Data());
+
+        auto* glBufShadow = static_cast<glPrimBuffer*>(buffer);
+        const u32 vertexFormat = glBufShadow->GetVertexFormat();
+        glUniform1i(glGetUniformLocation(shadowDepthProgram, "uHasUV"),
+                    (vertexFormat & PDDI_V_UV) ? 1 : 0);
+        glUniform1i(glGetUniformLocation(shadowDepthProgram, "uHasTexInfo"),
+                    (vertexFormat & PDDI_V_TEXINFO) ? 1 : 0);
+        glUniform1i(glGetUniformLocation(shadowDepthProgram, "uHasVRAM"), vramHandle ? 1 : 0);
+        const int useZeroTexelKey = (cachedBlendMode != PDDI_BLEND_NONE) ? 1 : 0;
+        glUniform1i(glGetUniformLocation(shadowDepthProgram, "uUseZeroTexelKey"), useZeroTexelKey);
+
+        const int texInfoOverride = texInfoOverrideEnabled ? 1 : 0;
+        glUniform1i(glGetUniformLocation(shadowDepthProgram, "uTexInfoOverrideEnabled"), texInfoOverride);
+        if (texInfoOverride != 0) {
+            const float tpage = static_cast<float>((texInfoOverrideWord >> 16) & 0xFFFFu);
+            const float cba = static_cast<float>(texInfoOverrideWord & 0xFFFFu);
+            glUniform2f(glGetUniformLocation(shadowDepthProgram, "uTexInfoOverride"), tpage, cba);
+        }
+        else {
+            glUniform2f(glGetUniformLocation(shadowDepthProgram, "uTexInfoOverride"), -1.0f, 0.0f);
+        }
+
+        if (vramHandle) {
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, vramHandle);
+            glUniform1i(glGetUniformLocation(shadowDepthProgram, "uVRAM"), 0);
+        }
+
+        const int useRealTexture = (realTextureModeEnabled && currentTexture) ? 1 : 0;
+        glUniform1i(glGetUniformLocation(shadowDepthProgram, "uRealTextureMode"), useRealTexture);
+        if (useRealTexture) {
+            static_cast<glTexture*>(currentTexture)->Bind(1);
+            glUniform1i(glGetUniformLocation(shadowDepthProgram, "uRealTex"), 1);
+            glUniform2f(glGetUniformLocation(shadowDepthProgram, "uRealTexOffset"), realTexOffsetX, realTexOffsetY);
+            glUniform2f(glGetUniformLocation(shadowDepthProgram, "uRealTexSize"), realTexSizeX, realTexSizeY);
+        }
+
+        GLenum glModeShadow = GL_TRIANGLES;
+        switch (buffer->GetPrimType()) {
+            case PDDI_PRIM_TRIANGLES: glModeShadow = GL_TRIANGLES; break;
+            case PDDI_PRIM_TRISTRIP:  glModeShadow = GL_TRIANGLE_STRIP; break;
+            case PDDI_PRIM_LINES:     glModeShadow = GL_LINES; break;
+            case PDDI_PRIM_LINESTRIP: glModeShadow = GL_LINE_STRIP; break;
+            case PDDI_PRIM_POINTS:    glModeShadow = GL_POINTS; break;
+        }
+        const u32 drawCountShadow = (indexCount != 0) ? indexCount : buffer->GetIndexCount();
+        const void* indexPtrShadow = reinterpret_cast<const void*>(static_cast<uintptr_t>(indexOffset) * sizeof(u16));
+        glBindVertexArray(glBufShadow->GetVAO());
+        glDrawElements(glModeShadow, drawCountShadow, GL_UNSIGNED_SHORT, indexPtrShadow);
+        glBindVertexArray(0);
+        glUseProgram(0);
+        return;
+    }
+
     glUseProgram(program3D);
 
     const float alphaScale = (cachedBlendMode == PDDI_BLEND_ALPHA) ? 0.5f : 1.0f;
@@ -1989,6 +2352,35 @@ void glContext::DrawPrimBuffer(pddiPrimBuffer* buffer, u32 indexOffset, u32 inde
     Mat4 mvp = projection * (viewMatrix * worldMatrix);
     glUniformMatrix4fv(glGetUniformLocation(program3D, "uMVP"),
                        1, GL_FALSE, mvp.Data());
+    glUniformMatrix4fv(glGetUniformLocation(program3D, "uWorldMatrix"),
+                       1, GL_FALSE, worldMatrix.Data());
+    glUniformMatrix4fv(glGetUniformLocation(program3D, "uViewMatrix"),
+                       1, GL_FALSE, viewMatrix.Data());
+    glUniform3f(glGetUniformLocation(program3D, "uCameraPos"),
+                cameraWorldPos[0], cameraWorldPos[1], cameraWorldPos[2]);
+    glUniform1i(glGetUniformLocation(program3D, "uShadowDebugMode"), shadowDebugMode);
+
+    const int receiveShadows = (receiveShadowsEnabled && shadowCascadeCount > 0) ? 1 : 0;
+    glUniform1i(glGetUniformLocation(program3D, "uReceiveShadows"), receiveShadows);
+    glUniform1i(glGetUniformLocation(program3D, "uShadowCascadeCount"), receiveShadows ? shadowCascadeCount : 0);
+    glUniform1i(glGetUniformLocation(program3D, "uShadowFilterQuality"), receiveShadows ? shadowFilterQuality : 0);
+    glUniform1fv(glGetUniformLocation(program3D, "uShadowBias[0]"), kShadowCascadeCount, shadowBias);
+    if (receiveShadows) {
+        glUniformMatrix4fv(glGetUniformLocation(program3D, "uLightVP[0]"), shadowCascadeCount,
+                           GL_FALSE, shadowLightVP[0].Data());
+        glUniform1fv(glGetUniformLocation(program3D, "uCascadeSplits[0]"), shadowCascadeCount,
+                     shadowCascadeSplits);
+        glUniform1fv(glGetUniformLocation(program3D, "uCascadeBlendDistances[0]"), shadowCascadeCount,
+                     shadowCascadeBlendDistances);
+        static const char* kShadowSamplerNames[kShadowCascadeCount] = {
+            "uShadowMap0", "uShadowMap1", "uShadowMap2"
+        };
+        for (s32 i = 0; i < shadowCascadeCount; i++) {
+            if (!shadowDepthTextures[i]) continue;
+            static_cast<glTexture*>(shadowDepthTextures[i])->Bind(2 + i);
+            glUniform1i(glGetUniformLocation(program3D, kShadowSamplerNames[i]), 2 + i);
+        }
+    }
 
     int hasVRAM = vramHandle ? 1 : 0;
     glUniform1i(glGetUniformLocation(program3D, "uHasVRAM"), hasVRAM);

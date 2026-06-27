@@ -37,6 +37,8 @@
 
 #include <vector>
 
+#include "extra/shadowcsm.h"
+
 static ComEffect* g_wEffectComEffects[64] = {};
 static ComEffect* g_wEffectOwnedEffects[64] = {};
 static s32 g_wEffectComEffectCount = 0;
@@ -82,6 +84,51 @@ static s32 s_lateComEffectQueueBlock = -1;
 static bool IsFrontRenderFlags(u32 flags) {
     return (flags & 0x1000800u) != 0u;
 }
+
+#if MODERN_GRAPHICS
+static bool ShouldReceiveEffectGeoShadows(bool frontRenderFlags, bool usesSemiTrans) {
+    return !frontRenderFlags
+        && !usesSemiTrans
+        && !ShadowCSM::IsCasterPrepass()
+        && ShadowCSM::GetQuality() != SHADOW_QUALITY_LOW;
+}
+
+static bool ComEffectDrawableUsesSemiTrans(const Model* model) {
+    if (!model || !model->drawable) {
+        return true;
+    }
+
+    if (model->drawableType == 1) {
+        const DrawableGeo* drawable = static_cast<const DrawableGeo*>(model->drawable);
+        return !drawable || !drawable->original || drawable->original->usesSemiTrans;
+    }
+
+    if (model->drawableType == 2) {
+        const OriginalSTree* active = GetActiveSTree(model->drawable);
+        return !active || !active->skinData || active->skinData->usesSemiTrans;
+    }
+
+    if (model->drawableType == 3) {
+        const DrawableETree* drawable = static_cast<const DrawableETree*>(model->drawable);
+        const OriginalETree* original = drawable ? drawable->original : nullptr;
+        if (!original) {
+            return true;
+        }
+        if (original->usesSemiTrans) {
+            return true;
+        }
+        for (u16 i = 0; i < original->geoPartCount; i++) {
+            const OriginalGeo* geo = original->geoParts ? original->geoParts[i] : nullptr;
+            if (geo && geo->usesSemiTrans) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    return true;
+}
+#endif
 
 static s32 PsxGetElementQ16(const Mat4& matrix, u32 col, u32 row) {
     const u32 index = col * 4u + row;
@@ -3370,7 +3417,28 @@ void ComEffect::Render(const LVector& pos, const LVector* scale, const LVector* 
     }
 
     p3d::context->SetWorldMatrix(world);
+#if MODERN_GRAPHICS
+    if (ShadowCSM::IsCasterPrepass()) {
+        if (!frontRenderFlags) {
+            ShadowCSM::DrawCasterIntoCascades(model->drawable, flags);
+        }
+        p3d::context->SetWorldMatrix(savedWorld);
+        if (useWord0) {
+            p3d::context->SetTexInfoOverride(false, 0);
+        }
+        return;
+    }
+    const bool receiveMappedShadows = ShouldReceiveEffectGeoShadows(frontRenderFlags, ComEffectDrawableUsesSemiTrans(model));
+    if (receiveMappedShadows) {
+        p3d::context->SetReceiveShadows(true);
+    }
+#endif
     model->drawable->Display(flags);
+#if MODERN_GRAPHICS
+    if (receiveMappedShadows) {
+        p3d::context->SetReceiveShadows(false);
+    }
+#endif
     p3d::context->SetWorldMatrix(savedWorld);
 
     if (useWord0) {
@@ -3435,7 +3503,28 @@ void ComEffect::Render(const Mat4& worldMatrix, u32 flags) {
 
     const Mat4 composedWorld = savedWorld * worldMatrix;
     p3d::context->SetWorldMatrix(composedWorld);
+#if MODERN_GRAPHICS
+    if (ShadowCSM::IsCasterPrepass()) {
+        if (!frontRenderFlags) {
+            ShadowCSM::DrawCasterIntoCascades(model->drawable, flags);
+        }
+        p3d::context->SetWorldMatrix(savedWorld);
+        if (useWord0) {
+            p3d::context->SetTexInfoOverride(false, 0);
+        }
+        return;
+    }
+    const bool receiveMappedShadows = ShouldReceiveEffectGeoShadows(frontRenderFlags, ComEffectDrawableUsesSemiTrans(model));
+    if (receiveMappedShadows) {
+        p3d::context->SetReceiveShadows(true);
+    }
+#endif
     model->drawable->Display(flags);
+#if MODERN_GRAPHICS
+    if (receiveMappedShadows) {
+        p3d::context->SetReceiveShadows(false);
+    }
+#endif
     p3d::context->SetWorldMatrix(savedWorld);
 
     if (useWord0) {
@@ -3620,6 +3709,18 @@ bool ComEffect::RenderGeoByIndex(u32 geoIndex, const Mat4& worldMatrix, u32 flag
 
     if (geo) {
         if (geo->meshBuffer) {
+#if MODERN_GRAPHICS
+            if (ShadowCSM::IsCasterPrepass()) {
+                if (!frontRenderFlags && !geo->usesSemiTrans) {
+                    ShadowCSM::DrawCasterPrimBufferIntoCascades(geo->meshBuffer);
+                }
+                p3d::context->SetWorldMatrix(savedWorld);
+                if (useWord0) {
+                    p3d::context->SetTexInfoOverride(false, 0);
+                }
+                return true;
+            }
+#endif
             if (geo->usesSemiTrans) {
                 u8 semiTransMode = geo->semiTransMode;
                 if (useWord0) {
@@ -3637,7 +3738,18 @@ bool ComEffect::RenderGeoByIndex(u32 geoIndex, const Mat4& worldMatrix, u32 flag
                 p3d::context->SetBlendMode(blendMode);
             }
 
+#if MODERN_GRAPHICS
+            const bool receiveMappedShadows = ShouldReceiveEffectGeoShadows(frontRenderFlags, geo->usesSemiTrans);
+            if (receiveMappedShadows) {
+                p3d::context->SetReceiveShadows(true);
+            }
+#endif
             p3d::context->DrawPrimBuffer(geo->meshBuffer);
+#if MODERN_GRAPHICS
+            if (receiveMappedShadows) {
+                p3d::context->SetReceiveShadows(false);
+            }
+#endif
 
             if (geo->usesSemiTrans) {
                 p3d::context->SetBlendMode(PDDI_BLEND_NONE);
@@ -4099,7 +4211,18 @@ void ComEffect::DoFastRender() {
                 p3d::context->SetBlendMode(blendMode);
             }
 
+#if MODERN_GRAPHICS
+            const bool receiveMappedShadows = ShouldReceiveEffectGeoShadows(false, drawGeo->usesSemiTrans);
+            if (receiveMappedShadows) {
+                p3d::context->SetReceiveShadows(true);
+            }
+#endif
             p3d::context->DrawPrimBuffer(drawGeo->meshBuffer);
+#if MODERN_GRAPHICS
+            if (receiveMappedShadows) {
+                p3d::context->SetReceiveShadows(false);
+            }
+#endif
 
             if (drawGeo->usesSemiTrans) {
                 p3d::context->SetBlendMode(PDDI_BLEND_NONE);
@@ -4162,7 +4285,18 @@ void ComEffect::DoFastRender() {
                 p3d::context->SetBlendMode(blendMode);
             }
 
+#if MODERN_GRAPHICS
+            const bool receiveMappedShadows = ShouldReceiveEffectGeoShadows(false, drawGeo->usesSemiTrans);
+            if (receiveMappedShadows) {
+                p3d::context->SetReceiveShadows(true);
+            }
+#endif
             p3d::context->DrawPrimBuffer(drawGeo->meshBuffer);
+#if MODERN_GRAPHICS
+            if (receiveMappedShadows) {
+                p3d::context->SetReceiveShadows(false);
+            }
+#endif
 
             if (drawGeo->usesSemiTrans) {
                 p3d::context->SetBlendMode(PDDI_BLEND_NONE);

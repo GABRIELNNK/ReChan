@@ -17,12 +17,8 @@ static inline int rcStricmp(const char* lhs, const char* rhs) {
     return static_cast<unsigned char>(*lhs) - static_cast<unsigned char>(*rhs);
 }
 
-// Game title
-#define JCSM_TITLE "Jackie Chan Stuntmaster"
-#define JCSM_VERSION "1.0.0"
-
-#define JCSM_TARGET_WIDTH 1280
-#define JCSM_TARGET_HEIGHT 720
+#define JCS_TARGET_WIDTH 1280
+#define JCS_TARGET_HEIGHT 720
 
 // Native resolution (overlay coordinate space)
 #define DEFAULT_SCREEN_WIDTH ((f32)512)

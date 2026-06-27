@@ -25,6 +25,7 @@ public:
     pddiPrimType GetPrimType() const override { return primType; }
 
     u32 GetVAO() const { return vao; }
+    u32 GetVertexFormat() const { return vertexFormat; }
 
 private:
     pddiPrimType primType;
@@ -56,6 +57,7 @@ public:
     void Bind(int unit) override;
 
     u32 GetGLHandle() const { return handle; }
+    unsigned int GetNativeHandle() const override { return handle; }
     bool SetRenderTargetStorage(int w, int h, pddiRenderTargetFormat format);
 
 private:
@@ -268,6 +270,15 @@ public:
     bool IsRealTextureModeEnabled() const override { return realTextureModeEnabled; }
     void SetRealTextureRect(float offsetX, float offsetY, float sizeX, float sizeY) override;
 
+    void SetShadowCasterPass(bool enable, const Mat4& lightVP) override;
+    void SetReceiveShadows(bool enable) override { receiveShadowsEnabled = enable; }
+    void SetShadowCascades(pddiTexture* const* depthTextures, const Mat4* lightVP,
+                           const float* splits, int count) override;
+    void SetCameraWorldPos(float x, float y, float z) override {
+        cameraWorldPos[0] = x; cameraWorldPos[1] = y; cameraWorldPos[2] = z;
+    }
+    void SetShadowDebugMode(int mode) override { shadowDebugMode = mode; }
+
     u32 Get3DProgram() const { return program3D; }
 
     void DrawGouraudQuad(float x0, float y0, float r0, float g0, float b0, float a0,
@@ -291,6 +302,22 @@ private:
     u32 quadVAO = 0;
     u32 quadVBO = 0;
     u32 program3D = 0;
+    u32 shadowDepthProgram = 0;
+    bool shadowCasterPassActive = false;
+    Mat4 shadowCasterLightVP;
+    bool receiveShadowsEnabled = false;
+    static constexpr s32 kShadowCascadeCount = 3;
+    pddiTexture* shadowDepthTextures[kShadowCascadeCount] = {};
+    Mat4 shadowLightVP[kShadowCascadeCount];
+    float shadowCascadeSplits[kShadowCascadeCount] = {};
+    float shadowCascadeBlendDistances[kShadowCascadeCount] = {};
+    s32 shadowCascadeCount = 0;
+    s32 shadowFilterQuality = 0;
+    float shadowBias[kShadowCascadeCount] = { 0.00072f, 0.00050f, 0.00036f };
+    static constexpr float shadowBiasMedium[kShadowCascadeCount] = { 0.00082f, 0.00058f, 0.00042f };
+    static constexpr float shadowBiasHigh[kShadowCascadeCount] = { 0.00064f, 0.00044f, 0.00032f };
+    float cameraWorldPos[3] = {};
+    s32 shadowDebugMode = 0;
     u32 gouraudVAO = 0;
     u32 gouraudVBO = 0;
     u32 gouraudProgram = 0;
@@ -331,6 +358,7 @@ private:
     void InitGouraudMesh();
     void InitBatchMesh();
     void Init3DShader();
+    void InitShadowDepthShader();
     void UpdateMultisampleState();
     void EnsureMSAAFramebuffer(s32 samples, s32 width, s32 height);
     void DestroyMSAAFramebuffer();

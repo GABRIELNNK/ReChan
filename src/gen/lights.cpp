@@ -483,6 +483,17 @@ void LightingClass::SetupLighting() {
 
     lightAnchor->SetupLightMemory(s_lightSphereCountA + s_lightSphereCountB);
 
+    static const LVector defaultLightDirs[3] = {
+        { 0, -65535, 0 },
+        { 0, -65536, 0 },
+        { 0, -65536, 0 },
+    };
+
+    for (s32 i = 0; i < 3; i++) {
+        const u32 fallbackColour = (i == 0) ? 0x00F0F0F0 : 0x00000000;
+        originalLights[i].SetLight(fallbackColour, &defaultLightDirs[i]);
+    }
+
     if (g_database) {
         for (DBVolume* volume = g_database->GetFirstVolume(); volume; volume = static_cast<DBVolume*>(volume->next)) {
             if (volume->subType == 101) {
@@ -498,17 +509,6 @@ void LightingClass::SetupLighting() {
                 }
             }
         }
-    }
-
-    static const LVector defaultLightDirs[3] = {
-        { 0, -65535, 0 },
-        { 0, -65536, 0 },
-        { 0, -65536, 0 },
-    };
-
-    for (s32 i = 0; i < 3; i++) {
-        const u32 fallbackColour = (i == 0) ? 0x00F0F0F0 : 0x00000000;
-        originalLights[i].SetLight(fallbackColour, &defaultLightDirs[i]);
     }
 
     if (g_database && lightAnchor) {

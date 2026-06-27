@@ -61,6 +61,8 @@
 #include "extra/autoupdater.h"
 #endif
 
+#include "extra/shadowcsm.h"
+
 // Global game pointer
 Game* g_game = nullptr;
 
@@ -463,6 +465,13 @@ void Game::DrawEverythingHandlerCB(Handler*) {
 
     // PSX: DrawBG__5BackG is called before block/world geometry draw.
     BackG::DrawBG();
+
+#if MODERN_GRAPHICS
+    // Prepare this frame's shadow cascades. World::Render runs a caster-only
+    // prepass before drawing block geometry receivers. No-op when Shadow
+    // Quality is Low.
+    ShadowCSM::BeginFrame();
+#endif
 
     // PSX: passes player position (MEMORY[0x1C] = thePlayer->pos) to DrawEverythingHandler,
     // NOT the camera position. Used for block distance sorting and seam offsets.

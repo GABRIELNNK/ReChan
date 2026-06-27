@@ -36,6 +36,8 @@
 #include "version.h"
 #endif
 
+#include "extra/shadowcsm.h"
+
 feCustomMenuMgr* g_feCustomMenuMgr = nullptr;
 
 static f32 UiAnimSeconds() {
@@ -631,6 +633,9 @@ void feCustomMenuMgr::BuildPages() {
         List("FE_FPS", EntryBinding_DisplayFrameRate, 1, 0, 3),
 #endif
         List("FE_MSA", EntryBinding_DisplayMsaa, 1, 0, 4),
+#if MODERN_GRAPHICS
+        List("FE_DSH", EntryBinding_DisplayShadowQuality, 1, 0, 2),
+#endif
         List("FE_LNG", EntryBinding_Language, 1, 0, (s32)NumLanguages - 1),
         Button("FE_BCK", EntryEvent_Back),
                });
@@ -2770,6 +2775,15 @@ void feCustomMenuMgr::Adjust(s32 dir) {
             ApplyValue(*e, v);
             return;
         }
+
+#if MODERN_GRAPHICS
+        if (e->binding == EntryBinding_DisplayShadowQuality) {
+            const s32 current = GetBoundValue(*e);
+            const s32 v = WrapStepValue(current, e->step, e->lo, e->hi, dir);
+            ApplyValue(*e, v);
+            return;
+        }
+#endif
     }
     else if (e->type == EntryType_Slider) {
         if (e->binding == EntryBinding_MusicVol ||
@@ -2827,6 +2841,9 @@ s32 feCustomMenuMgr::GetBoundValue(const Entry& e) const {
             const s32 samples = g_display ? g_display->GetMSAA() : Display::GetDefaultMSAA();
             return MsaaSamplesToOptionIndex(samples);
         }
+#if MODERN_GRAPHICS
+        case EntryBinding_DisplayShadowQuality: return (s32)ShadowCSM::GetQuality();
+#endif
 #if NEW_CHEATS
         case EntryBinding_CheatAllDragons: return IsCheatEnabled(CheatOption::AllDragons) ? 1 : 0;
         case EntryBinding_CheatAllLevels: return IsCheatEnabled(CheatOption::AllLevels) ? 1 : 0;
@@ -2919,6 +2936,11 @@ void feCustomMenuMgr::ApplyValue(const Entry& e, s32 v) {
     else if (e.binding == EntryBinding_DisplayResolution) {
         if (g_display) g_display->SetResolutionIndex(v);
     }
+#if MODERN_GRAPHICS
+    else if (e.binding == EntryBinding_DisplayShadowQuality) {
+        ShadowCSM::SetQuality((ShadowQuality)v);
+    }
+#endif
 #if NEW_CHEATS
     else if (e.binding == EntryBinding_CheatAllDragons) {
         SetCheatEnabled(CheatOption::AllDragons, v != 0);
@@ -5147,6 +5169,25 @@ void feCustomMenuMgr::RenderCurrentPage() {
                                             selected ? selectedColor.GetBlue8() : normalColor.GetBlue8());
                     g_textManager->PrintString(msaaText, valueScreenX, rowScreenY);
                 }
+#if MODERN_GRAPHICS
+                else if (item.binding == EntryBinding_DisplayShadowQuality) {
+                    const s32 quality = GetBoundValue(item);
+                    const char* qualityToken = "FE_LOW";
+                    if (quality == (s32)SHADOW_QUALITY_MEDIUM) qualityToken = "FE_MED";
+                    else if (quality == (s32)SHADOW_QUALITY_HIGH) qualityToken = "FE_HIG";
+                    const char* qualityText = Localize(qualityToken);
+
+                    if (!qualityText) {
+                        continue;
+                    }
+
+                    g_textManager->SetAlignment(TextAlign_Right);
+                    g_textManager->SetColor(selected ? selectedColor.GetRed8() : normalColor.GetRed8(),
+                                            selected ? selectedColor.GetGreen8() : normalColor.GetGreen8(),
+                                            selected ? selectedColor.GetBlue8() : normalColor.GetBlue8());
+                    g_textManager->PrintString(qualityText, valueScreenX, rowScreenY);
+                }
+#endif
                 else if (item.binding == EntryBinding_DisplayFrameRate) {
                     const char* frameRateToken = GetFrameRateDisplayToken(GetBoundValue(item));
                     const char* frameRateText = frameRateToken ? Localize(frameRateToken) : nullptr;

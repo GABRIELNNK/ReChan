@@ -9,6 +9,7 @@
 #include "p3d/context.h"
 #include "snd/sound.h"
 #include "snd/rsevent.h"
+#include "extra/shadowcsm.h"
 
 #include <filesystem>
 #include <string>
@@ -343,6 +344,20 @@ static void SetFrameRateSetting(s32 v) {
 #endif
 }
 
+static s32 GetShadowQualitySetting() {
+#if MODERN_GRAPHICS
+    return (s32)ShadowCSM::GetQuality();
+#else
+    return 0;
+#endif
+}
+
+static void SetShadowQualitySetting(s32 v) {
+#if MODERN_GRAPHICS
+    ShadowCSM::SetQuality((ShadowQuality)v);
+#endif
+}
+
 static const SettingDef kSettingDefs[] = {
     { "general", "language",      0, 0, (s32)NumLanguages - 1, GetLanguageSetting,    SetLanguageSetting },
     { "audio", "music_volume",   100, 0, 100, GetMusicVolume,   SetMusicVolume },
@@ -355,6 +370,7 @@ static const SettingDef kSettingDefs[] = {
     { "display", "vsync",          1, 0,   1, GetVsyncSetting,       SetVsyncSetting },
     { "display", "frame_rate",    30, 0, 120, GetFrameRateSetting,   SetFrameRateSetting },
     { "display", "msaa",           0, 0,  16, GetMsaaSetting,        SetMsaaSetting },
+    { "display", "shadow_quality", 0, 0,   2, GetShadowQualitySetting, SetShadowQualitySetting },
 };
 
 static constexpr u32 kSettingDefCount = (u32)(sizeof(kSettingDefs) / sizeof(kSettingDefs[0]));

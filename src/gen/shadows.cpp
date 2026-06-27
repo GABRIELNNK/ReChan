@@ -6,6 +6,8 @@
 #include "pddi/pddidev.h"
 #include <vector>
 
+#include "extra/shadowcsm.h"
+
 static constexpr s32 COLLISION_SECTOR_MIN_HEIGHT = (s32)0x80000001;
 // PSX globals at gp+0xB74/gp+0xB78 (0x800DD4C0/0x800DD4C4).
 static constexpr s32 TREE_SHADOW_SCALE_BASE = 0x2CB4E;
@@ -145,6 +147,14 @@ void ShadowShow(const LVector& center, LVector* points, s32 pointCount) {
     if (!points || pointCount <= 0 || pointCount > 6 || !p3d::device || !p3d::context) {
         return;
     }
+
+#if MODERN_GRAPHICS
+    // CSM (Medium/High) replaces the blob shadow with a real shadow map cast
+    // onto world geometry; only Low quality still draws the PSX-style fan.
+    if (ShadowCSM::GetQuality() != SHADOW_QUALITY_LOW) {
+        return;
+    }
+#endif
 
     ShadowRenderVertex verts[7] = {};
     u16 indices[18] = {};

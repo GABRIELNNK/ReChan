@@ -127,10 +127,13 @@ public:
     s32 FindHardwareVolumes(class Thing* thing);
     const HardwareLight* GetPortLight(s32 slot) const;
 
+    // Primary directional light heading derived from camera facing (used for
+    // CSM sun direction under MODERN_GRAPHICS, see shadowcsm.cpp).
+    static void ComputeLightDir(LVector* direction);
+
 private:
     void SetupHLight(s32 slot, const LVector* direction, u32 colour);
     void SetHLightToOriginal(s32 slot);
-    static void ComputeLightDir(LVector* direction);
     static void ClampWithinRGBLimit(u32* r, u32* g, u32* b);
     static void ClampWithinNormalLimit(s32* x, s32* y, s32* z);
 };

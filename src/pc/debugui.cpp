@@ -35,6 +35,7 @@
 #include "extra/assetexporter.h"
 #include "extra/assetexporter_ui.h"
 #include "p3d/context.h"
+#include "extra/shadowcsm.h"
 
 static bool sEnabled = false;
 static bool sShowPlayer = false;
@@ -55,6 +56,10 @@ static char sLastConsoleNote[1024] = {};
 static bool sCursorForcedByDebugUI = false;
 static bool sShowAssetExporter = false;
 static bool sShowMods = false;
+#if MODERN_GRAPHICS
+static bool sShowShadows = false;
+static s32 sShadowDebugMode = 0;
+#endif
 #ifdef REAL_TEXTURE_RENDERING
 static bool sRealTextureMode = false;
 #endif
@@ -1535,6 +1540,9 @@ void DebugUI::Draw() {
             ImGui::MenuItem("Player", nullptr, &sShowPlayer);
             ImGui::MenuItem("Particles", nullptr, &sShowParticles);
             ImGui::MenuItem("Debugging", nullptr, &sShowDebugging);
+#if MODERN_GRAPHICS
+            ImGui::MenuItem("Shadows (CSM)", nullptr, &sShowShadows);
+#endif
             ImGui::MenuItem("Camera", nullptr, &sShowCamera);
             ImGui::MenuItem("Animation", nullptr, &sShowAnimation);
             ImGui::MenuItem("Audio", nullptr, &sShowAudio);
@@ -2094,6 +2102,69 @@ void DebugUI::Draw() {
         }
         ImGui::End();
     }
+
+#if MODERN_GRAPHICS
+    if (sShowShadows) {
+        if (ImGui::Begin("Shadows (CSM)", &sShowShadows)) {
+            static const char* kQualityNames[] = { "Low (blob shadow)", "Medium", "High" };
+            s32 qualityIdx = (s32)ShadowCSM::GetQuality();
+            ImGui::Text("Quality:");
+            for (s32 q = 0; q < 3; q++) {
+                if (ImGui::RadioButton(kQualityNames[q], qualityIdx == q)) {
+                    ShadowCSM::SetQuality((ShadowQuality)q);
+                }
+            }
+            ImGui::Separator();
+            ImGui::Text("Cascade resolution: %d", ShadowCSM::GetCascadeResolution());
+            ImGui::Text("Frame prepared: %s", ShadowCSM::IsFramePrepared() ? "yes" : "no");
+            ImGui::Text("Casters submitted last frame: %d", ShadowCSM::GetCasterCount());
+            if (qualityIdx == SHADOW_QUALITY_LOW) {
+                ImGui::TextDisabled("Quality is Low: CSM is inactive, legacy blob shadow is used instead.");
+            }
+            else if (ShadowCSM::GetCasterCount() == 0) {
+                ImGui::TextColored(ImVec4(1, 0.6f, 0.2f, 1),
+                    "No casters submitted -- check Model::Show's modelFlags 0x10/0x20 gating.");
+            }
+
+            ImGui::Separator();
+            ImGui::Text("Cascade depth maps (white = near light, black = far/empty):");
+            for (s32 i = 0; i < 3; i++) {
+                if (i > 0) {
+                    ImGui::SameLine();
+                }
+                ImGui::BeginGroup();
+                ImGui::Text("Cascade %d", i);
+                u32 handle = ShadowCSM::GetCascadeTextureHandle(i);
+                if (handle != 0) {
+                    ImGui::Image((ImTextureID)(u64)handle, ImVec2(192, 192));
+                }
+                else {
+                    ImGui::TextDisabled("(not created)");
+                }
+                ImGui::EndGroup();
+            }
+
+            ImGui::Separator();
+            ImGui::Text("Debug visualization:");
+            ImGui::RadioButton("Off##shadowdbg", &sShadowDebugMode, 0);
+            ImGui::SameLine();
+            ImGui::RadioButton("Tint by cascade##shadowdbg", &sShadowDebugMode, 1);
+            ImGui::SameLine();
+            ImGui::RadioButton("Force-darken receivers##shadowdbg", &sShadowDebugMode, 2);
+            ImGui::TextWrapped(
+                "Tint by cascade: every shadow-receiving fragment (world block geometry) is "
+                "colored red/green/blue by which cascade it sampled -- if you see no tint at "
+                "all on world geometry, uReceiveShadows/uWorldMatrix wiring is the problem, "
+                "not the depth comparison. Force-darken: every receiving fragment is darkened "
+                "unconditionally, regardless of the actual depth test -- if this also shows "
+                "nothing, world geometry isn't being marked as a shadow receiver at all.");
+            if (p3d::context) {
+                p3d::context->SetShadowDebugMode(sShadowDebugMode);
+            }
+        }
+        ImGui::End();
+    }
+#endif
 
     if (sShowCamera && g_game) {
         if (ImGui::Begin("Camera", &sShowCamera)) {

@@ -67,6 +67,7 @@ u8* RP_FixUpPolysCBF_CL(tPrimGeom* geometry, void* view, u32 loopIndex, u32 poly
 
 int RP_ZCullGClip(tGeometry* geometry, const LVector* drawPos = nullptr);
 int RP_ZCullGMFog(tGeometry* geometry, const LVector* drawPos, u16 fogNear, u16 fogFar, u32 fogColour);
+pddiPrimBuffer* BuildUnculledPrimBufferFromPrimGeom(const tPrimGeom* geom);
 
 // Legacy host bridge for non-block call sites that still consume a raw
 // pddiPrimBuffer instead of owning a reversed tPrimGeom object.

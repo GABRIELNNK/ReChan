@@ -18,4 +18,8 @@ public:
 
     // Bind for rendering on a texture unit
     virtual void Bind(int unit) = 0;
+
+    // Backend-native texture handle (GL texture id on this backend), for
+    // debug UI previews (e.g. ImGui::Image). 0 if not applicable.
+    virtual unsigned int GetNativeHandle() const { return 0; }
 };

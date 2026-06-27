@@ -47,6 +47,8 @@
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
 
+#include "extra/shadowcsm.h"
+
 static void UploadRawTextureToWorldVRAM(s16 x, s16 y, s16 w, s16 h, const u8* raw) {
     if (!g_game || !g_game->GetWorld()) {
         return;
@@ -3897,6 +3899,19 @@ static void DrawEntityList(ccList& list, u16 blockNum, u32 vramHandle) {
     }
 }
 
+#if MODERN_GRAPHICS
+static void DrawEntityCasterList(ccList& list, u16 blockNum, u32 vramHandle) {
+    for (ccMinNode* n = list.head; n; n = n->next) {
+        Thing* thing = static_cast<Thing*>(n);
+        if (thing->blockNum == blockNum && thing->model) {
+            p3d::context->SetVRAMHandle(vramHandle);
+            p3d::context->SetTexInfoOverride(false, 0);
+            thing->Draw();
+        }
+    }
+}
+#endif
+
 // DrawEverythingHandler__FP7Handler (GAME.CPP:2211, 0x8002A98C)
 // Reversed from PSX: builds draw list from loaded blocks, selection-sorts by distSq
 // DESCENDING (farthest first for back-to-front rendering), applies OffsetToPreventSeams,
@@ -3976,6 +3991,44 @@ void World::DrawEverythingHandler(const LVector* playerPos) {
     BeginModelShadowQueue();
     ComEffect_ClearLateRenderQueue();
 
+#if MODERN_GRAPHICS
+    if (ShadowCSM::IsFramePrepared()) {
+        ShadowCSM::BeginCasterPrepass();
+        for (u32 i = 0; i < count; i++) {
+            DrawEntry& entry = drawArray[i];
+            const u16 bn = entry.block->blockNum;
+            if (!blockMgr.InDrawList(bn)) {
+                continue;
+            }
+
+            LVector localPos;
+            localPos.x = entry.block->posX;
+            localPos.y = entry.block->posY;
+            localPos.z = entry.block->posZ;
+            OffsetToPreventSeams(localPos, *playerPos);
+
+            p3d::context->SetTexInfoOverride(false, 0);
+            p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+            p3d::context->SetCullMode(PDDI_CULL_NONE);
+            ShadowCSM::DrawBlockCasterIntoCascades(entry.block, &localPos);
+
+            if (!g_ai) {
+                continue;
+            }
+
+            ShadowCSM::SetCasterWorldOffset((f32)(localPos.x - entry.block->posX),
+                                            (f32)(localPos.y - entry.block->posY),
+                                            (f32)(localPos.z - entry.block->posZ));
+            DrawEntityCasterList(g_ai->humanoidList, bn, vramHandle);
+            DrawEntityCasterList(g_ai->inactivePickupList, bn, vramHandle);
+            DrawEntityCasterList(g_ai->pickupList, bn, vramHandle);
+            DrawEntityCasterList(g_ai->moveList, bn, vramHandle);
+        }
+        ShadowCSM::SetCasterWorldOffset(0.0f, 0.0f, 0.0f);
+        ShadowCSM::EndCasterPrepass();
+    }
+#endif
+
     // Pass 1: render visible block entities + geometry.
     for (u32 i = 0; i < visibleCount; i++) {
         DrawEntry& entry = drawArray[i];
@@ -4003,12 +4056,21 @@ void World::DrawEverythingHandler(const LVector* playerPos) {
 
             // PSX: DrawLoop for each entity list
             if (g_ai) {
+#if MODERN_GRAPHICS
+                p3d::context->SetReceiveShadows(false);
+                ShadowCSM::SetCasterWorldOffset((f32)(localPos.x - entry.block->posX),
+                                                (f32)(localPos.y - entry.block->posY),
+                                                (f32)(localPos.z - entry.block->posZ));
+#endif
                 ComEffect_BeginLateRenderQueue(static_cast<s32>(bn));
                 DrawEntityList(g_ai->humanoidList, bn, vramHandle);
                 DrawEntityList(g_ai->inactivePickupList, bn, vramHandle);
                 DrawEntityList(g_ai->pickupList, bn, vramHandle);
                 DrawEntityList(g_ai->moveList, bn, vramHandle);
                 ComEffect_EndLateRenderQueue();
+#if MODERN_GRAPHICS
+                ShadowCSM::SetCasterWorldOffset(0.0f, 0.0f, 0.0f);
+#endif
             }
 
             // Block geometry pass for this block.
@@ -4017,8 +4079,14 @@ void World::DrawEverythingHandler(const LVector* playerPos) {
             p3d::context->SetBlendMode(PDDI_BLEND_NONE);
             p3d::context->SetCullMode(PDDI_CULL_NONE);
 
+#if MODERN_GRAPHICS
+            p3d::context->SetReceiveShadows(true);
+#endif
             p3d::context->SetWorldMatrix(blockBaseWorld);
             entry.block->Draw(&localPos);
+#if MODERN_GRAPHICS
+            p3d::context->SetReceiveShadows(false);
+#endif
 
             // Flush queued model shadows after block geometry.
             FlushModelShadowQueue();

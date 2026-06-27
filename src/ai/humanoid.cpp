@@ -37,6 +37,7 @@
 #include "extra/cheats.h"
 #endif
 
+#include "extra/shadowcsm.h"
 
 static constexpr s32 HUMANOID_ANIM_RUN = 2;
 static constexpr s32 HUMANOID_ANIM_DIVE_ROLL = 90;
@@ -1276,6 +1277,22 @@ void Humanoid::Draw() {
 
     LVector drawPos = pos;
     LVector drawOrient = orientation;
+
+#if MODERN_GRAPHICS
+    if (ShadowCSM::IsCasterPrepass()) {
+        if (model) {
+            Model* m = static_cast<Model*>(model);
+            m->posX = drawPos.x;
+            m->posY = drawPos.y;
+            m->posZ = drawPos.z;
+            m->rotX = (u16)(drawOrient.x & 0xFFFF);
+            m->rotY = (u16)(drawOrient.y & 0xFFFF);
+            m->rotZ = (u16)(drawOrient.z & 0xFFFF);
+            m->Show(0);
+        }
+        return;
+    }
+#endif
 
 #if HIGH_FPS_PLAY_PRESENTATION
     const bool humanoidInPlay =

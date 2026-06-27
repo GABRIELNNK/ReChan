@@ -140,11 +140,14 @@ void Door::DeleteModel() {
 void Door::Reset() {
     MARKFUNCTION(0x8001AEC8);
 
-    // PSX: hub level (7) state 5, else  state 0
+    // PSX: hub level (7) state 5, else state 0 for guarded doors.
     World* world = g_game ? g_game->GetWorld() : nullptr;
     s32 levelID = world ? world->GetCurLevelID() : 0;
     if (levelID == 7) {
         doorState = 5;
+    }
+    else if (killThingsCRC == 0) {
+        doorState = 1;
     }
     else {
         doorState = 0;

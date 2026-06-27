@@ -89,6 +89,9 @@ enum EntryBinding : u8 {
     EntryBinding_DisplayVsync,
     EntryBinding_DisplayFrameRate,
     EntryBinding_DisplayMsaa,
+#if MODERN_GRAPHICS
+    EntryBinding_DisplayShadowQuality,
+#endif
 #if NEW_CHEATS
     EntryBinding_CheatAllDragons,
     EntryBinding_CheatAllLevels,

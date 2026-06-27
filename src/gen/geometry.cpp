@@ -1644,6 +1644,12 @@ u8* RP_FixUpPolysCBF_CL(tPrimGeom* geometry, void* view, u32 loopIndex, u32 poly
     return outCursor;
 }
 
+pddiPrimBuffer* BuildUnculledPrimBufferFromPrimGeom(const tPrimGeom* geom) {
+    bool usesSemiTrans = false;
+    u8 semiTransMode = 0;
+    return BuildPrimBufferFromPrimGeom(geom, nullptr, nullptr, &usesSemiTrans, &semiTransMode);
+}
+
 bool ExtractPrimGeomVerts(const u8* raw, u32 size,
                           std::vector<PrimGeomVertex>& vertsOut,
                           std::vector<u32>& indicesOut,

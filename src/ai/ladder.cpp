@@ -125,8 +125,17 @@ void Ladder::Reset() {
     MARKFUNCTION(0x80089F70);
     World* world = g_game ? g_game->GetWorld() : nullptr;
     s32 levelID = world ? world->GetCurLevelID() : 0;
-    // PSX Reset checks hatchTriggerCRC (field at +0xA4).
-    state = (hatchTriggerCRC != 0 && levelID == 7) ? 1 : 0;
+    // PSX Reset checks hatchTriggerCRC (field at +0xA4). Ladders without a
+    // death-check target are already usable and should not self-trigger on spawn.
+    if (hatchTriggerCRC != 0 && levelID == 7) {
+        state = 1;
+    }
+    else if (deathCheckCRC == 0) {
+        state = 2;
+    }
+    else {
+        state = 0;
+    }
     cutscenePending = 0;
     deathCountdown = 3;
 }

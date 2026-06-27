@@ -15,6 +15,8 @@
 #include "pc/log.h"
 #include <vector>
 
+#include "extra/shadowcsm.h"
+
 // Global Thing unique ID counter (PSX: gp+3868)
 u16 Thing::s_nextUniqueID = 0;
 
@@ -106,6 +108,12 @@ void Thing::Draw() {
         m->Show(0);
         return;
     }
+
+#if MODERN_GRAPHICS
+    if (ShadowCSM::IsCasterPrepass()) {
+        return;
+    }
+#endif
 
     // PC debug: draw wireframe box at thing position when no model is loaded
     // Box size: 300 wide, 768 tall (approximate humanoid collision box)

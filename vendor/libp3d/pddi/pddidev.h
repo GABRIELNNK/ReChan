@@ -13,6 +13,8 @@ struct pddiPrimBufferDesc;
 enum pddiRenderTargetFormat {
     PDDI_RENDER_TARGET_RGBA8,
     PDDI_RENDER_TARGET_RGBA16F,
+    // Depth-only target (no colour attachment), used for shadow-map passes.
+    PDDI_RENDER_TARGET_DEPTH,
 };
 
 class pddiRenderTarget : public pddiObject {
@@ -252,6 +254,23 @@ public:
     virtual void SetRealTextureMode(bool enabled) = 0;
     virtual bool IsRealTextureModeEnabled() const = 0;
     virtual void SetRealTextureRect(float offsetX, float offsetY, float sizeX, float sizeY) = 0;
+
+    // Shadow mapping (MODERN_GRAPHICS). When a shadow-caster pass is active,
+    // DrawPrimBuffer renders depth-only using lightVP*worldMatrix instead of
+    // the normal view/projection. SetReceiveShadows marks subsequent draws
+    // (world block geometry) as shadow receivers in the main pass; casters
+    // (characters/obstacles) leave it disabled. SetShadowCascades supplies
+    // the cascade depth textures/matrices/splits the main pass samples.
+    virtual void SetShadowCasterPass(bool enable, const Mat4& lightVP) = 0;
+    virtual void SetReceiveShadows(bool enable) = 0;
+    virtual void SetShadowCascades(pddiTexture* const* depthTextures, const Mat4* lightVP,
+                                   const float* splits, int count) = 0;
+    // World-space camera position, used by the main pass to measure distance
+    // for cascade selection (avoids relying on reversed-Z gl_FragCoord.z).
+    virtual void SetCameraWorldPos(float x, float y, float z) = 0;
+    // Debug visualization for the DebugUI Shadows panel: 0=off,
+    // 1=tint receivers by selected cascade index, 2=force-darken receivers.
+    virtual void SetShadowDebugMode(int mode) = 0;
 };
 
 // pddiGamepad - abstract gamepad/controller interface

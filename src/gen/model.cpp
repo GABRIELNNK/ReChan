@@ -28,6 +28,8 @@
 #include <algorithm>
 #include <vector>
 
+#include "extra/shadowcsm.h"
+
 // Draws a mesh buffer, using the real-texture rendering path (one bound real
 // 2D texture per material, sub-range draws) when it's enabled and the mesh
 // has grouped index ranges; otherwise falls back to the single legacy draw
@@ -64,6 +66,18 @@ static void DrawTexturedMesh(pddiPrimBuffer* buffer
 
     p3d::context->DrawPrimBuffer(buffer);
 }
+
+#if MODERN_GRAPHICS
+static bool ShouldReceiveModelShadows(const Model* model, const Thing* owner) {
+    return model
+        && owner
+        && !ShadowCSM::IsCasterPrepass()
+        && ShadowCSM::GetQuality() != SHADOW_QUALITY_LOW
+        && (owner->flags & 0x80u) == 0u
+        && (owner->flags & 0x100u) == 0u
+        && (model->modelFlags & 0x20u) == 0u;
+}
+#endif
 
 static const u8 kStreeMirrorSwapPairs[] = {
     2, 6,
@@ -1704,8 +1718,40 @@ void SModel::Show(u32 flags) {
     const Mat4 savedWorld = p3d::context->GetWorldMatrix();
     p3d::context->SetWorldMatrix(world);
 
+#if MODERN_GRAPHICS
+    if (ShadowCSM::IsCasterPrepass()) {
+        if ((backPtr->flags & 0x80u) == 0u && (modelFlags & 0x10u) != 0u && (modelFlags & 0x20u) == 0u) {
+            ShadowCSM::DrawCasterIntoCascades(drawable, flags);
+        }
+
+        if (ambientLight) {
+            RestoreWorldAmbientLightToPort();
+        }
+        if (g_environmentManager) {
+            for (s32 slot = 0; slot < 3; slot++) {
+                if (addedHwLights[slot]) {
+                    g_environmentManager->lighting.RemoveLightFromPort(slot);
+                }
+            }
+        }
+        p3d::context->SetWorldMatrix(savedWorld);
+        return;
+    }
+#endif
+
     // PSX: calls drawable->Display(flags) through vtable
+#if MODERN_GRAPHICS
+    const bool receiveMappedShadows = ShouldReceiveModelShadows(this, backPtr);
+    if (receiveMappedShadows) {
+        p3d::context->SetReceiveShadows(true);
+    }
+#endif
     drawable->Display(flags);
+#if MODERN_GRAPHICS
+    if (receiveMappedShadows) {
+        p3d::context->SetReceiveShadows(false);
+    }
+#endif
 
     if (ambientLight) {
         RestoreWorldAmbientLightToPort();
@@ -2073,7 +2119,41 @@ void GModel::Show(u32 flags) {
     p3d::context->SetWorldMatrix(world);
 
     const bool applyGeoLighting = ambientLight || (hwLights && hwLightCount > 0);
-    drawable->Display(applyGeoLighting ? (flags | kDisplayFlagApplyGeoLighting) : flags);
+    const u32 displayFlags = applyGeoLighting ? (flags | kDisplayFlagApplyGeoLighting) : flags;
+
+#if MODERN_GRAPHICS
+    if (ShadowCSM::IsCasterPrepass()) {
+        if ((modelFlags & 0x10u) != 0u && (modelFlags & 0x20u) == 0u) {
+            ShadowCSM::DrawCasterIntoCascades(drawable, displayFlags);
+        }
+
+        if (ambientLight) {
+            RestoreWorldAmbientLightToPort();
+        }
+        if (g_environmentManager) {
+            for (s32 slot = 0; slot < 3; slot++) {
+                if (addedHwLights[slot]) {
+                    g_environmentManager->lighting.RemoveLightFromPort(slot);
+                }
+            }
+        }
+        p3d::context->SetWorldMatrix(savedWorld);
+        return;
+    }
+#endif
+
+#if MODERN_GRAPHICS
+    const bool receiveMappedShadows = ShouldReceiveModelShadows(this, backPtr);
+    if (receiveMappedShadows) {
+        p3d::context->SetReceiveShadows(true);
+    }
+#endif
+    drawable->Display(displayFlags);
+#if MODERN_GRAPHICS
+    if (receiveMappedShadows) {
+        p3d::context->SetReceiveShadows(false);
+    }
+#endif
 
     if (ambientLight) {
         RestoreWorldAmbientLightToPort();
@@ -2212,7 +2292,41 @@ void EModel::Show(u32 flags) {
     p3d::context->SetWorldMatrix(world);
 
     const bool applyGeoLighting = ambientLight || (hwLights && hwLightCount > 0);
-    drawable->Display(applyGeoLighting ? (flags | kDisplayFlagApplyGeoLighting) : flags);
+    const u32 displayFlags = applyGeoLighting ? (flags | kDisplayFlagApplyGeoLighting) : flags;
+
+#if MODERN_GRAPHICS
+    if (ShadowCSM::IsCasterPrepass()) {
+        if ((modelFlags & 0x10u) != 0u && (modelFlags & 0x20u) == 0u) {
+            ShadowCSM::DrawCasterIntoCascades(drawable, displayFlags);
+        }
+
+        if (ambientLight) {
+            RestoreWorldAmbientLightToPort();
+        }
+        if (g_environmentManager) {
+            for (s32 slot = 0; slot < 3; slot++) {
+                if (addedHwLights[slot]) {
+                    g_environmentManager->lighting.RemoveLightFromPort(slot);
+                }
+            }
+        }
+        p3d::context->SetWorldMatrix(savedWorld);
+        return;
+    }
+#endif
+
+#if MODERN_GRAPHICS
+    const bool receiveMappedShadows = ShouldReceiveModelShadows(this, backPtr);
+    if (receiveMappedShadows) {
+        p3d::context->SetReceiveShadows(true);
+    }
+#endif
+    drawable->Display(displayFlags);
+#if MODERN_GRAPHICS
+    if (receiveMappedShadows) {
+        p3d::context->SetReceiveShadows(false);
+    }
+#endif
 
     if (ambientLight) {
         RestoreWorldAmbientLightToPort();

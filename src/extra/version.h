@@ -1,4 +1,6 @@
 #pragma once
+// Game title
+#define JCS_TITLE "ReChan"
 #define GAME_VERSION "v0.9.8"
 #define UPDATE_REPO_OWNER "gennariarmando"
 #define UPDATE_REPO_NAME "rechan"

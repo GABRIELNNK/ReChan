@@ -32,6 +32,8 @@
 #include "extra/autoupdater.h"
 #endif
 
+#include "extra/version.h"
+
 #include <vector>
 #include <algorithm>
 
@@ -158,9 +160,9 @@ int main(int argc, char** argv) {
     tPlatform* platform = tPlatform::Create();
 
     tContextInitData init;
-    init.xSize = JCSM_TARGET_WIDTH;
-    init.ySize = JCSM_TARGET_HEIGHT;
-    init.title = JCSM_TITLE;
+    init.xSize = JCS_TARGET_WIDTH;
+    init.ySize = JCS_TARGET_HEIGHT;
+    init.title = JCS_TITLE;
 
     tContext* ctx = platform->CreateContext(init);
     if (!ctx)
@@ -316,7 +318,7 @@ int main(int argc, char** argv) {
         titleAccumSec += g_time->deltaTime;
         if (titleAccumSec >= 1.0f) {
             char titleBuf[128];
-            snprintf(titleBuf, sizeof(titleBuf), "%s - %.1f fps (%.2f ms)", JCSM_TITLE, g_time->fps, g_time->deltaTime * 1000.0f);
+            snprintf(titleBuf, sizeof(titleBuf), "%s - %.1f fps (%.2f ms)", JCS_TITLE, g_time->fps, g_time->deltaTime * 1000.0f);
             p3d::display->SetTitle(titleBuf);
             titleAccumSec = 0.0f;
         }
