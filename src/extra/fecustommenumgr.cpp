@@ -601,7 +601,7 @@ void feCustomMenuMgr::BuildPages() {
         Button("FE_DIS", EntryEvent_GoPage, MenuPage_Display),
         Button("FE_SND", EntryEvent_GoPage, MenuPage_Sound),
         Button("FE_UPD", EntryEvent_GoPage, MenuPage_Update),
-        Button("FE_CRE", EntryEvent_Credits),
+        //Button("FE_CRE", EntryEvent_Credits),
 #if NEW_CHEATS
         Button("FE_CHEATS", EntryEvent_GoPage, MenuPage_Cheats),
 #endif
