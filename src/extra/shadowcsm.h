@@ -37,6 +37,8 @@ public:
     static s32 GetCascadeResolution();
     static s32 GetCasterCount();
     static u32 GetCascadeTextureHandle(s32 index);
+    static const char* GetCascadeDepthFormatName();
+    static const char* GetFilterQualityName();
 };
 
 #endif // MODERN_GRAPHICS

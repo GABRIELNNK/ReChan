@@ -2116,6 +2116,8 @@ void DebugUI::Draw() {
             }
             ImGui::Separator();
             ImGui::Text("Cascade resolution: %d", ShadowCSM::GetCascadeResolution());
+            ImGui::Text("Depth format: %s", ShadowCSM::GetCascadeDepthFormatName());
+            ImGui::Text("Filter: %s", ShadowCSM::GetFilterQualityName());
             ImGui::Text("Frame prepared: %s", ShadowCSM::IsFramePrepared() ? "yes" : "no");
             ImGui::Text("Casters submitted last frame: %d", ShadowCSM::GetCasterCount());
             if (qualityIdx == SHADOW_QUALITY_LOW) {

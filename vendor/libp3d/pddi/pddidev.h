@@ -14,7 +14,9 @@ enum pddiRenderTargetFormat {
     PDDI_RENDER_TARGET_RGBA8,
     PDDI_RENDER_TARGET_RGBA16F,
     // Depth-only target (no colour attachment), used for shadow-map passes.
-    PDDI_RENDER_TARGET_DEPTH,
+    PDDI_RENDER_TARGET_DEPTH24,
+    PDDI_RENDER_TARGET_DEPTH32F,
+    PDDI_RENDER_TARGET_DEPTH = PDDI_RENDER_TARGET_DEPTH32F,
 };
 
 class pddiRenderTarget : public pddiObject {
@@ -212,6 +214,19 @@ public:
     virtual pddiRenderTarget* CreateRenderTarget(int width, int height,
                                                   pddiRenderTargetFormat format) = 0;
     virtual bool SetRenderTarget(pddiRenderTarget* target) = 0;
+
+    virtual void DrawFilledCircle(pddiBaseShader* shader,
+                          float centerX, float centerY,
+                          float radiusX, float radiusY,
+                          float u0, float v0, float u1, float v1,
+                          int segments) = 0;
+
+    virtual void DrawCircle(pddiBaseShader* shader,
+                    float centerX, float centerY,
+                    float radiusX, float radiusY,
+                    float thickness,
+                    float u0, float v0, float u1, float v1,
+                    int segments) = 0;
 
     // Immediate-mode textured quad (for UI / debug rendering)
     virtual void DrawQuad(pddiBaseShader* shader,

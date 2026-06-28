@@ -205,6 +205,7 @@ private:
     int ClampMSAASamples(int samples) const;
     void SyncFramebufferSize();
     void QueryFramebufferSize(int& width, int& height) const;
+    void PresentBlackFrame();
 
     static void FramebufferSizeCallback(GLFWwindow* window, int width, int height);
     static void WindowFocusCallback(GLFWwindow* window, int focused);
@@ -249,6 +250,19 @@ public:
     pddiRenderTarget* CreateRenderTarget(int width, int height,
                                          pddiRenderTargetFormat format) override;
     bool SetRenderTarget(pddiRenderTarget* target) override;
+
+    void DrawFilledCircle(pddiBaseShader* shader,
+                                     float centerX, float centerY,
+                                     float radiusX, float radiusY,
+                                     float u0, float v0, float u1, float v1,
+                                     int segments) override;
+
+    void DrawCircle(pddiBaseShader* shader,
+                               float centerX, float centerY,
+                               float radiusX, float radiusY,
+                               float thickness,
+                               float u0, float v0, float u1, float v1,
+                               int segments) override;
 
     void DrawQuad(pddiBaseShader* shader,
                   float x, float y, float w, float h,
@@ -303,6 +317,7 @@ private:
     u32 quadVBO = 0;
     u32 program3D = 0;
     u32 shadowDepthProgram = 0;
+    u32 shadowCompareSampler = 0;
     bool shadowCasterPassActive = false;
     Mat4 shadowCasterLightVP;
     bool receiveShadowsEnabled = false;
@@ -313,9 +328,9 @@ private:
     float shadowCascadeBlendDistances[kShadowCascadeCount] = {};
     s32 shadowCascadeCount = 0;
     s32 shadowFilterQuality = 0;
-    float shadowBias[kShadowCascadeCount] = { 0.00072f, 0.00050f, 0.00036f };
-    static constexpr float shadowBiasMedium[kShadowCascadeCount] = { 0.00082f, 0.00058f, 0.00042f };
-    static constexpr float shadowBiasHigh[kShadowCascadeCount] = { 0.00064f, 0.00044f, 0.00032f };
+    float shadowBias[kShadowCascadeCount] = { 0.00125f, 0.00092f, 0.00070f };
+    static constexpr float shadowBiasMedium[kShadowCascadeCount] = { 0.00145f, 0.00105f, 0.00078f };
+    static constexpr float shadowBiasHigh[kShadowCascadeCount] = { 0.00115f, 0.00084f, 0.00064f };
     float cameraWorldPos[3] = {};
     s32 shadowDebugMode = 0;
     u32 gouraudVAO = 0;

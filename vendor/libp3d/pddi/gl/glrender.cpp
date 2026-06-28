@@ -210,9 +210,9 @@ uniform int uShadowCascadeCount;
 uniform mat4 uLightVP[3];
 uniform float uCascadeSplits[3];
 uniform float uCascadeBlendDistances[3];
-uniform sampler2D uShadowMap0;
-uniform sampler2D uShadowMap1;
-uniform sampler2D uShadowMap2;
+uniform sampler2DShadow uShadowMap0;
+uniform sampler2DShadow uShadowMap1;
+uniform sampler2DShadow uShadowMap2;
 uniform int uShadowFilterQuality;
 uniform float uShadowBias[3];
 // Debug visualization (DebugUI Shadows panel): 0=off, 1=tint receivers by
@@ -220,20 +220,44 @@ uniform float uShadowBias[3];
 uniform int uShadowDebugMode;
 int gShadowCascade = -1;
 
-// Cascade depth textures use this renderer's reversed-Z convention (near=1,
-// far=0; see glContext::EnableZBuffer's GL_GEQUAL + glClearDepth(0.0)), so a
-// surface is shadowed when the stored occluder depth is *greater* (closer to
-// the light) than the receiver's own light-space depth.
-float ReadShadowDepth(int cascade, vec2 uv) {
-    if (cascade == 0) return texture(uShadowMap0, uv).r;
-    if (cascade == 1) return texture(uShadowMap1, uv).r;
-    return texture(uShadowMap2, uv).r;
-}
-
 ivec2 ShadowTextureSize(int cascade) {
     if (cascade == 0) return textureSize(uShadowMap0, 0);
     if (cascade == 1) return textureSize(uShadowMap1, 0);
     return textureSize(uShadowMap2, 0);
+}
+
+float SampleShadowLit(int cascade, vec2 uv, float compareDepth) {
+    if (cascade == 0) return texture(uShadowMap0, vec3(uv, compareDepth));
+    if (cascade == 1) return texture(uShadowMap1, vec3(uv, compareDepth));
+    return texture(uShadowMap2, vec3(uv, compareDepth));
+}
+
+vec2 ReceiverPlaneDepthGradient(vec2 uv, float receiverDepth) {
+    vec2 uvDx = dFdx(uv);
+    vec2 uvDy = dFdy(uv);
+    float depthDx = dFdx(receiverDepth);
+    float depthDy = dFdy(receiverDepth);
+    float det = uvDx.x * uvDy.y - uvDx.y * uvDy.x;
+    if (abs(det) < 1e-8) {
+        return vec2(0.0);
+    }
+
+    float invDet = 1.0 / det;
+    return vec2((depthDx * uvDy.y - depthDy * uvDx.y) * invDet,
+                (depthDy * uvDx.x - depthDx * uvDy.x) * invDet);
+}
+
+float ShadowCascadeCoverage(int cascade, vec4 lightClip) {
+    vec3 ndc = lightClip.xyz / lightClip.w;
+    vec2 uv = ndc.xy * 0.5 + 0.5;
+    float receiverDepth = ndc.z;
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || receiverDepth < 0.0 || receiverDepth > 1.0) {
+        return 0.0;
+    }
+
+    float borderDistance = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
+    float borderFadeWidth = (uShadowFilterQuality >= 2) ? 0.040 : 0.055;
+    return smoothstep(0.0, borderFadeWidth, borderDistance);
 }
 
 float SampleShadowCascade(int cascade, vec4 lightClip) {
@@ -245,33 +269,62 @@ float SampleShadowCascade(int cascade, vec4 lightClip) {
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || receiverDepth < 0.0 || receiverDepth > 1.0) {
         return 1.0;
     }
-    float bias = uShadowBias[cascade];
-    if (uShadowFilterQuality <= 0) {
-        float shadowMapDepth = ReadShadowDepth(cascade, uv);
-        return (shadowMapDepth - bias > receiverDepth) ? 0.45 : 1.0;
-    }
 
     ivec2 mapSize = ShadowTextureSize(cascade);
     vec2 texel = 1.0 / vec2(max(mapSize.x, 1), max(mapSize.y, 1));
-    int radius = (uShadowFilterQuality >= 2) ? 2 : 1;
+    vec2 depthGradient = ReceiverPlaneDepthGradient(uv, receiverDepth);
+    float screenDepthSlope = abs(dFdx(receiverDepth)) + abs(dFdy(receiverDepth));
+    float gradientMagnitude = abs(depthGradient.x) + abs(depthGradient.y);
+    float kernelRadius = (uShadowFilterQuality >= 2) ? 4.0 : 2.0;
+    float receiverPlaneBias = min(gradientMagnitude * max(texel.x, texel.y) *
+                                  kernelRadius * 0.35,
+                                  0.00035);
+    float slopeBias = min(screenDepthSlope * (uShadowFilterQuality >= 2 ? 0.9 : 0.6),
+                          0.00045);
+    float bias = min(uShadowBias[cascade] + receiverPlaneBias + slopeBias, 0.0022);
+
+    if (uShadowFilterQuality <= 0) {
+        float lit = SampleShadowLit(cascade, uv, receiverDepth + bias);
+        return mix(0.45, 1.0, lit);
+    }
+
+    int radius = (uShadowFilterQuality >= 2) ? 4 : 2;
     float lit = 0.0;
-    float taps = 0.0;
-    for (int y = -2; y <= 2; y++) {
-        for (int x = -2; x <= 2; x++) {
+    float totalWeight = 0.0;
+    for (int y = -4; y <= 4; y++) {
+        for (int x = -4; x <= 4; x++) {
             if (abs(x) > radius || abs(y) > radius) {
                 continue;
             }
-            float shadowMapDepth = ReadShadowDepth(cascade, uv + vec2(x, y) * texel);
             float weight = float((radius + 1 - abs(x)) * (radius + 1 - abs(y)));
-            lit += ((shadowMapDepth - bias > receiverDepth) ? 0.45 : 1.0) * weight;
-            taps += weight;
+            vec2 sampleUv = uv + vec2(x, y) * texel;
+            float tapPlaneBias = abs(clamp(dot(depthGradient, sampleUv - uv),
+                                           -0.00045, 0.00045));
+            float tapBias = min(bias + tapPlaneBias * 0.5, 0.0026);
+            lit += SampleShadowLit(cascade, sampleUv, receiverDepth + tapBias) * weight;
+            totalWeight += weight;
         }
     }
-    return lit / max(taps, 1.0);
+    return mix(0.45, 1.0, lit / max(totalWeight, 1.0));
+}
+
+float SampleCoveredCascade(int cascade, out float coverage) {
+    vec4 lightClip = uLightVP[cascade] * vec4(vWorldPos, 1.0);
+    coverage = ShadowCascadeCoverage(cascade, lightClip);
+    if (coverage <= 0.0) {
+        return 1.0;
+    }
+    return SampleShadowCascade(cascade, lightClip);
 }
 
 float ComputeShadowFactor() {
     if (uReceiveShadows == 0 || uShadowCascadeCount <= 0) {
+        return 1.0;
+    }
+
+    float maxShadowDepth = uCascadeSplits[uShadowCascadeCount - 1];
+    float fadeDistance = max(maxShadowDepth * 0.10, 1200.0);
+    if (vViewDepth >= maxShadowDepth) {
         return 1.0;
     }
 
@@ -281,15 +334,52 @@ float ComputeShadowFactor() {
             if (uShadowDebugMode == 2) {
                 return 0.3;
             }
-            float shadow = SampleShadowCascade(i, uLightVP[i] * vec4(vWorldPos, 1.0));
+
+            float coverage = 0.0;
+            float shadow = SampleCoveredCascade(i, coverage);
+
+            // If the depth-selected cascade does not actually cover this
+            // receiver, walk outward to larger cascades. Large vertical walls
+            // can be close in camera depth while their shadow projection lives
+            // in a broader cascade; treating the selected cascade as final
+            // creates the visible hard "no shadow until I get near" cutoff.
+            int fallbackCascade = i;
+            float fallbackCoverage = coverage;
+            float fallbackShadow = shadow;
+            for (int j = i + 1; j < uShadowCascadeCount; j++) {
+                float candidateCoverage = 0.0;
+                float candidateShadow = SampleCoveredCascade(j, candidateCoverage);
+                if (candidateCoverage > fallbackCoverage) {
+                    fallbackCascade = j;
+                    fallbackCoverage = candidateCoverage;
+                    fallbackShadow = candidateShadow;
+                }
+                if (candidateCoverage >= 0.999) {
+                    break;
+                }
+            }
+
+            if (fallbackCascade != i) {
+                gShadowCascade = fallbackCascade;
+                shadow = (coverage > 0.0) ? mix(fallbackShadow, shadow, coverage) : fallbackShadow;
+            }
+
             if (i < uShadowCascadeCount - 1) {
                 float blendDistance = max(uCascadeBlendDistances[i], 0.0);
                 float blendStart = uCascadeSplits[i] - blendDistance;
                 if (blendDistance > 0.0 && vViewDepth > blendStart) {
-                    float nextShadow = SampleShadowCascade(i + 1, uLightVP[i + 1] * vec4(vWorldPos, 1.0));
+                    float nextCoverage = 0.0;
+                    float nextShadow = SampleCoveredCascade(i + 1, nextCoverage);
+                    if (nextCoverage <= 0.0) {
+                        nextShadow = shadow;
+                    }
                     float blend = smoothstep(blendStart, uCascadeSplits[i], vViewDepth);
                     shadow = mix(shadow, nextShadow, blend);
                 }
+            }
+            if (i == uShadowCascadeCount - 1) {
+                float fadeStart = maxShadowDepth - fadeDistance;
+                shadow = mix(shadow, 1.0, smoothstep(fadeStart, maxShadowDepth, vViewDepth));
             }
             return shadow;
         }
@@ -721,6 +811,12 @@ void glPrimBuffer::SetupVertexAttribs() {
 
 // glTexture
 
+static bool IsDepthRenderTargetFormat(pddiRenderTargetFormat format) {
+    return format == PDDI_RENDER_TARGET_DEPTH24 ||
+           format == PDDI_RENDER_TARGET_DEPTH32F ||
+           format == PDDI_RENDER_TARGET_DEPTH;
+}
+
 static void ApplyTextureFilterMode(u32 handle, pddiFilterMode mode) {
     if (!handle) {
         return;
@@ -780,25 +876,32 @@ bool glTexture::SetRenderTargetStorage(int w, int h, pddiRenderTargetFormat form
     if (w <= 0 || h <= 0) return false;
     width = w;
     height = h;
-    if (format == PDDI_RENDER_TARGET_DEPTH) {
-        bpp = 24;
+    if (IsDepthRenderTargetFormat(format)) {
+        const bool useFloatDepth = format != PDDI_RENDER_TARGET_DEPTH24;
+        bpp = useFloatDepth ? 32 : 24;
         alphaDepth = 0;
         if (handle) glDeleteTextures(1, &handle);
         glGenTextures(1, &handle);
         glBindTexture(GL_TEXTURE_2D, handle);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, w, h, 0,
-                     GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        const GLint internalFormat = useFloatDepth ? GL_DEPTH_COMPONENT32F : GL_DEPTH_COMPONENT24;
+        const GLenum uploadType = useFloatDepth ? GL_FLOAT : GL_UNSIGNED_INT;
+        glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, w, h, 0,
+                     GL_DEPTH_COMPONENT, uploadType, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+        // Reversed-Z: far/empty depth is 0, which should sample as fully lit.
+        const GLfloat borderDepth[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+        glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderDepth);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
         // Replicate depth into G/B so debug-UI previews (ImGui::Image) show
         // grayscale instead of red-only; doesn't affect the .r sampling the
         // shadow shader uses.
         const GLint depthSwizzle[4] = { GL_RED, GL_RED, GL_RED, GL_ONE };
         glTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_RGBA, depthSwizzle);
         glBindTexture(GL_TEXTURE_2D, 0);
-        filterMode = PDDI_FILTER_NONE;
+        filterMode = PDDI_FILTER_BILINEAR;
         return handle != 0;
     }
 
@@ -839,7 +942,7 @@ bool glRenderTarget::Resize(int w, int h) {
     GLint previous = 0;
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previous);
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
-    if (format == PDDI_RENDER_TARGET_DEPTH) {
+    if (IsDepthRenderTargetFormat(format)) {
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D,
                                texture->GetGLHandle(), 0);
         glDrawBuffer(GL_NONE);
@@ -1331,34 +1434,65 @@ void glDisplay::SetResolution(int w, int h) {
     if (!window)
         return;
 
+    const bool wasVisible = glfwGetWindowAttrib(window, GLFW_VISIBLE) == GLFW_TRUE;
+
+    if (wasVisible) {
+        glfwHideWindow(window);
+    }
+
     if (IsFullscreen()) {
         GLFWmonitor* monitor = glfwGetWindowMonitor(window);
         const GLFWvidmode* vidMode = glfwGetVideoMode(monitor);
-        glfwSetWindowMonitor(window, monitor, 0, 0, w, h, vidMode->refreshRate);
+
+        glfwSetWindowMonitor(
+            window,
+            monitor,
+            0,
+            0,
+            w,
+            h,
+            vidMode ? vidMode->refreshRate : GLFW_DONT_CARE
+        );
     }
     else {
         glfwSetWindowSize(window, w, h);
         windowedW = w;
         windowedH = h;
 
-        // Center on primary monitor work area
         GLFWmonitor* primaryMonitor = glfwGetPrimaryMonitor();
         if (primaryMonitor) {
-            int workX = 0, workY = 0, workW = 0, workH = 0;
+            int workX = 0;
+            int workY = 0;
+            int workW = 0;
+            int workH = 0;
+
             glfwGetMonitorWorkarea(primaryMonitor, &workX, &workY, &workW, &workH);
+
             int centeredX = workX + (workW - w) / 2;
             int centeredY = workY + (workH - h) / 2;
+
             if (centeredX < workX) centeredX = workX;
             if (centeredY < workY) centeredY = workY;
+
             glfwSetWindowPos(window, centeredX, centeredY);
+
+            windowedX = centeredX;
+            windowedY = centeredY;
         }
 
         if (borderless) {
             ApplyBorderlessCaptureOverscan(window, w, h);
+
+            glfwGetWindowPos(window, &windowedX, &windowedY);
+            glfwGetWindowSize(window, &windowedW, &windowedH);
         }
     }
 
-    SyncFramebufferSize();
+    PresentBlackFrame();
+
+    if (wasVisible) {
+        glfwShowWindow(window);
+    }
 }
 
 void glDisplay::SetVSync(bool enabled) {
@@ -1472,6 +1606,27 @@ void glDisplay::QueryFramebufferSize(int& width, int& height) const {
     }
 
     glfwGetFramebufferSize(window, &width, &height);
+}
+
+void glDisplay::PresentBlackFrame() {
+    if (!window) {
+        return;
+    }
+
+    glfwMakeContextCurrent(window);
+
+    SyncFramebufferSize();
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glViewport(0, 0, fbWidth, fbHeight);
+
+    glDisable(GL_SCISSOR_TEST);
+
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClearDepth(0.0);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    glfwSwapBuffers(window);
 }
 
 void glDisplay::SyncFramebufferSize() {
@@ -1599,6 +1754,15 @@ glContext::glContext(glDisplay* disp)
     : display(disp) {
     GetDefaultWhiteTexture();
     s_defaultWhiteTextureUsers++;
+    glGenSamplers(1, &shadowCompareSampler);
+    glSamplerParameteri(shadowCompareSampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glSamplerParameteri(shadowCompareSampler, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glSamplerParameteri(shadowCompareSampler, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+    glSamplerParameteri(shadowCompareSampler, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+    glSamplerParameteri(shadowCompareSampler, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+    glSamplerParameteri(shadowCompareSampler, GL_TEXTURE_COMPARE_FUNC, GL_GEQUAL);
+    const GLfloat borderDepth[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+    glSamplerParameterfv(shadowCompareSampler, GL_TEXTURE_BORDER_COLOR, borderDepth);
     InitQuadMesh();
     InitGouraudMesh();
     InitBatchMesh();
@@ -1618,6 +1782,7 @@ glContext::~glContext() {
     if (batchProgram) glDeleteProgram(batchProgram);
     if (program3D) glDeleteProgram(program3D);
     if (shadowDepthProgram) glDeleteProgram(shadowDepthProgram);
+    if (shadowCompareSampler) glDeleteSamplers(1, &shadowCompareSampler);
 
     if (s_defaultWhiteTextureUsers > 0) {
         s_defaultWhiteTextureUsers--;
@@ -1994,6 +2159,200 @@ void glContext::UpdateMultisampleState() {
     else {
         glDisable(GL_MULTISAMPLE);
     }
+}
+
+void glContext::DrawFilledCircle(pddiBaseShader* shader,
+                                 float centerX, float centerY,
+                                 float radiusX, float radiusY,
+                                 float u0, float v0, float u1, float v1,
+                                 int segments) {
+    if (!shader)
+        return;
+
+    if (segments < 3)
+        segments = 3;
+
+    if (segments > 64)
+        segments = 64;
+
+    shader->SetMatrix("uProj", projection.Data());
+    shader->PreRender();
+
+    constexpr float PI2 = 6.28318530718f;
+
+    // 3 vertices per segment.
+    // Each vertex: x, y, u, v
+    float verts[64 * 3 * 4];
+
+    int out = 0;
+
+    const float uvCenterX = (u0 + u1) * 0.5f;
+    const float uvCenterY = (v0 + v1) * 0.5f;
+    const float uvRadiusX = (u1 - u0) * 0.5f;
+    const float uvRadiusY = (v1 - v0) * 0.5f;
+
+    for (int i = 0; i < segments; ++i) {
+        const float a0 = ((float)i / (float)segments) * PI2;
+        const float a1 = ((float)(i + 1) / (float)segments) * PI2;
+
+        const float c0 = std::cos(a0);
+        const float s0 = std::sin(a0);
+        const float c1 = std::cos(a1);
+        const float s1 = std::sin(a1);
+
+        const float x0 = centerX;
+        const float y0 = centerY;
+
+        const float x1p = centerX + c0 * radiusX;
+        const float y1p = centerY + s0 * radiusY;
+
+        const float x2p = centerX + c1 * radiusX;
+        const float y2p = centerY + s1 * radiusY;
+
+        const float tu0 = uvCenterX;
+        const float tv0 = uvCenterY;
+
+        const float tu1 = uvCenterX + c0 * uvRadiusX;
+        const float tv1 = uvCenterY + s0 * uvRadiusY;
+
+        const float tu2 = uvCenterX + c1 * uvRadiusX;
+        const float tv2 = uvCenterY + s1 * uvRadiusY;
+
+        verts[out++] = x0;
+        verts[out++] = y0;
+        verts[out++] = tu0;
+        verts[out++] = tv0;
+
+        verts[out++] = x1p;
+        verts[out++] = y1p;
+        verts[out++] = tu1;
+        verts[out++] = tv1;
+
+        verts[out++] = x2p;
+        verts[out++] = y2p;
+        verts[out++] = tu2;
+        verts[out++] = tv2;
+    }
+
+    glBindVertexArray(quadVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, quadVBO);
+
+    const GLsizeiptr sizeBytes = (GLsizeiptr)(out * sizeof(float));
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeBytes, verts);
+
+    glDrawArrays(GL_TRIANGLES, 0, segments * 3);
+
+    shader->PostRender();
+}
+
+void glContext::DrawCircle(pddiBaseShader* shader,
+                           float centerX, float centerY,
+                           float radiusX, float radiusY,
+                           float thickness,
+                           float u0, float v0, float u1, float v1,
+                           int segments) {
+    if (!shader)
+        return;
+
+    if (segments < 3)
+        segments = 3;
+
+    if (segments > 64)
+        segments = 64;
+
+    if (thickness <= 0.0f)
+        return;
+
+    shader->SetMatrix("uProj", projection.Data());
+    shader->PreRender();
+
+    constexpr float PI2 = 6.28318530718f;
+
+    const float innerRadiusX = std::max(0.0f, radiusX - thickness);
+    const float innerRadiusY = std::max(0.0f, radiusY - thickness);
+
+    // 2 triangles per segment, 6 vertices per segment.
+    // Each vertex: x, y, u, v
+    float verts[64 * 6 * 4];
+
+    int out = 0;
+
+    const float uvCenterX = (u0 + u1) * 0.5f;
+    const float uvCenterY = (v0 + v1) * 0.5f;
+    const float uvRadiusX = (u1 - u0) * 0.5f;
+    const float uvRadiusY = (v1 - v0) * 0.5f;
+
+    for (int i = 0; i < segments; ++i) {
+        const float a0 = ((float)i / (float)segments) * PI2;
+        const float a1 = ((float)(i + 1) / (float)segments) * PI2;
+
+        const float c0 = std::cos(a0);
+        const float s0 = std::sin(a0);
+        const float c1 = std::cos(a1);
+        const float s1 = std::sin(a1);
+
+        const float outerX0 = centerX + c0 * radiusX;
+        const float outerY0 = centerY + s0 * radiusY;
+        const float outerX1 = centerX + c1 * radiusX;
+        const float outerY1 = centerY + s1 * radiusY;
+
+        const float innerX0 = centerX + c0 * innerRadiusX;
+        const float innerY0 = centerY + s0 * innerRadiusY;
+        const float innerX1 = centerX + c1 * innerRadiusX;
+        const float innerY1 = centerY + s1 * innerRadiusY;
+
+        const float outerU0 = uvCenterX + c0 * uvRadiusX;
+        const float outerV0 = uvCenterY + s0 * uvRadiusY;
+        const float outerU1 = uvCenterX + c1 * uvRadiusX;
+        const float outerV1 = uvCenterY + s1 * uvRadiusY;
+
+        const float innerU0 = uvCenterX + c0 * uvRadiusX * (innerRadiusX / std::max(radiusX, 0.0001f));
+        const float innerV0 = uvCenterY + s0 * uvRadiusY * (innerRadiusY / std::max(radiusY, 0.0001f));
+        const float innerU1 = uvCenterX + c1 * uvRadiusX * (innerRadiusX / std::max(radiusX, 0.0001f));
+        const float innerV1 = uvCenterY + s1 * uvRadiusY * (innerRadiusY / std::max(radiusY, 0.0001f));
+
+        // Triangle 1
+        verts[out++] = outerX0;
+        verts[out++] = outerY0;
+        verts[out++] = outerU0;
+        verts[out++] = outerV0;
+
+        verts[out++] = outerX1;
+        verts[out++] = outerY1;
+        verts[out++] = outerU1;
+        verts[out++] = outerV1;
+
+        verts[out++] = innerX1;
+        verts[out++] = innerY1;
+        verts[out++] = innerU1;
+        verts[out++] = innerV1;
+
+        // Triangle 2
+        verts[out++] = outerX0;
+        verts[out++] = outerY0;
+        verts[out++] = outerU0;
+        verts[out++] = outerV0;
+
+        verts[out++] = innerX1;
+        verts[out++] = innerY1;
+        verts[out++] = innerU1;
+        verts[out++] = innerV1;
+
+        verts[out++] = innerX0;
+        verts[out++] = innerY0;
+        verts[out++] = innerU0;
+        verts[out++] = innerV0;
+    }
+
+    glBindVertexArray(quadVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, quadVBO);
+
+    const GLsizeiptr sizeBytes = (GLsizeiptr)(out * sizeof(float));
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeBytes, verts);
+
+    glDrawArrays(GL_TRIANGLES, 0, segments * 6);
+
+    shader->PostRender();
 }
 
 void glContext::DrawQuad(pddiBaseShader* shader,
@@ -2378,6 +2737,7 @@ void glContext::DrawPrimBuffer(pddiPrimBuffer* buffer, u32 indexOffset, u32 inde
         for (s32 i = 0; i < shadowCascadeCount; i++) {
             if (!shadowDepthTextures[i]) continue;
             static_cast<glTexture*>(shadowDepthTextures[i])->Bind(2 + i);
+            glBindSampler(2 + i, shadowCompareSampler);
             glUniform1i(glGetUniformLocation(program3D, kShadowSamplerNames[i]), 2 + i);
         }
     }

@@ -25,25 +25,31 @@
 #include <cfloat>
 
 constexpr s32 kCascadeCount = 3;
+constexpr s32 kActiveCascadeCount[2] = { 3, 3 }; // Medium, High
 constexpr s32 kCascadeResolution[2] = { 2048, 4096 }; // Medium, High
-constexpr f32 kShadowDistance = 28000.0f;
-constexpr f32 kSplitLambda = 0.65f;
-constexpr f32 kReceiverPaddingXY = 512.0f;
-constexpr f32 kCasterPaddingWorldRadius = 768.0f;
-constexpr f32 kCasterPaddingWorldHeight = 7000.0f;
-constexpr f32 kCasterPaddingLightNear = 12000.0f;
-constexpr f32 kCasterPaddingLightFar = 3000.0f;
+constexpr f32 kShadowDistance[2] = { 28000.0f, 28000.0f }; // Medium, High
+constexpr f32 kSplitLambda[2] = { 0.65f, 0.65f };
+constexpr f32 kReceiverPaddingXY[2] = { 512.0f, 512.0f };
+constexpr f32 kCasterPaddingWorldRadius[2] = { 768.0f, 768.0f };
+constexpr f32 kCasterPaddingWorldHeight[2] = { 7000.0f, 7000.0f };
+constexpr f32 kCasterPaddingLightNear[2] = { 12000.0f, 12000.0f };
+constexpr f32 kCasterPaddingLightFar[2] = { 3000.0f, 3000.0f };
 constexpr f32 kMinLightHorizontalLenSq = 4096.0f * 4096.0f;
 constexpr f32 kCascadePaddingScale[2] = { 1.15f, 1.0f }; // Medium, High
-constexpr f32 kCascadeOverlapMin = 768.0f;
-constexpr f32 kCascadeOverlapMax = 2500.0f;
-constexpr f32 kCascadeOverlapFraction = 0.18f;
-constexpr f32 kLevelDepthPadding = 4096.0f;
-constexpr f32 kMinLightDepthRange = 16384.0f;
+constexpr f32 kCascadeOverlapMin[2] = { 768.0f, 768.0f };
+constexpr f32 kCascadeOverlapMax[2] = { 2500.0f, 2500.0f };
+constexpr f32 kCascadeOverlapFraction[2] = { 0.18f, 0.18f };
+constexpr f32 kLevelDepthPadding[2] = { 4096.0f, 4096.0f };
+constexpr f32 kMinLightDepthRange[2] = { 16384.0f, 16384.0f };
+constexpr pddiRenderTargetFormat kCascadeDepthFormat = PDDI_RENDER_TARGET_DEPTH32F;
+constexpr f32 kShadowCasterOffsetFactor[2] = { -2.25f, -1.75f }; // Medium, High
+constexpr f32 kShadowCasterOffsetUnits[2] = { -12.0f, -8.0f };
+constexpr f32 kMinShadowLightDown = 0.92f;
 
 ShadowQuality s_quality = SHADOW_QUALITY_LOW;
 pddiRenderTarget* s_cascadeTargets[kCascadeCount] = {};
 s32 s_cascadeTargetRes = 0;
+s32 s_activeCascadeCount = 0;
 Mat4 s_lightVP[kCascadeCount];
 bool s_framePrepared = false;
 s32 s_casterCount = 0;
@@ -77,10 +83,33 @@ u32 LightBrightness(u32 colour) {
     return (colour & 0xFFu) + ((colour >> 8) & 0xFFu) + ((colour >> 16) & 0xFFu);
 }
 
-bool EnsureTargets(s32 resolution) {
-    if (s_cascadeTargetRes == resolution) {
+Vec3 ClampShadowLightTopDown(const Vec3& dir) {
+    Vec3 normalized = dir.Normalized();
+    if (normalized.MagnitudeSqr() <= 0.00001f) {
+        normalized = { 0.35f, -0.85f, 0.25f };
+    }
+
+    if (normalized.y <= -kMinShadowLightDown) {
+        return normalized;
+    }
+
+    Vec3 horizontal = { normalized.x, 0.0f, normalized.z };
+    if (horizontal.MagnitudeSqr() <= 0.00001f) {
+        horizontal = { 0.35f, 0.0f, 0.25f };
+    }
+    horizontal = horizontal.Normalized();
+
+    const f32 horizontalScale = std::sqrt(std::max(1.0f - kMinShadowLightDown * kMinShadowLightDown, 0.0f));
+    return Vec3(horizontal.x * horizontalScale,
+                -kMinShadowLightDown,
+                horizontal.z * horizontalScale).Normalized();
+}
+
+bool EnsureTargets(s32 resolution, s32 activeCascadeCount) {
+    activeCascadeCount = std::min(std::max(activeCascadeCount, 1), kCascadeCount);
+    if (s_cascadeTargetRes == resolution && s_activeCascadeCount == activeCascadeCount) {
         bool allValid = true;
-        for (s32 i = 0; i < kCascadeCount; i++) {
+        for (s32 i = 0; i < activeCascadeCount; i++) {
             if (!s_cascadeTargets[i] || !s_cascadeTargets[i]->IsValid()) {
                 allValid = false;
                 break;
@@ -96,9 +125,9 @@ bool EnsureTargets(s32 resolution) {
         return false;
     }
 
-    for (s32 i = 0; i < kCascadeCount; i++) {
+    for (s32 i = 0; i < activeCascadeCount; i++) {
         s_cascadeTargets[i] = p3d::context->CreateRenderTarget(resolution, resolution,
-                                                               PDDI_RENDER_TARGET_DEPTH);
+                                                               kCascadeDepthFormat);
         if (!s_cascadeTargets[i]) {
             ShadowCSM::Shutdown();
             return false;
@@ -106,6 +135,7 @@ bool EnsureTargets(s32 resolution) {
     }
 
     s_cascadeTargetRes = resolution;
+    s_activeCascadeCount = activeCascadeCount;
     return true;
 }
 
@@ -134,20 +164,27 @@ void BuildFrustumCorners(const Mat4& cameraToWorld, f32 tanHalfX, f32 tanHalfY,
     outCorners[7] = farCenter + right * farX + up * farY;
 }
 
-f32 ComputeCascadeSplit(f32 nearDepth, f32 farDepth, s32 cascadeIndex) {
-    const f32 ratio = (f32)cascadeIndex / (f32)kCascadeCount;
+f32 ComputeCascadeSplit(f32 nearDepth, f32 farDepth, s32 cascadeIndex,
+                        s32 activeCascadeCount, s32 qualityIndex) {
+    const f32 ratio = (f32)cascadeIndex / (f32)activeCascadeCount;
     const f32 logSplit = nearDepth * std::pow(farDepth / nearDepth, ratio);
     const f32 uniformSplit = nearDepth + (farDepth - nearDepth) * ratio;
-    return (logSplit * kSplitLambda) + (uniformSplit * (1.0f - kSplitLambda));
+    return (logSplit * kSplitLambda[qualityIndex]) + (uniformSplit * (1.0f - kSplitLambda[qualityIndex]));
 }
 
-f32 ComputeCascadeOverlap(f32 startDepth, f32 endDepth) {
+f32 ComputeCascadeOverlap(f32 startDepth, f32 endDepth, s32 qualityIndex) {
     const f32 range = std::max(endDepth - startDepth, 1.0f);
-    return std::min(std::max(range * kCascadeOverlapFraction, kCascadeOverlapMin), kCascadeOverlapMax);
+    return std::min(std::max(range * kCascadeOverlapFraction[qualityIndex],
+                             kCascadeOverlapMin[qualityIndex]),
+                    kCascadeOverlapMax[qualityIndex]);
 }
 
-bool ExpandLightDepthToLevelBounds(const Mat4& lightView, f32* minZ, f32* maxZ) {
-    if (!minZ || !maxZ || !g_game) {
+bool ExpandLightBoundsToLevelBounds(const Mat4& lightView,
+                                    f32* minX, f32* maxX,
+                                    f32* minY, f32* maxY,
+                                    f32* minZ, f32* maxZ,
+                                    s32 qualityIndex) {
+    if (!minX || !maxX || !minY || !maxY || !minZ || !maxZ || !g_game) {
         return false;
     }
 
@@ -175,20 +212,24 @@ bool ExpandLightDepthToLevelBounds(const Mat4& lightView, f32* minZ, f32* maxZ) 
 
     for (const Vec3& corner : corners) {
         const Vec3 lp = TransformPoint(lightView, corner);
-        *minZ = std::min(*minZ, lp.z - kLevelDepthPadding);
-        *maxZ = std::max(*maxZ, lp.z + kLevelDepthPadding);
+        *minX = std::min(*minX, lp.x - kReceiverPaddingXY[qualityIndex]);
+        *maxX = std::max(*maxX, lp.x + kReceiverPaddingXY[qualityIndex]);
+        *minY = std::min(*minY, lp.y - kReceiverPaddingXY[qualityIndex]);
+        *maxY = std::max(*maxY, lp.y + kReceiverPaddingXY[qualityIndex]);
+        *minZ = std::min(*minZ, lp.z - kLevelDepthPadding[qualityIndex]);
+        *maxZ = std::max(*maxZ, lp.z + kLevelDepthPadding[qualityIndex]);
     }
     return true;
 }
 
 void ComputeLightDepthPlanes(f32 minZ, f32 maxZ, bool includesLevelBounds,
-                             f32* nearDist, f32* farDist) {
+                             f32* nearDist, f32* farDist, s32 qualityIndex) {
     if (!nearDist || !farDist) {
         return;
     }
 
     if (minZ > maxZ) {
-        minZ = -kMinLightDepthRange;
+        minZ = -kMinLightDepthRange[qualityIndex];
         maxZ = -1.0f;
     }
 
@@ -201,10 +242,11 @@ void ComputeLightDepthPlanes(f32 minZ, f32 maxZ, bool includesLevelBounds,
         nearPlane = std::max(1.0f, nearPlane);
     }
 
-    if (farPlane < nearPlane + kMinLightDepthRange) {
+    const f32 minLightDepthRange = kMinLightDepthRange[qualityIndex];
+    if (farPlane < nearPlane + minLightDepthRange) {
         const f32 center = (nearPlane + farPlane) * 0.5f;
-        nearPlane = center - kMinLightDepthRange * 0.5f;
-        farPlane = center + kMinLightDepthRange * 0.5f;
+        nearPlane = center - minLightDepthRange * 0.5f;
+        farPlane = center + minLightDepthRange * 0.5f;
         if (!includesLevelBounds && nearPlane < 1.0f) {
             farPlane += 1.0f - nearPlane;
             nearPlane = 1.0f;
@@ -213,6 +255,26 @@ void ComputeLightDepthPlanes(f32 minZ, f32 maxZ, bool includesLevelBounds,
 
     *nearDist = nearPlane;
     *farDist = std::max(farPlane, nearPlane + 1.0f);
+}
+
+void FitStableSquareBounds(f32* minX, f32* maxX, f32* minY, f32* maxY) {
+    if (!minX || !maxX || !minY || !maxY) {
+        return;
+    }
+
+    const f32 width = *maxX - *minX;
+    const f32 height = *maxY - *minY;
+    if (width <= 0.0f || height <= 0.0f) {
+        return;
+    }
+
+    const f32 centerX = (*minX + *maxX) * 0.5f;
+    const f32 centerY = (*minY + *maxY) * 0.5f;
+    const f32 halfExtent = std::max(width, height) * 0.5f;
+    *minX = centerX - halfExtent;
+    *maxX = centerX + halfExtent;
+    *minY = centerY - halfExtent;
+    *maxY = centerY + halfExtent;
 }
 
 void SnapCascadeBounds(f32* minX, f32* maxX, f32* minY, f32* maxY, s32 resolution) {
@@ -288,10 +350,7 @@ Vec3 GetShadowLightDirection() {
         selected = { 0.35f, -0.85f, 0.25f };
     }
 
-    s_levelLightDir = selected.Normalized();
-    if (s_levelLightDir.MagnitudeSqr() <= 0.00001f) {
-        s_levelLightDir = { 0.0f, -1.0f, 0.0f };
-    }
+    s_levelLightDir = ClampShadowLightTopDown(selected);
     s_levelLightID = levelID;
     s_levelLightValid = true;
     return s_levelLightDir;
@@ -332,6 +391,7 @@ void ShadowCSM::Shutdown() {
         }
     }
     s_cascadeTargetRes = 0;
+    s_activeCascadeCount = 0;
     s_framePrepared = false;
     s_casterPrepass = false;
 }
@@ -356,9 +416,11 @@ void ShadowCSM::BeginFrame() {
         return;
     }
 
-    const s32 resolution = kCascadeResolution[(s_quality == SHADOW_QUALITY_HIGH) ? 1 : 0];
-    const f32 paddingScale = kCascadePaddingScale[(s_quality == SHADOW_QUALITY_HIGH) ? 1 : 0];
-    if (!EnsureTargets(resolution)) {
+    const s32 qualityIndex = (s_quality == SHADOW_QUALITY_HIGH) ? 1 : 0;
+    const s32 activeCascadeCount = kActiveCascadeCount[qualityIndex];
+    const s32 resolution = kCascadeResolution[qualityIndex];
+    const f32 paddingScale = kCascadePaddingScale[qualityIndex];
+    if (!EnsureTargets(resolution, activeCascadeCount)) {
         return;
     }
 
@@ -384,7 +446,7 @@ void ShadowCSM::BeginFrame() {
 
     const f32 cameraNear = std::max(p3dCam->GetNearPlane(), 8.0f);
     const f32 cameraFar = std::max(cameraNear + 1.0f, p3dCam->GetFarPlane());
-    const f32 shadowFar = std::min(cameraFar, kShadowDistance);
+    const f32 shadowFar = std::min(cameraFar, kShadowDistance[qualityIndex]);
 
     const Vec3 lightDir = GetShadowLightDirection();
     const f32 lx = lightDir.x, ly = lightDir.y, lz = lightDir.z;
@@ -398,19 +460,20 @@ void ShadowCSM::BeginFrame() {
     f32 splits[kCascadeCount];
     f32 splitDepths[kCascadeCount + 1];
     splitDepths[0] = cameraNear;
-    for (s32 i = 1; i < kCascadeCount; i++) {
-        splitDepths[i] = ComputeCascadeSplit(cameraNear, shadowFar, i);
+    for (s32 i = 1; i < activeCascadeCount; i++) {
+        splitDepths[i] = ComputeCascadeSplit(cameraNear, shadowFar, i,
+                                             activeCascadeCount, qualityIndex);
     }
-    splitDepths[kCascadeCount] = shadowFar;
+    splitDepths[activeCascadeCount] = shadowFar;
 
-    for (s32 i = 0; i < kCascadeCount; i++) {
+    for (s32 i = 0; i < activeCascadeCount; i++) {
         splits[i] = splitDepths[i + 1];
 
-        const f32 cascadeOverlap = ComputeCascadeOverlap(splitDepths[i], splitDepths[i + 1]);
+        const f32 cascadeOverlap = ComputeCascadeOverlap(splitDepths[i], splitDepths[i + 1], qualityIndex);
         const f32 fitNearDepth = (i > 0)
             ? std::max(cameraNear, splitDepths[i] - cascadeOverlap)
             : splitDepths[i];
-        const f32 fitFarDepth = (i < kCascadeCount - 1)
+        const f32 fitFarDepth = (i < activeCascadeCount - 1)
             ? std::min(shadowFar, splitDepths[i + 1] + cascadeOverlap)
             : splitDepths[i + 1];
 
@@ -424,13 +487,13 @@ void ShadowCSM::BeginFrame() {
         }
         center *= 1.0f / 8.0f;
 
-        const f32 lightDistance = kShadowDistance + kCasterPaddingLightNear;
+        const f32 lightDistance = kShadowDistance[qualityIndex] + kCasterPaddingLightNear[qualityIndex];
         const Vec3 eye = center - Vec3(lx, ly, lz) * lightDistance;
         Mat4 lightView = LookAt(eye.x, eye.y, eye.z, center.x, center.y, center.z, upX, upY, upZ);
-        const Vec3 casterHeightInLight = TransformDir(lightView, { 0.0f, kCasterPaddingWorldHeight, 0.0f });
-        const f32 casterPadX = (kReceiverPaddingXY + kCasterPaddingWorldRadius + std::fabs(casterHeightInLight.x)) * paddingScale;
-        const f32 casterPadY = (kReceiverPaddingXY + kCasterPaddingWorldRadius + std::fabs(casterHeightInLight.y)) * paddingScale;
-        const f32 casterPadZ = (kCasterPaddingWorldRadius + std::fabs(casterHeightInLight.z)) * paddingScale;
+        const Vec3 casterHeightInLight = TransformDir(lightView, { 0.0f, kCasterPaddingWorldHeight[qualityIndex], 0.0f });
+        const f32 casterPadX = (kReceiverPaddingXY[qualityIndex] + kCasterPaddingWorldRadius[qualityIndex] + std::fabs(casterHeightInLight.x)) * paddingScale;
+        const f32 casterPadY = (kReceiverPaddingXY[qualityIndex] + kCasterPaddingWorldRadius[qualityIndex] + std::fabs(casterHeightInLight.y)) * paddingScale;
+        const f32 casterPadZ = (kCasterPaddingWorldRadius[qualityIndex] + std::fabs(casterHeightInLight.z)) * paddingScale;
 
         f32 minX = FLT_MAX, minY = FLT_MAX, minZ = FLT_MAX;
         f32 maxX = -FLT_MAX, maxY = -FLT_MAX, maxZ = -FLT_MAX;
@@ -448,17 +511,22 @@ void ShadowCSM::BeginFrame() {
         minY -= casterPadY;
         maxX += casterPadX;
         maxY += casterPadY;
-        minZ -= kCasterPaddingLightNear + casterPadZ;
-        maxZ += kCasterPaddingLightFar + casterPadZ;
-        const bool includesLevelBounds = ExpandLightDepthToLevelBounds(lightView, &minZ, &maxZ);
+        minZ -= kCasterPaddingLightNear[qualityIndex] + casterPadZ;
+        maxZ += kCasterPaddingLightFar[qualityIndex] + casterPadZ;
+        const bool includesLevelBounds = ExpandLightBoundsToLevelBounds(lightView,
+                                                                        &minX, &maxX,
+                                                                        &minY, &maxY,
+                                                                        &minZ, &maxZ,
+                                                                        qualityIndex);
 
+        FitStableSquareBounds(&minX, &maxX, &minY, &maxY);
         SnapCascadeBounds(&minX, &maxX, &minY, &maxY, resolution);
 
         // The renderer uses reversed-Z with GL_ZERO_TO_ONE clip space
         // (near=1, far=0), matching the main PerspectiveReversedZ path.
         f32 nearDist = 1.0f;
-        f32 farDist = kMinLightDepthRange;
-        ComputeLightDepthPlanes(minZ, maxZ, includesLevelBounds, &nearDist, &farDist);
+        f32 farDist = kMinLightDepthRange[qualityIndex];
+        ComputeLightDepthPlanes(minZ, maxZ, includesLevelBounds, &nearDist, &farDist, qualityIndex);
         Mat4 lightProj = OrthoReversedZ(minX, maxX, minY, maxY, nearDist, farDist);
         s_lightVP[i] = lightProj * lightView;
 
@@ -472,11 +540,11 @@ void ShadowCSM::BeginFrame() {
     }
 
     pddiTexture* depthTextures[kCascadeCount];
-    for (s32 i = 0; i < kCascadeCount; i++) {
+    for (s32 i = 0; i < activeCascadeCount; i++) {
         depthTextures[i] = s_cascadeTargets[i]->GetTexture();
     }
 
-    p3d::context->SetShadowCascades(depthTextures, s_lightVP, splits, kCascadeCount);
+    p3d::context->SetShadowCascades(depthTextures, s_lightVP, splits, activeCascadeCount);
     p3d::context->SetCameraWorldPos(camX, camY, camZ);
 
     s_framePrepared = true;
@@ -492,6 +560,37 @@ s32 ShadowCSM::GetCascadeResolution() {
 
 s32 ShadowCSM::GetCasterCount() {
     return s_casterCount;
+}
+
+const char* ShadowCSM::GetCascadeDepthFormatName() {
+    return (kCascadeDepthFormat == PDDI_RENDER_TARGET_DEPTH32F) ? "D32F" : "D24";
+}
+
+const char* ShadowCSM::GetFilterQualityName() {
+    if (s_quality == SHADOW_QUALITY_HIGH) {
+        return "3 cascades, hardware PCF 9x9";
+    }
+    if (s_quality == SHADOW_QUALITY_MEDIUM) {
+        return "3 cascades, hardware PCF 5x5";
+    }
+    return "legacy blob";
+}
+
+void BeginShadowCasterDepthBias() {
+    if (!p3d::context) {
+        return;
+    }
+
+    const s32 qualityIndex = (s_quality == SHADOW_QUALITY_HIGH) ? 1 : 0;
+    p3d::context->SetPolygonOffset(true,
+                                   kShadowCasterOffsetFactor[qualityIndex],
+                                   kShadowCasterOffsetUnits[qualityIndex]);
+}
+
+void EndShadowCasterDepthBias() {
+    if (p3d::context) {
+        p3d::context->SetPolygonOffset(false);
+    }
 }
 
 void ShadowCSM::SetCasterWorldOffset(f32 x, f32 y, f32 z) {
@@ -511,6 +610,7 @@ void ShadowCSM::EndCasterPrepass() {
         p3d::context->SetShadowCasterPass(false, Mat4());
         p3d::context->SetReceiveShadows(false);
         p3d::context->EnableZBuffer(true);
+        p3d::context->SetPolygonOffset(false);
         p3d::context->SetBlendMode(PDDI_BLEND_NONE);
     }
 }
@@ -520,7 +620,7 @@ bool ShadowCSM::IsCasterPrepass() {
 }
 
 u32 ShadowCSM::GetCascadeTextureHandle(s32 index) {
-    if (index < 0 || index >= kCascadeCount || !s_cascadeTargets[index]) {
+    if (index < 0 || index >= s_activeCascadeCount || !s_cascadeTargets[index]) {
         return 0;
     }
     pddiTexture* tex = s_cascadeTargets[index]->GetTexture();
@@ -540,12 +640,13 @@ void ShadowCSM::DrawCasterIntoCascades(DrawableBasic* drawable, u32 flags) {
                                savedWorld.GetTransY() + s_casterOffsetY,
                                savedWorld.GetTransZ() + s_casterOffsetZ);
 
-    for (s32 i = 0; i < kCascadeCount; i++) {
+    for (s32 i = 0; i < s_activeCascadeCount; i++) {
         p3d::context->SetRenderTarget(s_cascadeTargets[i]);
         // See the matching comment in BeginFrame: must explicitly re-enable
         // depth writes, they're not implied by EnableZBuffer/SetRenderTarget.
         p3d::context->SetBlendMode(PDDI_BLEND_NONE);
         p3d::context->EnableZBuffer(true);
+        BeginShadowCasterDepthBias();
         p3d::context->SetCullMode(PDDI_CULL_NONE);
         p3d::context->SetShadowCasterPass(true, s_lightVP[i]);
         p3d::context->SetWorldMatrix(casterWorld);
@@ -553,6 +654,7 @@ void ShadowCSM::DrawCasterIntoCascades(DrawableBasic* drawable, u32 flags) {
         drawable->Display(flags);
 
         p3d::context->SetShadowCasterPass(false, Mat4());
+        EndShadowCasterDepthBias();
         p3d::context->SetRenderTarget(nullptr);
     }
 
@@ -572,10 +674,11 @@ void ShadowCSM::DrawCasterPrimBufferIntoCascades(pddiPrimBuffer* buffer) {
                                savedWorld.GetTransY() + s_casterOffsetY,
                                savedWorld.GetTransZ() + s_casterOffsetZ);
 
-    for (s32 i = 0; i < kCascadeCount; i++) {
+    for (s32 i = 0; i < s_activeCascadeCount; i++) {
         p3d::context->SetRenderTarget(s_cascadeTargets[i]);
         p3d::context->SetBlendMode(PDDI_BLEND_NONE);
         p3d::context->EnableZBuffer(true);
+        BeginShadowCasterDepthBias();
         p3d::context->SetCullMode(PDDI_CULL_NONE);
         p3d::context->SetShadowCasterPass(true, s_lightVP[i]);
         p3d::context->SetWorldMatrix(casterWorld);
@@ -583,6 +686,7 @@ void ShadowCSM::DrawCasterPrimBufferIntoCascades(pddiPrimBuffer* buffer) {
         p3d::context->DrawPrimBuffer(buffer);
 
         p3d::context->SetShadowCasterPass(false, Mat4());
+        EndShadowCasterDepthBias();
         p3d::context->SetRenderTarget(nullptr);
     }
 
@@ -607,10 +711,11 @@ void ShadowCSM::DrawBlockCasterIntoCascades(Block* block, const LVector* drawPos
                               static_cast<f32>(drawPos->y),
                               static_cast<f32>(drawPos->z));
 
-    for (s32 i = 0; i < kCascadeCount; i++) {
+    for (s32 i = 0; i < s_activeCascadeCount; i++) {
         p3d::context->SetRenderTarget(s_cascadeTargets[i]);
         p3d::context->SetBlendMode(PDDI_BLEND_NONE);
         p3d::context->EnableZBuffer(true);
+        BeginShadowCasterDepthBias();
         p3d::context->SetCullMode(PDDI_CULL_NONE);
         p3d::context->SetShadowCasterPass(true, s_lightVP[i]);
         p3d::context->SetWorldMatrix(blockWorld);
@@ -618,6 +723,7 @@ void ShadowCSM::DrawBlockCasterIntoCascades(Block* block, const LVector* drawPos
         p3d::context->DrawPrimBuffer(buffer);
 
         p3d::context->SetShadowCasterPass(false, Mat4());
+        EndShadowCasterDepthBias();
         p3d::context->SetRenderTarget(nullptr);
     }
 
