@@ -8,6 +8,10 @@
 #include "pddi/pddidev.h"
 #include "xclib/xcfile.h"
 #include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <cstring>
+#include <unordered_map>
 
 // Reference: "The PlayStation 1 Video (STR) Format" v1.20 by Michael Sabin (MIT license)
 
@@ -34,10 +38,59 @@ static inline s32 SignExtend(s32 v, u32 bits) {
     return (v ^ mask) - mask;
 }
 
+// Movie playback sync state is kept here so movieplayer.h does not need
+// extra members just to make video catch up after render stalls/window resize.
+struct MoviePlaybackSyncState {
+    bool clockStarted = false;
+    f64 startTimeSeconds = 0.0;
+};
+
+static std::unordered_map<const MoviePlayer*, MoviePlaybackSyncState> s_moviePlaybackSync;
+
+static f64 MovieNowSeconds() {
+    using Clock = std::chrono::steady_clock;
+    static const Clock::time_point s_start = Clock::now();
+
+    const std::chrono::duration<f64> elapsed = Clock::now() - s_start;
+    return elapsed.count();
+}
+
+static void MovieSyncReset(const MoviePlayer* movie) {
+    s_moviePlaybackSync.erase(movie);
+}
+
+static MoviePlaybackSyncState& MovieSyncState(const MoviePlayer* movie) {
+    return s_moviePlaybackSync[movie];
+}
+
+static bool MovieSyncIsStarted(const MoviePlayer* movie) {
+    const auto it = s_moviePlaybackSync.find(movie);
+    return it != s_moviePlaybackSync.end() && it->second.clockStarted;
+}
+
+static void MovieSyncStartIfNeeded(const MoviePlayer* movie) {
+    MoviePlaybackSyncState& state = MovieSyncState(movie);
+
+    if (!state.clockStarted) {
+        state.clockStarted = true;
+        state.startTimeSeconds = MovieNowSeconds();
+    }
+}
+
+static f64 MovieSyncElapsedSeconds(const MoviePlayer* movie) {
+    const auto it = s_moviePlaybackSync.find(movie);
+
+    if (it == s_moviePlaybackSync.end() || !it->second.clockStarted) {
+        return 0.0;
+    }
+
+    return MovieNowSeconds() - it->second.startTimeSeconds;
+}
+
+
 // MoviePlayer implementation
 
-MoviePlayer::MoviePlayer() {
-}
+MoviePlayer::MoviePlayer() {}
 
 MoviePlayer::~MoviePlayer() {
     Close();
@@ -45,6 +98,7 @@ MoviePlayer::~MoviePlayer() {
 
 bool MoviePlayer::Open(const char* path) {
     Close();
+    MovieSyncReset(this);
 
     u8* rawData = nullptr;
     if (!xcReadFileLow(path, &rawData, &fileSize)) {
@@ -72,22 +126,25 @@ bool MoviePlayer::Open(const char* path) {
         subHeaderOffset = 16;  // after 12 sync + 4 header
         dataOffset = 24;       // after sync + header + sub-header (8 bytes)
         LOG("[MoviePlayer] Detected raw 2352-byte sector format");
-    } else if (fileSize >= SECTOR_SIZE_MODE2 && (fileSize % SECTOR_SIZE_MODE2) == 0 &&
-               r32(fileData + 8) == 0x80010160) {
+    }
+    else if (fileSize >= SECTOR_SIZE_MODE2 && (fileSize % SECTOR_SIZE_MODE2) == 0 &&
+             r32(fileData + 8) == 0x80010160) {
         // Mode 2 without sync/header: 2336 bytes, sub-header at offset 0
         sectorSize = SECTOR_SIZE_MODE2;
         subHeaderOffset = 0;
         dataOffset = 8;        // after 8-byte sub-header
         LOG("[MoviePlayer] Detected Mode2 2336-byte sector format");
-    } else if (r32(fileData) == 0x80010160) {
+    }
+    else if (r32(fileData) == 0x80010160) {
         // Pure data sectors without any headers
         sectorSize = SECTOR_SIZE_DATA;
         subHeaderOffset = 0;
         dataOffset = 0;
         LOG("[MoviePlayer] Detected headerless 2048-byte sector format");
-    } else {
+    }
+    else {
         LOG("[MoviePlayer] Unknown sector format in %s (first 4 bytes: %02X %02X %02X %02X)",
-               path, fileData[0], fileData[1], fileData[2], fileData[3]);
+            path, fileData[0], fileData[1], fileData[2], fileData[3]);
         Close();
         return false;
     }
@@ -100,7 +157,7 @@ bool MoviePlayer::Open(const char* path) {
     finished = false;
     framesDecoded = 0;
     playbackTime = 0.0;
-    currentFrameNum = 0;
+    currentFrameNum = 0xFFFFFFFFu;
     frameReady = false;
     audioStarted = false;
 
@@ -162,44 +219,54 @@ bool MoviePlayer::Open(const char* path) {
     }
 
     // Compute frame rate from sector interleave.
-    // PSX CD spins at 2x = 150 sectors/sec. The ratio of total sectors (video+audio)
-    // per video frame determines the playback rate.
-    // Scan the first two video frames to measure sectors-per-frame.
+    // PSX CD spins at 2x = 150 sectors/sec. The distance between the first
+    // video sector of frame N and the first video sector of frame N+1 gives
+    // the total interleaved sectors per displayed video frame.
     {
         u32 firstFrameNum = 0;
-        u32 sectorsPerFrame = 0;
-        u32 totalSectorsForFrame = 0;
+        u32 firstFrameStartSector = 0;
+        u32 secondFrameStartSector = 0;
         bool foundFirst = false;
+        bool foundSecond = false;
 
         for (u32 s = 0; s < sectorCount && s < 300; s++) {
             const u8* sector = fileData + s * sectorSize;
+
             SectorHeader sh;
-            if (!ParseSectorHeader(sector, sh)) continue;
+            if (!ParseSectorHeader(sector, sh)) {
+                continue;
+            }
 
-            if (sh.isVideo) {
-                VideoChunkHeader vh;
-                if (!ParseVideoChunkHeader(sector + dataOffset, vh)) continue;
+            if (!sh.isVideo) {
+                continue;
+            }
 
-                if (!foundFirst) {
-                    firstFrameNum = vh.frameNum;
-                    foundFirst = true;
-                }
+            VideoChunkHeader vh;
+            if (!ParseVideoChunkHeader(sector + dataOffset, vh)) {
+                continue;
+            }
 
-                if (vh.frameNum == firstFrameNum) {
-                    totalSectorsForFrame++;
-                } else {
-                    // Count total sectors (all types) between start and this frame
-                    sectorsPerFrame = s; // all sectors up to second frame start
-                    break;
-                }
+            if (!foundFirst) {
+                firstFrameNum = vh.frameNum;
+                firstFrameStartSector = s;
+                foundFirst = true;
+                continue;
+            }
+
+            if (vh.frameNum != firstFrameNum) {
+                secondFrameStartSector = s;
+                foundSecond = true;
+                break;
             }
         }
 
-        if (sectorsPerFrame > 0) {
-            // 150 sectors/sec (2x CD speed) / sectors-per-frame = fps
+        if (foundSecond && secondFrameStartSector > firstFrameStartSector) {
+            const u32 sectorsPerFrame = secondFrameStartSector - firstFrameStartSector;
+
+            // 150 sectors/sec for PSX 2x CD speed.
             frameInterval = (f64)sectorsPerFrame / 150.0;
         }
-        // else keep default 1/15
+        // else keep the default value from the class.
     }
 
     LOG("[MoviePlayer] Opened %s: %ux%u, %u sectors (%u bytes/sector, %u payload), %u audio samples, %.1f fps",
@@ -209,6 +276,7 @@ bool MoviePlayer::Open(const char* path) {
 }
 
 void MoviePlayer::Close() {
+    MovieSyncReset(this);
     if (audioVoice) {
         AudioEngine::StopVoice(audioVoice);
         audioVoice = 0;
@@ -322,62 +390,92 @@ bool MoviePlayer::ParseVideoChunkHeader(const u8* data, VideoChunkHeader& hdr) {
 // Main frame advance loop
 
 bool MoviePlayer::AdvanceFrame() {
-    if (!fileData || finished) return false;
+    if (!fileData || finished) {
+        return false;
+    }
 
-    // Process sectors until we have a complete frame
+    bool decodedThisCall = false;
+
+    auto UploadDecodedFrameAndStartClock = [&]() {
+        if (!videoTexture) {
+            videoTexture = new tTexture();
+        }
+
+        videoTexture->Create(frameWidth, frameHeight, 32, 8, rgbaBuffer);
+
+        // Start audio only after the first decoded frame has actually been
+        // uploaded and can be rendered. This keeps audio from running ahead
+        // during slow first-frame decode or resize stalls.
+        if (!audioStarted && audioPCMWritten > 0) {
+            u32 sampleHandle = AudioEngine::LoadSample(
+                audioPCM,
+                audioPCMWritten / audioChannels,
+                audioSampleRate,
+                audioChannels);
+
+            if (sampleHandle != AUDIO_SAMPLE_INVALID) {
+                audioVoice = AudioEngine::PlaySample(sampleHandle, 1.0f, 0.0f, false);
+                audioStarted = true;
+
+                LOG("[MoviePlayer] Started audio: %u samples, %u Hz, %u ch",
+                    audioPCMWritten / audioChannels,
+                    audioSampleRate,
+                    audioChannels);
+            }
+        }
+
+        // If the movie has no audio, this still gives video a stable wall-clock
+        // timeline. If audio exists, this is started immediately after playback.
+        MovieSyncStartIfNeeded(this);
+    };
+
+    // Process sectors until we have a complete frame.
     while (currentSector < sectorCount) {
         const u8* sector = fileData + currentSector * sectorSize;
         currentSector++;
 
         SectorHeader sh;
-        if (!ParseSectorHeader(sector, sh)) continue;
+        if (!ParseSectorHeader(sector, sh)) {
+            continue;
+        }
 
         const u8* sectorPayload = sector + dataOffset;
 
-        // Audio is pre-decoded in Open(), skip here
-
+        // Audio is pre-decoded in Open(), so only video is collected here.
         if (sh.isVideo) {
             VideoChunkHeader vh;
-            if (!ParseVideoChunkHeader(sectorPayload, vh)) continue;
+            if (!ParseVideoChunkHeader(sectorPayload, vh)) {
+                continue;
+            }
 
             // New frame?
             if (vh.frameNum != currentFrameNum) {
-                // If we had a previous frame ready, decode it first
+                // If a previous frame was completely collected, decode/upload it
+                // now and leave this sector to be re-processed on the next call.
                 if (frameReady && demuxBytesWritten > 0) {
-                    DecodeVideoFrame(demuxBuffer, demuxBytesWritten,
-                                     frameWidth, frameHeight,
-                                     frameQuantScale, frameVersion);
+                    DecodeVideoFrame(demuxBuffer,
+                                     demuxBytesWritten,
+                                     frameWidth,
+                                     frameHeight,
+                                     frameQuantScale,
+                                     frameVersion);
+
                     framesDecoded++;
+                    decodedThisCall = true;
 
-                    // Start audio playback on first decoded frame
-                    if (!audioStarted && audioPCMWritten > 0) {
-                        u32 sampleHandle = AudioEngine::LoadSample(
-                            audioPCM, audioPCMWritten / audioChannels,
-                            audioSampleRate, audioChannels);
-                        if (sampleHandle != AUDIO_SAMPLE_INVALID) {
-                            audioVoice = AudioEngine::PlaySample(sampleHandle, 1.0f, 0.0f, false);
-                            audioStarted = true;
-                            LOG("[MoviePlayer] Started audio: %u samples, %u Hz, %u ch",
-                                   audioPCMWritten / audioChannels, audioSampleRate, audioChannels);
-                        }
-                    }
-
-                    // Reset demux for new frame
+                    // Reset demux for the next frame.
                     demuxBytesWritten = 0;
                     frameReady = false;
 
-                    // Back up so this sector (first of new frame) is re-processed next call
+                    // Back up so this sector, the first sector of the new frame,
+                    // is consumed by the next AdvanceFrame() call.
                     currentSector--;
 
-                    // Update texture and return - one frame per call
-                    if (!videoTexture) {
-                        videoTexture = new tTexture();
-                    }
-                    videoTexture->Create(frameWidth, frameHeight, 32, 8, rgbaBuffer);
+                    UploadDecodedFrameAndStartClock();
                     return true;
                 }
 
-                // Start collecting new frame
+                // Start collecting the new frame.
                 currentFrameNum = vh.frameNum;
                 frameWidth = vh.width;
                 frameHeight = vh.height;
@@ -389,19 +487,28 @@ bool MoviePlayer::AdvanceFrame() {
                 demuxBytesWritten = 0;
             }
 
-            // Append chunk data to demux buffer
+            // Append chunk data to the demux buffer.
             if (vh.chunkNum < vh.chunksInFrame) {
                 const u8* chunkData = sectorPayload + VIDEO_CHUNK_HEADER;
                 u32 bytesToCopy = videoChunkData;
-                // Don't exceed the frame's actual demux size
+
+                // Do not exceed the frame's actual demux size.
                 if (frameDemuxSize > 0 && demuxBytesWritten + bytesToCopy > frameDemuxSize) {
-                    bytesToCopy = (demuxBytesWritten < frameDemuxSize) ? (frameDemuxSize - demuxBytesWritten) : 0;
+                    bytesToCopy = demuxBytesWritten < frameDemuxSize
+                        ? frameDemuxSize - demuxBytesWritten
+                        : 0;
                 }
+
+                // Do not exceed our allocated demux buffer.
                 if (demuxBytesWritten + bytesToCopy > demuxBufferSize) {
                     bytesToCopy = demuxBufferSize - demuxBytesWritten;
                 }
-                memcpy(demuxBuffer + demuxBytesWritten, chunkData, bytesToCopy);
-                demuxBytesWritten += bytesToCopy;
+
+                if (bytesToCopy > 0) {
+                    memcpy(demuxBuffer + demuxBytesWritten, chunkData, bytesToCopy);
+                    demuxBytesWritten += bytesToCopy;
+                }
+
                 frameChunksReceived++;
 
                 if (frameChunksReceived >= frameChunksExpected) {
@@ -411,26 +518,75 @@ bool MoviePlayer::AdvanceFrame() {
         }
     }
 
-    // End of file - decode any remaining frame
+    // End of file: decode any remaining complete frame.
     if (frameReady && demuxBytesWritten > 0) {
-        DecodeVideoFrame(demuxBuffer, demuxBytesWritten,
-                         frameWidth, frameHeight,
-                         frameQuantScale, frameVersion);
-        framesDecoded++;
+        DecodeVideoFrame(demuxBuffer,
+                         demuxBytesWritten,
+                         frameWidth,
+                         frameHeight,
+                         frameQuantScale,
+                         frameVersion);
 
-        if (!videoTexture) {
-            videoTexture = new tTexture();
-        }
-        videoTexture->Create(frameWidth, frameHeight, 32, 8, rgbaBuffer);
+        framesDecoded++;
+        decodedThisCall = true;
+
+        demuxBytesWritten = 0;
+        frameReady = false;
+
+        UploadDecodedFrameAndStartClock();
     }
 
     finished = true;
-    return framesDecoded > 0;
+    return decodedThisCall;
 }
 
 void MoviePlayer::Render() {
+    // Decode the first frame immediately so there is something to show and so
+    // audio starts only when the first uploaded texture is ready.
+    if (!videoTexture && !finished) {
+        AdvanceFrame();
+    }
+
+    // Keep video synchronized to the movie clock instead of to render calls.
+    // If the window resize stalls rendering, elapsed time jumps forward and this
+    // loop catches the video up instead of letting audio drift ahead forever.
+    if (videoTexture && MovieSyncIsStarted(this) && frameInterval > 0.0 && !finished) {
+        const f64 elapsed = MovieSyncElapsedSeconds(this);
+
+        // framesDecoded is a 1-based count after the first frame is decoded.
+        // At t = 0, targetDecodedFrames is 1.
+        s32 targetDecodedFrames = (s32)std::floor(elapsed / frameInterval) + 1;
+        if (targetDecodedFrames < 1) {
+            targetDecodedFrames = 1;
+        }
+
+        constexpr s32 kMaxCatchUpFramesPerRender = 12;
+        s32 catchUpFrames = 0;
+
+        while (!finished &&
+               (s32)framesDecoded < targetDecodedFrames &&
+               catchUpFrames < kMaxCatchUpFramesPerRender) {
+            if (!AdvanceFrame()) {
+                break;
+            }
+
+            catchUpFrames++;
+        }
+
+        // If the render thread was blocked for a long time, avoid spending a huge
+        // amount of time decoding in one render call. The next render calls will
+        // continue catching up, and the cap prevents a second visible stall.
+        if (catchUpFrames == kMaxCatchUpFramesPerRender) {
+            LOG("[MoviePlayer] Video catch-up capped at %d frames", kMaxCatchUpFramesPerRender);
+        }
+    }
+
     if (videoTexture) {
-        ScreenDraw::DrawFullscreen(videoTexture);
+        ScreenDraw::DrawFullscreenAdvanced(
+            videoTexture,
+            frameWidth / (f32)frameHeight,
+            16.0f / 9.0f,
+            true);
     }
 }
 
@@ -448,7 +604,8 @@ void MoviePlayer::BitReader::NextWord() {
     if (wordPos < wordCount) {
         // Little-endian 16-bit read
         currentWord = data[wordPos++];
-    } else {
+    }
+    else {
         currentWord = 0;
     }
     bitsLeft = 16;
@@ -633,8 +790,8 @@ static const VLCEntry AC_VLC_TABLE[] = {
 static constexpr u32 AC_VLC_COUNT = sizeof(AC_VLC_TABLE) / sizeof(AC_VLC_TABLE[0]);
 
 void MoviePlayer::DecodeVideoFrame(const u8* demuxData, u32 demuxSize,
-                                    u16 width, u16 height,
-                                    u16 quantScale, u16 version) {
+                                   u16 width, u16 height,
+                                   u16 quantScale, u16 version) {
     if (!demuxData || demuxSize < 8) return;
 
     auto r16 = [](const u8* p) -> u16 { return p[0] | (p[1] << 8); };
@@ -683,7 +840,8 @@ void MoviePlayer::DecodeVideoFrame(const u8* demuxData, u32 demuxSize,
             if (px + 16 <= width && py + 16 <= height) {
                 MacroblockToRGB(cr_out, cb_out, y1_out, y2_out, y3_out, y4_out,
                                 rgbaBuffer + py * width + px, width);
-            } else {
+            }
+            else {
                 u32 temp[16 * 16];
                 MacroblockToRGB(cr_out, cb_out, y1_out, y2_out, y3_out, y4_out,
                                 temp, 16);
@@ -728,8 +886,8 @@ static const u8 REVERSE_ZIG_ZAG[64] = {
 };
 
 void MoviePlayer::DecodeBlock(BitReader& br, s32 block[64],
-                               u16 quantScale, u16 version,
-                               s32& prevDC, bool isChroma, bool isCr) {
+                              u16 quantScale, u16 version,
+                              s32& prevDC, bool isChroma, bool isCr) {
     std::memset(block, 0, 64 * sizeof(s32));
 
     // Read DC coefficient
@@ -737,7 +895,8 @@ void MoviePlayer::DecodeBlock(BitReader& br, s32 block[64],
     if (version == 2) {
         // V2: 10 bits signed, absolute
         dc = SignExtend(br.ReadBits(10), 10);
-    } else {
+    }
+    else {
         // V3: differential Huffman-coded DC (MPEG1 ISO 11172 tables)
         u32 peek = br.PeekBits(8);
         s32 dcDiff = 0;
@@ -747,54 +906,73 @@ void MoviePlayer::DecodeBlock(BitReader& br, s32 block[64],
             // Chroma DC VLC (table 2-D.12 from ISO 11172-2)
             if ((peek >> 0) == 0xFE) {
                 br.SkipBits(8); sizeCode = 8;
-            } else if ((peek >> 1) >= 0x7E) {
+            }
+            else if ((peek >> 1) >= 0x7E) {
                 br.SkipBits(7); sizeCode = 7;
-            } else if ((peek >> 2) >= 0x3E) {
+            }
+            else if ((peek >> 2) >= 0x3E) {
                 br.SkipBits(6); sizeCode = 6;
-            } else if ((peek >> 3) >= 0x1E) {
+            }
+            else if ((peek >> 3) >= 0x1E) {
                 br.SkipBits(5); sizeCode = 5;
-            } else if ((peek >> 4) >= 0x0E) {
+            }
+            else if ((peek >> 4) >= 0x0E) {
                 br.SkipBits(4); sizeCode = 4;
-            } else if ((peek >> 5) >= 0x06) {
+            }
+            else if ((peek >> 5) >= 0x06) {
                 br.SkipBits(3); sizeCode = 3;
-            } else if ((peek >> 6) >= 0x02) {
+            }
+            else if ((peek >> 6) >= 0x02) {
                 br.SkipBits(2); sizeCode = 2;
-            } else if ((peek >> 6) == 0x01) {
+            }
+            else if ((peek >> 6) == 0x01) {
                 br.SkipBits(2); sizeCode = 1;
-            } else {
+            }
+            else {
                 br.SkipBits(2); sizeCode = 0;
             }
-        } else {
+        }
+        else {
             // Luma DC VLC (table 2-D.12 from ISO 11172-2)
             if ((peek >> 1) >= 0x7E) {
                 br.SkipBits(7); sizeCode = 8;
-            } else if ((peek >> 2) >= 0x3E) {
+            }
+            else if ((peek >> 2) >= 0x3E) {
                 br.SkipBits(6); sizeCode = 7;
-            } else if ((peek >> 3) >= 0x1E) {
+            }
+            else if ((peek >> 3) >= 0x1E) {
                 br.SkipBits(5); sizeCode = 6;
-            } else if ((peek >> 4) >= 0x0E) {
+            }
+            else if ((peek >> 4) >= 0x0E) {
                 br.SkipBits(4); sizeCode = 5;
-            } else if ((peek >> 5) >= 0x06) {
+            }
+            else if ((peek >> 5) >= 0x06) {
                 br.SkipBits(3); sizeCode = 4;
-            } else if ((peek >> 5) == 0x05) {
+            }
+            else if ((peek >> 5) == 0x05) {
                 br.SkipBits(3); sizeCode = 3;
-            } else if ((peek >> 6) == 0x01) {
+            }
+            else if ((peek >> 6) == 0x01) {
                 br.SkipBits(2); sizeCode = 2;
-            } else if ((peek >> 6) == 0x00) {
+            }
+            else if ((peek >> 6) == 0x00) {
                 br.SkipBits(2); sizeCode = 1;
-            } else {
+            }
+            else {
                 br.SkipBits(3); sizeCode = 0;
             }
         }
 
         if (sizeCode == 0) {
             dcDiff = 0;
-        } else {
+        }
+        else {
             s32 valueBits = br.ReadBits(sizeCode);
             // Top bit 0 = negative, top bit 1 = positive (jpsxdec convention)
             if (valueBits & (1 << (sizeCode - 1))) {
                 dcDiff = valueBits;
-            } else {
+            }
+            else {
                 dcDiff = valueBits - ((1 << sizeCode) - 1);
             }
         }
@@ -826,7 +1004,8 @@ void MoviePlayer::DecodeBlock(BitReader& br, s32 block[64],
             br.SkipBits(6);
             run = (s32)br.ReadBits(6);
             level = SignExtend(br.ReadBits(10), 10);
-        } else {
+        }
+        else {
             // Try VLC table match
             bool matched = false;
             for (u32 v = 0; v < AC_VLC_COUNT; v++) {
@@ -896,10 +1075,10 @@ void MoviePlayer::IDCT(const s32 block[64], s32 out[64]) {
 
 // jpsxdec PsxYCbCr_int fixed-point constants (16-bit precision)
 // These are tuned to match PSX MDEC hardware output exactly.
-static constexpr s64 JPSXDEC_1_402  = 91893;  // round(1.402 * 65536) + 12
+static constexpr s64 JPSXDEC_1_402 = 91893;  // round(1.402 * 65536) + 12
 static constexpr s64 JPSXDEC_0_3437 = 22525;  // round(0.3437 * 65536)
 static constexpr s64 JPSXDEC_0_7143 = 46812;  // round(0.7143 * 65536)
-static constexpr s64 JPSXDEC_1_772  = 116224; // round(1.772 * 65536) + 94
+static constexpr s64 JPSXDEC_1_772 = 116224; // round(1.772 * 65536) + 94
 
 // jpsxdec shrRound for YCbCr
 static inline s32 ShrRound(s64 val, int bits) {
@@ -907,9 +1086,9 @@ static inline s32 ShrRound(s64 val, int bits) {
 }
 
 void MoviePlayer::MacroblockToRGB(const s32 cr[64], const s32 cb[64],
-                                    const s32 y1[64], const s32 y2[64],
-                                    const s32 y3[64], const s32 y4[64],
-                                    u32* rgbaOut, u32 stride) {
+                                  const s32 y1[64], const s32 y2[64],
+                                  const s32 y3[64], const s32 y4[64],
+                                  u32* rgbaOut, u32 stride) {
     for (int py = 0; py < 16; py++) {
         for (int px = 0; px < 16; px++) {
             // Get Y value from appropriate sub-block (flat indexing: row*8+col)
@@ -929,9 +1108,9 @@ void MoviePlayer::MacroblockToRGB(const s32 cr[64], const s32 cb[64],
             // PSX YCbCr -> RGB conversion (jpsxdec PsxYCbCr_int formula)
             // Y is centered at 0, add 128 for display range
             s32 Yshift = Y + 128;
-            s32 r = Yshift + ShrRound(JPSXDEC_1_402  * Cr, 16);
+            s32 r = Yshift + ShrRound(JPSXDEC_1_402 * Cr, 16);
             s32 g = Yshift + ShrRound(-JPSXDEC_0_3437 * Cb - JPSXDEC_0_7143 * Cr, 16);
-            s32 b = Yshift + ShrRound(JPSXDEC_1_772  * Cb, 16);
+            s32 b = Yshift + ShrRound(JPSXDEC_1_772 * Cb, 16);
 
             r = Clamp(r, 0, 255);
             g = Clamp(g, 0, 255);
@@ -985,7 +1164,8 @@ void MoviePlayer::DecodeXAAudio(const u8* sectorData, u8 codingInfo) {
             u8 filterParam;
             if (unit < 4) {
                 filterParam = groupData[unit];       // bytes 0,1,2,3
-            } else {
+            }
+            else {
                 filterParam = groupData[unit + 4];   // bytes 8,9,10,11
             }
 
@@ -1002,7 +1182,8 @@ void MoviePlayer::DecodeXAAudio(const u8* sectorData, u8 codingInfo) {
                 s32 nibble;
                 if (unit & 1) {
                     nibble = (dataByte >> 4) & 0x0F;
-                } else {
+                }
+                else {
                     nibble = dataByte & 0x0F;
                 }
 
@@ -1034,7 +1215,8 @@ void MoviePlayer::DecodeXAAudio(const u8* sectorData, u8 codingInfo) {
                     }
                 }
             }
-        } else {
+        }
+        else {
             // Mono: write all units sequentially
             for (u32 unit = 0; unit < 8; unit++) {
                 for (u32 s = 0; s < 28; s++) {

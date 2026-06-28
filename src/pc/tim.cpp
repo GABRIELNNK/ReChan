@@ -13,6 +13,8 @@
 #include "pddi/pdditex.h"
 #include "xclib/xcfile.h"
 #include <vector>
+#include <algorithm>
+#include <cmath>
 #ifdef MOD_LOADER
 #include "extra/modloader.h"
 #include "p3d/hash.h"
@@ -208,54 +210,190 @@ static void EnsureShader() {
 }
 
 // Overlay batching
+static constexpr s32 kMinCircleSegments = 3;
+static constexpr s32 kMaxCircleSegments = 64;
+static constexpr f32 kTwoPi = 6.28318530718f;
+
 static s32 s_overlayBatchDepth = 0;
 static Mat4 s_overlayBatchPrevProj;
-static std::vector<pddiBatchVertex> s_pendingQuadVerts;
-static tTexture* s_pendingQuadTex = nullptr;
-static bool s_pendingQuadActive = false;
+static std::vector<pddiBatchVertex> s_pendingPrimitiveVerts;
+static tTexture* s_pendingPrimitiveTex = nullptr;
+static bool s_pendingPrimitiveActive = false;
 
-static void FlushPendingQuadBatch() {
-    if (s_pendingQuadVerts.empty()) {
-        s_pendingQuadActive = false;
-        return;
-    }
-    p3d::context->DrawQuadBatch(
-        s_pendingQuadTex ? s_pendingQuadTex->GetTexture() : nullptr,
-        PDDI_BLEND_ALPHA,
-        s_pendingQuadVerts.data(),
-        (s32)s_pendingQuadVerts.size());
-    s_pendingQuadVerts.clear();
-    s_pendingQuadActive = false;
+static s32 ClampCircleSegments(s32 segments) {
+    if (segments < kMinCircleSegments)
+        return kMinCircleSegments;
+
+    if (segments > kMaxCircleSegments)
+        return kMaxCircleSegments;
+
+    return segments;
 }
 
-void ScreenDraw::SetScissor(s32 x, s32 y, s32 w, s32 h) {
-    if (s_overlayBatchDepth > 0) {
-        FlushPendingQuadBatch();
+static void QueueBatchedVertex(f32 x, f32 y,
+                               f32 u, f32 v,
+                               u8 r, u8 g, u8 b, u8 a) {
+    s_pendingPrimitiveVerts.push_back({ x, y, u, v, r, g, b, a });
+}
+
+static void FlushPendingPrimitiveBatch() {
+    if (s_pendingPrimitiveVerts.empty()) {
+        s_pendingPrimitiveActive = false;
+        return;
     }
-    if (p3d::context) {
-        p3d::context->SetScissor(x, y, w, h);
+
+    p3d::context->DrawQuadBatch(
+        s_pendingPrimitiveTex ? s_pendingPrimitiveTex->GetTexture() : nullptr,
+        PDDI_BLEND_ALPHA,
+        s_pendingPrimitiveVerts.data(),
+        (s32)s_pendingPrimitiveVerts.size());
+
+    s_pendingPrimitiveVerts.clear();
+    s_pendingPrimitiveActive = false;
+}
+
+static void EnsurePrimitiveBatchTexture(tTexture* tex) {
+    if (s_pendingPrimitiveActive && s_pendingPrimitiveTex != tex) {
+        FlushPendingPrimitiveBatch();
     }
+
+    s_pendingPrimitiveTex = tex;
+    s_pendingPrimitiveActive = true;
 }
 
 static void QueueBatchedQuad(tTexture* tex, f32 x, f32 y, f32 w, f32 h,
-                              f32 u0, f32 v0, f32 u1, f32 v1,
-                              u8 r, u8 g, u8 b, u8 a) {
-    if (s_pendingQuadActive && s_pendingQuadTex != tex) {
-        FlushPendingQuadBatch();
-    }
-    s_pendingQuadTex = tex;
-    s_pendingQuadActive = true;
+                             f32 u0, f32 v0, f32 u1, f32 v1,
+                             u8 r, u8 g, u8 b, u8 a) {
+    if (w == 0.0f || h == 0.0f || a == 0)
+        return;
 
-    const f32 yTop = y, yBottom = y + h;
-    const pddiBatchVertex verts[6] = {
-        { x,     yBottom, u0, v1, r, g, b, a },
-        { x + w, yBottom, u1, v1, r, g, b, a },
-        { x + w, yTop,    u1, v0, r, g, b, a },
-        { x,     yBottom, u0, v1, r, g, b, a },
-        { x + w, yTop,    u1, v0, r, g, b, a },
-        { x,     yTop,    u0, v0, r, g, b, a },
-    };
-    s_pendingQuadVerts.insert(s_pendingQuadVerts.end(), verts, verts + 6);
+    EnsurePrimitiveBatchTexture(tex);
+
+    const f32 yTop = y;
+    const f32 yBottom = y + h;
+
+    QueueBatchedVertex(x, yBottom, u0, v1, r, g, b, a);
+    QueueBatchedVertex(x + w, yBottom, u1, v1, r, g, b, a);
+    QueueBatchedVertex(x + w, yTop, u1, v0, r, g, b, a);
+
+    QueueBatchedVertex(x, yBottom, u0, v1, r, g, b, a);
+    QueueBatchedVertex(x + w, yTop, u1, v0, r, g, b, a);
+    QueueBatchedVertex(x, yTop, u0, v0, r, g, b, a);
+}
+
+static void QueueBatchedFilledCircle(tTexture* tex,
+                                     f32 centerX, f32 centerY,
+                                     f32 radiusX, f32 radiusY,
+                                     f32 u0, f32 v0, f32 u1, f32 v1,
+                                     s32 segments,
+                                     u8 r, u8 g, u8 b, u8 a) {
+    if (radiusX <= 0.0f || radiusY <= 0.0f || a == 0)
+        return;
+
+    segments = ClampCircleSegments(segments);
+    EnsurePrimitiveBatchTexture(tex);
+
+    const f32 uvCenterX = (u0 + u1) * 0.5f;
+    const f32 uvCenterY = (v0 + v1) * 0.5f;
+    const f32 uvRadiusX = (u1 - u0) * 0.5f;
+    const f32 uvRadiusY = (v1 - v0) * 0.5f;
+
+    for (s32 i = 0; i < segments; ++i) {
+        const f32 a0 = ((f32)i / (f32)segments) * kTwoPi;
+        const f32 a1 = ((f32)(i + 1) / (f32)segments) * kTwoPi;
+
+        const f32 c0 = std::cos(a0);
+        const f32 s0 = std::sin(a0);
+        const f32 c1 = std::cos(a1);
+        const f32 s1 = std::sin(a1);
+
+        const f32 x0 = centerX;
+        const f32 y0 = centerY;
+
+        const f32 x1p = centerX + c0 * radiusX;
+        const f32 y1p = centerY + s0 * radiusY;
+
+        const f32 x2p = centerX + c1 * radiusX;
+        const f32 y2p = centerY + s1 * radiusY;
+
+        const f32 tu0 = uvCenterX;
+        const f32 tv0 = uvCenterY;
+
+        const f32 tu1 = uvCenterX + c0 * uvRadiusX;
+        const f32 tv1 = uvCenterY + s0 * uvRadiusY;
+
+        const f32 tu2 = uvCenterX + c1 * uvRadiusX;
+        const f32 tv2 = uvCenterY + s1 * uvRadiusY;
+
+        QueueBatchedVertex(x0, y0, tu0, tv0, r, g, b, a);
+        QueueBatchedVertex(x1p, y1p, tu1, tv1, r, g, b, a);
+        QueueBatchedVertex(x2p, y2p, tu2, tv2, r, g, b, a);
+    }
+}
+
+static void QueueBatchedCircle(tTexture* tex,
+                               f32 centerX, f32 centerY,
+                               f32 radiusX, f32 radiusY,
+                               f32 thickness,
+                               f32 u0, f32 v0, f32 u1, f32 v1,
+                               s32 segments,
+                               u8 r, u8 g, u8 b, u8 a) {
+    if (radiusX <= 0.0f || radiusY <= 0.0f || thickness <= 0.0f || a == 0)
+        return;
+
+    segments = ClampCircleSegments(segments);
+    EnsurePrimitiveBatchTexture(tex);
+
+    const f32 innerRadiusX = std::max(0.0f, radiusX - thickness);
+    const f32 innerRadiusY = std::max(0.0f, radiusY - thickness);
+
+    const f32 uvCenterX = (u0 + u1) * 0.5f;
+    const f32 uvCenterY = (v0 + v1) * 0.5f;
+    const f32 uvRadiusX = (u1 - u0) * 0.5f;
+    const f32 uvRadiusY = (v1 - v0) * 0.5f;
+
+    const f32 innerUvScaleX = radiusX > 0.0001f ? (innerRadiusX / radiusX) : 0.0f;
+    const f32 innerUvScaleY = radiusY > 0.0001f ? (innerRadiusY / radiusY) : 0.0f;
+
+    for (s32 i = 0; i < segments; ++i) {
+        const f32 a0 = ((f32)i / (f32)segments) * kTwoPi;
+        const f32 a1 = ((f32)(i + 1) / (f32)segments) * kTwoPi;
+
+        const f32 c0 = std::cos(a0);
+        const f32 s0 = std::sin(a0);
+        const f32 c1 = std::cos(a1);
+        const f32 s1 = std::sin(a1);
+
+        const f32 outerX0 = centerX + c0 * radiusX;
+        const f32 outerY0 = centerY + s0 * radiusY;
+        const f32 outerX1 = centerX + c1 * radiusX;
+        const f32 outerY1 = centerY + s1 * radiusY;
+
+        const f32 innerX0 = centerX + c0 * innerRadiusX;
+        const f32 innerY0 = centerY + s0 * innerRadiusY;
+        const f32 innerX1 = centerX + c1 * innerRadiusX;
+        const f32 innerY1 = centerY + s1 * innerRadiusY;
+
+        const f32 outerU0 = uvCenterX + c0 * uvRadiusX;
+        const f32 outerV0 = uvCenterY + s0 * uvRadiusY;
+        const f32 outerU1 = uvCenterX + c1 * uvRadiusX;
+        const f32 outerV1 = uvCenterY + s1 * uvRadiusY;
+
+        const f32 innerU0 = uvCenterX + c0 * uvRadiusX * innerUvScaleX;
+        const f32 innerV0 = uvCenterY + s0 * uvRadiusY * innerUvScaleY;
+        const f32 innerU1 = uvCenterX + c1 * uvRadiusX * innerUvScaleX;
+        const f32 innerV1 = uvCenterY + s1 * uvRadiusY * innerUvScaleY;
+
+        // Triangle 1
+        QueueBatchedVertex(outerX0, outerY0, outerU0, outerV0, r, g, b, a);
+        QueueBatchedVertex(outerX1, outerY1, outerU1, outerV1, r, g, b, a);
+        QueueBatchedVertex(innerX1, innerY1, innerU1, innerV1, r, g, b, a);
+
+        // Triangle 2
+        QueueBatchedVertex(outerX0, outerY0, outerU0, outerV0, r, g, b, a);
+        QueueBatchedVertex(innerX1, innerY1, innerU1, innerV1, r, g, b, a);
+        QueueBatchedVertex(innerX0, innerY0, innerU0, innerV0, r, g, b, a);
+    }
 }
 
 // Internal: begin 2D overlay rendering (saves projection, sets ortho).
@@ -312,7 +450,7 @@ void ScreenDraw::EndBatch() {
         return;
     }
     if (--s_overlayBatchDepth == 0) {
-        FlushPendingQuadBatch();
+        FlushPendingPrimitiveBatch();
         p3d::context->SetProjectionMatrix(s_overlayBatchPrevProj);
         p3d::context->EnableZBuffer(true);
         p3d::context->SetBlendMode(PDDI_BLEND_NONE);
@@ -320,9 +458,21 @@ void ScreenDraw::EndBatch() {
     }
 }
 
+void ScreenDraw::SetScissor(s32 x, s32 y, s32 w, s32 h) {
+    // Scissor changes rasterization state, so pending triangles must be drawn
+    // before changing it. This keeps ordering correct inside a ScreenDraw batch.
+    if (s_overlayBatchDepth > 0) {
+        FlushPendingPrimitiveBatch();
+    }
+
+    if (p3d::context) {
+        p3d::context->SetScissor(x, y, w, h);
+    }
+}
+
 void ScreenDraw::DrawFullscreen(tTexture* tex) {
     if (s_overlayBatchDepth > 0) {
-        FlushPendingQuadBatch();
+        FlushPendingPrimitiveBatch();
     }
 
     Mat4 prev = BeginOverlay();
@@ -331,6 +481,117 @@ void ScreenDraw::DrawFullscreen(tTexture* tex) {
     s_screenShader->SetTexture(0, tex ? tex->GetTexture() : nullptr);
     s_screenShader->SetColour(0, pddiColour(255, 255, 255, 255));
     p3d::context->DrawQuad(s_screenShader, SCALE_AND_CENTER_X(0.0f), 0.0f, SCREEN_SCALE_X(DEFAULT_SCREEN_WIDTH), SCREEN_HEIGHT, 0.0f, 0.0f, 1.0f, 1.0f);
+
+    EndOverlay(prev);
+}
+
+void ScreenDraw::DrawFullscreenAdvanced(tTexture* tex,
+                                       f32 sourceAspect,
+                                       f32 desiredAspect,
+                                       bool fillScreen) {
+    if (s_overlayBatchDepth > 0) {
+        FlushPendingPrimitiveBatch();
+    }
+
+    if (!tex || sourceAspect <= 0.0f || desiredAspect <= 0.0f) {
+        return;
+    }
+
+    Mat4 prev = BeginOverlay();
+    p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+
+    f32 u0 = 0.0f;
+    f32 v0 = 0.0f;
+    f32 u1 = 1.0f;
+    f32 v1 = 1.0f;
+
+    // First crop the SOURCE image to the desired aspect ratio.
+    //
+    // Example:
+    // sourceAspect  = 4.0f / 3.0f
+    // desiredAspect = 16.0f / 9.0f
+    //
+    // This removes the top/bottom black bars from a 4:3 frame
+    // that contains letterboxed 16:9 video.
+    if (sourceAspect < desiredAspect) {
+        // Source is taller/narrower than desired.
+        // Crop vertically.
+        const f32 visibleHeight = sourceAspect / desiredAspect;
+        const f32 cropY = (1.0f - visibleHeight) * 0.5f;
+
+        v0 = cropY;
+        v1 = 1.0f - cropY;
+    }
+    else if (sourceAspect > desiredAspect) {
+        // Source is wider than desired.
+        // Crop horizontally.
+        const f32 visibleWidth = desiredAspect / sourceAspect;
+        const f32 cropX = (1.0f - visibleWidth) * 0.5f;
+
+        u0 = cropX;
+        u1 = 1.0f - cropX;
+    }
+
+    f32 x = SCALE_AND_CENTER_X(0.0f);
+    f32 y = 0.0f;
+    f32 w = SCREEN_SCALE_X(DEFAULT_SCREEN_WIDTH);
+    f32 h = SCREEN_HEIGHT;
+
+    if (fillScreen) {
+        // Scale the desired-aspect image to fill the screen.
+        // If the screen aspect differs, this crops outside the screen.
+        const f32 screenAspect = w / h;
+
+        if (screenAspect > desiredAspect) {
+            // Screen is wider than desired.
+            // Match width, extend height beyond screen.
+            const f32 newH = w / desiredAspect;
+            y = (h - newH) * 0.5f;
+            h = newH;
+        }
+        else if (screenAspect < desiredAspect) {
+            // Screen is narrower than desired.
+            // Match height, extend width beyond screen.
+            const f32 newW = h * desiredAspect;
+            x = x + (w - newW) * 0.5f;
+            w = newW;
+        }
+    }
+    else {
+        // Fit inside screen, preserving aspect ratio.
+        // This may create black bars.
+        const f32 screenAspect = w / h;
+
+        if (screenAspect > desiredAspect) {
+            // Screen is wider.
+            // Match height, reduce width.
+            const f32 newW = h * desiredAspect;
+            x = x + (w - newW) * 0.5f;
+            w = newW;
+        }
+        else if (screenAspect < desiredAspect) {
+            // Screen is taller/narrower.
+            // Match width, reduce height.
+            const f32 newH = w / desiredAspect;
+            y = (h - newH) * 0.5f;
+            h = newH;
+        }
+    }
+
+    s_screenShader->SetTexture(0, tex->GetTexture());
+    s_screenShader->SetColour(0, pddiColour(255, 255, 255, 255));
+
+    p3d::context->DrawQuad(
+        s_screenShader,
+        x,
+        y,
+        w,
+        h,
+        u0,
+        v0,
+        u1,
+        v1
+    );
 
     EndOverlay(prev);
 }
@@ -347,9 +608,8 @@ void ScreenDraw::DrawQuad(tTexture* tex, f32 x, f32 y, f32 w, f32 h,
     Mat4 prev = BeginOverlay();
     p3d::context->SetBlendMode(PDDI_BLEND_ALPHA);
 
-    s_screenShader->SetTexture(0, tex ? tex->GetTexture() : nullptr);
-    s_screenShader->SetColour(0, pddiColour(r, g, b, a));
-    p3d::context->DrawQuad(s_screenShader, x, y, w, h, u0, v0, u1, v1);
+    QueueBatchedQuad(tex, x, y, w, h, u0, v0, u1, v1, r, g, b, a);
+    FlushPendingPrimitiveBatch();
 
     EndOverlay(prev);
 }
@@ -363,7 +623,7 @@ void ScreenDraw::DrawShaderQuad(pddiBaseShader* shader, f32 x, f32 y, f32 w, f32
     }
 
     if (s_overlayBatchDepth > 0) {
-        FlushPendingQuadBatch();
+        FlushPendingPrimitiveBatch();
     }
 
     Mat4 prev = BeginOverlay(canvasW, canvasH);
@@ -376,20 +636,112 @@ void ScreenDraw::DrawColoredQuad(u8 r, u8 g, u8 b, u8 a) {
     DrawColoredRect(0.0f, 0.0f, SCREEN_WIDTH, SCREEN_HEIGHT, r, g, b, a);
 }
 
-void ScreenDraw::DrawColoredRect(f32 x, f32 y, f32 w, f32 h,
-                                 u8 r, u8 g, u8 b, u8 a) {
+void ScreenDraw::DrawCircle(tTexture* tex,
+                            f32 centerX, f32 centerY,
+                            f32 radiusX, f32 radiusY,
+                            f32 thickness,
+                            f32 u0, f32 v0, f32 u1, f32 v1,
+                            s32 segments, u8 r, u8 g, u8 b, u8 a) {
     if (s_overlayBatchDepth > 0) {
         EnsureShader();
-        QueueBatchedQuad(nullptr, x, y, w, h, 0.0f, 0.0f, 1.0f, 1.0f, r, g, b, a);
+        QueueBatchedCircle(tex,
+                           centerX, centerY,
+                           radiusX, radiusY,
+                           thickness,
+                           u0, v0, u1, v1,
+                           segments,
+                           r, g, b, a);
         return;
     }
 
     Mat4 prev = BeginOverlay();
     p3d::context->SetBlendMode(PDDI_BLEND_ALPHA);
 
-    s_screenShader->SetTexture(0, nullptr);
-    s_screenShader->SetColour(0, pddiColour(r, g, b, a));
-    p3d::context->DrawQuad(s_screenShader, x, y, w, h, 0.0f, 0.0f, 1.0f, 1.0f);
+    QueueBatchedCircle(tex,
+                       centerX, centerY,
+                       radiusX, radiusY,
+                       thickness,
+                       u0, v0, u1, v1,
+                       segments,
+                       r, g, b, a);
+    FlushPendingPrimitiveBatch();
+
+    EndOverlay(prev);
+}
+
+void ScreenDraw::DrawCircle(f32 centerX, f32 centerY,
+                            f32 radiusX, f32 radiusY,
+                            f32 thickness,
+                            f32 u0, f32 v0, f32 u1, f32 v1,
+                            s32 segments, u8 r, u8 g, u8 b, u8 a) {
+    DrawCircle(nullptr,
+               centerX, centerY,
+               radiusX, radiusY,
+               thickness,
+               u0, v0, u1, v1,
+               segments,
+               r, g, b, a);
+}
+
+void ScreenDraw::DrawFilledCircle(tTexture* tex,
+                                  f32 centerX, f32 centerY,
+                                  f32 radiusX, f32 radiusY,
+                                  f32 u0, f32 v0, f32 u1, f32 v1,
+                                  s32 segments, u8 r, u8 g, u8 b, u8 a) {
+    if (s_overlayBatchDepth > 0) {
+        EnsureShader();
+        QueueBatchedFilledCircle(tex,
+                                 centerX, centerY,
+                                 radiusX, radiusY,
+                                 u0, v0, u1, v1,
+                                 segments,
+                                 r, g, b, a);
+        return;
+    }
+
+    Mat4 prev = BeginOverlay();
+    p3d::context->SetBlendMode(PDDI_BLEND_ALPHA);
+
+    QueueBatchedFilledCircle(tex,
+                             centerX, centerY,
+                             radiusX, radiusY,
+                             u0, v0, u1, v1,
+                             segments,
+                             r, g, b, a);
+    FlushPendingPrimitiveBatch();
+
+    EndOverlay(prev);
+}
+
+void ScreenDraw::DrawFilledCircle(f32 centerX, f32 centerY,
+                                  f32 radiusX, f32 radiusY,
+                                  f32 u0, f32 v0, f32 u1, f32 v1,
+                                  s32 segments, u8 r, u8 g, u8 b, u8 a) {
+    DrawFilledCircle(nullptr,
+                     centerX, centerY,
+                     radiusX, radiusY,
+                     u0, v0, u1, v1,
+                     segments,
+                     r, g, b, a);
+}
+
+void ScreenDraw::DrawColoredRect(f32 x, f32 y, f32 w, f32 h,
+                                 u8 r, u8 g, u8 b, u8 a) {
+    if (s_overlayBatchDepth > 0) {
+        EnsureShader();
+        QueueBatchedQuad(nullptr, x, y, w, h,
+                         0.0f, 0.0f, 1.0f, 1.0f,
+                         r, g, b, a);
+        return;
+    }
+
+    Mat4 prev = BeginOverlay();
+    p3d::context->SetBlendMode(PDDI_BLEND_ALPHA);
+
+    QueueBatchedQuad(nullptr, x, y, w, h,
+                     0.0f, 0.0f, 1.0f, 1.0f,
+                     r, g, b, a);
+    FlushPendingPrimitiveBatch();
 
     EndOverlay(prev);
 }
@@ -399,7 +751,7 @@ void ScreenDraw::DrawGouraudQuad(f32 x0, f32 y0, u8 r0, u8 g0, u8 b0, u8 a0,
                                  f32 x2, f32 y2, u8 r2, u8 g2, u8 b2, u8 a2,
                                  f32 x3, f32 y3, u8 r3, u8 g3, u8 b3, u8 a3) {
     if (s_overlayBatchDepth > 0) {
-        FlushPendingQuadBatch();
+        FlushPendingPrimitiveBatch();
     }
 
     Mat4 prev = BeginOverlay();

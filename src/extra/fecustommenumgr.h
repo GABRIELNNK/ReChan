@@ -399,6 +399,8 @@ public:
     bool IsActive() const { return m_active; }
     MenuPage GetCurrentPage() const { return m_currPage; }
 
+    void RenderAutosaveSpinner(s32 centerX, s32 centerY, f32 alpha01 = 1.0f) const;
+
 private:
     void BuildPages();
     PageDef& AddPage(MenuPage id, const char* title,
@@ -438,7 +440,6 @@ private:
     void ClampSaveSlotScroll();
     void RenderSaveSlotsPage(s32 panelX, s32 panelY, s32 panelW, s32 panelH,
                              const xcColour1555& selectedColor) const;
-    void RenderAutosaveSpinner(s32 centerX, s32 centerY, f32 alpha01 = 1.0f) const;
 
 #if AUTO_UPDATER
     void RefreshUpdatePageEntries();

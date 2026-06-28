@@ -5544,7 +5544,7 @@ void feCustomMenuMgr::RenderActivePopupContent(s32 panelX, s32 panelW, s32 first
             }
             const s32 spinnerY = firstY + DEF_ROW_TEXT_H
                 + (lines - 1) * DEF_ROW_STEP + DEF_INFO_ROW_EXTRA + 12;
-            RenderAutosaveSpinner(panelX + panelW / 2, spinnerY, popupAlpha);
+            RenderAutosaveSpinner(SCALE_AND_CENTER_X(panelX + panelW / 2), SCREEN_SCALE_Y(spinnerY), popupAlpha);
             break;
         }
 #if AUTO_UPDATER
@@ -5565,22 +5565,72 @@ void feCustomMenuMgr::RenderActivePopupContent(s32 panelX, s32 panelW, s32 first
 
 void feCustomMenuMgr::RenderAutosaveSpinner(s32 centerX, s32 centerY, f32 alpha01) const {
     static constexpr s32 kSegments = 8;
-    static constexpr f32 kRadius = 5.0f;
-    static constexpr f32 kSize = 2.0f;
+    static constexpr s32 kCircleSegments = 12;
+
+    static constexpr f32 kRadius = 6.0f;
+    static constexpr f32 kDotRadius = 1.75f;
+
+    static constexpr f32 kUnitCircle[kSegments][2] = {
+        {  1.000000f,  0.000000f },
+        {  0.707107f,  0.707107f },
+        {  0.000000f,  1.000000f },
+        { -0.707107f,  0.707107f },
+        { -1.000000f,  0.000000f },
+        { -0.707107f, -0.707107f },
+        {  0.000000f, -1.000000f },
+        {  0.707107f, -0.707107f },
+    };
+
     const f32 scaleX = SCREEN_SCALE_X(1.0f);
     const f32 scaleY = SCREEN_SCALE_Y(1.0f);
+
+    // Keeps the spinner visually round when X/Y screen scaling differs.
     const f32 xCompensation = (scaleX > 0.0f) ? (scaleY / scaleX) : 1.0f;
+
     const f32 radiusX = kRadius * xCompensation;
-    const f32 sizeX = kSize * xCompensation;
-    // 15 segments/sec (matches the original frame/2 advance at 30 fps), wall-clock paced.
+    const f32 radiusY = kRadius;
+
+    const f32 dotRadiusX = kDotRadius * xCompensation;
+    const f32 dotRadiusY = kDotRadius;
+
+    // 15 segments/sec, matching original frame / 2 behavior at 30 fps.
     const s32 head = (s32)((s64)(UiAnimSeconds() * 15.0f) % kSegments);
+
     for (s32 i = 0; i < kSegments; ++i) {
-        const f32 angle = ((f32)i / (f32)kSegments) * 6.2831853f;
         const s32 distance = (head - i + kSegments) % kSegments;
-        const u8 alpha = ScaleAlphaU8((u8)(255 - distance * 18), alpha01);
-        const f32 x = (f32)centerX + std::cos(angle) * radiusX - sizeX * 0.5f;
-        const f32 y = (f32)centerY + std::sin(angle) * kRadius - kSize * 0.5f;
-        DrawRect(x, y, sizeX, kSize, 255, 224, 96, alpha);
+
+        // Stronger fade than the old square spinner, because circles look better with a longer trail.
+        const s32 alphaBase = 255 - distance * 30;
+        if (alphaBase <= 0) {
+            continue;
+        }
+
+        const u8 alpha = ScaleAlphaU8((u8)alphaBase, alpha01);
+        if (alpha == 0) {
+            continue;
+        }
+
+        // Slight emphasis on the current active dot.
+        const f32 pulse = (distance == 0) ? 1.25f : 1.0f;
+
+        const f32 x = (f32)centerX + SCREEN_SCALE_X(kUnitCircle[i][0] * radiusX);
+        const f32 y = (f32)centerY + SCREEN_SCALE_Y(kUnitCircle[i][1] * radiusY);
+
+        ScreenDraw::DrawFilledCircle(
+            x,
+            y,
+            SCREEN_SCALE_X(dotRadiusX * pulse),
+            SCREEN_SCALE_Y(dotRadiusY * pulse),
+            0.0f,
+            0.0f,
+            1.0f,
+            1.0f,
+            kCircleSegments,
+            255,
+            224,
+            96,
+            alpha
+        );
     }
 }
 

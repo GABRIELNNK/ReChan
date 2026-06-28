@@ -35,46 +35,91 @@ namespace ScreenDraw {
     void BeginBatch(f32 canvasW = 0.0f, f32 canvasH = 0.0f);
     void EndBatch();
 
-    // RAII helper: opens a batch for the lifetime of the scope. Safe for
-    // functions with multiple return paths (menu/HUD render).
+    // RAII helper: opens a batch for the lifetime of the scope.
+    // Safe for functions with multiple return paths.
     struct Batch {
-        explicit Batch(f32 canvasW = 0.0f, f32 canvasH = 0.0f) { BeginBatch(canvasW, canvasH); }
-        ~Batch() { EndBatch(); }
+        explicit Batch(f32 canvasW = 0.0f, f32 canvasH = 0.0f) {
+            BeginBatch(canvasW, canvasH);
+        }
+
+        ~Batch() {
+            EndBatch();
+        }
+
         Batch(const Batch&) = delete;
         Batch& operator=(const Batch&) = delete;
     };
 
-    // Draw a texture filling the entire screen (opaque, no alpha).
+    // Draw a texture filling the entire screen.
     void DrawFullscreen(tTexture* tex);
 
+    void DrawFullscreenAdvanced(tTexture* tex,
+                                            f32 sourceAspect,
+                                            f32 desiredAspect,
+                                            bool fillScreen);
+
     // Draw a textured quad with optional UV and color tint.
-    // Default UV = full texture, default color = white (no tint).
-    void DrawQuad(tTexture* tex, f32 x, f32 y, f32 w, f32 h,
-                  f32 u0 = 0.0f, f32 v0 = 0.0f, f32 u1 = 1.0f, f32 v1 = 1.0f,
+    void DrawQuad(tTexture* tex,
+                  f32 x, f32 y, f32 w, f32 h,
+                  f32 u0 = 0.0f, f32 v0 = 0.0f,
+                  f32 u1 = 1.0f, f32 v1 = 1.0f,
                   u8 r = 255, u8 g = 255, u8 b = 255, u8 a = 255);
 
     // Draw through a caller-owned programmable shader while preserving the
     // same overlay state and coordinate system as the regular 2D helpers.
-    // canvasW/canvasH override the projected coordinate space (default: the
-    // live screen size); pass the target's own size when drawing into an
-    // off-screen render target so the quad isn't projected against the main
-    // window's resolution instead of the buffer actually being rendered to.
-    void DrawShaderQuad(pddiBaseShader* shader, f32 x, f32 y, f32 w, f32 h,
-                        f32 u0 = 0.0f, f32 v0 = 0.0f, f32 u1 = 1.0f, f32 v1 = 1.0f,
+    void DrawShaderQuad(pddiBaseShader* shader,
+                        f32 x, f32 y, f32 w, f32 h,
+                        f32 u0 = 0.0f, f32 v0 = 0.0f,
+                        f32 u1 = 1.0f, f32 v1 = 1.0f,
                         pddiBlendMode blendMode = PDDI_BLEND_ALPHA,
                         f32 canvasW = 0.0f, f32 canvasH = 0.0f);
 
-    // Draw a solid colored rectangle (no texture).
+    // Draw a solid colored rectangle.
     void DrawColoredRect(f32 x, f32 y, f32 w, f32 h,
                          u8 r, u8 g, u8 b, u8 a);
 
-    // Draw a fullscreen colored quad (used for fade transitions).
+    // Draw a fullscreen colored quad, used for fade transitions.
     void DrawColoredQuad(u8 r, u8 g, u8 b, u8 a);
+
+    // Draw a textured circle outline/ring.
+    void DrawCircle(tTexture* tex,
+                    f32 centerX, f32 centerY,
+                    f32 radiusX, f32 radiusY,
+                    f32 thickness,
+                    f32 u0 = 0.0f, f32 v0 = 0.0f,
+                    f32 u1 = 1.0f, f32 v1 = 1.0f,
+                    s32 segments = 32,
+                    u8 r = 255, u8 g = 255, u8 b = 255, u8 a = 255);
+
+    // Draw a colored circle outline/ring.
+    void DrawCircle(f32 centerX, f32 centerY,
+                    f32 radiusX, f32 radiusY,
+                    f32 thickness,
+                    f32 u0 = 0.0f, f32 v0 = 0.0f,
+                    f32 u1 = 1.0f, f32 v1 = 1.0f,
+                    s32 segments = 32,
+                    u8 r = 255, u8 g = 255, u8 b = 255, u8 a = 255);
+
+    // Draw a textured filled circle.
+    void DrawFilledCircle(tTexture* tex,
+                          f32 centerX, f32 centerY,
+                          f32 radiusX, f32 radiusY,
+                          f32 u0 = 0.0f, f32 v0 = 0.0f,
+                          f32 u1 = 1.0f, f32 v1 = 1.0f,
+                          s32 segments = 32,
+                          u8 r = 255, u8 g = 255, u8 b = 255, u8 a = 255);
+
+    // Draw a colored filled circle.
+    void DrawFilledCircle(f32 centerX, f32 centerY,
+                          f32 radiusX, f32 radiusY,
+                          f32 u0 = 0.0f, f32 v0 = 0.0f,
+                          f32 u1 = 1.0f, f32 v1 = 1.0f,
+                          s32 segments = 32,
+                          u8 r = 255, u8 g = 255, u8 b = 255, u8 a = 255);
 
     void SetScissor(s32 x, s32 y, s32 w, s32 h);
 
-
-    // Draw a Gouraud-shaded quad with 4 per-vertex colors (PSX POLYG4).
+    // Draw a Gouraud-shaded quad with 4 per-vertex colors.
     void DrawGouraudQuad(f32 x0, f32 y0, u8 r0, u8 g0, u8 b0, u8 a0,
                          f32 x1, f32 y1, u8 r1, u8 g1, u8 b1, u8 a1,
                          f32 x2, f32 y2, u8 r2, u8 g2, u8 b2, u8 a2,
