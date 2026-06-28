@@ -893,6 +893,103 @@ static bool ResolveFirstModelTexInfo(const Model* model, u16* outTpage, u16* out
     return true;
 }
 
+static bool ResolveUniformModelTpage(const Model* model, u16* outTpage) {
+    if (outTpage) {
+        *outTpage = 0;
+    }
+
+    if (!model || !model->drawable) {
+        return false;
+    }
+
+    if (model->drawableType == 2) {
+        OriginalSTree* active = GetActiveSTree(model->drawable);
+        if (!active) {
+            return false;
+        }
+
+        u32 word0 = 0;
+        if (!ResolveFirstSkinWord0(active->skinData, &word0)) {
+            return false;
+        }
+
+        if (outTpage) {
+            *outTpage = static_cast<u16>((word0 >> 16) & 0xFFFFu);
+        }
+        return true;
+    }
+
+    if (model->drawableType == 1) {
+        const DrawableGeo* drawableGeo = static_cast<const DrawableGeo*>(model->drawable);
+        const OriginalGeo* geo = drawableGeo ? drawableGeo->original : nullptr;
+        u32 word0 = 0;
+        if (!ResolveFirstGeoPacketWord0(geo, &word0)) {
+            return false;
+        }
+
+        if (outTpage) {
+            *outTpage = static_cast<u16>((word0 >> 16) & 0xFFFFu);
+        }
+        return true;
+    }
+
+    if (model->drawableType == 3) {
+        const DrawableETree* drawableETree = static_cast<const DrawableETree*>(model->drawable);
+        const OriginalETree* original = drawableETree ? drawableETree->original : nullptr;
+        if (!original || !original->geoParts || original->geoPartCount == 0) {
+            return false;
+        }
+
+        bool haveTpage = false;
+        u16 resolvedTpage = 0;
+
+        for (u16 i = 0; i < original->geoPartCount; i++) {
+            if (drawableETree->geoPartVisible && drawableETree->geoPartVisible[i] == 0) {
+                continue;
+            }
+
+            if (original->skeleton
+                && original->skeleton->joints
+                && i < original->skeleton->numJoints
+                && ((original->skeleton->joints[i].flags & STF_HAS_MESH) == 0)) {
+                continue;
+            }
+
+            const OriginalGeo* geo = original->geoParts[i];
+            if (!geo || !geo->meshBuffer) {
+                continue;
+            }
+
+            u32 word0 = 0;
+            if (!ResolveFirstGeoPacketWord0(geo, &word0)) {
+                continue;
+            }
+
+            const u16 tpage = static_cast<u16>((word0 >> 16) & 0xFFFFu);
+            if (!haveTpage) {
+                resolvedTpage = tpage;
+                haveTpage = true;
+                continue;
+            }
+
+            if (resolvedTpage != tpage) {
+                return false;
+            }
+        }
+
+        if (!haveTpage) {
+            return false;
+        }
+
+        if (outTpage) {
+            *outTpage = resolvedTpage;
+        }
+        return true;
+    }
+
+    return false;
+}
+
 static bool ResolveFirstGeoFastWord1(const OriginalGeo* geo, u32* outColorWord) {
     if (outColorWord) {
         *outColorWord = 0;
@@ -2664,25 +2761,6 @@ bool ComEffect::ApplyClutAnimFrame(ClutAnimData* clutAnimData, s32 frame) {
         return wrote;
     };
 
-    auto getDynGeoPrimPacketSize = [](u8 primCmd) -> u32 {
-        switch (primCmd & 0xFCu) {
-            case 0x3C:
-            case 0x2C:
-                return 52;
-            case 0x38:
-            case 0x28:
-                return 36;
-            case 0x34:
-            case 0x24:
-                return 40;
-            case 0x30:
-            case 0x20:
-                return 28;
-            default:
-                return 0;
-        }
-    };
-
     auto applyPacketOffsetsToGeo = [&](OriginalGeo* geo) -> bool {
         if (!GeoSupportsDynamicUV(geo)
             || !geo->dynamicPrimStart
@@ -2699,7 +2777,7 @@ bool ComEffect::ApplyClutAnimFrame(ClutAnimData* clutAnimData, s32 frame) {
         const f32 cbaWord = static_cast<f32>(clut);
 
         for (s32 offsetIndex = 0; offsetIndex < clutAnimData->numOffsets; offsetIndex++) {
-            const u32 packetOffset = static_cast<u32>(clutAnimData->offsets[offsetIndex]);
+            const u32 packetHalfOffset = static_cast<u32>(clutAnimData->offsets[offsetIndex]);
 
             for (u32 primIndex = 0; primIndex < geo->dynamicPrimCount; primIndex++) {
                 if (clutAnimData->materialUID != 0
@@ -2708,31 +2786,22 @@ bool ComEffect::ApplyClutAnimFrame(ClutAnimData* clutAnimData, s32 frame) {
                     continue;
                 }
 
-                const u32 packetBase = geo->dynamicPrimPacketOffset[primIndex];
-                const u32 packetSize = getDynGeoPrimPacketSize(geo->dynamicPrimCmd[primIndex]);
-                if (packetSize == 0) {
+                bool isCbaLane = false;
+                u32 vertexIndex = 0;
+                if (!ResolveWord0LaneVertexByPacketHalfOffset(
+                        geo,
+                        primIndex,
+                        packetHalfOffset,
+                        &isCbaLane,
+                        &vertexIndex)) {
                     continue;
                 }
 
-                if (packetOffset < packetBase || packetOffset >= (packetBase + packetSize)) {
+                if (!isCbaLane || vertexIndex >= geo->dynamicVertCount) {
                     continue;
                 }
 
-                const u32 start = geo->dynamicPrimStart[primIndex];
-                const u32 count = static_cast<u32>(geo->dynamicPrimVertCount[primIndex]);
-                if (count == 0 || start >= geo->dynamicVertCount) {
-                    continue;
-                }
-
-                for (u32 corner = 0; corner < count; corner++) {
-                    const u32 vertexIndex = start + corner;
-                    if (vertexIndex >= geo->dynamicVertCount) {
-                        break;
-                    }
-
-                    geo->dynamicVerts[vertexIndex].cba = cbaWord;
-                }
-
+                geo->dynamicVerts[vertexIndex].cba = cbaWord;
                 wrote = true;
                 break;
             }
@@ -2821,15 +2890,85 @@ bool ComEffect::ApplyClutAnimFrame(ClutAnimData* clutAnimData, s32 frame) {
         }
     }
 
+    // Fallback when primitive material ownership is unavailable: preserve
+    // per-vertex TPAGE and update only CLUT lane directly on dynamic verts.
+    auto applyClutToGeoAllPrims = [&](OriginalGeo* geo) -> bool {
+        if (!GeoSupportsDynamicUV(geo)
+            || !geo->dynamicPrimStart
+            || !geo->dynamicPrimVertCount
+            || geo->dynamicPrimCount == 0) {
+            return false;
+        }
+
+        bool wrote = false;
+        const f32 cbaWord = static_cast<f32>(clut);
+        for (u32 primIndex = 0; primIndex < geo->dynamicPrimCount; primIndex++) {
+            const u32 start = geo->dynamicPrimStart[primIndex];
+            const u32 count = static_cast<u32>(geo->dynamicPrimVertCount[primIndex]);
+            if (count == 0 || start >= geo->dynamicVertCount) {
+                continue;
+            }
+
+            for (u32 corner = 0; corner < count; corner++) {
+                const u32 vertexIndex = start + corner;
+                if (vertexIndex >= geo->dynamicVertCount) {
+                    break;
+                }
+
+                geo->dynamicVerts[vertexIndex].cba = cbaWord;
+            }
+
+            wrote = true;
+        }
+
+        if (wrote) {
+            geo->meshBuffer->SetVertexData(geo->dynamicVerts, geo->dynamicVertCount);
+        }
+
+        return wrote;
+    };
+
+    bool appliedFallback = false;
+    if (model && model->drawable) {
+        if (model->drawableType == 1) {
+            DrawableGeo* drawableGeo = static_cast<DrawableGeo*>(model->drawable);
+            OriginalGeo* geo = drawableGeo ? drawableGeo->original : nullptr;
+            if (geo && (clutAnimData->primUID == 0 || geo->nameCRC == clutAnimData->primUID)) {
+                appliedFallback = applyClutToGeoAllPrims(geo);
+            }
+        }
+        else if (model->drawableType == 3) {
+            DrawableETree* drawableETree = static_cast<DrawableETree*>(model->drawable);
+            OriginalETree* original = drawableETree ? drawableETree->original : nullptr;
+            if (original && original->geoParts && original->geoPartCount > 0) {
+                for (u16 i = 0; i < original->geoPartCount; i++) {
+                    if (clutAnimData->primUID != 0
+                        && original->geoPartHashes
+                        && original->geoPartHashes[i] != clutAnimData->primUID) {
+                        continue;
+                    }
+
+                    if (applyClutToGeoAllPrims(original->geoParts[i])) {
+                        appliedFallback = true;
+                    }
+                }
+            }
+        }
+    }
+
+    if (appliedFallback) {
+        geoWord0Slot = kFastWordInactive;
+        return true;
+    }
+
+    // Global override path is only safe when model TPAGE is uniform.
+    // Mixed-TPAGE effects (common in ETree FX) must not be collapsed to one TPAGE.
     u16 tpage = 0;
     if (geoWord0Slot != kFastWordInactive) {
         tpage = static_cast<u16>((geoWord0Slot >> 16) & 0xFFFFu);
     }
-    else {
-        u16 unusedCba = 0;
-        if (!ResolveFirstModelTexInfo(model, &tpage, &unusedCba)) {
-            return false;
-        }
+    else if (!ResolveUniformModelTpage(model, &tpage)) {
+        return false;
     }
 
     geoWord0Slot = (static_cast<u32>(tpage) << 16) | static_cast<u32>(clut);
@@ -3467,6 +3606,10 @@ void ComEffect::Render(const Mat4& worldMatrix, u32 flags) {
 
     const Mat4 savedWorld = p3d::context->GetWorldMatrix();
 
+    // Per-frame texinfo override (TPAGE/CLUT) must be rebuilt from the
+    // active misc anim path; avoid leaking prior frame/state overrides.
+    geoWord0Slot = kFastWordInactive;
+
     MiscAnimNode* liveNode = ComEffect_ResolveLiveMiscAnimNode(this);
     const bool allowRenderAnim = (model->drawableType == 2) || (model->drawableType == 3);
     if (allowRenderAnim && liveNode && (flags & 0x80000u) == 0u) {
@@ -3681,6 +3824,10 @@ bool ComEffect::RenderGeoByIndex(u32 geoIndex, const Mat4& worldMatrix, u32 flag
         return false;
     }
 
+    // Per-frame texinfo override (TPAGE/CLUT) must be rebuilt from the
+    // active misc anim path; avoid leaking prior frame/state overrides.
+    geoWord0Slot = kFastWordInactive;
+
     MiscAnimNode* liveNode = ComEffect_ResolveLiveMiscAnimNode(this);
     const bool canApplyFrame = (frameCount > 0) && (currentFrame < frameCount);
     if (canApplyFrame && liveNode && (flags & 0x80000u) == 0u) {
@@ -3851,17 +3998,14 @@ void ComEffect::FastZSortDisplayGCT3(u32 primCount) {
     for (u32 drawIndex = 0; drawIndex < fastDrawCount; drawIndex++) {
         const FastDrawEntry& entry = fastDrawEntries[drawIndex];
         const bool useWord0 = (entry.word0 != kFastWordInactive);
+        const f32 entryTpage = static_cast<f32>((entry.word0 >> 16) & 0xFFFFu);
+        const f32 entryCba = static_cast<f32>(entry.word0 & 0xFFFFu);
         std::memcpy(drawGeo->dynamicVerts,
                     baseVerts,
                     sizeof(GeoRenderVertex) * drawGeo->dynamicVertCount);
 
         ApplyPerPrimWord1(drawGeo, baseVerts, entry.word1);
-        if (useWord0) {
-            ApplyPerPrimWord0(drawGeo, entry.word0);
-        }
-        else {
-            drawGeo->meshBuffer->SetVertexData(drawGeo->dynamicVerts, drawGeo->dynamicVertCount);
-        }
+        drawGeo->meshBuffer->SetVertexData(drawGeo->dynamicVerts, drawGeo->dynamicVertCount);
 
         u8 semiTransMode = drawGeo->semiTransMode;
         if (useWord0) {
@@ -3891,6 +4035,11 @@ void ComEffect::FastZSortDisplayGCT3(u32 primCount) {
                 const GeoRenderVertex& sourceVertex = drawGeo->dynamicVerts[start + corner];
                 GeoRenderVertex& outVertex = tri.verts[corner];
                 outVertex = sourceVertex;
+
+                if (useWord0) {
+                    outVertex.tpage = entryTpage;
+                    outVertex.cba = entryCba;
+                }
 
                 f32 worldX = 0.0f;
                 f32 worldY = 0.0f;
@@ -3940,10 +4089,11 @@ void ComEffect::FastZSortDisplayGCT3(u32 primCount) {
         sortedTris[j] = key;
     }
 
-    static const u16 kTriIndices[3] = { 2, 1, 0 };
+    static const u16 kTriIndices[3] = { 0, 1, 2 };
     const u32 format = PDDI_V_POSITION | PDDI_V_COLOUR | PDDI_V_UV | PDDI_V_TEXINFO;
 
     p3d::context->SetWorldMatrix(Mat4());
+    p3d::context->SetCullMode(PDDI_CULL_NONE);
     for (u32 triIndex = 0; triIndex < sortedTriCount; triIndex++) {
         const FastSortedTri& tri = sortedTris[triIndex];
         pddiPrimBufferDesc desc(PDDI_PRIM_TRIANGLES, format, 3u, 3u);
@@ -4015,17 +4165,14 @@ void ComEffect::FastZSortDisplayGCT4(u32 primCount) {
     for (u32 drawIndex = 0; drawIndex < fastDrawCount; drawIndex++) {
         const FastDrawEntry& entry = fastDrawEntries[drawIndex];
         const bool useWord0 = (entry.word0 != kFastWordInactive);
+        const f32 entryTpage = static_cast<f32>((entry.word0 >> 16) & 0xFFFFu);
+        const f32 entryCba = static_cast<f32>(entry.word0 & 0xFFFFu);
         std::memcpy(drawGeo->dynamicVerts,
                     baseVerts,
                     sizeof(GeoRenderVertex) * drawGeo->dynamicVertCount);
 
         ApplyPerPrimWord1(drawGeo, baseVerts, entry.word1);
-        if (useWord0) {
-            ApplyPerPrimWord0(drawGeo, entry.word0);
-        }
-        else {
-            drawGeo->meshBuffer->SetVertexData(drawGeo->dynamicVerts, drawGeo->dynamicVertCount);
-        }
+        drawGeo->meshBuffer->SetVertexData(drawGeo->dynamicVerts, drawGeo->dynamicVertCount);
 
         u8 semiTransMode = drawGeo->semiTransMode;
         if (useWord0) {
@@ -4055,6 +4202,11 @@ void ComEffect::FastZSortDisplayGCT4(u32 primCount) {
                 const GeoRenderVertex& sourceVertex = drawGeo->dynamicVerts[start + corner];
                 GeoRenderVertex& outVertex = quad.verts[corner];
                 outVertex = sourceVertex;
+
+                if (useWord0) {
+                    outVertex.tpage = entryTpage;
+                    outVertex.cba = entryCba;
+                }
 
                 f32 worldX = 0.0f;
                 f32 worldY = 0.0f;
@@ -4104,10 +4256,11 @@ void ComEffect::FastZSortDisplayGCT4(u32 primCount) {
         sortedQuads[j] = key;
     }
 
-    static const u16 kQuadIndices[6] = { 3, 2, 1, 3, 1, 0 };
+    static const u16 kQuadIndices[6] = { 0, 1, 2, 2, 1, 3 };
     const u32 format = PDDI_V_POSITION | PDDI_V_COLOUR | PDDI_V_UV | PDDI_V_TEXINFO;
 
     p3d::context->SetWorldMatrix(Mat4());
+    p3d::context->SetCullMode(PDDI_CULL_NONE);
     for (u32 quadIndex = 0; quadIndex < sortedQuadCount; quadIndex++) {
         const FastSortedQuad& quad = sortedQuads[quadIndex];
         pddiPrimBufferDesc desc(PDDI_PRIM_TRIANGLES, format, 4u, 6u);
@@ -4183,7 +4336,7 @@ void ComEffect::DoFastRender() {
         fastDrawCount = 0;
 
         if (canReplayGeoByIndex) {
-            RenderGeoByIndex(renderGeoIndex, entry.worldMatrix, 0x80000u);
+            RenderGeoByIndex(renderGeoIndex, entry.worldMatrix, 0u);
         }
         else {
             const bool useWord0 = (entry.word0 != kFastWordInactive);
@@ -4242,9 +4395,6 @@ void ComEffect::DoFastRender() {
         return;
     }
 
-    // replay queued entries through standard draw paths
-    // instead of custom fast z-sort rebuild helpers.
-
     const bool canReplayGeoByIndex = model && model->drawableType == 3 && fastDrawGeoIndex >= 0;
     const u32 renderGeoIndex = static_cast<u32>(fastDrawGeoIndex);
     u32* word1Slot = GetGeoFastWord1Slot(fastDrawGeoIndex);
@@ -4260,13 +4410,16 @@ void ComEffect::DoFastRender() {
         geoWord0Slot = (entry.word0 != kFastWordInactive) ? entry.word0 : kFastWordInactive;
 
         if (canReplayGeoByIndex) {
-            // Replay queued particle entries through the resolved fast geo index.
-            // This avoids mutating shared dynamic vertex streams during fast replay.
-            RenderGeoByIndex(renderGeoIndex, entry.worldMatrix, 0x80000u);
+            RenderGeoByIndex(renderGeoIndex, entry.worldMatrix, 0u);
         }
         else {
             const Mat4 drawWorld = savedWorld * entry.worldMatrix;
             p3d::context->SetWorldMatrix(drawWorld);
+
+            const bool useWord0 = (entry.word0 != kFastWordInactive);
+            if (useWord0) {
+                p3d::context->SetTexInfoOverride(true, entry.word0);
+            }
 
             if (drawGeo->usesSemiTrans) {
                 u8 semiTransMode = drawGeo->semiTransMode;
@@ -4300,6 +4453,10 @@ void ComEffect::DoFastRender() {
 
             if (drawGeo->usesSemiTrans) {
                 p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+            }
+
+            if (useWord0) {
+                p3d::context->SetTexInfoOverride(false, 0);
             }
         }
     }

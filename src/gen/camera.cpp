@@ -17,6 +17,7 @@
 #include "gen/paramanim.h"
 #include "gen/psxmath_helpers.h"
 #include "gen/display.h"
+#include "gen/director.h"
 #include "pc/log.h"
 
 // PSX math helpers
@@ -238,9 +239,9 @@ void Camera::UpdateHighFPS() {
     }
 
     // Keep director/cutscene camera updates on pure logic positions.
-    // Interpolating render-only frames can place the camera through world
-    // geometry even when PSX logic camera stays in front of it.
-    if (g_directorActive != 0) {
+    // Some NIS scripts clear g_directorActive while scriptState stays active,
+    // so gate on both to avoid interpolating camera state mid-cutscene.
+    if (g_directorActive != 0 || (g_director && g_director->scriptState != 0)) {
         Update();
         return;
     }

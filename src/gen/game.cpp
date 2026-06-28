@@ -540,7 +540,9 @@ static bool PumpMenuFadeFrame(f64 frameStart) {
     if (g_time) {
         g_time->Step();
     }
-    rDoTaskList(&rMainTaskList, 0);
+    ++rFrameCount;
+    ++rFrameCount60;
+    rDoTaskList(&rMainTaskList, static_cast<u32>(rFrameCount60));
     if (g_time) {
         g_time->WaitForFrameEnd(frameStart);
     }

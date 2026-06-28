@@ -61,7 +61,6 @@ static s32 g_dialogHandle = 0;          // PSX: gp[3496/4=874]
 static s32 g_checkpointDataValue = 0;   // PSX: dword_800D6F90
 static s32 g_checkpointBlockIndex = 0;  // PSX: gp+0xDA0 (source for opcodes 0x7B/0x7D)
 static u8 g_checkpointPetalIndex = 0;   // PSX: gp+0xDA4 (0='a', 1='b', ...)
-static s32 g_modelFuncLogBudget = 64;
 
 enum class DirectorScriptState : s32 {
     Idle = 0,
@@ -1243,7 +1242,6 @@ void Director::SetScript() {
     directorDialogCounter = -1;
     returnAddressIndex = 0;
     directorDialogLimit = 180;
-    g_modelFuncLogBudget = 64;
 }
 
 // PSX: SetCodeSnip__8DirectorPlP5Thing (DIRECTOR.CPP:2782, 0x8003C268)
@@ -1290,7 +1288,6 @@ void Director::SetCodeSnip(s32* snip, Thing* thing) {
 
     returnAddressIndex = 0;
     directorDialogLimit = 180;
-    g_modelFuncLogBudget = 64;
 }
 
 bool Director::TriggerDeathVolume(s32 newDeathType) {
@@ -1790,12 +1787,7 @@ void Director::Process() {
                 const LVector pos = { scriptPtr[2], scriptPtr[3], scriptPtr[4] };
                 scriptPtr += 5;
 
-                FWEffect* fwEffect = FWEffect::Find(effectHash);
-                if (fwEffect) {
-                    const s32 savedPosX = fwEffect->pos.x;
-                    Effects* created = GEffect_Create(effectHash, &pos, nullptr, nullptr, 0, 0, 0);
-                    fwEffect->pos.x = savedPosX;
-                }
+                GEffect_Create(effectHash, &pos, nullptr, nullptr, 0, 0, 0);
                 break;
             }
 
@@ -1822,12 +1814,7 @@ void Director::Process() {
 
             case DirectorOpcode::RemoveNisEffect:
                 scriptPtr += 1;
-                LOG("[ChefPotNIS] RemoveNisEffect opcode");
                 if (WEffect* effect = WEffect::Find(kDirectorNisEffectHash)) {
-                    LOG(
-                        "[ChefPotNIS] RemoveNisEffect found hash=0x%08X inList=%d",
-                        kDirectorNisEffectHash,
-                        effect->inEffectsList);
                     effect->pos.z -= 10000;
                     effect->NISRemoveEffect();
                 }
@@ -1899,14 +1886,6 @@ void Director::Process() {
                 break;
 
             case DirectorOpcode::ModelFunc:
-                if (g_modelFuncLogBudget > 0) {
-                    LOG(
-                        "[ChefPotNIS] ModelFunc dispatch scriptState=%d subOpRaw=%d subOpHex=0x%08X",
-                        scriptState,
-                        scriptPtr[1],
-                        static_cast<u32>(scriptPtr[1]));
-                    g_modelFuncLogBudget--;
-                }
                 scriptPtr += 1;
                 ProcessModelFunc();
                 break;
@@ -2162,15 +2141,6 @@ void Director::Process() {
                 scriptPtr += 2;
                 WorldPointNode* wpn = WorldPoints_GetNISPoint(static_cast<u32>(pointIdx));
                 if (wpn) {
-                    const char* pointName = wpn->GetName() ? wpn->GetName() : "null";
-                    LOG(
-                        "[ChefPotNIS] SetNisPoint crc=0x%08X name='%s' pos=(%d,%d,%d)",
-                        static_cast<u32>(pointIdx),
-                        pointName,
-                        wpn->pos.x,
-                        wpn->pos.y,
-                        wpn->pos.z);
-
                     nisPointX = wpn->pos.x;
                     nisPointY = wpn->pos.y;
                     nisPointZ = wpn->pos.z;
@@ -2182,11 +2152,6 @@ void Director::Process() {
                             Player::s_player->blockNum = static_cast<u16>(wpn->parValue);
                         }
                     }
-                }
-                else {
-                    LOG(
-                        "[ChefPotNIS] SetNisPoint crc=0x%08X unresolved",
-                        static_cast<u32>(pointIdx));
                 }
                 break;
             }

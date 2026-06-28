@@ -55,8 +55,8 @@ static bool OnWndProc(const pddiWndMessage& msg) {
                 // Regained focus
                 if (p3d::input)
                     p3d::input->SetEnabled(true);
-                if (AudioEngine::IsInitialized())
-                    AudioEngine::SetMasterVolume(sSavedMasterVolume);
+                //if (AudioEngine::IsInitialized())
+                //    AudioEngine::SetMasterVolume(sSavedMasterVolume);
                 // Keep the mouse free on focus gain in windowed mode so a titlebar
                 // click/drag can move the window. In-content mouse clicks will
                 // recapture below via PDDI_WND_MOUSEBUTTON.
@@ -86,10 +86,10 @@ static bool OnWndProc(const pddiWndMessage& msg) {
                 // Lost focus
                 if (p3d::input)
                     p3d::input->SetEnabled(false);
-                if (AudioEngine::IsInitialized()) {
-                    sSavedMasterVolume = AudioEngine::GetMasterVolume();
-                    AudioEngine::SetMasterVolume(0.0f);
-                }
+                //if (AudioEngine::IsInitialized()) {
+                //    sSavedMasterVolume = AudioEngine::GetMasterVolume();
+                //    AudioEngine::SetMasterVolume(0.0f);
+                //}
                 // Always release mouse when losing focus
                 if (g_display)
                     g_display->SetCursorCaptured(false);
@@ -266,9 +266,9 @@ int main(int argc, char** argv) {
         g_time->Step();
 #endif
 
-        rFrameCount = 1;
-        rFrameCount60 = 1;
-        rDoTaskList(&rFrameTaskList, 0);
+        ++rFrameCount;
+        ++rFrameCount60;
+        rDoTaskList(&rFrameTaskList, static_cast<u32>(rFrameCount));
 
         p3d::display->PollEvents();
 
@@ -309,7 +309,7 @@ int main(int argc, char** argv) {
             }
         }
         else {
-            rDoTaskList(&rMainTaskList, 0);
+            rDoTaskList(&rMainTaskList, static_cast<u32>(rFrameCount60));
         }
 
         g_time->WaitForFrameEnd(frameStart);
