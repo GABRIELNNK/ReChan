@@ -5172,7 +5172,7 @@ void feCustomMenuMgr::RenderCurrentPage() {
 #if MODERN_GRAPHICS
                 else if (item.binding == EntryBinding_DisplayShadowQuality) {
                     const s32 quality = GetBoundValue(item);
-                    const char* qualityToken = "FE_LOW";
+                    const char* qualityToken = "FE_NO";
                     if (quality == (s32)SHADOW_QUALITY_MEDIUM) qualityToken = "FE_MED";
                     else if (quality == (s32)SHADOW_QUALITY_HIGH) qualityToken = "FE_HIG";
                     const char* qualityText = Localize(qualityToken);

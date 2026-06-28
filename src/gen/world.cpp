@@ -2088,7 +2088,7 @@ static void LoadGeoPair(
 
         // Track PRM (tPrimGeom) perm locations from 0x6009 chunks for STree lookup
         struct PrmInfo { u32 permOffset; u32 permSize; };
-        std::unordered_map<u32, PrmInfo> prmMap; // nameHash → perm location
+        std::unordered_map<u32, PrmInfo> prmMap; // nameHash = perm location
 
 #if defined(MOD_LOADER) || defined(REAL_TEXTURE_RENDERING)
         // CLUT chunks (e.g. "name CLUT") always precede their indexed data chunk
@@ -4467,7 +4467,6 @@ void World::UnloadPetal() {
     UnloadUVPrimData();
     UnloadCBVPrimData();
     PurgeSwitches();
-    BackG::DeleteBG();
 
     // Unload current blocks (collision sectors, geometry)
     if (g_blockManager) {
@@ -4710,5 +4709,8 @@ s32 World::LevelMenuExecute(hdMenuItem* item) {
 
     return 4;
 }
+
+
+
 
 
