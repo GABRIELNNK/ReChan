@@ -42,6 +42,19 @@ struct ListenerState {
     bool valid = false;
 };
 
+struct Biquad {
+    f32 b0 = 1.0f;
+    f32 b1 = 0.0f;
+    f32 b2 = 0.0f;
+    f32 a1 = 0.0f;
+    f32 a2 = 0.0f;
+};
+
+struct BiquadState {
+    f32 z1 = 0.0f;
+    f32 z2 = 0.0f;
+};
+
 // Engine state
 static constexpr u32 MAX_SAMPLES = 4096;
 static constexpr u32 MAX_VOICES = 32;
@@ -55,6 +68,13 @@ static f32 g_masterVolume = 0.5f;
 static u32 g_deviceSampleRate = ENGINE_SAMPLE_RATE; // actual device sample rate
 static u32 g_outputChannels = DEFAULT_MIX_CHANNELS;
 static bool g_outputMono = false;
+static constexpr bool g_smoothResampling = true;
+static constexpr s32 g_bassBoostAmount = 50;
+static constexpr s32 g_trebleBoostAmount = 5;
+static BiquadState g_bassShelfState[8] = {};
+static BiquadState g_trebleShelfState[8] = {};
+static f32 g_exciterLowpassState[8] = {};
+static bool g_surroundEnabled = true;
 
 static InternalSample g_samples[MAX_SAMPLES];
 static u32 g_nextSampleId = 1;
@@ -90,6 +110,233 @@ static inline f32 clampf(f32 v, f32 lo, f32 hi) {
     if (v < lo) return lo;
     if (v > hi) return hi;
     return v;
+}
+
+static inline f32 Pcm16ToFloat(s16 sample) {
+    return (f32)sample / 32768.0f;
+}
+
+static inline s32 clampi(s32 v, s32 lo, s32 hi) {
+    if (v < lo) return lo;
+    if (v > hi) return hi;
+    return v;
+}
+
+static inline f32 dbToLinear(f32 db) {
+    return std::pow(10.0f, db / 20.0f);
+}
+
+static inline f32 ProcessBiquad(const Biquad& filter, BiquadState& state, f32 sample) {
+    const f32 out = filter.b0 * sample + state.z1;
+    state.z1 = filter.b1 * sample - filter.a1 * out + state.z2;
+    state.z2 = filter.b2 * sample - filter.a2 * out;
+    return out;
+}
+
+static Biquad MakeLowShelf(f32 sampleRate, f32 frequency, f32 gainDb) {
+    const f32 A = dbToLinear(gainDb * 0.5f);
+    const f32 w0 = 2.0f * 3.14159265358979323846f * frequency / sampleRate;
+    const f32 cosW0 = std::cos(w0);
+    const f32 sinW0 = std::sin(w0);
+    const f32 sqrtA = std::sqrt(A);
+    const f32 alpha = sinW0 * 0.70710678118f;
+    const f32 twoSqrtAAlpha = 2.0f * sqrtA * alpha;
+
+    const f32 b0 = A * ((A + 1.0f) - (A - 1.0f) * cosW0 + twoSqrtAAlpha);
+    const f32 b1 = 2.0f * A * ((A - 1.0f) - (A + 1.0f) * cosW0);
+    const f32 b2 = A * ((A + 1.0f) - (A - 1.0f) * cosW0 - twoSqrtAAlpha);
+    const f32 a0 = (A + 1.0f) + (A - 1.0f) * cosW0 + twoSqrtAAlpha;
+    const f32 a1 = -2.0f * ((A - 1.0f) + (A + 1.0f) * cosW0);
+    const f32 a2 = (A + 1.0f) + (A - 1.0f) * cosW0 - twoSqrtAAlpha;
+
+    return { b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0 };
+}
+
+static Biquad MakeHighShelf(f32 sampleRate, f32 frequency, f32 gainDb) {
+    const f32 A = dbToLinear(gainDb * 0.5f);
+    const f32 w0 = 2.0f * 3.14159265358979323846f * frequency / sampleRate;
+    const f32 cosW0 = std::cos(w0);
+    const f32 sinW0 = std::sin(w0);
+    const f32 sqrtA = std::sqrt(A);
+    const f32 alpha = sinW0 * 0.70710678118f;
+    const f32 twoSqrtAAlpha = 2.0f * sqrtA * alpha;
+
+    const f32 b0 = A * ((A + 1.0f) + (A - 1.0f) * cosW0 + twoSqrtAAlpha);
+    const f32 b1 = -2.0f * A * ((A - 1.0f) + (A + 1.0f) * cosW0);
+    const f32 b2 = A * ((A + 1.0f) + (A - 1.0f) * cosW0 - twoSqrtAAlpha);
+    const f32 a0 = (A + 1.0f) - (A - 1.0f) * cosW0 + twoSqrtAAlpha;
+    const f32 a1 = 2.0f * ((A - 1.0f) - (A + 1.0f) * cosW0);
+    const f32 a2 = (A + 1.0f) - (A - 1.0f) * cosW0 - twoSqrtAAlpha;
+
+    return { b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0 };
+}
+
+static inline f32 ReadSampleChannel(const InternalSample& smp, u32 frame, u32 channel) {
+    if (frame >= smp.numFrames || smp.channels == 0) {
+        return 0.0f;
+    }
+
+    if (channel >= smp.channels) {
+        channel = smp.channels - 1;
+    }
+
+    return Pcm16ToFloat(smp.data[frame * smp.channels + channel]);
+}
+
+static inline f32 ReadSampleChannelNearest(const InternalSample& smp, f64 frameF, u32 channel, bool loop) {
+    if (!smp.data || smp.numFrames == 0 || smp.channels == 0) {
+        return 0.0f;
+    }
+
+    u32 frame = (u32)frameF;
+    if (frame >= smp.numFrames) {
+        frame = loop ? 0 : (smp.numFrames - 1);
+    }
+    return ReadSampleChannel(smp, frame, channel);
+}
+
+static inline u32 ResolveSampleFrame(const InternalSample& smp, s32 frame, bool loop) {
+    if (loop) {
+        const s32 count = (s32)smp.numFrames;
+        frame %= count;
+        if (frame < 0) {
+            frame += count;
+        }
+        return (u32)frame;
+    }
+
+    if (frame < 0) {
+        return 0;
+    }
+    if ((u32)frame >= smp.numFrames) {
+        return smp.numFrames - 1;
+    }
+    return (u32)frame;
+}
+
+static inline f32 CubicInterpolate(f32 s0, f32 s1, f32 s2, f32 s3, f32 t) {
+    const f32 a0 = -0.5f * s0 + 1.5f * s1 - 1.5f * s2 + 0.5f * s3;
+    const f32 a1 = s0 - 2.5f * s1 + 2.0f * s2 - 0.5f * s3;
+    const f32 a2 = -0.5f * s0 + 0.5f * s2;
+    return ((a0 * t + a1) * t + a2) * t + s1;
+}
+
+static inline f32 ReadSampleChannelInterpolated(const InternalSample& smp, f64 frameF, u32 channel, bool loop) {
+    if (!smp.data || smp.numFrames == 0 || smp.channels == 0) {
+        return 0.0f;
+    }
+
+    s32 frame1 = (s32)frameF;
+    f32 frac = (f32)(frameF - (f64)frame1);
+    if (frame1 < 0) {
+        frame1 = 0;
+        frac = 0.0f;
+    }
+    if ((u32)frame1 >= smp.numFrames) {
+        frame1 = (s32)smp.numFrames - 1;
+        frac = 0.0f;
+    }
+
+    const f32 s0 = ReadSampleChannel(smp, ResolveSampleFrame(smp, frame1 - 1, loop), channel);
+    const f32 s1 = ReadSampleChannel(smp, ResolveSampleFrame(smp, frame1, loop), channel);
+    const f32 s2 = ReadSampleChannel(smp, ResolveSampleFrame(smp, frame1 + 1, loop), channel);
+    const f32 s3 = ReadSampleChannel(smp, ResolveSampleFrame(smp, frame1 + 2, loop), channel);
+    return clampf(CubicInterpolate(s0, s1, s2, s3, frac), -1.0f, 1.0f);
+}
+
+static inline f32 ReadSampleMonoInterpolated(const InternalSample& smp, f64 frameF, bool loop) {
+    if (smp.channels == 1) {
+        return ReadSampleChannelInterpolated(smp, frameF, 0, loop);
+    }
+
+    f32 sum = 0.0f;
+    for (u32 ch = 0; ch < smp.channels; ch++) {
+        sum += ReadSampleChannelInterpolated(smp, frameF, ch, loop);
+    }
+    return sum / (f32)smp.channels;
+}
+
+static inline f32 ReadSampleMono(const InternalSample& smp, f64 frameF, bool loop) {
+    if (g_smoothResampling) {
+        return ReadSampleMonoInterpolated(smp, frameF, loop);
+    }
+
+    if (smp.channels == 1) {
+        return ReadSampleChannelNearest(smp, frameF, 0, loop);
+    }
+
+    f32 sum = 0.0f;
+    for (u32 ch = 0; ch < smp.channels; ch++) {
+        sum += ReadSampleChannelNearest(smp, frameF, ch, loop);
+    }
+    return sum / (f32)smp.channels;
+}
+
+static inline f32 ReadSampleStereoChannel(const InternalSample& smp, f64 frameF, u32 channel, bool loop) {
+    return g_smoothResampling
+        ? ReadSampleChannelInterpolated(smp, frameF, channel, loop)
+        : ReadSampleChannelNearest(smp, frameF, channel, loop);
+}
+
+static void ApplyMastering(f32* out, u32 frameCount, u32 outChannels) {
+    if ((g_bassBoostAmount <= 0 && g_trebleBoostAmount <= 0) || outChannels == 0) {
+        return;
+    }
+
+    const f32 bassDb = ((f32)g_bassBoostAmount / 100.0f) * 12.0f;
+    const f32 trebleDb = ((f32)g_trebleBoostAmount / 100.0f) * 10.0f;
+    const f32 exciterAmount = ((f32)g_trebleBoostAmount / 100.0f) * 0.18f;
+    const Biquad bass = MakeLowShelf((f32)g_deviceSampleRate, 135.0f, bassDb);
+    const Biquad treble = MakeHighShelf((f32)g_deviceSampleRate, 3200.0f, trebleDb);
+    const f32 exciterCutoffHz = 2800.0f;
+    const f32 exciterAlpha = (2.0f * 3.14159265358979323846f * exciterCutoffHz)
+        / ((2.0f * 3.14159265358979323846f * exciterCutoffHz) + (f32)g_deviceSampleRate);
+    const u32 channels = (outChannels < 8) ? outChannels : 8;
+
+    for (u32 frame = 0; frame < frameCount; frame++) {
+        for (u32 ch = 0; ch < channels; ch++) {
+            f32& sample = out[frame * outChannels + ch];
+            f32 processed = sample;
+            if (g_bassBoostAmount > 0) {
+                processed = ProcessBiquad(bass, g_bassShelfState[ch], processed);
+            }
+            if (g_trebleBoostAmount > 0) {
+                processed = ProcessBiquad(treble, g_trebleShelfState[ch], processed);
+                g_exciterLowpassState[ch] += exciterAlpha * (processed - g_exciterLowpassState[ch]);
+                const f32 high = processed - g_exciterLowpassState[ch];
+                processed += std::tanh(high * 2.5f) * exciterAmount;
+            }
+            sample = processed;
+        }
+    }
+}
+
+static void ApplySurroundUpmix(f32* out, u32 frameCount, u32 outChannels) {
+    if (!g_surroundEnabled || outChannels < 4) {
+        return;
+    }
+
+    const bool hasFiveOneLayout = outChannels >= 6;
+    const u32 centerChannel = hasFiveOneLayout ? 2 : 0;
+    const u32 lfeChannel = hasFiveOneLayout ? 3 : 0;
+    const u32 rearLeftChannel = hasFiveOneLayout ? 4 : 2;
+    const u32 rearRightChannel = hasFiveOneLayout ? 5 : 3;
+
+    for (u32 frame = 0; frame < frameCount; frame++) {
+        f32* dst = out + frame * outChannels;
+        const f32 left = dst[0];
+        const f32 right = dst[1];
+        const f32 mono = (left + right) * 0.5f;
+        const f32 ambience = (left - right) * 0.5f;
+
+        if (hasFiveOneLayout) {
+            dst[centerChannel] += mono * 0.45f;
+            dst[lfeChannel] += mono * 0.18f;
+        }
+
+        dst[rearLeftChannel] += ambience * 0.70f;
+        dst[rearRightChannel] -= ambience * 0.70f;
+    }
 }
 
 static inline void StepMusicFade() {
@@ -286,10 +533,7 @@ static void audioCallback(ma_device* device, void* output, const void* /*input*/
                     }
                 }
 
-                const f32 sMono =
-                    (smp.channels == 1)
-                    ? (smp.data[pos] / 32768.0f)
-                    : (((f32)smp.data[pos * 2] + (f32)smp.data[pos * 2 + 1]) * (0.5f / 32768.0f));
+                const f32 sMono = ReadSampleMono(smp, voice.positionF, voice.loop);
 
                 if (voice.spatial) {
                     for (u32 ch = 0; ch < outChannels && ch < 8; ch++) {
@@ -304,8 +548,8 @@ static void audioCallback(ma_device* device, void* output, const void* /*input*/
                         f32 sampleL = sMono;
                         f32 sampleR = sMono;
                         if (smp.channels >= 2) {
-                            sampleL = smp.data[pos * 2] / 32768.0f;
-                            sampleR = smp.data[pos * 2 + 1] / 32768.0f;
+                            sampleL = ReadSampleStereoChannel(smp, voice.positionF, 0, voice.loop);
+                            sampleR = ReadSampleStereoChannel(smp, voice.positionF, 1, voice.loop);
                         }
 
                         out[i * outChannels] += sampleL * vol * gains[0];
@@ -348,13 +592,10 @@ static void audioCallback(ma_device* device, void* output, const void* /*input*/
                         }
 
                         const f32 mvol = g_musicVolume * g_masterVolume;
-                        const f32 left =
-                            (smp.channels >= 2)
-                            ? (smp.data[pos * 2] / 32768.0f)
-                            : (smp.data[pos] / 32768.0f);
+                        const f32 left = ReadSampleStereoChannel(smp, g_musicPositionF, 0, g_musicLoop);
                         const f32 right =
                             (smp.channels >= 2)
-                            ? (smp.data[pos * 2 + 1] / 32768.0f)
+                            ? ReadSampleStereoChannel(smp, g_musicPositionF, 1, g_musicLoop)
                             : left;
 
                         if (outChannels == 1) {
@@ -425,6 +666,9 @@ static void audioCallback(ma_device* device, void* output, const void* /*input*/
         }
     }
 
+    ApplySurroundUpmix(out, frameCount, outChannels);
+    ApplyMastering(out, frameCount, outChannels);
+
     // Clamp output
     for (u32 i = 0; i < frameCount * outChannels; i++) {
         if (out[i] > 1.0f) out[i] = 1.0f;
@@ -444,6 +688,10 @@ bool AudioEngine::Init() {
     g_nextVoiceId = 1;
     g_masterVolume = 0.5f;
     g_outputMono = false;
+    memset(g_bassShelfState, 0, sizeof(g_bassShelfState));
+    memset(g_trebleShelfState, 0, sizeof(g_trebleShelfState));
+    memset(g_exciterLowpassState, 0, sizeof(g_exciterLowpassState));
+    g_surroundEnabled = true;
     g_outputChannels = DEFAULT_MIX_CHANNELS;
     g_musicActive = false;
     g_musicSample = AUDIO_SAMPLE_INVALID;
@@ -865,4 +1113,12 @@ bool AudioEngine::GetOutputMono() {
 
 u32 AudioEngine::GetOutputChannels() {
     return g_outputChannels;
+}
+
+void AudioEngine::SetSurroundEnabled(bool enabled) {
+    g_surroundEnabled = enabled;
+}
+
+bool AudioEngine::GetSurroundEnabled() {
+    return g_surroundEnabled;
 }

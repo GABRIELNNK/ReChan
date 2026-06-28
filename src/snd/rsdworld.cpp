@@ -40,9 +40,11 @@ static void UpdateListenerInAudioEngine() {
 
 static std::vector<rsdPersistent*> g_persistentSounds;
 static std::mutex g_persistentMutex;
+static bool g_persistentMuted = false;
 
 void rsdWorld::StopAllPersistentSounds() {
     std::lock_guard<std::mutex> lock(g_persistentMutex);
+    g_persistentMuted = false;
     for (rsdPersistent* snd : g_persistentSounds) {
         if (!snd) {
             continue;
@@ -63,9 +65,10 @@ void rsdWorld::StopAllPersistentSounds() {
 // PSX: rsdPersistent::FadeOutAll (RSDBACH.CPP) - mute all persistent sounds in place.
 void rsdWorld::MuteAllPersistentSounds() {
     std::lock_guard<std::mutex> lock(g_persistentMutex);
+    g_persistentMuted = true;
     for (rsdPersistent* snd : g_persistentSounds) {
         if (snd) {
-            snd->SetVolume(0);
+            snd->SetMuted(true);
         }
     }
 }
@@ -73,9 +76,10 @@ void rsdWorld::MuteAllPersistentSounds() {
 // PSX: rsdPersistent::FadeInAll (RSDBACH.CPP) - restore all persistent sounds from mute.
 void rsdWorld::UnmuteAllPersistentSounds() {
     std::lock_guard<std::mutex> lock(g_persistentMutex);
+    g_persistentMuted = false;
     for (rsdPersistent* snd : g_persistentSounds) {
         if (snd) {
-            snd->SetVolume(snd->volume);
+            snd->SetMuted(false);
         }
     }
 }
@@ -267,6 +271,10 @@ rsdPersistent::rsdPersistent(u32 sampleId_, void* posPtr, u8 reverb, u16 volume_
     }
 
     vol *= g_sound->effectsVolume;
+    muted = g_persistentMuted;
+    if (muted) {
+        vol = 0.0f;
+    }
     f32 pitchF = PsxPitchToFloat(pitch);
 
     AudioVoice v = AUDIO_VOICE_INVALID;
@@ -330,14 +338,20 @@ void rsdPersistent::SetVolume(u16 psxVol) {
     UpdateSpatial();
 }
 
+void rsdPersistent::SetMuted(bool muted_) {
+    muted = muted_;
+    UpdateSpatial();
+}
+
 void rsdPersistent::UpdateSpatial() {
     if (voiceHandle) {
         AudioVoice v = static_cast<AudioVoice>(reinterpret_cast<uintptr_t>(voiceHandle));
 
-        u16 volL = volume;
-        u16 volR = volume;
+        const u16 effectiveVolume = muted ? 0 : volume;
+        u16 volL = effectiveVolume;
+        u16 volR = effectiveVolume;
         if (posPtr != nullptr) {
-            GetObjectVolumesPsx(volume, posPtr, volL, volR, spatialFlags);
+            GetObjectVolumesPsx(effectiveVolume, posPtr, volL, volR, spatialFlags);
         }
 
         const f32 fVolL = PsxVolToFloat(volL);

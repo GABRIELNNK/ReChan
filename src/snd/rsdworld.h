@@ -55,7 +55,10 @@ public:
 
     // PSX: SetVolume (update volume on active voice)
     void SetVolume(u16 psxVol);
+    void SetMuted(bool muted);
 
     // PC: refresh spatial position/volume from live world state.
     void UpdateSpatial();
+private:
+    bool muted = false;
 };

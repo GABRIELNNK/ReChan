@@ -1,4 +1,5 @@
 #include "pc/settings.h"
+#include "pc/audio.h"
 #include "pc/log.h"
 #include "gen/ccfile.h"
 #include "gen/control.h"
@@ -242,6 +243,14 @@ static void SetStereoEnabled(s32 value) {
     rsEvent(enabled ? RS_SET_STEREO : RS_SET_MONO, 0, 0, 0);
 }
 
+static s32 GetSurroundEnabledSetting() {
+    return AudioEngine::GetSurroundEnabled() ? 1 : 0;
+}
+
+static void SetSurroundEnabledSetting(s32 value) {
+    AudioEngine::SetSurroundEnabled(value != 0);
+}
+
 static s32 GetPlayerConfigSetting() {
     if (!g_inputManager) {
         return 0;
@@ -364,6 +373,7 @@ static const SettingDef kSettingDefs[] = {
     { "audio", "effects_volume", 100, 0, 100, GetEffectsVolume, SetEffectsVolume },
     { "audio", "dialog_volume",  100, 0, 100, GetDialogVolume,  SetDialogVolume },
     { "audio", "stereo",           1, 0,   1, GetStereoEnabled, SetStereoEnabled },
+    { "audio", "surround",         1, 0,   1, GetSurroundEnabledSetting, SetSurroundEnabledSetting },
     { "controls", "player_config", 0, 0,   2, GetPlayerConfigSetting, SetPlayerConfigSetting },
     { "controls", "shock",         0, 0,   1, GetShockEnabledSetting, SetShockEnabledSetting },
     { "display", "screen_mode",     2, 0,   2, GetScreenModeSetting,  SetScreenModeSetting },

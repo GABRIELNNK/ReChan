@@ -1,5 +1,6 @@
 #include "gen/common.h"
 #include "snd/sound.h"
+#include "snd/rsevent.h"
 #include "snd/rsdformat.h"
 #include "snd/hmndsnd.h"
 #include "xclib/xcfile.h"
@@ -61,10 +62,12 @@ void Sound::InternalOpen() {
     // PSX: soundLoadFunc callback calls SetupSound() later; PC: call directly
     AudioEngine::Init();
     SetupSound();
+    rsEvent(RS_INITIALIZE, 0, 0, 0);
 }
 
 // PSX: InternalClose__5Sound
 void Sound::InternalClose() {
+    rsEvent(RS_TERMINATE, 0, 0, 0);
     // PC: shutdown audio engine
     CleanupSound();
     AudioEngine::Shutdown();

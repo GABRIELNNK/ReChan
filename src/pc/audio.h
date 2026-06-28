@@ -61,4 +61,6 @@ public:
     static void SetOutputMono(bool mono);
     static bool GetOutputMono();
     static u32 GetOutputChannels();
+    static void SetSurroundEnabled(bool enabled);
+    static bool GetSurroundEnabled();
 };
