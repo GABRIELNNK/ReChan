@@ -424,20 +424,6 @@ s32 BlockManager::DemandLoading() {
         g_ai->PopulateBlock();
     }
 
-    // Avoid global WEffect reset churn on boundary changes. Keep effects for
-    // currently active blocks and only unpopulate blocks that are no longer active.
-    for (u32 i = 0; i < GetNumBlocks(); i++) {
-        Block* block = GetBlock(i);
-        if (!block) {
-            continue;
-        }
-
-        const s32 blockNum = static_cast<s32>(block->blockNum);
-        if (!InActiveList(static_cast<u32>(blockNum))) {
-            WEffect_UnPopulateWEffects(blockNum);
-        }
-    }
-
     WEffect_PopulateWEffects();
 
     return 0;

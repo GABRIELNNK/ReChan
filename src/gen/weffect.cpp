@@ -168,30 +168,6 @@ static u32 PsxP3DClipCode(u32 packedScreenXY, s32 depth, const ChanProjectionSta
     return code;
 }
 
-static s32 ResolveStableEffectBlock(const LVector& pos, s32 fallbackBlock) {
-    const s32 collisionBlock = CollisionSector::GetBlockNumber(pos);
-    if (collisionBlock >= 0) {
-        return collisionBlock;
-    }
-
-    if (fallbackBlock >= 0) {
-        return fallbackBlock;
-    }
-
-    if (g_blockManager) {
-        const u16 loadedBlock = g_blockManager->GetBlockNumber(pos);
-        if (g_blockManager->IsValidBlockNumber(loadedBlock)) {
-            return static_cast<s32>(loadedBlock);
-        }
-    }
-
-    if (Player::s_player && Player::s_player->blockNum >= 0) {
-        return Player::s_player->blockNum;
-    }
-
-    return -1;
-}
-
 void ComEffect_SetSeamOffset(s32 x, s32 y, s32 z) {
     s_comEffectSeamOffset.x = x;
     s_comEffectSeamOffset.y = y;
@@ -5081,7 +5057,7 @@ s32 WEffect::Create() {
             rotation = *pathRot;
         }
 
-        blockNum = ResolveStableEffectBlock(pos, blockNum);
+        blockNum = CollisionSector::GetBlockNumber(pos);
     }
 
 #if HIGH_FPS_PLAY_PRESENTATION
@@ -5178,7 +5154,7 @@ s32 WEffect::Update() {
                 rotation = *pathRot;
             }
 
-            blockNum = ResolveStableEffectBlock(pos, blockNum);
+            blockNum = CollisionSector::GetBlockNumber(pos);
         }
 
         if (uvData) {

@@ -56,7 +56,12 @@ s32 CGenericPersistentSound::Begin() {
     MARKFUNCTION(0x800AC3CC);
 
     if (persist) {
-        return -3000;
+        if (rsdPersistent::ObjectExists(persist)) {
+            return -3000;
+        }
+
+        delete persist;
+        persist = nullptr;
     }
 
     const u8* data = reinterpret_cast<const u8*>(&g_persistData[2 * persistId]);

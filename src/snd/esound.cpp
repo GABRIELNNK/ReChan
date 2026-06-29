@@ -1,8 +1,25 @@
 #include "snd/esound.h"
 
 #include "snd/prstsnd.h"
+#include "snd/rsdworld.h"
 
 #include <cstring>
+
+static bool RefreshOrClearPersistent(CGenericPersistentSound*& persistent) {
+    if (!persistent) {
+        return false;
+    }
+
+    if (!rsdPersistent::ObjectExists(persistent->persist)) {
+        persistent->End();
+        delete persistent;
+        persistent = nullptr;
+        return false;
+    }
+
+    persistent->persist->UpdateSpatial();
+    return true;
+}
 
 // PSX: _20CParticleEffectSound (ESOUND.CPP:23, 0x800ACC9C)
 CParticleEffectSound::CParticleEffectSound() {
@@ -38,6 +55,9 @@ s32 CParticleEffectSound::Load(const void* data) {
 // PSX: StartAnimating__20CParticleEffectSound (ESOUND.CPP:105, 0x800ACD70)
 s32 CParticleEffectSound::StartAnimating() {
     MARKFUNCTION(0x800ACD70);
+    if (RefreshOrClearPersistent(persistent)) {
+        return -3000;
+    }
     return BeginPersistent(static_cast<u8>(persistentId), &persistent);
 }
 
@@ -100,6 +120,9 @@ s32 CWorldEffectSound::Load(const void* data) {
 // PSX: StartAnimating__17CWorldEffectSound (ESOUND.CPP:224, 0x800ACEB0)
 s32 CWorldEffectSound::StartAnimating() {
     MARKFUNCTION(0x800ACEB0);
+    if (RefreshOrClearPersistent(persistent)) {
+        return -3000;
+    }
     return BeginPersistent(static_cast<u8>(persistentId), &persistent);
 }
 

@@ -1787,7 +1787,12 @@ void Director::Process() {
                 const LVector pos = { scriptPtr[2], scriptPtr[3], scriptPtr[4] };
                 scriptPtr += 5;
 
-                GEffect_Create(effectHash, &pos, nullptr, nullptr, 0, 0, 0);
+                FWEffect* fwEffect = FWEffect::Find(effectHash);
+                if (fwEffect) {
+                    const s32 blockNum = fwEffect->blockNum;
+                    GEffect_Create(effectHash, &pos, nullptr, nullptr, 0, 0, 0);
+                    fwEffect->blockNum = blockNum;
+                }
                 break;
             }
 

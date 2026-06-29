@@ -54,4 +54,8 @@
 
 #define AUTO_UPDATER (CUSTOM_MENU && 1)
 
+// Graphics improvements shadows and post processing.
 #define MODERN_GRAPHICS 1
+
+// Spatial audio path for positional world sfx.
+#define MODERN_SPATIAL_AUDIO 1

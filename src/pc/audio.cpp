@@ -1,5 +1,6 @@
 #include "gen/common.h"
 #include "pc/audio.h"
+#include "gen/config.h"
 #include "p3d/filepath.h"
 #include "miniaudio.h"
 #include <vector>
@@ -124,6 +125,16 @@ static inline s32 clampi(s32 v, s32 lo, s32 hi) {
 
 static inline f32 dbToLinear(f32 db) {
     return std::pow(10.0f, db / 20.0f);
+}
+
+static inline f32 equalPowerLeft(f32 pan) {
+    const f32 angle = (clampf(pan, -1.0f, 1.0f) + 1.0f) * (3.14159265358979323846f * 0.25f);
+    return std::cos(angle);
+}
+
+static inline f32 equalPowerRight(f32 pan) {
+    const f32 angle = (clampf(pan, -1.0f, 1.0f) + 1.0f) * (3.14159265358979323846f * 0.25f);
+    return std::sin(angle);
 }
 
 static inline f32 ProcessBiquad(const Biquad& filter, BiquadState& state, f32 sample) {
@@ -364,8 +375,8 @@ static void ComputeSpatialGains(
 
     if (!listener.valid || outChannels == 0) {
         if (outChannels >= 2) {
-            outGains[0] = 1.0f;
-            outGains[1] = 1.0f;
+            outGains[0] = 0.70710678118f;
+            outGains[1] = 0.70710678118f;
         }
         else {
             outGains[0] = 1.0f;
@@ -401,19 +412,20 @@ static void ComputeSpatialGains(
     const f32 dirX = dx * invLen;
     const f32 dirZ = dz * invLen;
 
-    const f32 yawRad = ((f32)listener.yaw16) * (6.28318530717958647692f / 65536.0f);
-    const f32 forwardX = std::sin(yawRad);
-    const f32 forwardZ = std::cos(yawRad);
-    const f32 rightX = forwardZ;
-    const f32 rightZ = -forwardX;
-
-    const f32 front = clampf(dirX * forwardX + dirZ * forwardZ, -1.0f, 1.0f);
-    const f32 side = clampf(dirX * rightX + dirZ * rightZ, -1.0f, 1.0f);
-
-    const f32 leftW = clampf((1.0f - side) * 0.5f, 0.0f, 1.0f);
-    const f32 rightW = clampf((1.0f + side) * 0.5f, 0.0f, 1.0f);
-    const f32 frontW = clampf((1.0f + front) * 0.5f, 0.0f, 1.0f);
-    const f32 rearW = 1.0f - frontW;
+    const f32 yawRad = (f32)listener.yaw16 * (6.28318530717958647692f / 65536.0f);
+    const f32 sinYaw = std::sin(yawRad);
+    const f32 cosYaw = std::cos(yawRad);
+    const f32 localX = dirX * cosYaw - dirZ * sinYaw;
+    const f32 localZ = dirX * sinYaw + dirZ * cosYaw;
+    const f32 side = clampf(localX, -1.0f, 1.0f);
+    const f32 front = clampf(localZ, -1.0f, 1.0f);
+    const f32 rear = clampf(-front, 0.0f, 1.0f);
+    const f32 frontAmount = clampf(front, 0.0f, 1.0f);
+    const f32 frontRearSum = frontAmount + rear;
+    const f32 frontW = (frontRearSum > 0.0001f) ? (frontAmount / frontRearSum) : 0.70710678118f;
+    const f32 rearW = (frontRearSum > 0.0001f) ? (rear / frontRearSum) : 0.29289321882f;
+    const f32 leftGain = equalPowerLeft(side);
+    const f32 rightGain = equalPowerRight(side);
 
     if (outChannels == 1) {
         outGains[0] = distGain;
@@ -421,36 +433,35 @@ static void ComputeSpatialGains(
     }
 
     if (outChannels == 2) {
-        const f32 angle = (side + 1.0f) * (3.14159265358979323846f * 0.25f);
-        outGains[0] = std::cos(angle) * distGain;
-        outGains[1] = std::sin(angle) * distGain;
+        outGains[0] = leftGain * distGain;
+        outGains[1] = rightGain * distGain;
         return;
     }
 
     if (outChannels == 4) {
-        outGains[0] = leftW * frontW * distGain;
-        outGains[1] = rightW * frontW * distGain;
-        outGains[2] = leftW * rearW * distGain;
-        outGains[3] = rightW * rearW * distGain;
+        outGains[0] = leftGain * frontW * distGain;
+        outGains[1] = rightGain * frontW * distGain;
+        outGains[2] = leftGain * rearW * distGain;
+        outGains[3] = rightGain * rearW * distGain;
         return;
     }
 
-    outGains[0] = leftW * frontW * distGain;
-    outGains[1] = rightW * frontW * distGain;
+    outGains[0] = leftGain * frontW * distGain;
+    outGains[1] = rightGain * frontW * distGain;
 
     if (outChannels >= 3) {
-        outGains[2] = (1.0f - std::fabs(side)) * frontW * distGain;
+        outGains[2] = clampf(1.0f - std::fabs(side), 0.0f, 1.0f) * frontW * distGain;
     }
     if (outChannels >= 4) {
         outGains[3] = 0.0f; // LFE not synthesized.
     }
     if (outChannels >= 6) {
-        outGains[4] = leftW * rearW * distGain;
-        outGains[5] = rightW * rearW * distGain;
+        outGains[4] = leftGain * rearW * distGain;
+        outGains[5] = rightGain * rearW * distGain;
     }
     if (outChannels >= 8) {
-        outGains[6] = leftW * rearW * 0.75f * distGain;
-        outGains[7] = rightW * rearW * 0.75f * distGain;
+        outGains[6] = leftGain * rearW * 0.5f * distGain;
+        outGains[7] = rightGain * rearW * 0.5f * distGain;
     }
 }
 
@@ -494,10 +505,8 @@ static void audioCallback(ma_device* device, void* output, const void* /*input*/
             }
             else {
                 if (outChannels >= 2) {
-                    const f32 pan = clampf(voice.pan, -1.0f, 1.0f);
-                    const f32 angle = (pan + 1.0f) * (3.14159265358979323846f * 0.25f);
-                    gains[0] = std::cos(angle);
-                    gains[1] = std::sin(angle);
+                    gains[0] = equalPowerLeft(voice.pan);
+                    gains[1] = equalPowerRight(voice.pan);
                 }
                 else {
                     gains[0] = 1.0f;
@@ -666,7 +675,9 @@ static void audioCallback(ma_device* device, void* output, const void* /*input*/
         }
     }
 
+#if !MODERN_SPATIAL_AUDIO
     ApplySurroundUpmix(out, frameCount, outChannels);
+#endif
     ApplyMastering(out, frameCount, outChannels);
 
     // Clamp output

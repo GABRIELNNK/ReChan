@@ -314,6 +314,12 @@ static void ProcessHandlerList(ccMinList& list) {
     }
 }
 
+static void UpdateSpatialAudioListener() {
+    // PSX updates the 3D audio listener from player/camera every gameplay frame.
+    // PC derives the listener from the current camera inside the sound backend.
+    rsEvent(21, 0, 0, 0);
+}
+
 void Game::ProcessHandlers() {
     MARKFUNCTION(0x8002B4F0);
 
@@ -1512,6 +1518,7 @@ bool Game::gsPlayState(Game* game) {
             g_display->GetCamera()->UpdateHighFPS();
         }
 
+        UpdateSpatialAudioListener();
         ProcessHandlerList(game->handlerSet2.handlerList);
         return true;
     }
@@ -1554,6 +1561,8 @@ bool Game::gsPlayState(Game* game) {
         g_display->GetCamera()->UpdateHighFPS();
     }
 
+    UpdateSpatialAudioListener();
+
     // PSX: CInteractiveMusicController::Think (MSCCTRLR.CPP:56) - per-frame FAG song switching.
     InteractiveMusicControllerThink();
 
@@ -1565,6 +1574,7 @@ bool Game::gsPlayState(Game* game) {
             g_director->Process();
         }
 
+        UpdateSpatialAudioListener();
         ProcessHandlerList(game->handlerSet2.handlerList);
         return true;
     }
@@ -1579,6 +1589,7 @@ bool Game::gsPlayState(Game* game) {
 
     // PSX: ProcessHandlers(game) - runs handlerSet1 (think) + handlerSet2 (draw)
     game->ProcessHandlers();
+    UpdateSpatialAudioListener();
 
     // PSX: CInteractiveMusicController::Think (MSCCTRLR.CPP:56) - per-frame FAG song switching.
     InteractiveMusicControllerThink();

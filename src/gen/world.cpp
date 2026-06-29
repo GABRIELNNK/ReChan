@@ -267,7 +267,9 @@ static SequenceAnim* ParseSequenceAnimRaw(const u8* rawData, u32 rawSize) {
     sequence->nameUID = p3dReadU32LE(rawData + 0);
     const u32 packedFrames = p3dReadU32LE(rawData + 12);
     sequence->numFrames = static_cast<s32>(packedFrames);
-    sequence->frameBits = 16;
+    // PSX tSequenceFlip uses frame >> 8 for the part and frame & 0xFF
+    // for the local frame.
+    sequence->frameBits = 8;
 
     const u32 numParts = (packedFrames >> sequence->frameBits) + 1u;
 

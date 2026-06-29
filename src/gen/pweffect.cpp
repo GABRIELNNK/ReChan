@@ -3,7 +3,6 @@
 #include "gen/pweffect.h"
 
 #include "gen/ai.h"
-#include "gen/blockmgr.h"
 #include "gen/colsect.h"
 #include "gen/database.h"
 #include "gen/effects.h"
@@ -59,31 +58,6 @@ static Mat4 BuildEffectWorldMatrix(const LVector& pos, const LVector* scale) {
     world.m[13] = static_cast<f32>(pos.y);
     world.m[14] = static_cast<f32>(pos.z);
     return world;
-}
-
-static s32 ResolveEffectBlockNumber(const LVector& pos, s32 fallbackBlock = -1) {
-    // PSX parity: PW/FPW use collision-sector block lookup for effect routing.
-    const s32 collisionBlockNum = CollisionSector::GetBlockNumber(pos);
-    if (collisionBlockNum >= 0) {
-        return collisionBlockNum;
-    }
-
-    if (fallbackBlock >= 0) {
-        return fallbackBlock;
-    }
-
-    if (g_blockManager) {
-        const u16 loadedBlock = g_blockManager->GetBlockNumber(pos);
-        if (g_blockManager->IsValidBlockNumber(loadedBlock)) {
-            return static_cast<s32>(loadedBlock);
-        }
-    }
-
-    if (Player::s_player && Player::s_player->blockNum >= 0) {
-        return Player::s_player->blockNum;
-    }
-
-    return -1;
 }
 
 static s32 ResolveCollisionEffectBlockNumber(const LVector& pos) {
@@ -492,7 +466,7 @@ s32 PWEffect::Create() {
             pos = *pathPos;
         }
 
-        blockNum = ResolveEffectBlockNumber(pos, blockNum);
+        blockNum = ResolveCollisionEffectBlockNumber(pos);
     }
 
     if (mentor) {
@@ -531,7 +505,7 @@ s32 PWEffect::Update() {
                 pos = *pathPos;
             }
 
-            blockNum = ResolveEffectBlockNumber(pos, blockNum);
+            blockNum = ResolveCollisionEffectBlockNumber(pos);
         }
 
         if (particleMgr) {
@@ -860,12 +834,6 @@ s32 FPWEffect::Update() {
         particleMgr->CreateParticles(localOrigin, nullptr);
     }
 
-    if (particleMgr) {
-        particleMgr->Update();
-    }
-
-    UpdateSound();
-
     if (lifeCounter < 0 && particleMgr && !particleMgr->ActiveParticles()) {
         if (noPool) {
             doneBits = 1;
@@ -889,8 +857,18 @@ s32 FPWEffect::Update() {
             if (sound) {
                 sound->StopAnimating();
             }
+
+            return blockNum;
         }
+
+        return doneMask;
     }
+
+    if (particleMgr) {
+        particleMgr->Update();
+    }
+
+    UpdateSound();
 
     return blockNum;
 }
@@ -1320,7 +1298,7 @@ s32 FPWEffect_DebugSpawnParticle(u32 particleHash,
         return -1;
     }
 
-    const s32 collisionBlockNum = ResolveEffectBlockNumber(*pos);
+    const s32 collisionBlockNum = ResolveCollisionEffectBlockNumber(*pos);
 
     if (collisionBlockNum == -1) {
         return -3;

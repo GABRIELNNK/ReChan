@@ -1,6 +1,7 @@
 #include "snd/rsdworld.h"
 #include "snd/sound.h"
 #include "snd/sndmath.h"
+#include "gen/config.h"
 #include "gen/common.h"
 #include "gen/display.h"
 #include "gen/camera.h"
@@ -14,6 +15,14 @@
 // These are defined inline by p3d math headers; declare here to keep tooling resolution stable.
 s32 rmSin16(s32 angle);
 s32 rmMag3ff(s32 a1, s32 a2, s32 a3);
+
+static constexpr s32 MIN_AUDIBLE_DIST = 0;
+static constexpr s32 MAX_AUDIBLE_DIST = 10000;
+static constexpr s32 STEREO_SEPARATION = 1024;
+
+static f32 ModernSpatialMaxDistance(u32 extraRange) {
+    return (f32)(MAX_AUDIBLE_DIST + (s32)extraRange);
+}
 
 static bool GetListenerState(LVector& outPos, s32& outYaw) {
     if (!g_display) {
@@ -85,11 +94,6 @@ void rsdWorld::UnmuteAllPersistentSounds() {
 }
 
 static void GetObjectVolumesPsx(u16 baseVol, const LVector* objPos, u16& outVolL, u16& outVolR, u32 extraRange) {
-    // PSX defaults from rsd init globals.
-    static constexpr s32 MIN_AUDIBLE_DIST = 0;
-    static constexpr s32 MAX_AUDIBLE_DIST = 10000;
-    static constexpr s32 STEREO_SEPARATION = 1024;
-
     LVector listener = {};
     s32 yaw = 0;
     if (!objPos || !GetListenerState(listener, yaw)
@@ -193,6 +197,13 @@ s32 rsdWorld::PlayTransientPositional(u32 sampleId, void* posPtr, u16 volume, s1
     }
 
     AudioVoice v = AUDIO_VOICE_INVALID;
+#if MODERN_SPATIAL_AUDIO
+    if (objPos != nullptr) {
+        const f32 vol = PsxVolToFloat(volume) * g_sound->effectsVolume;
+        v = AudioEngine::PlaySample3D(s, *objPos, vol, false, true, 0.0f, ModernSpatialMaxDistance(flags));
+    }
+    else
+#endif
     v = AudioEngine::PlaySample(s, vol, pcPan, false);
 
     if (v != AUDIO_VOICE_INVALID && pitchF != 1.0f) {
@@ -261,10 +272,14 @@ rsdPersistent::rsdPersistent(u32 sampleId_, void* posPtr, u8 reverb, u16 volume_
 
     f32 vol = 0.0f;
     if (this->posPtr != nullptr) {
+#if MODERN_SPATIAL_AUDIO
+        vol = PsxVolToFloat(volume_);
+#else
         u16 volL = 0;
         u16 volR = 0;
         GetObjectVolumesPsx(volume_, this->posPtr, volL, volR, flags);
         vol = (PsxVolToFloat(volL) + PsxVolToFloat(volR)) * 0.5f;
+#endif
     }
     else {
         vol = PsxVolToFloat(volume_);
@@ -279,6 +294,7 @@ rsdPersistent::rsdPersistent(u32 sampleId_, void* posPtr, u8 reverb, u16 volume_
 
     AudioVoice v = AUDIO_VOICE_INVALID;
     f32 pcPan = 0.0f;
+#if !MODERN_SPATIAL_AUDIO
     if (this->posPtr != nullptr) {
         u16 volL = 0;
         u16 volR = 0;
@@ -289,7 +305,14 @@ rsdPersistent::rsdPersistent(u32 sampleId_, void* posPtr, u8 reverb, u16 volume_
             pcPan = (fVolR - fVolL) / (fVolL + fVolR);
         }
     }
+#endif
 
+#if MODERN_SPATIAL_AUDIO
+    if (this->posPtr != nullptr) {
+        v = AudioEngine::PlaySample3D(s, *this->posPtr, vol, true, true, 0.0f, ModernSpatialMaxDistance(flags));
+    }
+    else
+#endif
     v = AudioEngine::PlaySample(s, vol, pcPan, true);
 
     if (v != AUDIO_VOICE_INVALID) {
@@ -326,9 +349,18 @@ bool rsdPersistent::ObjectExists(rsdPersistent* obj) {
     if (!obj) {
         return false;
     }
+
+    {
+        std::lock_guard<std::mutex> lock(g_persistentMutex);
+        if (std::find(g_persistentSounds.begin(), g_persistentSounds.end(), obj) == g_persistentSounds.end()) {
+            return false;
+        }
+    }
+
     if (!obj->voiceHandle) {
         return false;
     }
+
     AudioVoice v = static_cast<AudioVoice>(reinterpret_cast<uintptr_t>(obj->voiceHandle));
     return AudioEngine::IsVoicePlaying(v);
 }
@@ -348,6 +380,19 @@ void rsdPersistent::UpdateSpatial() {
         AudioVoice v = static_cast<AudioVoice>(reinterpret_cast<uintptr_t>(voiceHandle));
 
         const u16 effectiveVolume = muted ? 0 : volume;
+#if MODERN_SPATIAL_AUDIO
+        f32 vol = PsxVolToFloat(effectiveVolume);
+        if (g_sound) {
+            vol *= g_sound->effectsVolume;
+        }
+
+        if (posPtr != nullptr) {
+            AudioEngine::SetVoicePosition(v, *posPtr);
+            AudioEngine::SetVoiceDistanceRange(v, 0.0f, ModernSpatialMaxDistance(spatialFlags));
+        }
+
+        AudioEngine::SetVoiceVolume(v, vol);
+#else
         u16 volL = effectiveVolume;
         u16 volR = effectiveVolume;
         if (posPtr != nullptr) {
@@ -367,6 +412,7 @@ void rsdPersistent::UpdateSpatial() {
         }
         AudioEngine::SetVoiceVolume(v, vol);
         AudioEngine::SetVoicePan(v, pcPan);
+#endif
     }
 }
 

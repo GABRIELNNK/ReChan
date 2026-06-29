@@ -19,6 +19,7 @@
 #include "gen/psxmath_helpers.h"
 #include "pc/debugui.h"
 #include "p3d/p3dmath.h"
+#include "pc/log.h"
 
 // PSX binary angle constants
 static constexpr s32 ANGLE_FULL_ROTATION = 0xFFFF;
@@ -106,30 +107,30 @@ static bool IsPlayerAggressiveCombatState(s32 actionState) {
 
 static bool IsOscarSyncActionState(s32 actionState) {
     switch (actionState) {
-    case AS_COMBAT_IDLE:
-    case AS_BACK_GRAB_LATCH:
-    case AS_BACK_GRAB:
-    case AS_THROW_CHARACTER_RECEIVE:
-    case AS_BACK_GRAB_RECEIVE_PRE_LATCH:
-    case AS_BACK_GRAB_RECEIVE_LATCH:
-    case AS_BACK_GRAB_RECEIVE:
-        return true;
-    default:
-        return false;
+        case AS_COMBAT_IDLE:
+        case AS_BACK_GRAB_LATCH:
+        case AS_BACK_GRAB:
+        case AS_THROW_CHARACTER_RECEIVE:
+        case AS_BACK_GRAB_RECEIVE_PRE_LATCH:
+        case AS_BACK_GRAB_RECEIVE_LATCH:
+        case AS_BACK_GRAB_RECEIVE:
+            return true;
+        default:
+            return false;
     }
 }
 
 static bool IsDantePhase1PressureState(s32 actionState) {
     switch (actionState) {
-    case AS_PAUSE:
-    case AS_JUMP:
-    case AS_FALL:
-    case AS_FLIP:
-    case AS_STATE_33:
-    case AS_STATE_35:
-        return true;
-    default:
-        return false;
+        case AS_PAUSE:
+        case AS_JUMP:
+        case AS_FALL:
+        case AS_FLIP:
+        case AS_STATE_33:
+        case AS_STATE_35:
+            return true;
+        default:
+            return false;
     }
 }
 
@@ -213,18 +214,18 @@ static void RestoreDeferredHandlerOrAiFollowPathFallback(Behaviour* self) {
         self->handlerDispatch = -1;
 
         switch (self->aiType) {
-        case AITypes::TT_BUTCH:
-            self->handler = Behaviour::ButchDMS;
-            break;
-        case AITypes::TT_GRONTAR:
-            self->handler = Behaviour::GrontarDMS;
-            break;
-        case AITypes::TT_DANTE:
-            self->handler = Behaviour::DanteDMS_Phase1;
-            break;
-        default:
-            self->handler = Behaviour::NDMS;
-            break;
+            case AITypes::TT_BUTCH:
+                self->handler = Behaviour::ButchDMS;
+                break;
+            case AITypes::TT_GRONTAR:
+                self->handler = Behaviour::GrontarDMS;
+                break;
+            case AITypes::TT_DANTE:
+                self->handler = Behaviour::DanteDMS_Phase1;
+                break;
+            default:
+                self->handler = Behaviour::NDMS;
+                break;
         }
     }
 
@@ -249,24 +250,24 @@ static void RestoreDeferredHandlerOrJumpingFallback(Behaviour* self) {
         self->handlerDispatch = -1;
 
         switch (self->aiType) {
-        case AITypes::TT_BUTCH:
-            self->handler = Behaviour::ButchDMS;
-            break;
-        case AITypes::TT_GRONTAR:
-            self->handler = Behaviour::GrontarDMS;
-            break;
-        case AITypes::TT_PAUL:
-            self->handler = Behaviour::PaulDMS;
-            break;
-        case AITypes::TT_OSCAR:
-            self->handler = Behaviour::OscarDMS;
-            break;
-        case AITypes::TT_DANTE:
-            self->handler = Behaviour::DanteDMS_Phase1;
-            break;
-        default:
-            self->handler = Behaviour::NDMS;
-            break;
+            case AITypes::TT_BUTCH:
+                self->handler = Behaviour::ButchDMS;
+                break;
+            case AITypes::TT_GRONTAR:
+                self->handler = Behaviour::GrontarDMS;
+                break;
+            case AITypes::TT_PAUL:
+                self->handler = Behaviour::PaulDMS;
+                break;
+            case AITypes::TT_OSCAR:
+                self->handler = Behaviour::OscarDMS;
+                break;
+            case AITypes::TT_DANTE:
+                self->handler = Behaviour::DanteDMS_Phase1;
+                break;
+            default:
+                self->handler = Behaviour::NDMS;
+                break;
         }
     }
 
@@ -339,29 +340,29 @@ void Behaviour::SetAIHandler(u32 handlerType) {
     }
 
     switch (handlerType) {
-    case AITypes::TT_PLAYER:
-        padPort = 0;
-        handler = PlayerUserControl;
-        break;
-    case AITypes::TT_GRONTAR:
-        handler = GrontarDMS;
-        break;
-    case AITypes::TT_DANTE:
-        handler = DanteDMS_Phase1;
-        break;
-    case AITypes::TT_OSCAR:
-        bossOscar = owner;
-        handler = OscarDMS;
-        break;
-    case AITypes::TT_BUTCH:
-        handler = ButchDMS;
-        break;
-    case AITypes::TT_PAUL:
-        bossPaul = owner;
-        handler = PaulDMS;
-        break;
-    default:
-        break;
+        case AITypes::TT_PLAYER:
+            padPort = 0;
+            handler = PlayerUserControl;
+            break;
+        case AITypes::TT_GRONTAR:
+            handler = GrontarDMS;
+            break;
+        case AITypes::TT_DANTE:
+            handler = DanteDMS_Phase1;
+            break;
+        case AITypes::TT_OSCAR:
+            bossOscar = owner;
+            handler = OscarDMS;
+            break;
+        case AITypes::TT_BUTCH:
+            handler = ButchDMS;
+            break;
+        case AITypes::TT_PAUL:
+            bossPaul = owner;
+            handler = PaulDMS;
+            break;
+        default:
+            break;
     }
 }
 
@@ -423,7 +424,7 @@ void Behaviour::ButchDMS(Behaviour* self) {
         return;
     }
 
-    if (g_directorActive != 0) {
+    if (g_director && g_director->scriptState != 0) {
         return;
     }
 
@@ -622,52 +623,52 @@ void Behaviour::ButchDMS(Behaviour* self) {
     }
 
     switch (navDecision) {
-    case 1:
-        owner->moveSpeed = (s16)self->animConfigPtr->strafingSpeed;
-        owner->RequestAction(6);
-        return;
+        case 1:
+            owner->moveSpeed = (s16)self->animConfigPtr->strafingSpeed;
+            owner->RequestAction(6);
+            return;
 
-    case 2:
-        owner->SetDesiredMoveDirection(owner->faceAngle - 0x4000);
-        owner->moveSpeed = (s16)self->animConfigPtr->strafingSpeed;
-        owner->RequestAction(6);
-        return;
+        case 2:
+            owner->SetDesiredMoveDirection(owner->faceAngle - 0x4000);
+            owner->moveSpeed = (s16)self->animConfigPtr->strafingSpeed;
+            owner->RequestAction(6);
+            return;
 
-    case 3:
-        owner->SetDesiredMoveDirection(owner->faceAngle + 0x4000);
-        owner->moveSpeed = (s16)self->animConfigPtr->strafingSpeed;
-        owner->RequestAction(6);
-        return;
+        case 3:
+            owner->SetDesiredMoveDirection(owner->faceAngle + 0x4000);
+            owner->moveSpeed = (s16)self->animConfigPtr->strafingSpeed;
+            owner->RequestAction(6);
+            return;
 
-    case 4:
-        owner->SetDesiredMoveDirection(owner->faceAngle + 0x8000);
-        owner->moveSpeed = (s16)self->animConfigPtr->strafingSpeed;
-        owner->RequestAction(6);
-        return;
+        case 4:
+            owner->SetDesiredMoveDirection(owner->faceAngle + 0x8000);
+            owner->moveSpeed = (s16)self->animConfigPtr->strafingSpeed;
+            owner->RequestAction(6);
+            return;
 
-    case 5:
-        owner->RequestAction(1);
-        return;
+        case 5:
+            owner->RequestAction(1);
+            return;
 
-    case 6:
-    {
-        const s32 randomTaunt = (s32)rmRangedRandom(4);
-        if (randomTaunt == 0) {
-            owner->field316 = 0x5C;
+        case 6:
+        {
+            const s32 randomTaunt = (s32)rmRangedRandom(4);
+            if (randomTaunt == 0) {
+                owner->field316 = 0x5C;
+            }
+            else if (randomTaunt == 1) {
+                owner->field316 = 0x5B;
+            }
+            else {
+                owner->field316 = 0x5A;
+            }
+
+            owner->RequestAction(0x15);
+            return;
         }
-        else if (randomTaunt == 1) {
-            owner->field316 = 0x5B;
-        }
-        else {
-            owner->field316 = 0x5A;
-        }
 
-        owner->RequestAction(0x15);
-        return;
-    }
-
-    default:
-        return;
+        default:
+            return;
     }
 }
 
@@ -744,13 +745,8 @@ void Behaviour::ButchDMS_Charge(Behaviour* self) {
 void Behaviour::GrontarDMS(Behaviour* self) {
     MARKFUNCTION(0x8001D314);
 
-    if (!self || !self->owner) {
+    if (!self || !self->owner)
         return;
-    }
-
-    if (g_directorActive != 0) {
-        return;
-    }
 
     Humanoid* owner = self->owner;
     Player* player = Player::s_player;
@@ -776,23 +772,13 @@ void Behaviour::GrontarDMS(Behaviour* self) {
         comboStateB = 0;
     };
 
-    // Zone membership only matters while he hasn't engaged the player yet:
-    // at close/mid range he must keep fighting regardless of which side of
-    // the (boundary-adjacent, easy to straddle mid-fight) zone box he's on.
-    // Gating mid-range combat on InActiveZone() made him flicker between
-    // chasing the player and snapping toward a fixed zone-center point every
-    // time he crossed the box edge during a real fight.
-    if (!self->InActiveZone() && distanceToPlayer >= GRONTAR_FAR_ATTACK_DIST) {
+    if (!self->InActiveZone() && distanceToPlayer >= GRONTAR_CLOSE_ATTACK_DIST) {
         LVector zoneCenter = {};
         owner->activeZone->GetActiveZoneCenterPoint(zoneCenter);
-        owner->FaceThingDesired(player);
+        owner->SetTarget(player);
         owner->FacePointDesired(zoneCenter);
-        // GA_STRAFE(6) routes through AS_STRAFE, which has no locomotion of its
-        // own for Grontar (see Grontar::_Taunt/_DiveRoll dispatch); GA_MOVE(2)
-        // is what _Run() actually applies AddForce for, same as the far-distance
-        // approach branch below.
         owner->moveSpeed = (s16)self->animConfigPtr->runningSpeed;
-        owner->RequestAction(2);
+        owner->RequestAction(6);
 
         resetComboState();
         return;
@@ -941,7 +927,7 @@ void Behaviour::PaulDMS(Behaviour* self) {
         spotRecoverTimer -= 1;
     }
 
-    const s32 strafeSpeed = self->animConfigPtr ? (s16)self->animConfigPtr->strafingSpeed : 0;
+    const s32 strafeSpeed = GetFaceAngleDataBackAngle(self);
 
     s32 shouldDance = 0;
     WEffect* bossSpotLight = FindBossSpotLight();
@@ -957,7 +943,7 @@ void Behaviour::PaulDMS(Behaviour* self) {
     }
 
     s32& spotPathWasForcedOff = self->field80To176[3]; // +0x5C
-    if (g_directorActive != 0) {
+    if (g_director && g_director->scriptState != 0) {
         bossSpotLight->EnablePath(0);
         spotPathWasForcedOff = 1;
         return;
@@ -1016,7 +1002,7 @@ void Behaviour::PaulDMS(Behaviour* self) {
 
     const s32 ownerInPlayerField = IsPointInFieldOf(owner->pos, player->pos, player->orientation.y, 0x1555, 0x1555) ? 1 : 0;
     const s32 playerPressureState = IsDantePhase1PressureState(player->actionState) ? 1 : 0;
-    const s32 playerIsStrafing = (player->actionState == (s32)AS_STRAFE) ? 1 : 0;
+    const s32 playerDiveRolling = (player->actionState == (s32)AS_DIVE_ROLL) ? 1 : 0;
     const s32 ownerInCombatState = ((u32)(owner->actionState - 0x20) < 5u) ? 1 : 0;
 
     s32& strafeDecision = self->field80To176[9]; // +0x74
@@ -1032,7 +1018,7 @@ void Behaviour::PaulDMS(Behaviour* self) {
                 owner->SetDesiredMoveDirection(owner->faceAngle + 0x4000);
             }
 
-            owner->FaceThingDesired(player);
+            owner->SetTarget(player);
             owner->RequestAction(6);
             return;
         }
@@ -1050,7 +1036,7 @@ void Behaviour::PaulDMS(Behaviour* self) {
     }
 
     if (distanceToPlayer > PAUL_CLOSE_ATTACK_DIST) {
-        if (playerIsStrafing != 0 && ownerInPlayerField != 0) {
+        if (playerDiveRolling != 0 && ownerInPlayerField != 0) {
             owner->RequestAction(9);
             return;
         }
@@ -1112,7 +1098,7 @@ void Behaviour::PaulDMS(Behaviour* self) {
                     strafeDecision = 3;
                 }
 
-                owner->FaceThingDesired(player);
+                owner->SetTarget(player);
                 owner->RequestAction(6);
                 return;
             }
@@ -1138,7 +1124,7 @@ void Behaviour::OscarDMS(Behaviour* self) {
         return;
     }
 
-    if (g_directorActive != 0) {
+    if (g_director && g_director->scriptState != 0) {
         return;
     }
 
@@ -1387,7 +1373,7 @@ void Behaviour::OscarHenchmanDMS(Behaviour* self) {
         return;
     }
 
-    if (g_directorActive != 0) {
+    if (g_director && g_director->scriptState != 0) {
         return;
     }
 
@@ -1627,7 +1613,7 @@ void Behaviour::DanteDMS_Phase1(Behaviour* self) {
 
     const s32 ownerInPlayerField = IsPointInFieldOf(owner->pos, player->pos, player->orientation.y, 0x1555, 0x1555) ? 1 : 0;
     const s32 pressureState = IsDantePhase1PressureState(player->actionState) ? 1 : 0;
-    const s32 playerIsStrafing = (player->actionState == (s32)AS_STRAFE) ? 1 : 0;
+    const s32 playerDiveRolling = (player->actionState == (s32)AS_DIVE_ROLL) ? 1 : 0;
 
     if (IsPlayerAggressiveCombatState(player->actionState)) {
         self->nextHandlerThisOffset = 0;
@@ -1652,7 +1638,7 @@ void Behaviour::DanteDMS_Phase1(Behaviour* self) {
     }
 
     if (distanceToPlayer > DANTE_PHASE1_DIST_THRESHOLD) {
-        if (playerIsStrafing != 0 && ownerInPlayerField != 0) {
+        if (playerDiveRolling != 0 && ownerInPlayerField != 0) {
             owner->RequestAction(9);
             return;
         }
@@ -3245,29 +3231,29 @@ s32 Behaviour::NavigateWorld(s32& moveDirection) {
 
         if (turnDegrees <= 0) {
             if (owner->CheckWallCollision(
-                    (s16)(wallAngle + 0x4000),
-                    512,
-                    150,
-                    500,
-                    collisionRatio,
-                    wallNormal,
-                    hitPoint,
-                    verticalSpan,
-                    wallMaterial) != 0) {
+                (s16)(wallAngle + 0x4000),
+                512,
+                150,
+                500,
+                collisionRatio,
+                wallNormal,
+                hitPoint,
+                verticalSpan,
+                wallMaterial) != 0) {
                 turnDegrees = 15;
             }
         }
         else {
             if (owner->CheckWallCollision(
-                    (s16)(wallAngle - 0x4000),
-                    512,
-                    150,
-                    500,
-                    collisionRatio,
-                    wallNormal,
-                    hitPoint,
-                    verticalSpan,
-                    wallMaterial) != 0) {
+                (s16)(wallAngle - 0x4000),
+                512,
+                150,
+                500,
+                collisionRatio,
+                wallNormal,
+                hitPoint,
+                verticalSpan,
+                wallMaterial) != 0) {
                 turnDegrees = -15;
             }
         }
