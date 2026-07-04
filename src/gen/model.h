@@ -476,6 +476,11 @@ public:
     // +124..+132: persistent 16.16 head-track direction vector.
     LVector headTrackDir = { 0, 0, 0xFFFF };
 
+#if HIGH_FPS_PLAY_PRESENTATION
+    s32 nisJointTranslationYRender = 0;
+    u32 nisJointTranslationYTick = 0xFFFFFFFFu;
+#endif
+
     HumanoidModel();
     ~HumanoidModel() override;
 

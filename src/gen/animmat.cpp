@@ -2,6 +2,7 @@
 #include "gen/animmat.h"
 #include "gen/model.h"
 #include "gen/psxmath_helpers.h"
+#include "gen/time.h"
 #include "ai/humanoid.h"
 #include "p3d/context.h"
 #include "p3d/skeleton.h"
@@ -467,8 +468,21 @@ static s32 AM_Bip01Callback(STreeJoint* joint, u32 /*jointIndex*/, const Mat4& /
 
     if ((owner->flags2 & TF2_NIS_ENTER) != 0) {
         if ((owner->flags2 & TF2_NIS_FROZEN) == 0) {
+#if HIGH_FPS_PLAY_PRESENTATION
+            const u32 currentTick = g_time ? g_time->GetFrameCounter() : 0;
+            if (model->nisJointTranslationYTick != currentTick) {
+                model->nisJointTranslationYTick = currentTick;
+                joint->translationY = model->field116;
+                model->field116 = 100;
+                model->nisJointTranslationYRender = joint->translationY;
+            }
+            else {
+                joint->translationY = model->nisJointTranslationYRender;
+            }
+#else
             joint->translationY = model->field116;
             model->field116 = 100;
+#endif
         }
         if (((owner->flags2 >> 6) & 1) == 0) {
             joint->translationX = 0;

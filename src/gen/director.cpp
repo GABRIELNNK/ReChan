@@ -2156,6 +2156,7 @@ void Director::Process() {
                         if (wpn->parValue != 9999) {
                             Player::s_player->blockNum = static_cast<u16>(wpn->parValue);
                         }
+                        Player::s_player->ResetRenderInterpolation();
                     }
                 }
                 break;
@@ -2726,6 +2727,7 @@ void Director::ProcessHumanoidFunc() {
                 if (humanoid) {
                     humanoid->pos = position;
                     humanoid->homePos = position;
+                    humanoid->ResetRenderInterpolation();
                 }
                 break;
             }

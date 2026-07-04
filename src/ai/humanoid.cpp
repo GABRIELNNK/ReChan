@@ -253,31 +253,14 @@ static s32 BuildInterpolatedAnimFrameReal(const AnimStructure* anim, s32 prevFra
 }
 
 static void UpdateHumanoidRenderAnimPose(HumanoidModel* model, HumanoidRenderSmoothState* smoothState,
-    bool didLogicStep, f32 alpha) {
-    if (!model || !smoothState) {
+    f32 alpha) {
+    if (!model || !smoothState || !smoothState->animInitialized) {
         return;
     }
 
     AnimStructure* anim = static_cast<AnimStructure*>(model->animStructure);
     if (!anim || !anim->flip || !anim->animation) {
-        smoothState->animInitialized = false;
         return;
-    }
-
-    const s32 animEnum = anim->animEnum;
-    const s32 currentFrame = anim->currentFrame;
-
-    if (!smoothState->animInitialized || smoothState->animEnum != animEnum) {
-        smoothState->animInitialized = true;
-        smoothState->animEnum = animEnum;
-        smoothState->prevAnimFrame = currentFrame;
-        smoothState->curAnimFrame = currentFrame;
-    }
-
-    if (didLogicStep) {
-        smoothState->animEnum = animEnum;
-        smoothState->prevAnimFrame = smoothState->curAnimFrame;
-        smoothState->curAnimFrame = currentFrame;
     }
 
     if (alpha < 0.0f) {
@@ -336,8 +319,51 @@ static void UpdateHumanoidRenderAnimPose(HumanoidModel* model, HumanoidRenderSmo
 void Humanoid::ResetRenderInterpolation() {
     ClearHumanoidRenderSmoothState(this);
 }
+
+void Humanoid::AdvanceRenderInterpolationTick() {
+    HumanoidRenderSmoothState* smoothState = FindHumanoidRenderSmoothState(this);
+    if (!smoothState) {
+        return;
+    }
+
+    if (!smoothState->initialized) {
+        smoothState->prevPos = pos;
+        smoothState->curPos = pos;
+        smoothState->prevOrient = orientation;
+        smoothState->curOrient = orientation;
+        smoothState->initialized = true;
+    }
+    else {
+        smoothState->prevPos = smoothState->curPos;
+        smoothState->curPos = pos;
+        smoothState->prevOrient = smoothState->curOrient;
+        smoothState->curOrient = orientation;
+    }
+
+    HumanoidModel* hm = model ? static_cast<HumanoidModel*>(model) : nullptr;
+    AnimStructure* anim = hm ? static_cast<AnimStructure*>(hm->animStructure) : nullptr;
+    if (!anim) {
+        smoothState->animInitialized = false;
+        return;
+    }
+
+    const s32 animEnum = anim->animEnum;
+    const s32 currentFrame = anim->currentFrame;
+
+    if (!smoothState->animInitialized || smoothState->animEnum != animEnum) {
+        smoothState->animInitialized = true;
+        smoothState->animEnum = animEnum;
+        smoothState->prevAnimFrame = currentFrame;
+        smoothState->curAnimFrame = currentFrame;
+    }
+    else {
+        smoothState->prevAnimFrame = smoothState->curAnimFrame;
+        smoothState->curAnimFrame = currentFrame;
+    }
+}
 #else
 void Humanoid::ResetRenderInterpolation() {}
+void Humanoid::AdvanceRenderInterpolationTick() {}
 #endif
 
 // PSX gp+1764 (0x800DD030): gravityReduction
@@ -1278,47 +1304,16 @@ void Humanoid::Draw() {
     LVector drawPos = pos;
     LVector drawOrient = orientation;
 
-#if MODERN_GRAPHICS
-    if (ShadowCSM::IsCasterPrepass()) {
-        if (model) {
-            Model* m = static_cast<Model*>(model);
-            m->posX = drawPos.x;
-            m->posY = drawPos.y;
-            m->posZ = drawPos.z;
-            m->rotX = (u16)(drawOrient.x & 0xFFFF);
-            m->rotY = (u16)(drawOrient.y & 0xFFFF);
-            m->rotZ = (u16)(drawOrient.z & 0xFFFF);
-            m->Show(0);
-        }
-        return;
-    }
-#endif
-
 #if HIGH_FPS_PLAY_PRESENTATION
     const bool humanoidInPlay =
         (g_time && g_game && g_game->GetState() == GameState::Play);
-    const bool didLogicStep = humanoidInPlay && g_time->DidPlayLogicStepThisFrame();
     f32 presentationAlpha = humanoidInPlay ? g_time->GetPlayPresentationAlpha() : 0.0f;
     HumanoidRenderSmoothState* smoothState = nullptr;
 
     if (humanoidInPlay) {
         smoothState = FindHumanoidRenderSmoothState(this);
-        if (smoothState && !smoothState->initialized) {
-            smoothState->prevPos = pos;
-            smoothState->curPos = pos;
-            smoothState->prevOrient = orientation;
-            smoothState->curOrient = orientation;
-            smoothState->initialized = true;
-        }
 
-        if (smoothState && didLogicStep) {
-            smoothState->prevPos = smoothState->curPos;
-            smoothState->curPos = pos;
-            smoothState->prevOrient = smoothState->curOrient;
-            smoothState->curOrient = orientation;
-        }
-
-        if (smoothState) {
+        if (smoothState && smoothState->initialized) {
             if (presentationAlpha < 0.0f) {
                 presentationAlpha = 0.0f;
             }
@@ -1345,6 +1340,31 @@ void Humanoid::Draw() {
     }
     else {
         ClearHumanoidRenderSmoothState(this);
+    }
+#endif
+
+#if MODERN_GRAPHICS
+    if (ShadowCSM::IsCasterPrepass()) {
+        if (model) {
+            HumanoidModel* hm = static_cast<HumanoidModel*>(model);
+            Model* m = static_cast<Model*>(model);
+            m->posX = drawPos.x;
+            m->posY = drawPos.y;
+            m->posZ = drawPos.z;
+            m->rotX = (u16)(drawOrient.x & 0xFFFF);
+            m->rotY = (u16)(drawOrient.y & 0xFFFF);
+            m->rotZ = (u16)(drawOrient.z & 0xFFFF);
+#if HIGH_FPS_PLAY_PRESENTATION
+            if (humanoidInPlay && smoothState && hm->animMatrices) {
+                const s32 savedCapture = hm->animMatrices->CaptureEnabled();
+                hm->animMatrices->SetCaptureEnabled(0);
+                UpdateHumanoidRenderAnimPose(hm, smoothState, presentationAlpha);
+                hm->animMatrices->SetCaptureEnabled(savedCapture);
+            }
+#endif
+            m->Show(0);
+        }
+        return;
     }
 #endif
 
@@ -1375,7 +1395,7 @@ void Humanoid::Draw() {
 
     #if HIGH_FPS_PLAY_PRESENTATION
         if (humanoidInPlay) {
-            UpdateHumanoidRenderAnimPose(hm, smoothState, didLogicStep, presentationAlpha);
+            UpdateHumanoidRenderAnimPose(hm, smoothState, presentationAlpha);
         }
     #endif
         m->Show(0);

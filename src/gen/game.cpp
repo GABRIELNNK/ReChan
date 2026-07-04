@@ -366,6 +366,9 @@ static void AnimateLoop(ccList& list) {
 static void CaptureHumanoidAttackJointsLoop(ccList& list) {
     for (ccMinNode* node = list.head; node != nullptr; node = node->next) {
         Thing* thing = static_cast<Thing*>(node);
+        Humanoid* humanoid = static_cast<Humanoid*>(thing);
+        humanoid->AdvanceRenderInterpolationTick();
+
         HumanoidModel* hm = thing->model ? dynamic_cast<HumanoidModel*>(static_cast<Model*>(thing->model)) : nullptr;
         if (hm && hm->animMatrices) {
             hm->animMatrices->Swap();
