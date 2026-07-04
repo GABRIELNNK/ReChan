@@ -17,7 +17,7 @@
 </td>
 
 <td align="center" valign="middle" width="256">
-<img src="res/rechanlogo256.png" width="256">
+<img src="res/rechanlogo512.png" width="256">
 </td>
 </tr>
 </table>
@@ -46,7 +46,7 @@ Beyond reconstruction, the project also introduces improvements over the origina
 <p align="center">
   <img src="res/screenshots/title.jpg" width="30%">
   <img src="res/screenshots/hub.jpg" width="30%">
-  <img src="res/screenshots/waterfront3.jpg" width="30%">
+  <img src="res/screenshots/level.jpg" width="30%">
 </p>
 
 ## Getting Started
