@@ -287,9 +287,12 @@ public:
     void SetShadowCasterPass(bool enable, const Mat4& lightVP) override;
     void SetReceiveShadows(bool enable) override { receiveShadowsEnabled = enable; }
     void SetShadowCascades(pddiTexture* const* depthTextures, const Mat4* lightVP,
-                           const float* splits, int count) override;
+                           const float* splits, const float* texelWorldSizes, int count) override;
     void SetCameraWorldPos(float x, float y, float z) override {
         cameraWorldPos[0] = x; cameraWorldPos[1] = y; cameraWorldPos[2] = z;
+    }
+    void SetShadowLightDirection(float x, float y, float z) override {
+        shadowLightDir[0] = x; shadowLightDir[1] = y; shadowLightDir[2] = z;
     }
     void SetShadowDebugMode(int mode) override { shadowDebugMode = mode; }
 
@@ -328,10 +331,14 @@ private:
     float shadowCascadeBlendDistances[kShadowCascadeCount] = {};
     s32 shadowCascadeCount = 0;
     s32 shadowFilterQuality = 0;
-    float shadowBias[kShadowCascadeCount] = { 0.00125f, 0.00092f, 0.00070f };
-    static constexpr float shadowBiasMedium[kShadowCascadeCount] = { 0.00145f, 0.00105f, 0.00078f };
-    static constexpr float shadowBiasHigh[kShadowCascadeCount] = { 0.00115f, 0.00084f, 0.00064f };
+    float shadowBias[kShadowCascadeCount] = { 0.00080f, 0.00060f, 0.00044f };
+    static constexpr float shadowBiasLow[kShadowCascadeCount] = { 0.00120f, 0.00088f, 0.00064f };
+    static constexpr float shadowBiasMedium[kShadowCascadeCount] = { 0.00080f, 0.00060f, 0.00044f };
+    static constexpr float shadowBiasHigh[kShadowCascadeCount] = { 0.00050f, 0.00038f, 0.00028f };
+    static constexpr float shadowBiasVeryHigh[kShadowCascadeCount] = { 0.00032f, 0.00024f, 0.00018f };
     float cameraWorldPos[3] = {};
+    float shadowLightDir[3] = { 0.35f, -0.85f, 0.25f };
+    float shadowTexelWorldSize[kShadowCascadeCount] = {};
     s32 shadowDebugMode = 0;
     u32 gouraudVAO = 0;
     u32 gouraudVBO = 0;

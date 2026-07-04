@@ -72,7 +72,7 @@ static bool ShouldReceiveModelShadows(const Model* model, const Thing* owner) {
     return model
         && owner
         && !ShadowCSM::IsCasterPrepass()
-        && ShadowCSM::GetQuality() != SHADOW_QUALITY_LOW
+        && ShadowCSM::GetQuality() != SHADOW_QUALITY_OFF
         && (owner->flags & 0x80u) == 0u
         && (owner->flags & 0x100u) == 0u
         && (model->modelFlags & 0x20u) == 0u;

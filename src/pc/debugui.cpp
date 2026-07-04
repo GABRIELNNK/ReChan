@@ -2106,10 +2106,10 @@ void DebugUI::Draw() {
 #if MODERN_GRAPHICS
     if (sShowShadows) {
         if (ImGui::Begin("Shadows (CSM)", &sShowShadows)) {
-            static const char* kQualityNames[] = { "Low (blob shadow)", "Medium", "High" };
+            static const char* kQualityNames[] = { "Off (blob shadow)", "Low", "Medium", "High", "Very High" };
             s32 qualityIdx = (s32)ShadowCSM::GetQuality();
             ImGui::Text("Quality:");
-            for (s32 q = 0; q < 3; q++) {
+            for (s32 q = 0; q < 5; q++) {
                 if (ImGui::RadioButton(kQualityNames[q], qualityIdx == q)) {
                     ShadowCSM::SetQuality((ShadowQuality)q);
                 }
@@ -2120,8 +2120,8 @@ void DebugUI::Draw() {
             ImGui::Text("Filter: %s", ShadowCSM::GetFilterQualityName());
             ImGui::Text("Frame prepared: %s", ShadowCSM::IsFramePrepared() ? "yes" : "no");
             ImGui::Text("Casters submitted last frame: %d", ShadowCSM::GetCasterCount());
-            if (qualityIdx == SHADOW_QUALITY_LOW) {
-                ImGui::TextDisabled("Quality is Low: CSM is inactive, legacy blob shadow is used instead.");
+            if (qualityIdx == SHADOW_QUALITY_OFF) {
+                ImGui::TextDisabled("Quality is Off: CSM is inactive, legacy blob shadow is used instead.");
             }
             else if (ShadowCSM::GetCasterCount() == 0) {
                 ImGui::TextColored(ImVec4(1, 0.6f, 0.2f, 1),

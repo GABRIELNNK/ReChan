@@ -380,7 +380,7 @@ static const SettingDef kSettingDefs[] = {
     { "display", "vsync",          1, 0,   1, GetVsyncSetting,       SetVsyncSetting },
     { "display", "frame_rate",    30, 0, 120, GetFrameRateSetting,   SetFrameRateSetting },
     { "display", "msaa",           0, 0,  16, GetMsaaSetting,        SetMsaaSetting },
-    { "display", "shadow_quality", 0, 0,   2, GetShadowQualitySetting, SetShadowQualitySetting },
+    { "display", "shadow_quality", 0, 0,   4, GetShadowQualitySetting, SetShadowQualitySetting },
 };
 
 static constexpr u32 kSettingDefCount = (u32)(sizeof(kSettingDefs) / sizeof(kSettingDefs[0]));

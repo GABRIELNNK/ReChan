@@ -634,7 +634,7 @@ void feCustomMenuMgr::BuildPages() {
 #endif
         List("FE_MSA", EntryBinding_DisplayMsaa, 1, 0, 4),
 #if MODERN_GRAPHICS
-        List("FE_DSH", EntryBinding_DisplayShadowQuality, 1, 0, 2),
+        List("FE_DSH", EntryBinding_DisplayShadowQuality, 1, 0, 4),
 #endif
         List("FE_LNG", EntryBinding_Language, 1, 0, (s32)NumLanguages - 1),
         Button("FE_BCK", EntryEvent_Back),
@@ -5172,9 +5172,11 @@ void feCustomMenuMgr::RenderCurrentPage() {
 #if MODERN_GRAPHICS
                 else if (item.binding == EntryBinding_DisplayShadowQuality) {
                     const s32 quality = GetBoundValue(item);
-                    const char* qualityToken = "FE_NO";
-                    if (quality == (s32)SHADOW_QUALITY_MEDIUM) qualityToken = "FE_MED";
+                    const char* qualityToken = "FE_OFF";
+                    if (quality == (s32)SHADOW_QUALITY_LOW) qualityToken = "FE_LOW";
+                    else if (quality == (s32)SHADOW_QUALITY_MEDIUM) qualityToken = "FE_MED";
                     else if (quality == (s32)SHADOW_QUALITY_HIGH) qualityToken = "FE_HIG";
+                    else if (quality == (s32)SHADOW_QUALITY_VERY_HIGH) qualityToken = "FE_VHI";
                     const char* qualityText = Localize(qualityToken);
 
                     if (!qualityText) {

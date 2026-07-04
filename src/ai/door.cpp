@@ -14,6 +14,7 @@
 #include "snd/snddrct.h"
 #include "gen/model.h"
 #include "gen/database.h"
+#include "extra/shadowcsm.h"
 
 Door::Door(const LVector* pos, u16 type) : Obstacle(pos, type) {
     MARKFUNCTION(0x8001AB0C);
@@ -207,7 +208,17 @@ void Door::Draw() {
     if (model) {
         LVector drawPos = pos;
         LVector renderRot = drawRot;
+
+#if MODERN_GRAPHICS
+        // See Obstacle::Draw: skip the HIGH_FPS smoothing update during the
+        // shadow caster prepass, since this frame's main pass Draw() call
+        // still runs afterwards and would double-advance it.
+        if (!ShadowCSM::IsCasterPrepass()) {
+            ObstacleBuildRenderTransform(this, pos, drawRot, drawPos, renderRot);
+        }
+#else
         ObstacleBuildRenderTransform(this, pos, drawRot, drawPos, renderRot);
+#endif
 
         Model* m = static_cast<Model*>(model);
         m->posX = drawPos.x;

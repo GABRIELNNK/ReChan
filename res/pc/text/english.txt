@@ -430,6 +430,9 @@ Medium
 [FE_HIG]
 High
 
+[FE_VHI]
+Very High
+
 [FE_ON]
 On
 

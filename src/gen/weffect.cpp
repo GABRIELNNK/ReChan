@@ -90,7 +90,7 @@ static bool ShouldReceiveEffectGeoShadows(bool frontRenderFlags, bool usesSemiTr
     return !frontRenderFlags
         && !usesSemiTrans
         && !ShadowCSM::IsCasterPrepass()
-        && ShadowCSM::GetQuality() != SHADOW_QUALITY_LOW;
+        && ShadowCSM::GetQuality() != SHADOW_QUALITY_OFF;
 }
 
 static bool ComEffectDrawableUsesSemiTrans(const Model* model) {

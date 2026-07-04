@@ -430,6 +430,9 @@ Media
 [FE_HIG]
 Alta
 
+[FE_VHI]
+Molto alta
+
 [FE_ON]
 On
 

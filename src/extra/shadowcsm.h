@@ -11,9 +11,11 @@ struct DrawableBasic;
 class pddiPrimBuffer;
 
 enum ShadowQuality : s32 {
-    SHADOW_QUALITY_LOW = 0,    // legacy blob shadow, no shadow map
-    SHADOW_QUALITY_MEDIUM = 1, // CSM, lower resolution, single-tap
-    SHADOW_QUALITY_HIGH = 2,   // CSM, higher resolution, PCF
+    SHADOW_QUALITY_OFF = 0, // legacy blob shadow, no shadow map
+    SHADOW_QUALITY_LOW = 1,
+    SHADOW_QUALITY_MEDIUM = 2,
+    SHADOW_QUALITY_HIGH = 3,
+    SHADOW_QUALITY_VERY_HIGH = 4,
 };
 
 class ShadowCSM {

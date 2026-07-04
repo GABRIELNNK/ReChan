@@ -149,9 +149,9 @@ void ShadowShow(const LVector& center, LVector* points, s32 pointCount) {
     }
 
 #if MODERN_GRAPHICS
-    // CSM (Medium/High) replaces the blob shadow with a real shadow map cast
-    // onto world geometry; only Low quality still draws the PSX-style fan.
-    if (ShadowCSM::GetQuality() != SHADOW_QUALITY_LOW) {
+    // CSM (Low/Medium/High) replaces the blob shadow with a real shadow map
+    // cast onto world geometry; only Off still draws the PSX-style fan.
+    if (ShadowCSM::GetQuality() != SHADOW_QUALITY_OFF) {
         return;
     }
 #endif

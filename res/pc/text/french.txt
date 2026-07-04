@@ -430,6 +430,9 @@ Moyen
 [FE_HIG]
 Eleve
 
+[FE_VHI]
+Tres eleve
+
 [FE_ON]
 Active
 

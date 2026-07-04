@@ -215,10 +215,37 @@ uniform sampler2DShadow uShadowMap1;
 uniform sampler2DShadow uShadowMap2;
 uniform int uShadowFilterQuality;
 uniform float uShadowBias[3];
+uniform float uShadowTexelWorldSize[3];
+uniform vec3 uShadowLightDir;
 // Debug visualization (DebugUI Shadows panel): 0=off, 1=tint receivers by
 // selected cascade index, 2=force-darken every receiver fragment.
 uniform int uShadowDebugMode;
 int gShadowCascade = -1;
+
+vec3 ComputeFlatNormal() {
+    vec3 n = cross(dFdx(vWorldPos), dFdy(vWorldPos));
+    float lenSq = dot(n, n);
+    if (lenSq < 1e-8) {
+        return uShadowLightDir;
+    }
+    n *= inversesqrt(lenSq);
+    if (dot(n, uShadowLightDir) < 0.0) {
+        n = -n;
+    }
+    return n;
+}
+
+// Rotated Poisson disk + interleaved gradient noise
+const vec2 kPoissonDisk[8] = vec2[](
+    vec2(-0.613392, 0.617481), vec2(0.170019, -0.040254),
+    vec2(-0.299417, 0.791925), vec2(0.645680, 0.493210),
+    vec2(-0.651784, 0.717887), vec2(0.421003, 0.027070),
+    vec2(-0.817194, -0.271096), vec2(-0.705374, -0.668203)
+);
+
+float InterleavedGradientNoise(vec2 fragCoord) {
+    return fract(52.9829189 * fract(dot(fragCoord, vec2(0.06711056, 0.00583715))));
+}
 
 ivec2 ShadowTextureSize(int cascade) {
     if (cascade == 0) return textureSize(uShadowMap0, 0);
@@ -263,8 +290,6 @@ float ShadowCascadeCoverage(int cascade, vec4 lightClip) {
 float SampleShadowCascade(int cascade, vec4 lightClip) {
     vec3 ndc = lightClip.xyz / lightClip.w;
     vec2 uv = ndc.xy * 0.5 + 0.5;
-    // The GL backend uses glClipControl(..., GL_ZERO_TO_ONE), so NDC Z is
-    // already the depth texture's 0..1 range. Do not remap it as -1..1.
     float receiverDepth = ndc.z;
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || receiverDepth < 0.0 || receiverDepth > 1.0) {
         return 1.0;
@@ -272,44 +297,33 @@ float SampleShadowCascade(int cascade, vec4 lightClip) {
 
     ivec2 mapSize = ShadowTextureSize(cascade);
     vec2 texel = 1.0 / vec2(max(mapSize.x, 1), max(mapSize.y, 1));
-    vec2 depthGradient = ReceiverPlaneDepthGradient(uv, receiverDepth);
     float screenDepthSlope = abs(dFdx(receiverDepth)) + abs(dFdy(receiverDepth));
-    float gradientMagnitude = abs(depthGradient.x) + abs(depthGradient.y);
-    float kernelRadius = (uShadowFilterQuality >= 2) ? 4.0 : 2.0;
-    float receiverPlaneBias = min(gradientMagnitude * max(texel.x, texel.y) *
-                                  kernelRadius * 0.35,
-                                  0.00035);
-    float slopeBias = min(screenDepthSlope * (uShadowFilterQuality >= 2 ? 0.9 : 0.6),
-                          0.00045);
-    float bias = min(uShadowBias[cascade] + receiverPlaneBias + slopeBias, 0.0022);
+    float slopeBias = min(screenDepthSlope * 0.45, 0.00045);
+    float bias = min(uShadowBias[cascade] + slopeBias, 0.0018);
+    vec2 depthGradient = ReceiverPlaneDepthGradient(uv, receiverDepth);
+    float diskRadiusTexels = uShadowFilterQuality == 0 ? 2.6
+                            : uShadowFilterQuality == 1 ? 1.6
+                            : uShadowFilterQuality == 2 ? 1.3
+                            : 1.2;
+    float angle = InterleavedGradientNoise(gl_FragCoord.xy) * 6.2831853;
+    float s = sin(angle), c = cos(angle);
+    mat2 rot = mat2(c, -s, s, c);
 
-    if (uShadowFilterQuality <= 0) {
-        float lit = SampleShadowLit(cascade, uv, receiverDepth + bias);
-        return mix(0.45, 1.0, lit);
-    }
-
-    int radius = (uShadowFilterQuality >= 2) ? 4 : 2;
     float lit = 0.0;
-    float totalWeight = 0.0;
-    for (int y = -4; y <= 4; y++) {
-        for (int x = -4; x <= 4; x++) {
-            if (abs(x) > radius || abs(y) > radius) {
-                continue;
-            }
-            float weight = float((radius + 1 - abs(x)) * (radius + 1 - abs(y)));
-            vec2 sampleUv = uv + vec2(x, y) * texel;
-            float tapPlaneBias = abs(clamp(dot(depthGradient, sampleUv - uv),
-                                           -0.00045, 0.00045));
-            float tapBias = min(bias + tapPlaneBias * 0.5, 0.0026);
-            lit += SampleShadowLit(cascade, sampleUv, receiverDepth + tapBias) * weight;
-            totalWeight += weight;
-        }
+    for (int i = 0; i < 8; i++) {
+        vec2 offset = (rot * kPoissonDisk[i]) * diskRadiusTexels * texel;
+        float tapPlaneBias = abs(clamp(dot(depthGradient, offset), -0.00045, 0.00045));
+        float tapBias = min(bias + tapPlaneBias * 0.5, 0.0022);
+        lit += SampleShadowLit(cascade, uv + offset, receiverDepth + tapBias);
     }
-    return mix(0.45, 1.0, lit / max(totalWeight, 1.0));
+    return mix(0.45, 1.0, lit / 8.0);
 }
 
-float SampleCoveredCascade(int cascade, out float coverage) {
-    vec4 lightClip = uLightVP[cascade] * vec4(vWorldPos, 1.0);
+float SampleCoveredCascade(int cascade, vec3 shadowNormal, out float coverage) {
+    float NdotL = max(dot(shadowNormal, uShadowLightDir), 0.15);
+    float offsetScale = clamp(1.0 / NdotL, 0.45, 4.0);
+    vec3 offsetPos = vWorldPos + shadowNormal * uShadowTexelWorldSize[cascade] * offsetScale;
+    vec4 lightClip = uLightVP[cascade] * vec4(offsetPos, 1.0);
     coverage = ShadowCascadeCoverage(cascade, lightClip);
     if (coverage <= 0.0) {
         return 1.0;
@@ -328,6 +342,8 @@ float ComputeShadowFactor() {
         return 1.0;
     }
 
+    vec3 shadowNormal = ComputeFlatNormal();
+
     for (int i = 0; i < uShadowCascadeCount; i++) {
         if (vViewDepth <= uCascadeSplits[i] || i == uShadowCascadeCount - 1) {
             gShadowCascade = i;
@@ -336,7 +352,7 @@ float ComputeShadowFactor() {
             }
 
             float coverage = 0.0;
-            float shadow = SampleCoveredCascade(i, coverage);
+            float shadow = SampleCoveredCascade(i, shadowNormal, coverage);
 
             // If the depth-selected cascade does not actually cover this
             // receiver, walk outward to larger cascades. Large vertical walls
@@ -348,7 +364,7 @@ float ComputeShadowFactor() {
             float fallbackShadow = shadow;
             for (int j = i + 1; j < uShadowCascadeCount; j++) {
                 float candidateCoverage = 0.0;
-                float candidateShadow = SampleCoveredCascade(j, candidateCoverage);
+                float candidateShadow = SampleCoveredCascade(j, shadowNormal, candidateCoverage);
                 if (candidateCoverage > fallbackCoverage) {
                     fallbackCascade = j;
                     fallbackCoverage = candidateCoverage;
@@ -369,7 +385,7 @@ float ComputeShadowFactor() {
                 float blendStart = uCascadeSplits[i] - blendDistance;
                 if (blendDistance > 0.0 && vViewDepth > blendStart) {
                     float nextCoverage = 0.0;
-                    float nextShadow = SampleCoveredCascade(i + 1, nextCoverage);
+                    float nextShadow = SampleCoveredCascade(i + 1, shadowNormal, nextCoverage);
                     if (nextCoverage <= 0.0) {
                         nextShadow = shadow;
                     }
@@ -2569,24 +2585,30 @@ void glContext::SetShadowCasterPass(bool enable, const Mat4& lightVP) {
 }
 
 void glContext::SetShadowCascades(pddiTexture* const* depthTextures, const Mat4* lightVPs,
-                                  const float* splits, int count) {
+                                  const float* splits, const float* texelWorldSizes, int count) {
     shadowCascadeCount = (count < 0) ? 0 : (count > kShadowCascadeCount ? kShadowCascadeCount : count);
     shadowFilterQuality = 0;
     for (s32 i = 0; i < shadowCascadeCount; i++) {
         shadowDepthTextures[i] = depthTextures[i];
         shadowLightVP[i] = lightVPs[i];
         shadowCascadeSplits[i] = splits[i];
+        shadowTexelWorldSize[i] = texelWorldSizes ? texelWorldSizes[i] : 0.0f;
         const float previousSplit = (i > 0) ? shadowCascadeSplits[i - 1] : 0.0f;
         const float cascadeRange = std::max(shadowCascadeSplits[i] - previousSplit, 1.0f);
         shadowCascadeBlendDistances[i] = std::min(std::max(cascadeRange * 0.12f, 384.0f), 1536.0f);
-        if (depthTextures[i] && depthTextures[i]->GetWidth() >= 4096) {
+        if (depthTextures[i] && depthTextures[i]->GetWidth() >= 8192) {
+            shadowFilterQuality = 3;
+        }
+        else if (depthTextures[i] && depthTextures[i]->GetWidth() >= 4096) {
             shadowFilterQuality = 2;
         }
         else if (depthTextures[i] && depthTextures[i]->GetWidth() >= 2048) {
             shadowFilterQuality = 1;
         }
     }
-    const float* biasSet = (shadowFilterQuality >= 2) ? shadowBiasHigh : shadowBiasMedium;
+    const float* biasSet = (shadowFilterQuality >= 3) ? shadowBiasVeryHigh
+        : (shadowFilterQuality == 2) ? shadowBiasHigh
+        : (shadowFilterQuality == 1) ? shadowBiasMedium : shadowBiasLow;
     for (s32 i = 0; i < kShadowCascadeCount; i++) {
         shadowBias[i] = biasSet[i];
     }
@@ -2594,6 +2616,7 @@ void glContext::SetShadowCascades(pddiTexture* const* depthTextures, const Mat4*
         shadowDepthTextures[i] = nullptr;
         shadowCascadeSplits[i] = 0.0f;
         shadowCascadeBlendDistances[i] = 0.0f;
+        shadowTexelWorldSize[i] = 0.0f;
     }
 }
 
@@ -2724,6 +2747,8 @@ void glContext::DrawPrimBuffer(pddiPrimBuffer* buffer, u32 indexOffset, u32 inde
     glUniform1i(glGetUniformLocation(program3D, "uShadowCascadeCount"), receiveShadows ? shadowCascadeCount : 0);
     glUniform1i(glGetUniformLocation(program3D, "uShadowFilterQuality"), receiveShadows ? shadowFilterQuality : 0);
     glUniform1fv(glGetUniformLocation(program3D, "uShadowBias[0]"), kShadowCascadeCount, shadowBias);
+    glUniform3f(glGetUniformLocation(program3D, "uShadowLightDir"),
+                shadowLightDir[0], shadowLightDir[1], shadowLightDir[2]);
     if (receiveShadows) {
         glUniformMatrix4fv(glGetUniformLocation(program3D, "uLightVP[0]"), shadowCascadeCount,
                            GL_FALSE, shadowLightVP[0].Data());
@@ -2731,6 +2756,8 @@ void glContext::DrawPrimBuffer(pddiPrimBuffer* buffer, u32 indexOffset, u32 inde
                      shadowCascadeSplits);
         glUniform1fv(glGetUniformLocation(program3D, "uCascadeBlendDistances[0]"), shadowCascadeCount,
                      shadowCascadeBlendDistances);
+        glUniform1fv(glGetUniformLocation(program3D, "uShadowTexelWorldSize[0]"), kShadowCascadeCount,
+                     shadowTexelWorldSize);
         static const char* kShadowSamplerNames[kShadowCascadeCount] = {
             "uShadowMap0", "uShadowMap1", "uShadowMap2"
         };

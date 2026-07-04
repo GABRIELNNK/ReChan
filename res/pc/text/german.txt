@@ -430,6 +430,9 @@ Mittel
 [FE_HIG]
 Hoch
 
+[FE_VHI]
+Sehr hoch
+
 [FE_ON]
 Ein
 

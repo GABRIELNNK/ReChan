@@ -14,6 +14,7 @@
 #include "p3d/flip.h"
 #include "p3d/p3dmath.h"
 #include "snd/snddrct.h"
+#include "extra/shadowcsm.h"
 
 static constexpr s32 LAUNCHER_AWNING_LAUNCH_FRAME = 8;       // gp+0xc28
 static constexpr s32 LAUNCHER_JUMP_HOLD_MAX_FRAMES = 3;      // gp+0xc2c
@@ -122,7 +123,17 @@ void Launcher::Draw() {
 
     LVector drawPos = pos;
     LVector drawOrient = orientation;
+
+#if MODERN_GRAPHICS
+    // See Obstacle::Draw: skip the HIGH_FPS smoothing update during the
+    // shadow caster prepass, since this frame's main pass Draw() call
+    // still runs afterwards and would double-advance it.
+    if (!ShadowCSM::IsCasterPrepass()) {
+        ObstacleBuildRenderTransform(this, pos, orientation, drawPos, drawOrient);
+    }
+#else
     ObstacleBuildRenderTransform(this, pos, orientation, drawPos, drawOrient);
+#endif
 
     // Copy position and orientation to model
     mdl->posX = drawPos.x;

@@ -430,6 +430,9 @@ Media
 [FE_HIG]
 Alta
 
+[FE_VHI]
+Muy alta
+
 [FE_ON]
 Encendido
 

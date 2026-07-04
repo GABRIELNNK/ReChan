@@ -25,28 +25,40 @@
 #include <cfloat>
 
 constexpr s32 kCascadeCount = 3;
-constexpr s32 kActiveCascadeCount[2] = { 3, 3 }; // Medium, High
-constexpr s32 kCascadeResolution[2] = { 2048, 4096 }; // Medium, High
-constexpr f32 kShadowDistance[2] = { 28000.0f, 28000.0f }; // Medium, High
-constexpr f32 kSplitLambda[2] = { 0.65f, 0.65f };
-constexpr f32 kReceiverPaddingXY[2] = { 512.0f, 512.0f };
-constexpr f32 kCasterPaddingWorldRadius[2] = { 768.0f, 768.0f };
-constexpr f32 kCasterPaddingWorldHeight[2] = { 7000.0f, 7000.0f };
-constexpr f32 kCasterPaddingLightNear[2] = { 12000.0f, 12000.0f };
-constexpr f32 kCasterPaddingLightFar[2] = { 3000.0f, 3000.0f };
+
+// Indexed by (ShadowQuality - 1): 0 = Low, 1 = Medium, 2 = High, 3 = Very High.
+// SHADOW_QUALITY_OFF never reaches these tables (BeginFrame/SetQuality bail
+// out to the legacy blob shadow before any of this is touched).
+constexpr s32 kQualityTierCount = 4;
+constexpr s32 kActiveCascadeCount[kQualityTierCount] = { 2, 3, 3, 3 };
+constexpr s32 kCascadeResolution[kQualityTierCount] = { 1024, 2048, 4096, 8192 };
+constexpr f32 kShadowDistance[kQualityTierCount] = { 20000.0f, 28000.0f, 28000.0f, 28000.0f };
+constexpr f32 kSplitLambda[kQualityTierCount] = { 0.6f, 0.65f, 0.65f, 0.65f };
+// Receiver/caster frustum padding tightens as resolution climbs, raising
+// effective texel density for crisper cascade edges; Low keeps the most
+// generous padding since it's coarse enough that the extra slack doesn't show.
+constexpr f32 kReceiverPaddingXY[kQualityTierCount] = { 512.0f, 384.0f, 320.0f, 256.0f };
+constexpr f32 kCasterPaddingWorldRadius[kQualityTierCount] = { 768.0f, 640.0f, 576.0f, 512.0f };
+constexpr f32 kCasterPaddingWorldHeight[kQualityTierCount] = { 7000.0f, 7000.0f, 7000.0f, 7000.0f };
+constexpr f32 kCasterPaddingLightNear[kQualityTierCount] = { 12000.0f, 12000.0f, 12000.0f, 12000.0f };
+constexpr f32 kCasterPaddingLightFar[kQualityTierCount] = { 3000.0f, 3000.0f, 3000.0f, 3000.0f };
 constexpr f32 kMinLightHorizontalLenSq = 4096.0f * 4096.0f;
-constexpr f32 kCascadePaddingScale[2] = { 1.15f, 1.0f }; // Medium, High
-constexpr f32 kCascadeOverlapMin[2] = { 768.0f, 768.0f };
-constexpr f32 kCascadeOverlapMax[2] = { 2500.0f, 2500.0f };
-constexpr f32 kCascadeOverlapFraction[2] = { 0.18f, 0.18f };
-constexpr f32 kLevelDepthPadding[2] = { 4096.0f, 4096.0f };
-constexpr f32 kMinLightDepthRange[2] = { 16384.0f, 16384.0f };
+constexpr f32 kCascadePaddingScale[kQualityTierCount] = { 1.25f, 1.15f, 1.0f, 0.95f };
+constexpr f32 kCascadeOverlapMin[kQualityTierCount] = { 768.0f, 768.0f, 768.0f, 768.0f };
+constexpr f32 kCascadeOverlapMax[kQualityTierCount] = { 2500.0f, 2500.0f, 2500.0f, 2500.0f };
+constexpr f32 kCascadeOverlapFraction[kQualityTierCount] = { 0.18f, 0.18f, 0.18f, 0.18f };
+constexpr f32 kLevelDepthPadding[kQualityTierCount] = { 4096.0f, 4096.0f, 4096.0f, 4096.0f };
+constexpr f32 kMinLightDepthRange[kQualityTierCount] = { 16384.0f, 16384.0f, 16384.0f, 16384.0f };
 constexpr pddiRenderTargetFormat kCascadeDepthFormat = PDDI_RENDER_TARGET_DEPTH32F;
-constexpr f32 kShadowCasterOffsetFactor[2] = { -2.25f, -1.75f }; // Medium, High
-constexpr f32 kShadowCasterOffsetUnits[2] = { -12.0f, -8.0f };
+// Caster-side polygon offset (glPolygonOffset factor/units) pushes shadow
+// casters back in light space to suppress acne. Shrinks as resolution climbs
+// (finer texels need less push to avoid acne) to cut peter-panning; Low
+// keeps the strongest push since its coarse texels are the most acne-prone.
+constexpr f32 kShadowCasterOffsetFactor[kQualityTierCount] = { -2.75f, -1.6f, -1.2f, -1.0f };
+constexpr f32 kShadowCasterOffsetUnits[kQualityTierCount] = { -14.0f, -8.0f, -5.0f, -4.0f };
 constexpr f32 kMinShadowLightDown = 0.92f;
 
-ShadowQuality s_quality = SHADOW_QUALITY_LOW;
+ShadowQuality s_quality = SHADOW_QUALITY_OFF;
 pddiRenderTarget* s_cascadeTargets[kCascadeCount] = {};
 s32 s_cascadeTargetRes = 0;
 s32 s_activeCascadeCount = 0;
@@ -179,12 +191,10 @@ f32 ComputeCascadeOverlap(f32 startDepth, f32 endDepth, s32 qualityIndex) {
                     kCascadeOverlapMax[qualityIndex]);
 }
 
-bool ExpandLightBoundsToLevelBounds(const Mat4& lightView,
-                                    f32* minX, f32* maxX,
-                                    f32* minY, f32* maxY,
-                                    f32* minZ, f32* maxZ,
-                                    s32 qualityIndex) {
-    if (!minX || !maxX || !minY || !maxY || !minZ || !maxZ || !g_game) {
+bool ExpandLightDepthRangeToLevelBounds(const Mat4& lightView,
+                                        f32* minZ, f32* maxZ,
+                                        s32 qualityIndex) {
+    if (!minZ || !maxZ || !g_game) {
         return false;
     }
 
@@ -212,10 +222,6 @@ bool ExpandLightBoundsToLevelBounds(const Mat4& lightView,
 
     for (const Vec3& corner : corners) {
         const Vec3 lp = TransformPoint(lightView, corner);
-        *minX = std::min(*minX, lp.x - kReceiverPaddingXY[qualityIndex]);
-        *maxX = std::max(*maxX, lp.x + kReceiverPaddingXY[qualityIndex]);
-        *minY = std::min(*minY, lp.y - kReceiverPaddingXY[qualityIndex]);
-        *maxY = std::max(*maxY, lp.y + kReceiverPaddingXY[qualityIndex]);
         *minZ = std::min(*minZ, lp.z - kLevelDepthPadding[qualityIndex]);
         *maxZ = std::max(*maxZ, lp.z + kLevelDepthPadding[qualityIndex]);
     }
@@ -361,17 +367,17 @@ ShadowQuality ShadowCSM::GetQuality() {
 }
 
 void ShadowCSM::SetQuality(ShadowQuality quality) {
-    if (quality < SHADOW_QUALITY_LOW || quality > SHADOW_QUALITY_HIGH) {
-        quality = SHADOW_QUALITY_LOW;
+    if (quality < SHADOW_QUALITY_OFF || quality > SHADOW_QUALITY_VERY_HIGH) {
+        quality = SHADOW_QUALITY_OFF;
     }
 
     const ShadowQuality previousQuality = s_quality;
     s_quality = quality;
 
-    if (s_quality == SHADOW_QUALITY_LOW) {
+    if (s_quality == SHADOW_QUALITY_OFF) {
         Shutdown();
         if (p3d::context) {
-            p3d::context->SetShadowCascades(nullptr, nullptr, nullptr, 0);
+            p3d::context->SetShadowCascades(nullptr, nullptr, nullptr, nullptr, 0);
             p3d::context->SetReceiveShadows(false);
             p3d::context->SetShadowCasterPass(false, Mat4());
         }
@@ -401,9 +407,9 @@ void ShadowCSM::BeginFrame() {
     s_casterPrepass = false;
     s_casterCount = 0;
 
-    if (s_quality == SHADOW_QUALITY_LOW) {
+    if (s_quality == SHADOW_QUALITY_OFF) {
         if (p3d::context) {
-            p3d::context->SetShadowCascades(nullptr, nullptr, nullptr, 0);
+            p3d::context->SetShadowCascades(nullptr, nullptr, nullptr, nullptr, 0);
             p3d::context->SetReceiveShadows(false);
             p3d::context->SetShadowCasterPass(false, Mat4());
         }
@@ -416,7 +422,7 @@ void ShadowCSM::BeginFrame() {
         return;
     }
 
-    const s32 qualityIndex = (s_quality == SHADOW_QUALITY_HIGH) ? 1 : 0;
+    const s32 qualityIndex = (s32)s_quality - 1;
     const s32 activeCascadeCount = kActiveCascadeCount[qualityIndex];
     const s32 resolution = kCascadeResolution[qualityIndex];
     const f32 paddingScale = kCascadePaddingScale[qualityIndex];
@@ -458,6 +464,7 @@ void ShadowCSM::BeginFrame() {
     }
 
     f32 splits[kCascadeCount];
+    f32 texelWorldSizes[kCascadeCount] = {};
     f32 splitDepths[kCascadeCount + 1];
     splitDepths[0] = cameraNear;
     for (s32 i = 1; i < activeCascadeCount; i++) {
@@ -513,14 +520,13 @@ void ShadowCSM::BeginFrame() {
         maxY += casterPadY;
         minZ -= kCasterPaddingLightNear[qualityIndex] + casterPadZ;
         maxZ += kCasterPaddingLightFar[qualityIndex] + casterPadZ;
-        const bool includesLevelBounds = ExpandLightBoundsToLevelBounds(lightView,
-                                                                        &minX, &maxX,
-                                                                        &minY, &maxY,
-                                                                        &minZ, &maxZ,
-                                                                        qualityIndex);
+        const bool includesLevelBounds = ExpandLightDepthRangeToLevelBounds(lightView,
+                                                                            &minZ, &maxZ,
+                                                                            qualityIndex);
 
         FitStableSquareBounds(&minX, &maxX, &minY, &maxY);
         SnapCascadeBounds(&minX, &maxX, &minY, &maxY, resolution);
+        texelWorldSizes[i] = (maxX - minX) / (f32)std::max(resolution, 1);
 
         // The renderer uses reversed-Z with GL_ZERO_TO_ONE clip space
         // (near=1, far=0), matching the main PerspectiveReversedZ path.
@@ -544,8 +550,11 @@ void ShadowCSM::BeginFrame() {
         depthTextures[i] = s_cascadeTargets[i]->GetTexture();
     }
 
-    p3d::context->SetShadowCascades(depthTextures, s_lightVP, splits, activeCascadeCount);
+    p3d::context->SetShadowCascades(depthTextures, s_lightVP, splits, texelWorldSizes, activeCascadeCount);
     p3d::context->SetCameraWorldPos(camX, camY, camZ);
+    // uShadowLightDir wants the direction FROM a surface TOWARD the light;
+    // lightDir here is the direction the light travels (surface-ward), so negate it.
+    p3d::context->SetShadowLightDirection(-lx, -ly, -lz);
 
     s_framePrepared = true;
 }
@@ -567,11 +576,17 @@ const char* ShadowCSM::GetCascadeDepthFormatName() {
 }
 
 const char* ShadowCSM::GetFilterQualityName() {
+    if (s_quality == SHADOW_QUALITY_VERY_HIGH) {
+        return "3 cascades, rotated Poisson PCF (1.2 texel radius)";
+    }
     if (s_quality == SHADOW_QUALITY_HIGH) {
-        return "3 cascades, hardware PCF 9x9";
+        return "3 cascades, rotated Poisson PCF (1.3 texel radius)";
     }
     if (s_quality == SHADOW_QUALITY_MEDIUM) {
-        return "3 cascades, hardware PCF 5x5";
+        return "3 cascades, rotated Poisson PCF (1.6 texel radius)";
+    }
+    if (s_quality == SHADOW_QUALITY_LOW) {
+        return "2 cascades, rotated Poisson PCF (2.6 texel radius)";
     }
     return "legacy blob";
 }
@@ -581,7 +596,7 @@ void BeginShadowCasterDepthBias() {
         return;
     }
 
-    const s32 qualityIndex = (s_quality == SHADOW_QUALITY_HIGH) ? 1 : 0;
+    const s32 qualityIndex = (s_quality > SHADOW_QUALITY_OFF) ? (s32)s_quality - 1 : 0;
     p3d::context->SetPolygonOffset(true,
                                    kShadowCasterOffsetFactor[qualityIndex],
                                    kShadowCasterOffsetUnits[qualityIndex]);

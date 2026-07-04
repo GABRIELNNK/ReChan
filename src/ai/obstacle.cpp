@@ -27,6 +27,7 @@
 #include "p3d/skeleton.h"
 #include "snd/snddrct.h"
 #include "gen/time.h"
+#include "extra/shadowcsm.h"
 
 const LVector ZERO_DELTA_VELOCITY = { 0, 0, 0 };
 
@@ -278,7 +279,19 @@ void Obstacle::Draw() {
     if (model) {
         LVector drawPos = pos;
         LVector drawOrient = orientation;
+
+#if MODERN_GRAPHICS
+        // Shadow caster prepass draws every mover a second time this frame
+        // (world.cpp DrawEntityCasterList) before the main pass reaches it.
+        // Feeding that extra call through ObstacleBuildRenderTransform would
+        // advance the HIGH_FPS smoothing state twice on a logic-step frame,
+        // collapsing prevPos/curPos and snapping the interpolated draw pos.
+        if (!ShadowCSM::IsCasterPrepass()) {
+            ObstacleBuildRenderTransform(this, pos, orientation, drawPos, drawOrient);
+        }
+#else
         ObstacleBuildRenderTransform(this, pos, orientation, drawPos, drawOrient);
+#endif
 
         // PSX: selects render table based on shadowFlag and lightingFlag
         // (litTable, ZSortTable, litFarTable, ZFarTable) - not needed on PC

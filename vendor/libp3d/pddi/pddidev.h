@@ -279,10 +279,12 @@ public:
     virtual void SetShadowCasterPass(bool enable, const Mat4& lightVP) = 0;
     virtual void SetReceiveShadows(bool enable) = 0;
     virtual void SetShadowCascades(pddiTexture* const* depthTextures, const Mat4* lightVP,
-                                   const float* splits, int count) = 0;
+                                   const float* splits, const float* texelWorldSizes,
+                                   int count) = 0;
     // World-space camera position, used by the main pass to measure distance
     // for cascade selection (avoids relying on reversed-Z gl_FragCoord.z).
     virtual void SetCameraWorldPos(float x, float y, float z) = 0;
+    virtual void SetShadowLightDirection(float x, float y, float z) = 0;
     // Debug visualization for the DebugUI Shadows panel: 0=off,
     // 1=tint receivers by selected cascade index, 2=force-darken receivers.
     virtual void SetShadowDebugMode(int mode) = 0;
