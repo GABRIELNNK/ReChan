@@ -82,6 +82,7 @@ STreeData* CloneSTreeData(const STreeData* source) {
             clone->joints[i].postCallback = nullptr;
             clone->joints[i].flags &= ~(STF_PRE_CALLBACK_MASK | STF_POST_CALLBACK_MASK);
             clone->joints[i].useOverrideMatrix = false;
+            clone->joints[i].renderScale = 1.0f;
             clone->joints[i].meshBuffer = nullptr;
         }
     }
@@ -156,6 +157,7 @@ static void ComputeWorldMatricesInternal(STreeData* skeleton, Mat4* outMatrices,
         s16 savedRotationZ = 0;
         bool savedUseOverrideMatrix = false;
         Mat4 savedOverrideMatrix;
+        f32 savedRenderScale = 1.0f;
 
         if (preserveJointState) {
             savedFlags = j.flags;
@@ -167,6 +169,7 @@ static void ComputeWorldMatricesInternal(STreeData* skeleton, Mat4* outMatrices,
             savedRotationZ = j.rotationZ;
             savedUseOverrideMatrix = j.useOverrideMatrix;
             savedOverrideMatrix = j.overrideMatrix;
+            savedRenderScale = j.renderScale;
         }
 
         if (j.flags & STF_PUSH_MATRIX) {
@@ -188,6 +191,10 @@ static void ComputeWorldMatricesInternal(STreeData* skeleton, Mat4* outMatrices,
             p3dBuildRotMatrixYZX(j.rotationX, j.rotationY, j.rotationZ, local);
             local.SetTranslation((f32)j.translationX, (f32)j.translationY, (f32)j.translationZ);
             current = current * local;
+        }
+
+        if (j.renderScale != 1.0f) {
+            current.ScaleRotation(j.renderScale);
         }
 
         if (invokeCallbacks && (j.flags & STF_POST_CALLBACK_MASK) && j.postCallback) {
@@ -232,6 +239,7 @@ static void ComputeWorldMatricesInternal(STreeData* skeleton, Mat4* outMatrices,
             j.rotationZ = savedRotationZ;
             j.useOverrideMatrix = savedUseOverrideMatrix;
             j.overrideMatrix = savedOverrideMatrix;
+            j.renderScale = savedRenderScale;
         }
     }
 }
@@ -308,6 +316,7 @@ static bool ParseJointChunk(const u8* data, u32 dataSize, STreeJoint* out) {
     out->preCallback = nullptr;
     out->postCallback = nullptr;
     out->useOverrideMatrix = false;
+    out->renderScale = 1.0f;
     out->meshBuffer = nullptr;
 
     // Optional 0x6125 rest-pose sub-chunk (single optional child in STLOAD AddJoint).

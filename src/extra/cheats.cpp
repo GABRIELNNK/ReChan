@@ -7,6 +7,8 @@
 #include "gen/game.h"
 #include "gen/scoremgr.h"
 #include "gen/world.h"
+#include "p3d/context.h"
+#include "pddi/pddidev.h"
 #include <cstring>
 
 static bool s_allDragons = false;
@@ -14,6 +16,9 @@ static bool s_allLevels = false;
 static bool s_godMode = false;
 static bool s_onePunchMan = false;
 static bool s_heavenBound = false;
+static bool s_bobbleHead = false;
+static bool s_stuntquake = false;
+static bool s_mirrorWorld = false;
 static PetalStats s_dragonSnapshot[21] = {};
 static PetalStats s_levelSnapshot[21] = {};
 static u8 s_currentGoldSnapshot = 0;
@@ -27,6 +32,9 @@ static bool* GetCheatFlag(CheatOption option) {
         case CheatOption::GodMode: return &s_godMode;
         case CheatOption::OnePunchMan: return &s_onePunchMan;
         case CheatOption::HeavenBound: return &s_heavenBound;
+        case CheatOption::BobbleHead: return &s_bobbleHead;
+        case CheatOption::Stuntquake: return &s_stuntquake;
+        case CheatOption::MirrorWorld: return &s_mirrorWorld;
     }
     return nullptr;
 }
@@ -82,6 +90,11 @@ void SetCheatEnabled(CheatOption option, bool enabled) {
     }
 
     *flag = enabled;
+
+    if (option == CheatOption::MirrorWorld && p3d::context) {
+        p3d::context->SetWorldMirror(enabled);
+    }
+
     if (!enabled) return;
 
     if (g_scoreManager && option == CheatOption::AllDragons) {
@@ -108,6 +121,9 @@ void ResetCheats() {
     SetCheatEnabled(CheatOption::GodMode, false);
     SetCheatEnabled(CheatOption::OnePunchMan, false);
     SetCheatEnabled(CheatOption::HeavenBound, false);
+    SetCheatEnabled(CheatOption::BobbleHead, false);
+    SetCheatEnabled(CheatOption::Stuntquake, false);
+    SetCheatEnabled(CheatOption::MirrorWorld, false);
 }
 
 #endif

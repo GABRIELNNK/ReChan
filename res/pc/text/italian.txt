@@ -613,6 +613,15 @@ One Punch Man:
 [FE_CH_HVN]
 Verso il paradiso:
 
+[FE_CH_BOBL]
+Testa Ballerina:
+
+[FE_CH_QUAKE]
+Terremoto Acrobatico:
+
+[FE_CH_MIRR]
+Mondo Specchio:
+
 #
 # PSX overrides
 #

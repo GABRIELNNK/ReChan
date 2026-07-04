@@ -9,6 +9,9 @@ enum class CheatOption {
     GodMode,
     OnePunchMan,
     HeavenBound,
+    BobbleHead,
+    Stuntquake,
+    MirrorWorld,
 };
 
 bool IsCheatEnabled(CheatOption option);

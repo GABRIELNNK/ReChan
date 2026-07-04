@@ -613,6 +613,15 @@ One Punch Man:
 [FE_CH_HVN]
 Rumbo al cielo:
 
+[FE_CH_BOBL]
+Cabezon:
+
+[FE_CH_QUAKE]
+Terremoto Acrobatico:
+
+[FE_CH_MIRR]
+Mundo Espejo:
+
 #
 # PSX overrides
 #

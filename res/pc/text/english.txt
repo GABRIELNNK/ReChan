@@ -613,6 +613,15 @@ One Punch Man:
 [FE_CH_HVN]
 Heaven Bound:
 
+[FE_CH_BOBL]
+Bobble Head:
+
+[FE_CH_QUAKE]
+Stuntquake:
+
+[FE_CH_MIRR]
+Mirror World:
+
 #
 # PSX overrides
 #

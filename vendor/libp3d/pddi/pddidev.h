@@ -193,6 +193,9 @@ public:
     virtual const Mat4& GetViewMatrix() const = 0;
     virtual const Mat4& GetProjectionMatrix() const = 0;
 
+    virtual void SetWorldMirror(bool enable) = 0;
+    virtual bool GetWorldMirror() const = 0;
+
     // State
     virtual void SetCullMode(pddiCullMode mode) = 0;
     virtual void EnableZBuffer(bool enable) = 0;

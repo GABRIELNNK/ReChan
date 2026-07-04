@@ -17,9 +17,13 @@
 #include "pc/log.h"
 #include "gen/ai.h"
 #include "gen/blockmgr.h"
+#include "gen/camera.h"
+#include "gen/display.h"
+#include "gen/geffect.h"
 #include "gen/scoremgr.h"
 #include "gen/game.h"
 #include "gen/world.h"
+#include "snd/snddrct.h"
 #if NEW_CHEATS
 #include "extra/cheats.h"
 #endif
@@ -1187,6 +1191,43 @@ void Player::FallingPhysics() {
     }
 }
 
+#if NEW_CHEATS
+static constexpr u32 STUNTQUAKE_EFFECT_HASH = 0x0B0E21C4u;   // same visual as HUMANOID_LAND_IMPACT_EFFECT_HASH
+static constexpr s32 STUNTQUAKE_RADIUS = 2500;
+static constexpr s32 STUNTQUAKE_SHAKE_FRAMES = 0x0F;
+
+static void TriggerStuntquake(Player* player) {
+    if (!player) {
+        return;
+    }
+
+    Camera* camera = g_display ? g_display->GetCamera() : nullptr;
+    if (camera) {
+        camera->ShakeCamera(STUNTQUAKE_SHAKE_FRAMES);
+    }
+
+    GEffect_Create(STUNTQUAKE_EFFECT_HASH, &player->pos, nullptr, nullptr, 0, 0x19, 0);
+    CSoundDirect::PlayTransient(0x28, &player->pos, 0, 0);
+    CSoundDirect::PlayTransient(0x16, &player->pos, 0, 0);
+
+    for (ccMinNode* node = g_ai ? g_ai->humanoidList.head : nullptr; node; node = node->next) {
+        Humanoid* h = static_cast<Humanoid*>(node);
+        if (!h || h == static_cast<Humanoid*>(player) || !h->health) {
+            continue;
+        }
+        // Skip humanoids already in a collapse/stun reaction (AS_COLLAPSE_STUN..+3),
+        // same range FindFoe excludes, so we don't interrupt an existing reaction.
+        if ((u32)(h->actionState - (s32)AS_COLLAPSE_STUN) < 4u) {
+            continue;
+        }
+        if (h->DistanceFromPoint(player->pos) > STUNTQUAKE_RADIUS) {
+            continue;
+        }
+        h->SetActionState(AS_COLLAPSE_STUN, 0);
+    }
+}
+#endif
+
 // PSX: CheckForLanding__6Player (PLAYER.CPP:4366, 0x80033C00)
 // PSX: checks TF_ON_GROUND (set by collision system via Land() in HandleThingFloor)
 void Player::CheckForLanding() {
@@ -1194,6 +1235,12 @@ void Player::CheckForLanding() {
     if (!(flags & TF_ON_GROUND)) {
         return;
     }
+
+#if NEW_CHEATS
+    if (IsCheatEnabled(CheatOption::Stuntquake)) {
+        TriggerStuntquake(this);
+    }
+#endif
 
     Model* m = model ? static_cast<Model*>(model) : nullptr;
     AnimStructure* anim = (m != nullptr) ? static_cast<AnimStructure*>(m->animStructure) : nullptr;

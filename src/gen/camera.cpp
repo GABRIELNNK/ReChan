@@ -10,6 +10,7 @@
 #include "p3d/keycode.h"
 #include "p3d/input.h"
 #include "p3d/context.h"
+#include "pddi/pddidev.h"
 #include "pc/debugui.h"
 #include "gen/game.h"
 #include "gen/world.h"
@@ -86,8 +87,12 @@ bool Camera::WorldToScreen(const LVector& worldPos, f32* outScreenX, f32* outScr
         return false;
     }
 
-    const f32 screenX = static_cast<f32>(PsxProjectScreenCoord(port.centerX, vx, port.projectionDistanceX, vz));
+    f32 screenX = static_cast<f32>(PsxProjectScreenCoord(port.centerX, vx, port.projectionDistanceX, vz));
     const f32 screenY = static_cast<f32>(PsxProjectScreenCoord(port.centerY, vy, port.projectionDistanceY, vz));
+
+    if (p3d::context && p3d::context->GetWorldMirror()) {
+        screenX = static_cast<f32>(port.width) - screenX;
+    }
 
     *outScreenX = screenX;
     *outScreenY = screenY;

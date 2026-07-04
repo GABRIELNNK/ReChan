@@ -613,6 +613,15 @@ One Punch Man:
 [FE_CH_HVN]
 Vers le paradis :
 
+[FE_CH_BOBL]
+Tete Branlante :
+
+[FE_CH_QUAKE]
+Seisme Cascadeur :
+
+[FE_CH_MIRR]
+Monde Miroir :
+
 #
 # PSX overrides
 #

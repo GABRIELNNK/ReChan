@@ -311,6 +311,7 @@ static STreeData* BuildSkeleton(const cgltf_data* data) {
         joint.restPoseRotX = joint.rotationX;
         joint.restPoseRotY = joint.rotationY;
         joint.restPoseRotZ = joint.rotationZ;
+        joint.renderScale = 1.0f;
         skeleton->jointOrderMap[i] = i;
     }
 

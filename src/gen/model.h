@@ -481,6 +481,20 @@ public:
     u32 nisJointTranslationYTick = 0xFFFFFFFFu;
 #endif
 
+#if NEW_CHEATS
+    f32 bobblePhase = 0.0f;      // running oscillator phase
+    f32 bobbleAmp = 0.0f;        // smoothed amplitude from continuous speed
+    f32 bobbleKick = 0.0f;       // decaying amplitude injected by acceleration
+    f32 bobbleAngleX = 0.0f;     // applied head pitch (binary angle)
+    f32 bobbleAngleZ = 0.0f;     // applied head roll (binary angle)
+    s32 bobblePrevX = 0;         // previous position for movement delta
+    s32 bobblePrevZ = 0;
+    s32 bobblePrevDX = 0;        // previous delta for acceleration
+    s32 bobblePrevDZ = 0;
+    bool bobblePrevValid = false;
+    u32 bobbleTick = 0xFFFFFFFFu;
+#endif
+
     HumanoidModel();
     ~HumanoidModel() override;
 

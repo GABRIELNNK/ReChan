@@ -2591,6 +2591,7 @@ static void LoadGeoPair(
                                     joint.bindTranslationY = entry.transY;
                                     joint.bindTranslationZ = entry.transZ;
                                     joint.captureBufferIdx = -1;
+                                    joint.renderScale = 1.0f;
                                 }
 
                                 LOG("[World] ETree '%s' part[%u] jointHash=0x%08X modelHash=0x%08X resolved=%d",

@@ -4,6 +4,7 @@
 #include "gen/psxmath_helpers.h"
 #include "gen/time.h"
 #include "ai/humanoid.h"
+#include "extra/cheats.h"
 #include "p3d/context.h"
 #include "p3d/skeleton.h"
 #include "p3d/matrix.h"
@@ -370,12 +371,106 @@ static void HeadTrack(Humanoid* owner, STreeJoint* joint, const Mat4& currentMat
     joint->useOverrideMatrix = true;
 }
 
+#if NEW_CHEATS
+static void BobbleHeadUpdate(Humanoid* owner, STreeJoint* joint) {
+    if (!owner || !joint) {
+        return;
+    }
+    HumanoidModel* model = owner->model ? static_cast<HumanoidModel*>(owner->model) : nullptr;
+    if (!model) {
+        return;
+    }
+
+    const u32 currentTick = g_time ? g_time->GetFrameCounter() : 0;
+    if (model->bobbleTick != currentTick) {
+        model->bobbleTick = currentTick;
+
+        const s32 px = owner->pos.x;
+        const s32 pz = owner->pos.z;
+
+        if (!model->bobblePrevValid) {
+            model->bobblePrevValid = true;
+            model->bobblePrevX = px;
+            model->bobblePrevZ = pz;
+        }
+
+        s32 dx = px - model->bobblePrevX;
+        s32 dz = pz - model->bobblePrevZ;
+        model->bobblePrevX = px;
+        model->bobblePrevZ = pz;
+
+        // Ignore teleports / respawns so the head doesn't launch on a warp.
+        constexpr s32 kTeleportThreshold = 4000;
+        if (dx > kTeleportThreshold || dx < -kTeleportThreshold
+            || dz > kTeleportThreshold || dz < -kTeleportThreshold) {
+            dx = 0;
+            dz = 0;
+            model->bobbleKick = 0.0f;
+        }
+
+        const f32 fdx = (f32)dx;
+        const f32 fdz = (f32)dz;
+        const f32 speed = std::sqrt(fdx * fdx + fdz * fdz);
+
+        const f32 adx = (f32)(dx - model->bobblePrevDX);
+        const f32 adz = (f32)(dz - model->bobblePrevDZ);
+        const f32 accel = std::sqrt(adx * adx + adz * adz);
+        model->bobblePrevDX = dx;
+        model->bobblePrevDZ = dz;
+
+        // Tunable feel. Amplitudes are in binary-angle units (0x10000 = 360 deg,
+        // ~182 per degree). World movement is in the thousands per running frame.
+        constexpr f32 kSpeedToAmp = 11.0f;   // continuous jiggle vs. speed
+        constexpr f32 kMaxContAmp = 1400.0f; // ~7.7 deg steady wobble
+        constexpr f32 kAccelToKick = 8.0f;   // extra wobble on accel spikes
+        constexpr f32 kKickDecay = 0.85f;
+        constexpr f32 kMaxKick = 3400.0f;
+        constexpr f32 kMaxTotal = 4600.0f;   // ~25 deg hard cap
+        constexpr f32 kPhaseStep = 1.0f;
+        constexpr f32 kTwoPi = 6.2831853f;
+
+        f32 targetAmp = speed * kSpeedToAmp;
+        if (targetAmp > kMaxContAmp) {
+            targetAmp = kMaxContAmp;
+        }
+        model->bobbleAmp += (targetAmp - model->bobbleAmp) * 0.2f;
+
+        model->bobbleKick = model->bobbleKick * kKickDecay + accel * kAccelToKick;
+        if (model->bobbleKick > kMaxKick) {
+            model->bobbleKick = kMaxKick;
+        }
+
+        model->bobblePhase += kPhaseStep;
+        if (model->bobblePhase > kTwoPi) {
+            model->bobblePhase -= kTwoPi;
+        }
+
+        f32 total = model->bobbleAmp + model->bobbleKick;
+        if (total > kMaxTotal) {
+            total = kMaxTotal;
+        }
+
+        model->bobbleAngleX = std::sin(model->bobblePhase) * total;
+        model->bobbleAngleZ = std::sin(model->bobblePhase * 0.8f + 1.7f) * total * 0.7f;
+    }
+
+    joint->rotationX = (s16)(joint->rotationX + (s16)model->bobbleAngleX);
+    joint->rotationZ = (s16)(joint->rotationZ + (s16)model->bobbleAngleZ);
+    joint->renderScale = 2.2f;
+}
+#endif
+
 static s32 AM_HeadCallback(STreeJoint* joint, u32 /*jointIndex*/, const Mat4& currentMatrix) {
     AnimationMatrices* animMatrices = static_cast<AnimationMatrices*>(joint ? joint->callbackData : nullptr);
     if (animMatrices) {
         animMatrices->CopyMatrix(0, currentMatrix);
         Humanoid* owner = static_cast<Humanoid*>(animMatrices->GetHumanoid());
         HeadTrack(owner, joint, currentMatrix);
+#if NEW_CHEATS
+        if (IsCheatEnabled(CheatOption::BobbleHead)) {
+            BobbleHeadUpdate(owner, joint);
+        }
+#endif
     }
     return 1;
 }

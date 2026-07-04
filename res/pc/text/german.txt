@@ -613,6 +613,15 @@ One Punch Man:
 [FE_CH_HVN]
 Himmelfahrt:
 
+[FE_CH_BOBL]
+Wackelkopf:
+
+[FE_CH_QUAKE]
+Stuntbeben:
+
+[FE_CH_MIRR]
+Spiegelwelt:
+
 #
 # PSX overrides
 #

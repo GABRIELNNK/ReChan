@@ -1937,6 +1937,13 @@ void glContext::SetProjectionMatrix(const Mat4& m) { projection = m; }
 void glContext::SetViewMatrix(const Mat4& m) { viewMatrix = m; }
 void glContext::SetWorldMatrix(const Mat4& m) { worldMatrix = m; }
 
+void glContext::SetWorldMirror(bool enable) {
+    if (worldMirror == enable)
+        return;
+    worldMirror = enable;
+    stateDirty = true;
+}
+
 void glContext::SetCullMode(pddiCullMode mode) {
     if (!stateDirty && mode == cachedCullMode)
         return;
@@ -1946,7 +1953,17 @@ void glContext::SetCullMode(pddiCullMode mode) {
     // PSX uses CW winding (left-handed). X-flip in projection preserves CW.
     glFrontFace(GL_CW);
 
-    switch (mode) {
+    pddiCullMode effectiveMode = mode;
+    if (worldMirror) {
+        if (mode == PDDI_CULL_NORMAL) {
+            effectiveMode = PDDI_CULL_INVERTED;
+        }
+        else if (mode == PDDI_CULL_INVERTED) {
+            effectiveMode = PDDI_CULL_NORMAL;
+        }
+    }
+
+    switch (effectiveMode) {
         case PDDI_CULL_NONE:
             glDisable(GL_CULL_FACE);
             break;

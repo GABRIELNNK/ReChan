@@ -239,6 +239,9 @@ public:
     const Mat4& GetViewMatrix() const override { return viewMatrix; }
     const Mat4& GetProjectionMatrix() const override { return projection; }
 
+    void SetWorldMirror(bool enable) override;
+    bool GetWorldMirror() const override { return worldMirror; }
+
     void SetCullMode(pddiCullMode mode) override;
     void EnableZBuffer(bool enable) override;
     void SetBlendMode(pddiBlendMode mode) override;
@@ -363,6 +366,9 @@ private:
     s32 savedViewport[4] = {};
     s32 savedScissor[4] = {};
     bool savedScissorEnabled = false;
+
+    // PC-only cheat hook: see pddiRenderContext::SetWorldMirror.
+    bool worldMirror = false;
 
     // Renderstate cache
     pddiCullMode cachedCullMode = PDDI_CULL_NONE;

@@ -657,6 +657,9 @@ void feCustomMenuMgr::BuildPages() {
         Toggle("FE_CH_GOD", EntryBinding_CheatGodMode),
         Toggle("FE_CH_PNCH", EntryBinding_CheatOnePunchMan),
         Toggle("FE_CH_HVN", EntryBinding_CheatHeavenBound),
+        Toggle("FE_CH_BOBL", EntryBinding_CheatBobbleHead),
+        Toggle("FE_CH_QUAKE", EntryBinding_CheatStuntquake),
+        Toggle("FE_CH_MIRR", EntryBinding_CheatMirrorWorld),
         Button("FE_BCK", EntryEvent_Back),
                });
 #endif
@@ -2850,6 +2853,9 @@ s32 feCustomMenuMgr::GetBoundValue(const Entry& e) const {
         case EntryBinding_CheatGodMode: return IsCheatEnabled(CheatOption::GodMode) ? 1 : 0;
         case EntryBinding_CheatOnePunchMan: return IsCheatEnabled(CheatOption::OnePunchMan) ? 1 : 0;
         case EntryBinding_CheatHeavenBound: return IsCheatEnabled(CheatOption::HeavenBound) ? 1 : 0;
+        case EntryBinding_CheatBobbleHead: return IsCheatEnabled(CheatOption::BobbleHead) ? 1 : 0;
+        case EntryBinding_CheatStuntquake: return IsCheatEnabled(CheatOption::Stuntquake) ? 1 : 0;
+        case EntryBinding_CheatMirrorWorld: return IsCheatEnabled(CheatOption::MirrorWorld) ? 1 : 0;
 #endif
         default: return 0;
     }
@@ -2957,11 +2963,20 @@ void feCustomMenuMgr::ApplyValue(const Entry& e, s32 v) {
     else if (e.binding == EntryBinding_CheatHeavenBound) {
         SetCheatEnabled(CheatOption::HeavenBound, v != 0);
     }
+    else if (e.binding == EntryBinding_CheatBobbleHead) {
+        SetCheatEnabled(CheatOption::BobbleHead, v != 0);
+    }
+    else if (e.binding == EntryBinding_CheatStuntquake) {
+        SetCheatEnabled(CheatOption::Stuntquake, v != 0);
+    }
+    else if (e.binding == EntryBinding_CheatMirrorWorld) {
+        SetCheatEnabled(CheatOption::MirrorWorld, v != 0);
+    }
 #endif
 
 #if NEW_CHEATS
     if (e.binding >= EntryBinding_CheatAllDragons
-        && e.binding <= EntryBinding_CheatHeavenBound) {
+        && e.binding <= EntryBinding_CheatMirrorWorld) {
         return;
     }
 #endif

@@ -45,7 +45,11 @@ void tCamera::GetClipPlanes(u16* outNear, u16* outFar) const {
 // view.BeginRender() is called (e.g. in Display::BeginFrame).
 void tCamera::SetState() {
     if (hasProjection) {
-        p3d::context->SetProjectionMatrix(projection);
+        Mat4 proj = projection;
+        if (p3d::context->GetWorldMirror()) {
+            proj.m[0] = -proj.m[0];
+        }
+        p3d::context->SetProjectionMatrix(proj);
     }
 }
 

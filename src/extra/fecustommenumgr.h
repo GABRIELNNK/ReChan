@@ -98,6 +98,9 @@ enum EntryBinding : u8 {
     EntryBinding_CheatGodMode,
     EntryBinding_CheatOnePunchMan,
     EntryBinding_CheatHeavenBound,
+    EntryBinding_CheatBobbleHead,
+    EntryBinding_CheatStuntquake,
+    EntryBinding_CheatMirrorWorld,
 #endif
 };
 

@@ -56,6 +56,9 @@ struct STreeJoint {
     Mat4 overrideMatrix;
     bool useOverrideMatrix = false;
 
+    // PC-only: uniform scale applied to this joint's output world matrix only
+    f32 renderScale = 1.0f;
+
     // PC-only: per-joint pddiPrimBuffer
     pddiPrimBuffer* meshBuffer = nullptr;
 };

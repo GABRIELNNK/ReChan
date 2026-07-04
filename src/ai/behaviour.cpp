@@ -18,6 +18,7 @@
 #include "gen/weffect.h"
 #include "gen/psxmath_helpers.h"
 #include "pc/debugui.h"
+#include "extra/cheats.h"
 #include "p3d/p3dmath.h"
 #include "pc/log.h"
 
@@ -2313,7 +2314,13 @@ void Behaviour::PlayerUserControl(Behaviour* self) {
         Camera& cam = g_game->GetCamera();
         s32 cameraAngle = cam.GetOrientY();
 
-        targetAngle = cameraAngle - rmATan216((f32)analogX, (f32)(-(s16)analogY)) + ANGLE_QUARTER_TURN;
+        s32 mirroredAnalogX = analogX;
+#if NEW_CHEATS
+        if (IsCheatEnabled(CheatOption::MirrorWorld)) {
+            mirroredAnalogX = -analogX;
+        }
+#endif
+        targetAngle = cameraAngle - rmATan216((f32)mirroredAnalogX, (f32)(-(s16)analogY)) + ANGLE_QUARTER_TURN;
 
         s32 angleDiff = ownerAngle - targetAngle;
         if (angleDiff > ANGLE_FULL_ROTATION) {
