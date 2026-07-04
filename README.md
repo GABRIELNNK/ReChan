@@ -44,9 +44,9 @@ Beyond reconstruction, the project also introduces improvements over the origina
 
 ## Screenshots
 <p align="center">
-  <img src="res/screenshots/title.jpg" width="30%">
-  <img src="res/screenshots/hub.jpg" width="30%">
-  <img src="res/screenshots/level.jpg" width="30%">
+  <img src="res/screenshots/title.png" width="30%">
+  <img src="res/screenshots/hub.png" width="30%">
+  <img src="res/screenshots/level.png" width="30%">
 </p>
 
 ## Getting Started
