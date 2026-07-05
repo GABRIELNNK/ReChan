@@ -2006,9 +2006,11 @@ bool Game::gsQueuePetalLoad(Game* game) {
 #endif
 
     // PSX: ShowLoadingScreenText(gameMenu, currentLevelIndex, targetPetalIndex)
+#if !CUSTOM_MENU
     if (g_gameMenu) {
         g_gameMenu->ShowLoadingScreenText(world->GetCurrentLevelIndex(), world->GetTargetPetalIndex());
     }
+#endif
 
 #if CUSTOM_MENU
     g_deferLevelBeginMusic = true;
