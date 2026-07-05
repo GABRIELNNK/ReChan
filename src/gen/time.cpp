@@ -44,6 +44,13 @@ s32 Time::BeginPlayFixedStep() {
     static constexpr s32 kMaxLogicStepsPerFrame = 4;
     static constexpr f32 kMaxAccumulatedTime = kPlayLogicDt * (f32)kMaxLogicStepsPerFrame;
 
+    if (targetFPS == 30) {
+        playLogicAccumulator = 0.0f;
+        playPresentationAlpha = 1.0f;
+        playLogicStepCount = 1;
+        return playLogicStepCount;
+    }
+
     playLogicAccumulator += deltaTime;
     if (playLogicAccumulator > kMaxAccumulatedTime) {
         playLogicAccumulator = kMaxAccumulatedTime;

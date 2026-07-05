@@ -282,12 +282,16 @@ static void UpdateHumanoidRenderAnimPose(HumanoidModel* model, HumanoidRenderSmo
             return;
         }
 
-        const s32 prevFrameReal = (prevPart == curPart)
-            ? (prevLocalFrame << 16 | (smoothState->prevAnimFrame & 0xFFFF))
-            : 0;
         const s32 curFrameReal = curLocalFrame << 16 | (smoothState->curAnimFrame & 0xFFFF);
 
-        s32 frameReal = prevFrameReal + (s32)((f32)(curFrameReal - prevFrameReal) * alpha);
+        s32 frameReal;
+        if (prevPart == curPart) {
+            const s32 prevFrameReal = prevLocalFrame << 16 | (smoothState->prevAnimFrame & 0xFFFF);
+            frameReal = prevFrameReal + (s32)((f32)(curFrameReal - prevFrameReal) * alpha);
+        }
+        else {
+            frameReal = curFrameReal;
+        }
 
         const s32 maxFrameReal = (part->numFrames > 0) ? ((part->numFrames - 1) << 16) : 0;
         if (frameReal < 0) {
