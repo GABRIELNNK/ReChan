@@ -3377,18 +3377,50 @@ void Director::DrawWideScreenPolys() {
         return;
     }
 
-    const f32 barFrac = static_cast<f32>(wsBarCurrent) / 240.0f;
-    f32 drawFrac = barFrac;
     u8 alpha = static_cast<u8>((wsAlphaCurrent < 255) ? wsAlphaCurrent : 255);
 
+    // deploy = how far the bars have slid in, 0..1. In fade mode the bars are
+    // full size and the alpha does the animation; in slide mode the bars grow
+    // in from the edges and alpha stays solid.
+    f32 deploy = 1.0f;
 #if DIRECTOR_WIDESCREEN_SLIDE_BARS
     const f32 alphaTarget = (wsAlphaTarget > 0) ? static_cast<f32>(wsAlphaTarget) : 255.0f;
-    const f32 slideProgress = Clamp(static_cast<f32>(wsAlphaCurrent) / alphaTarget, 0.0f, 1.0f);
-    drawFrac *= slideProgress;
+    deploy = Clamp(static_cast<f32>(wsAlphaCurrent) / alphaTarget, 0.0f, 1.0f);
     alpha = 255;
 #endif
 
-    const f32 barHeight = drawFrac * SCREEN_HEIGHT;
+#if DIRECTOR_SMART_CUTSCENE_BORDERS
+    constexpr f32 kAspectEpsilon = 0.01f;
+    const f32 screenAspect = SCREEN_WIDTH / SCREEN_HEIGHT;
+
+    if (screenAspect > TARGET_ASPECT_RATIO + kAspectEpsilon) {
+        const f32 barWidth = (SCREEN_WIDTH - SCREEN_HEIGHT * TARGET_ASPECT_RATIO) * 0.5f * deploy;
+        if (barWidth <= 0.0f) {
+            return;
+        }
+        ScreenDraw::DrawColoredRect(0.0f, 0.0f, barWidth, SCREEN_HEIGHT,
+                                    0, 0, 0, alpha);
+        ScreenDraw::DrawColoredRect(SCREEN_WIDTH - barWidth, 0.0f, barWidth, SCREEN_HEIGHT,
+                                    0, 0, 0, alpha);
+        return;
+    }
+
+    if (screenAspect < TARGET_ASPECT_RATIO - kAspectEpsilon) {
+        const f32 barHeight = (SCREEN_HEIGHT - SCREEN_WIDTH / TARGET_ASPECT_RATIO) * 0.5f * deploy;
+        if (barHeight <= 0.0f) {
+            return;
+        }
+        ScreenDraw::DrawColoredRect(0.0f, 0.0f, SCREEN_WIDTH, barHeight,
+                                    0, 0, 0, alpha);
+        ScreenDraw::DrawColoredRect(0.0f, SCREEN_HEIGHT - barHeight, SCREEN_WIDTH, barHeight,
+                                    0, 0, 0, alpha);
+        return;
+    }
+
+    // Exactly 16:9: the Vert- FOV already frames the shot, no bars needed.
+    return;
+#else
+    const f32 barHeight = (static_cast<f32>(wsBarCurrent) / 240.0f) * deploy * SCREEN_HEIGHT;
     if (barHeight <= 0.0f) {
         return;
     }
@@ -3399,6 +3431,7 @@ void Director::DrawWideScreenPolys() {
     // Bottom bar
     ScreenDraw::DrawColoredRect(0.0f, SCREEN_HEIGHT - barHeight, SCREEN_WIDTH, barHeight,
                                 0, 0, 0, alpha);
+#endif
 }
 
 // PSX: PurgeAnims__8Director (DIRECTOR.CPP:4662, 0x8003F0E4)

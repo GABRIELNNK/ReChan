@@ -286,7 +286,25 @@ void Display::BeginFrame() {
         if (tanHalfY < 0.0001f) {
             tanHalfY = std::tan(0.35f);
         }
-        const f32 tanHalfX = tanHalfY * cameraAspect;
+        f32 tanHalfX;
+#if DIRECTOR_CUTSCENE_VERT_FOV
+        if (theCamera->HasActiveCameraAnim()) {
+            const f32 intendedHalfX = tanHalfY * DEFAULT_ASPECT_RATIO;
+            const f32 intendedHalfY = intendedHalfX / TARGET_ASPECT_RATIO;
+            if (cameraAspect > TARGET_ASPECT_RATIO) {
+                tanHalfY = intendedHalfY;
+                tanHalfX = tanHalfY * cameraAspect;
+            }
+            else {
+                tanHalfX = intendedHalfX;
+                tanHalfY = tanHalfX / cameraAspect;
+            }
+        }
+        else
+#endif
+        {
+            tanHalfX = tanHalfY * cameraAspect; // Hor+
+        }
         p3dCam->SetProjectionMatrix(
             PerspectiveReversedZTangents(tanHalfX, tanHalfY,
                 p3dCam->GetNearPlane(), p3dCam->GetFarPlane()));

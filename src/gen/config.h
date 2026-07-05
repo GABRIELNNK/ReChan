@@ -15,7 +15,15 @@
 #define FIX_ASPECT_RATIO 1
 
 // Director cutscene bars: 0 = PSX-like alpha fade, 1 = slide in/out using alpha as progress.
-#define DIRECTOR_WIDESCREEN_SLIDE_BARS 0
+#define DIRECTOR_WIDESCREEN_SLIDE_BARS 1
+
+// Automatic cutscene borders (letterbox/pillarbox) based on the current aspect ratio, instead of hardcoded 4:3.
+#define DIRECTOR_SMART_CUTSCENE_BORDERS 1
+
+// During real cutscenes switch the projection from Hor+ to Vert-
+// This stops any display wider than 4:3 from revealing off camera content past the sides of a
+// directed shot, matching exactly what the original hardware framed.
+#define DIRECTOR_CUTSCENE_VERT_FOV 1
 
 // When ESC is bound to both menu back and menu open/close,
 // let it back out of submenu pages before closing the whole menu.
@@ -32,7 +40,7 @@
 #define CUSTOM_MENU 1
 
 // Experimental: Keep simulation fixed at 30 fps while rendering at higher frame rates, with interpolation for smoothness.
-#define HIGH_FPS_PLAY_PRESENTATION 1
+#define HIGH_FPS_PLAY_PRESENTATION 0
 
 // Mod loader support: when enabled, the game checks the ~mods/ directory for
 // replacement assets (PNG textures, GLB models, WAV sounds, JSON data) before
