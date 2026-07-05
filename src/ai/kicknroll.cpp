@@ -1127,6 +1127,12 @@ void Stack::Think() {
 
 #if HIGH_FPS_PLAY_PRESENTATION
     renderPrevFrame = frameBeforeTick;
+
+    if (flip->tree && flip->tree->numJoints > 0) {
+        Mat4* jointMatrices = new Mat4[flip->tree->numJoints];
+        flip->tree->ComputeWorldMatricesWithCallbacks(jointMatrices);
+        delete[] jointMatrices;
+    }
 #endif
 
     if (knockDownSound) {
