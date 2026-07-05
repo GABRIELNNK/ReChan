@@ -1203,6 +1203,12 @@ s32 feCustomMenuMgr::Invoke() {
                 m_activePopup = PopupKind_None;
                 m_result = m_popupCloseResult;
                 m_popupPoll = nullptr;
+                // An async scan/extract just finished behind the popup; rebuild the
+                // asset page so its buttons reflect the new state (e.g. ScanFoundOne
+                // -> real Extract button) instead of the stale pre-scan entries.
+                if (m_currPage == MenuPage_AssetMissing) {
+                    RefreshAssetPageEntries();
+                }
             }
             return m_result;
         }

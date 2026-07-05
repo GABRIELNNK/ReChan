@@ -51,6 +51,17 @@ static bool EnsureMinidumpDirectory() {
         (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 }
 
+static void BuildCrashPaths() {
+    const unsigned long pid = static_cast<unsigned long>(GetCurrentProcessId());
+    const bool hasDirectory = EnsureMinidumpDirectory();
+    std::snprintf(s_reportPath, sizeof(s_reportPath),
+                  hasDirectory ? "minidumps\\rechan-crash-%lu.txt" : "rechan-crash-%lu.txt",
+                  pid);
+    std::snprintf(s_dumpPath, sizeof(s_dumpPath),
+                  hasDirectory ? "minidumps\\rechan-crash-%lu.dmp" : "rechan-crash-%lu.dmp",
+                  pid);
+}
+
 static void WriteMiniDump(EXCEPTION_POINTERS* exceptionInfo) {
     HANDLE dump = CreateFileA(s_dumpPath, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
                               FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -73,6 +84,7 @@ static void WriteMiniDump(EXCEPTION_POINTERS* exceptionInfo) {
 }
 
 static void WriteCrashReport(EXCEPTION_POINTERS* exceptionInfo, const char* reason) {
+    BuildCrashPaths();
     WriteMiniDump(exceptionInfo);
 
     HANDLE report = CreateFileA(s_reportPath, GENERIC_WRITE, FILE_SHARE_READ, nullptr,
@@ -215,15 +227,6 @@ static void CrtSignalHandler(int signalNumber) {
 }
 
 void CrashReporter::Install() {
-    const unsigned long pid = static_cast<unsigned long>(GetCurrentProcessId());
-    const bool hasDirectory = EnsureMinidumpDirectory();
-    std::snprintf(s_reportPath, sizeof(s_reportPath),
-                  hasDirectory ? "minidumps\\rechan-crash-%lu.txt" : "rechan-crash-%lu.txt",
-                  pid);
-    std::snprintf(s_dumpPath, sizeof(s_dumpPath),
-                  hasDirectory ? "minidumps\\rechan-crash-%lu.dmp" : "rechan-crash-%lu.dmp",
-                  pid);
-
     SetErrorMode(GetErrorMode() | SEM_NOGPFAULTERRORBOX);
     SetUnhandledExceptionFilter(UnhandledExceptionHandler);
     std::set_terminate(TerminateHandler);
@@ -317,6 +320,13 @@ static void FatalSignalHandler(int signalNumber, siginfo_t* signalInfo, void*) {
     }
     s_handlingCrash = 1;
 
+    // Create the minidumps directory only now, at crash time, so nothing is
+    // written to the filesystem on a clean run.
+    const bool hasDirectory = EnsureMinidumpDirectory();
+    std::snprintf(s_reportPath, sizeof(s_reportPath),
+                  hasDirectory ? "minidumps/rechan-crash-%ld.txt" : "rechan-crash-%ld.txt",
+                  static_cast<long>(getpid()));
+
     const int report = open(s_reportPath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (report >= 0) {
         char buffer[2048];
@@ -378,10 +388,6 @@ static void FatalSignalHandler(int signalNumber, siginfo_t* signalInfo, void*) {
 }
 
 void CrashReporter::Install() {
-    const bool hasDirectory = EnsureMinidumpDirectory();
-    std::snprintf(s_reportPath, sizeof(s_reportPath),
-                  hasDirectory ? "minidumps/rechan-crash-%ld.txt" : "rechan-crash-%ld.txt",
-                  static_cast<long>(getpid()));
     s_suppressDialog = std::getenv("RECHAN_CRASH_REPORTER_NO_DIALOG") != nullptr;
 
     struct sigaction action = {};

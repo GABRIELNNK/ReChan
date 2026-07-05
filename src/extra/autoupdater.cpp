@@ -372,11 +372,7 @@ void AutoUpdater::InstallAndRelaunch() {
     if (f) {
         fprintf(f, "#!/bin/sh\n");
         fprintf(f, "sleep 3\n");
-#ifdef __APPLE__
-        fprintf(f, "unzip -o \"%s\" -d \"%s\"\n", m_tempArchivePath.c_str(), exeDir.c_str());
-#else
         fprintf(f, "tar -xzf \"%s\" -C \"%s\"\n", m_tempArchivePath.c_str(), exeDir.c_str());
-#endif
         fprintf(f, "rm -f \"%s\"\n", m_tempArchivePath.c_str());
         fprintf(f, "\"%s/%s\" &\n", exeDir.c_str(), exeName.c_str());
         fprintf(f, "rm -f \"$0\"\n");
@@ -448,10 +444,13 @@ void AutoUpdater::DownloadThreadFunc() {
     std::string url = m_updateAssetUrl;
     std::string outPath = m_tempArchivePath;
 
+    // -f makes curl fail (non-zero, no output file) on HTTP 4xx/5xx instead of
+    // silently writing the error-page body into the archive; -L follows the
+    // release-asset redirect to the CDN.
 #ifdef RC_PLATFORM_WINDOWS
-    std::string cmd = "curl -sL -o \"" + outPath + "\" -w \"%{size_download}\" \"" + url + "\"";
+    std::string cmd = "curl -fsSL -o \"" + outPath + "\" -w \"%{size_download}\" \"" + url + "\"";
 #else
-    std::string cmd = "curl -sL -o '" + outPath + "' -w '%{size_download}' '" + url + "'";
+    std::string cmd = "curl -fsSL -o '" + outPath + "' -w '%{size_download}' '" + url + "'";
 #endif
 
     std::string result = shellExec(cmd.c_str());
@@ -465,6 +464,19 @@ void AutoUpdater::DownloadThreadFunc() {
         m_error = "Download failed: output file not created";
         m_state = State::Error;
         return;
+    }
+
+    // curl -w reports the bytes actually transferred; when the release metadata
+    // told us the expected size, reject a truncated/mismatched download before it
+    // reaches the extractor.
+    if (m_downloadSize > 0) {
+        const s64 actualBytes = (s64)strtoll(result.c_str(), nullptr, 10);
+        if (actualBytes > 0 && actualBytes != m_downloadSize) {
+            remove(outPath.c_str());
+            m_error = "Download failed: size mismatch";
+            m_state = State::Error;
+            return;
+        }
     }
 
     m_downloadedBytes = m_downloadSize;
