@@ -148,6 +148,6 @@ project "libp3d"
         runtime "Debug"
         symbols "on"
 
-    filter "configurations:Release"
+    filter "configurations:Release*"
         runtime "Release"
         optimize "on"

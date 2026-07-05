@@ -10,20 +10,20 @@ struct FightingCollisionAttackType;
 
 // PSX: BehaviourAttrib (56 bytes) - parsed from scr\behave.txt and stored in AI::behaviourList.
 struct BehaviourAttrib : public ccNode {
-    u16 aggression = 50;      // +24
-    u16 circling = 75;        // +26
-    u16 distancing = 80;      // +28
-    u16 comboCount = 0;       // +30
-    u16* comboChances = nullptr; // +32
-    char** comboStrings = nullptr; // +36
-    u16 attackFreq = 0;       // +40
-    u16 minThink = 5;         // +42
-    u16 runningSpeed = 4000;  // +44
-    u16 strafingSpeed = 1250; // +46
-    u16 punch = 60;           // +48
-    u16 kick = 40;            // +50
-    u16 throwChance = 0;      // +52
-    u16 maxThink = 50;        // +54
+    u16 attackFreq = 50;      // +24 / +0x18
+    u16 aggression = 75;      // +26 / +0x1A
+    u16 distancing = 80;      // +28 / +0x1C
+    u16 comboCount = 0;       // +30 / +0x1E
+    u16* comboChances = nullptr; // +32 / +0x20
+    char** comboStrings = nullptr; // +36 / +0x24
+    u16 minThinkFreq = 0;     // +40 / +0x28
+    u16 maxThinkFreq = 5;     // +42 / +0x2A
+    u16 runningSpeed = 4000;  // +44 / +0x2C
+    u16 strafingSpeed = 1250; // +46 / +0x2E
+    u16 punchPerc = 60;       // +48 / +0x30
+    u16 kickPerc = 40;        // +50 / +0x32
+    u16 throwPerc = 0;        // +52 / +0x34
+    u16 circling = 50;        // +54 / +0x36
 
     BehaviourAttrib();
     ~BehaviourAttrib() override;

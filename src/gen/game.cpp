@@ -366,14 +366,19 @@ static void AnimateLoop(ccList& list) {
 static void CaptureHumanoidAttackJointsLoop(ccList& list) {
     for (ccMinNode* node = list.head; node != nullptr; node = node->next) {
         Thing* thing = static_cast<Thing*>(node);
-        Humanoid* humanoid = static_cast<Humanoid*>(thing);
-        humanoid->AdvanceRenderInterpolationTick();
-
         HumanoidModel* hm = thing->model ? dynamic_cast<HumanoidModel*>(static_cast<Model*>(thing->model)) : nullptr;
         if (hm && hm->animMatrices) {
             hm->animMatrices->Swap();
             hm->CaptureAttackJointMatrices();
         }
+    }
+}
+
+static void AdvanceHumanoidRenderInterpolationLoop(ccList& list) {
+    for (ccMinNode* node = list.head; node != nullptr; node = node->next) {
+        Thing* thing = static_cast<Thing*>(node);
+        Humanoid* humanoid = static_cast<Humanoid*>(thing);
+        humanoid->AdvanceRenderInterpolationTick();
     }
 }
 #endif
@@ -420,12 +425,15 @@ static void animLoopDSTACK() {
     }
 
     if (g_ai) {
+#if HIGH_FPS_PLAY_PRESENTATION
+        CaptureHumanoidAttackJointsLoop(g_ai->humanoidList);
+#endif
         AnimateLoop(g_ai->humanoidList);
         AnimateLoop(g_ai->pickupList);
         AnimateLoop(g_ai->inactivePickupList);
         AnimateLoop(g_ai->moveList);
 #if HIGH_FPS_PLAY_PRESENTATION
-        CaptureHumanoidAttackJointsLoop(g_ai->humanoidList);
+        AdvanceHumanoidRenderInterpolationLoop(g_ai->humanoidList);
 #endif
     }
 

@@ -859,6 +859,12 @@ void Stack::Draw() {
     }
 
 #if HIGH_FPS_PLAY_PRESENTATION
+    TransformFlip* renderFlip = nullptr;
+    s32 savedFrameReal = 0;
+    LVector savedJoint0 = {};
+    LVector savedJoint1 = {};
+    bool restoreGameplayPose = false;
+
     const bool stackInPlay = (g_time && g_game && g_game->GetState() == GameState::Play);
     if (stackInPlay && anim && anim->flip) {
         f32 alpha = g_time->GetPlayPresentationAlpha();
@@ -873,18 +879,29 @@ void Stack::Draw() {
         const s32 curFrameReal = currentFrame << 16;
         const s32 interpFrameReal = prevFrameReal + (s32)((f32)(curFrameReal - prevFrameReal) * alpha);
 
-        const LVector savedJoint0 = jointPositions[0];
-        const LVector savedJoint1 = jointPositions[1];
+        renderFlip = anim->flip;
+        savedFrameReal = renderFlip->frameReal;
+        savedJoint0 = jointPositions[0];
+        savedJoint1 = jointPositions[1];
+        restoreGameplayPose = true;
 
-        anim->flip->SetFrameReal(interpFrameReal);
-        anim->flip->UpdateJoints();
-
-        jointPositions[0] = savedJoint0;
-        jointPositions[1] = savedJoint1;
+        renderFlip->SetFrameReal(interpFrameReal);
+        renderFlip->UpdateJoints();
     }
 #endif
 
     Obstacle::Draw();
+
+#if HIGH_FPS_PLAY_PRESENTATION
+    if (restoreGameplayPose) {
+        if (renderFlip) {
+            renderFlip->SetFrameReal(savedFrameReal);
+            renderFlip->UpdateJoints();
+        }
+        jointPositions[0] = savedJoint0;
+        jointPositions[1] = savedJoint1;
+    }
+#endif
 }
 
 void Stack::AnalyzeMesh(DBRoot* root) {

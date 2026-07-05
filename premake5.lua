@@ -1,8 +1,9 @@
 workspace "rechan"
     architecture "x86_64"
-    configurations { "Debug", "Release" }
+    configurations { "Debug", "Release", "ReleaseASan" }
     location "build"
     startproject "rechan"
+    toolset "v145"
 
 outputdir = "%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}"
 
@@ -68,7 +69,7 @@ project "rechan"
         symbols "on"
         defines { "DEBUG" }
 
-    filter "configurations:Release"
+    filter "configurations:Release*"
         defines { "NDEBUG" }
         runtime "Release"
         optimize "on"
@@ -76,5 +77,16 @@ project "rechan"
     filter { "system:windows", "configurations:Release" }
         kind "WindowedApp"
         entrypoint "mainCRTStartup"
+
+    -- ReleaseASan: optimized (keeps the layout-sensitive bug live) + AddressSanitizer.
+    -- Kept as ConsoleApp so ASan diagnostics print to a console window.
+    filter "configurations:ReleaseASan"
+        symbols "on"
+        editandcontinue "off"
+        targetname "rechan-asan"
+        buildoptions { "/fsanitize=address" }
+        -- libp3d is linked without ASan; disable STL container annotations so the
+        -- instrumented rechan objects match (avoids LNK2038 annotate_* mismatches).
+        defines { "_DISABLE_STL_ANNOTATION" }
 
     filter {}

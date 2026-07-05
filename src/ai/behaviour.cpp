@@ -2539,17 +2539,17 @@ void Behaviour::ComplexAttack() {
     s32 randomChance = (s32)rmRangedRandom(100) + 1;
     char actionCode = 0;
 
-    if (randomChance <= (s32)animConfigPtr->punch) {
+    if (randomChance <= (s32)animConfigPtr->punchPerc) {
         actionCode = 'P';
     }
     else {
-        randomChance -= (s32)animConfigPtr->punch;
-        if (randomChance <= (s32)animConfigPtr->kick) {
+        randomChance -= (s32)animConfigPtr->punchPerc;
+        if (randomChance <= (s32)animConfigPtr->kickPerc) {
             actionCode = 'K';
         }
         else {
-            randomChance -= (s32)animConfigPtr->kick;
-            if (randomChance <= (s32)animConfigPtr->throwChance) {
+            randomChance -= (s32)animConfigPtr->kickPerc;
+            if (randomChance <= (s32)animConfigPtr->throwPerc) {
                 actionCode = 'T';
             }
             else {
@@ -2780,8 +2780,8 @@ void Behaviour::NDMS(Behaviour* b) {
     b->ndmsThinkCounter++;
     if (b->ndmsThinkCounter > b->ndmsThinkDelay) {
         b->ndmsThinkCounter = 0;
-        b->ndmsThinkDelay = (s32)b->animConfigPtr->attackFreq
-            + (s32)rmRangedRandom((u32)((s32)b->animConfigPtr->minThink - (s32)b->animConfigPtr->attackFreq));
+        b->ndmsThinkDelay = (s32)b->animConfigPtr->minThinkFreq
+            + (s32)rmRangedRandom((u32)((s32)b->animConfigPtr->maxThinkFreq - (s32)b->animConfigPtr->minThinkFreq));
         randomCircling = (s32)rmRangedRandom(100);
         randomDistancing = (s32)rmRangedRandom(100);
         randomAggression = (s32)rmRangedRandom(100);
@@ -2802,14 +2802,14 @@ void Behaviour::NDMS(Behaviour* b) {
 
         if (dy <= NDMS_HEIGHT_DELTA_THRESHOLD
             && owner->DistanceFromPointXZ(player->pos) <= REJOIN_ACTIVE_ZONE_PLAYER_DIST_THRESHOLD) {
-            if (randomAggression - 20 < (s32)b->animConfigPtr->aggression) {
+            if (randomAggression - 20 < (s32)b->animConfigPtr->attackFreq) {
                 decision = 6;
             }
             else {
                 decision = owner->HasEnemyTauntDialog() ? 6 : 5;
             }
         }
-        else if (randomCircling < (s32)b->animConfigPtr->circling) {
+        else if (randomCircling < (s32)b->animConfigPtr->aggression) {
             if (b->field60 != 0 && distanceToPlayer < NDMS_SLOWDOWN_DIST_THRESHOLD) {
                 owner->moveSpeed = (s32)(s16)b->animConfigPtr->strafingSpeed;
                 decision = 1;
@@ -2825,10 +2825,10 @@ void Behaviour::NDMS(Behaviour* b) {
             }
         }
         else {
-            if (randomCircling - 20 < (s32)b->animConfigPtr->circling) {
+            if (randomCircling - 20 < (s32)b->animConfigPtr->aggression) {
                 decision = 6;
             }
-            else if (randomCircling - 20 < (s32)b->animConfigPtr->aggression) {
+            else if (randomCircling - 20 < (s32)b->animConfigPtr->attackFreq) {
                 decision = 6;
             }
             else {
@@ -2847,14 +2847,14 @@ void Behaviour::NDMS(Behaviour* b) {
 
         if (dy <= NDMS_HEIGHT_DELTA_THRESHOLD
             && owner->DistanceFromPointXZ(player->pos) <= REJOIN_ACTIVE_ZONE_PLAYER_DIST_THRESHOLD) {
-            if (randomAggression - 20 < (s32)b->animConfigPtr->aggression) {
+            if (randomAggression - 20 < (s32)b->animConfigPtr->attackFreq) {
                 decision = 6;
             }
             else {
                 decision = owner->HasEnemyTauntDialog() ? 6 : 5;
             }
         }
-        else if (randomCircling < (s32)b->animConfigPtr->circling) {
+        else if (randomCircling < (s32)b->animConfigPtr->aggression) {
             owner->moveSpeed = (s32)(s16)b->animConfigPtr->strafingSpeed;
 
             if (owner->GetTicketIssuer()) {
@@ -2866,10 +2866,10 @@ void Behaviour::NDMS(Behaviour* b) {
             }
         }
         else {
-            if (randomCircling - 20 < (s32)b->animConfigPtr->circling) {
+            if (randomCircling - 20 < (s32)b->animConfigPtr->aggression) {
                 decision = 6;
             }
-            else if (randomCircling - 20 < (s32)b->animConfigPtr->aggression) {
+            else if (randomCircling - 20 < (s32)b->animConfigPtr->attackFreq) {
                 decision = 6;
             }
             else {
@@ -2886,7 +2886,7 @@ void Behaviour::NDMS(Behaviour* b) {
             return;
         }
 
-        if ((u32)(actionState - 46) < 9u && randomCircling < (s32)b->animConfigPtr->circling) {
+        if ((u32)(actionState - 46) < 9u && randomCircling < (s32)b->animConfigPtr->aggression) {
             b->nextHandlerThisOffset = 0;
             b->nextHandlerDispatch = -1;
             b->nextHandler = NDMS;
@@ -2901,13 +2901,13 @@ void Behaviour::NDMS(Behaviour* b) {
             (b->aiParam != 0 && activeZone && activeZone->AllowedToMoveIn(owner) != 0);
 
         if (allowedToMove) {
-            if (randomAggression < (s32)b->animConfigPtr->aggression) {
+            if (randomAggression < (s32)b->animConfigPtr->attackFreq) {
                 decision = 7;
             }
-            else if (facingAway && randomAggression - 70 < (s32)b->animConfigPtr->aggression) {
+            else if (facingAway && randomAggression - 70 < (s32)b->animConfigPtr->attackFreq) {
                 decision = 7;
             }
-            else if (randomCircling < (s32)b->animConfigPtr->circling) {
+            else if (randomCircling < (s32)b->animConfigPtr->aggression) {
                 b->nextHandlerThisOffset = 0;
                 b->nextHandlerDispatch = -1;
                 b->nextHandler = NDMS;
@@ -2926,13 +2926,13 @@ void Behaviour::NDMS(Behaviour* b) {
             decision = 4;
         }
         else {
-            if (randomAggression < (s32)b->animConfigPtr->aggression) {
+            if (randomAggression < (s32)b->animConfigPtr->attackFreq) {
                 decision = 7;
             }
-            else if (facingAway && randomAggression - 70 < (s32)b->animConfigPtr->aggression) {
+            else if (facingAway && randomAggression - 70 < (s32)b->animConfigPtr->attackFreq) {
                 decision = 7;
             }
-            else if (randomCircling < (s32)b->animConfigPtr->circling) {
+            else if (randomCircling < (s32)b->animConfigPtr->aggression) {
                 b->nextHandlerThisOffset = 0;
                 b->nextHandlerDispatch = -1;
                 b->nextHandler = NDMS;
@@ -2963,7 +2963,7 @@ void Behaviour::NDMS(Behaviour* b) {
 
         if (dy <= NDMS_HEIGHT_DELTA_THRESHOLD
             && owner->DistanceFromPointXZ(player->pos) <= REJOIN_ACTIVE_ZONE_PLAYER_DIST_THRESHOLD) {
-            if (randomAggression < (s32)b->animConfigPtr->aggression) {
+            if (randomAggression < (s32)b->animConfigPtr->attackFreq) {
                 if (owner->pos.y < player->pos.y) {
                     owner->RequestAction(9);
                 }
@@ -2973,14 +2973,14 @@ void Behaviour::NDMS(Behaviour* b) {
                 return;
             }
 
-            if (randomCircling < (s32)b->animConfigPtr->circling) {
+            if (randomCircling < (s32)b->animConfigPtr->aggression) {
                 decision = 6;
             }
             else {
                 decision = owner->HasEnemyTauntDialog() ? 6 : 5;
             }
         }
-        else if (randomCircling < (s32)b->animConfigPtr->circling || facingAway) {
+        else if (randomCircling < (s32)b->animConfigPtr->aggression || facingAway) {
             owner->moveSpeed = (s32)(s16)b->animConfigPtr->strafingSpeed;
 
             if (owner->GetTicketIssuer()) {
@@ -3003,7 +3003,7 @@ void Behaviour::NDMS(Behaviour* b) {
                 decision = b->NavigateEnemies(2);
             }
         }
-        else if (randomAggression < (s32)b->animConfigPtr->aggression) {
+        else if (randomAggression < (s32)b->animConfigPtr->attackFreq) {
             decision = 5;
         }
         else if (randomDistancing < (s32)b->animConfigPtr->distancing) {
@@ -3364,8 +3364,8 @@ s32 Behaviour::NavigateEnemies(s32 mode) {
         }
 
         navDecisionCounter = 0;
-        if ((s32)rmRangedRandom(100) >= (s32)animConfigPtr->maxThink) {
-            navDecision = ((s32)animConfigPtr->circling < (s32)rmRangedRandom(100)) ? 5 : 1;
+        if ((s32)rmRangedRandom(100) >= (s32)animConfigPtr->circling) {
+            navDecision = ((s32)animConfigPtr->aggression < (s32)rmRangedRandom(100)) ? 5 : 1;
             return navDecision;
         }
 
@@ -3391,8 +3391,8 @@ s32 Behaviour::NavigateEnemies(s32 mode) {
     }
 
     navDecisionCounter = 0;
-    if ((s32)rmRangedRandom(150) >= (s32)animConfigPtr->maxThink) {
-        if ((s32)animConfigPtr->circling >= (s32)rmRangedRandom(100)) {
+    if ((s32)rmRangedRandom(150) >= (s32)animConfigPtr->circling) {
+        if ((s32)animConfigPtr->aggression >= (s32)rmRangedRandom(100)) {
             navDecision = mode;
         }
         else {

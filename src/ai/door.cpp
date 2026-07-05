@@ -16,6 +16,16 @@
 #include "gen/database.h"
 #include "extra/shadowcsm.h"
 
+static void DoorCreateUnlockEffects(const Door& door) {
+    if (door.secondaryModelHash != 0) {
+        GEffect_Create(static_cast<u32>(door.secondaryModelHash), nullptr, nullptr, nullptr, 0, 0, 0);
+    }
+
+    if (door.tertiaryModelHash != 0) {
+        GEffect_Create(static_cast<u32>(door.tertiaryModelHash), nullptr, nullptr, nullptr, 0, 0, 0);
+    }
+}
+
 Door::Door(const LVector* pos, u16 type) : Obstacle(pos, type) {
     MARKFUNCTION(0x8001AB0C);
     closedBox = INVALID_COLLISION_BOX;
@@ -141,13 +151,13 @@ void Door::DeleteModel() {
 void Door::Reset() {
     MARKFUNCTION(0x8001AEC8);
 
-    // PSX: hub level (7) state 5, else state 0 for guarded doors.
     World* world = g_game ? g_game->GetWorld() : nullptr;
     s32 levelID = world ? world->GetCurLevelID() : 0;
+    const bool startsUnlocked = levelID != 7 && killThingsCRC == 0;
     if (levelID == 7) {
         doorState = 5;
     }
-    else if (killThingsCRC == 0) {
+    else if (startsUnlocked) {
         doorState = 1;
     }
     else {
@@ -163,6 +173,10 @@ void Door::Reset() {
     LOG("[Door::Reset] name=%s state=%d pos=(%d,%d,%d) baseRotY=%d targetCRC=0x%08X model=%p flags=0x%X blockNum=%d",
         GetName() ? GetName() : "null", doorState, pos.x, pos.y, pos.z,
         baseRotY, targetCRC, model, flags, blockNum);
+
+    if (startsUnlocked) {
+        DoorCreateUnlockEffects(*this);
+    }
 }
 
 void Door::Think() {
@@ -467,12 +481,6 @@ void Door::DeathCheck() {
             CSoundDirect::PlayTransient(158, static_cast<void*>(&pos), 0, 0);
         }
 
-        if (secondaryModelHash != 0) {
-            GEffect_Create(static_cast<u32>(secondaryModelHash), nullptr, nullptr, nullptr, 0, 0, 0);
-        }
-
-        if (tertiaryModelHash != 0) {
-            GEffect_Create(static_cast<u32>(tertiaryModelHash), nullptr, nullptr, nullptr, 0, 0, 0);
-        }
+        DoorCreateUnlockEffects(*this);
     }
 }

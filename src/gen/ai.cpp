@@ -1367,7 +1367,7 @@ void AI::ParseBehaviourAttribScript() {
         }
 
         switch (p3dHash(token)) {
-            case 4627422: // BEGIN
+            case 0x00469BDE: // p3dHash("BEGIN")
                 cursor = GetNextAlphaNumToken(token, cursor, end);
                 if (token[0] != '\0') {
                     current = new BehaviourAttrib();
@@ -1375,25 +1375,25 @@ void AI::ParseBehaviourAttribScript() {
                     comboIndex = -1;
                 }
                 break;
-            case 92004129: // AGGRESSION
+            case 0x057BDF21: // p3dHash("ATTACKFREQ") -> BehaviourAttrib+0x18 (attackFreq)
+                if (current) {
+                    cursor = GetNextAlphaNumToken(token, cursor, end);
+                    current->attackFreq = (u16)AlphaToULong(token);
+                }
+                break;
+            case 0x06AC27FE: // p3dHash("AGGRESSION") -> BehaviourAttrib+0x1A (aggression)
                 if (current) {
                     cursor = GetNextAlphaNumToken(token, cursor, end);
                     current->aggression = (u16)AlphaToULong(token);
                 }
                 break;
-            case 111945726: // CIRCLING
-                if (current) {
-                    cursor = GetNextAlphaNumToken(token, cursor, end);
-                    current->circling = (u16)AlphaToULong(token);
-                }
-                break;
-            case 140965031: // DISTANCING
+            case 0x0866F4A7: // p3dHash("DISTANCING") -> BehaviourAttrib+0x1C (distancing)
                 if (current) {
                     cursor = GetNextAlphaNumToken(token, cursor, end);
                     current->distancing = (u16)AlphaToULong(token);
                 }
                 break;
-            case 86524271: // NCOMBO
+            case 0x0528416F: // p3dHash("NCOMBO")
                 if (current) {
                     cursor = GetNextAlphaNumToken(token, cursor, end);
                     current->comboCount = (u16)AlphaToULong(token);
@@ -1416,7 +1416,7 @@ void AI::ParseBehaviourAttribScript() {
                     comboIndex = 0;
                 }
                 break;
-            case 4735343: // COMBO
+            case 0x0048416F: // p3dHash("COMBO")
                 if (current && current->comboCount > 0 && comboIndex >= 0 && comboIndex < current->comboCount) {
                     cursor = GetNextAlphaNumToken(token, cursor, end);
                     current->comboChances[comboIndex] = (u16)AlphaToULong(token);
@@ -1425,55 +1425,55 @@ void AI::ParseBehaviourAttribScript() {
                     comboIndex++;
                 }
                 break;
-            case 238602555: // ATTACKFREQ
+            case 0x0E38C93B: // p3dHash("MINTHINK") -> BehaviourAttrib+0x28 (minThinkFreq)
                 if (current) {
                     cursor = GetNextAlphaNumToken(token, cursor, end);
-                    current->attackFreq = (u16)AlphaToULong(token);
+                    current->minThinkFreq = (u16)AlphaToULong(token);
                 }
                 break;
-            case 114870587: // MINTHINK
+            case 0x06D8C93B: // p3dHash("MAXTHINK") -> BehaviourAttrib+0x2A (maxThinkFreq)
                 if (current) {
                     cursor = GetNextAlphaNumToken(token, cursor, end);
-                    current->minThink = (u16)AlphaToULong(token);
+                    current->maxThinkFreq = (u16)AlphaToULong(token);
                 }
                 break;
-            case 129137524: // RUNNINGSPEED
+            case 0x07B27B74: // p3dHash("RUNNINGSPEED") -> BehaviourAttrib+0x2C (runningSpeed)
                 if (current) {
                     cursor = GetNextAlphaNumToken(token, cursor, end);
                     current->runningSpeed = (u16)AlphaToULong(token);
                 }
                 break;
-            case 195925748: // STRAIFINGSPEED
+            case 0x0BAD96F4: // p3dHash("STRAIFINGSPEED") -> BehaviourAttrib+0x2E (strafingSpeed)
                 if (current) {
                     cursor = GetNextAlphaNumToken(token, cursor, end);
                     current->strafingSpeed = (u16)AlphaToULong(token);
                 }
                 break;
-            case 5612152: // PUNCH
+            case 0x0055A278: // p3dHash("PUNCH") -> BehaviourAttrib+0x30 (punchPerc)
                 if (current) {
                     cursor = GetNextAlphaNumToken(token, cursor, end);
-                    current->punch = (u16)AlphaToULong(token);
+                    current->punchPerc = (u16)AlphaToULong(token);
                 }
                 break;
-            case 327035: // KICK
+            case 0x0004FD7B: // p3dHash("KICK") -> BehaviourAttrib+0x32 (kickPerc)
                 if (current) {
                     cursor = GetNextAlphaNumToken(token, cursor, end);
-                    current->kick = (u16)AlphaToULong(token);
+                    current->kickPerc = (u16)AlphaToULong(token);
                 }
                 break;
-            case 5822279: // THROW
+            case 0x0058D747: // p3dHash("THROW") -> BehaviourAttrib+0x34 (throwPerc)
                 if (current) {
                     cursor = GetNextAlphaNumToken(token, cursor, end);
-                    current->throwChance = (u16)AlphaToULong(token);
+                    current->throwPerc = (u16)AlphaToULong(token);
                 }
                 break;
-            case 241699415: // MAXTHINK
+            case 0x0E680A57: // p3dHash("CIRCLING") -> BehaviourAttrib+0x36 (circling)
                 if (current) {
                     cursor = GetNextAlphaNumToken(token, cursor, end);
-                    current->maxThink = (u16)AlphaToULong(token);
+                    current->circling = (u16)AlphaToULong(token);
                 }
                 break;
-            case 18980: // END
+            case 0x00004A24: // p3dHash("END")
                 if (current) {
                     behaviourList.AddNodeTail(current);
                     current = nullptr;

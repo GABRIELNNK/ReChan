@@ -320,6 +320,49 @@ static void UpdateHumanoidRenderAnimPose(HumanoidModel* model, HumanoidRenderSmo
     anim->flip->UpdateJoints();
 }
 
+struct HumanoidRenderAnimPoseBackup {
+    TransformFlip* flip = nullptr;
+    TransformAnim* anim = nullptr;
+    s32 frameReal = 0;
+    bool valid = false;
+};
+
+static HumanoidRenderAnimPoseBackup ApplyHumanoidRenderAnimPose(
+    HumanoidModel* model,
+    HumanoidRenderSmoothState* smoothState,
+    f32 alpha) {
+    HumanoidRenderAnimPoseBackup backup = {};
+    if (!model || !smoothState || !smoothState->animInitialized) {
+        return backup;
+    }
+
+    AnimStructure* anim = static_cast<AnimStructure*>(model->animStructure);
+    if (!anim || !anim->flip || !anim->animation) {
+        return backup;
+    }
+
+    backup.flip = anim->flip;
+    backup.anim = anim->flip->anim;
+    backup.frameReal = anim->flip->frameReal;
+    backup.valid = true;
+
+    UpdateHumanoidRenderAnimPose(model, smoothState, alpha);
+    return backup;
+}
+
+static void RestoreHumanoidRenderAnimPose(const HumanoidRenderAnimPoseBackup& backup) {
+    if (!backup.valid || !backup.flip) {
+        return;
+    }
+
+    if (backup.flip->anim != backup.anim) {
+        backup.flip->anim = backup.anim;
+        backup.flip->dirty = 1;
+    }
+    backup.flip->SetFrameReal(backup.frameReal);
+    backup.flip->UpdateJoints();
+}
+
 void Humanoid::ResetRenderInterpolation() {
     ClearHumanoidRenderSmoothState(this);
 }
@@ -1359,11 +1402,15 @@ void Humanoid::Draw() {
             m->rotY = (u16)(drawOrient.y & 0xFFFF);
             m->rotZ = (u16)(drawOrient.z & 0xFFFF);
 #if HIGH_FPS_PLAY_PRESENTATION
+            HumanoidRenderAnimPoseBackup renderAnimBackup = {};
             if (humanoidInPlay && smoothState && hm->animMatrices) {
                 const s32 savedCapture = hm->animMatrices->CaptureEnabled();
                 hm->animMatrices->SetCaptureEnabled(0);
-                UpdateHumanoidRenderAnimPose(hm, smoothState, presentationAlpha);
+                renderAnimBackup = ApplyHumanoidRenderAnimPose(hm, smoothState, presentationAlpha);
+                m->Show(0);
+                RestoreHumanoidRenderAnimPose(renderAnimBackup);
                 hm->animMatrices->SetCaptureEnabled(savedCapture);
+                return;
             }
 #endif
             m->Show(0);
@@ -1375,12 +1422,14 @@ void Humanoid::Draw() {
     if (model) {
         HumanoidModel* hm = static_cast<HumanoidModel*>(model);
 #if HIGH_FPS_PLAY_PRESENTATION
+        s32 savedCapture = 1;
         // High-FPS path: the authoritative attack-joint capture + buffer swap is
         // driven once per logic tick by CaptureHumanoidAttackJointsLoop, NOT here.
         // Draw() runs at render rate on an interpolated pose, so capture is
         // disabled during the in-play Show() to keep render-only/interpolated
         // joint positions out of the gameplay hit-detection buffers.
         if (hm->animMatrices) {
+            savedCapture = hm->animMatrices->CaptureEnabled();
             hm->animMatrices->SetCaptureEnabled(humanoidInPlay ? 0 : 1);
         }
 #else
@@ -1398,15 +1447,17 @@ void Humanoid::Draw() {
         m->rotZ = (u16)(drawOrient.z & 0xFFFF);
 
     #if HIGH_FPS_PLAY_PRESENTATION
+        HumanoidRenderAnimPoseBackup renderAnimBackup = {};
         if (humanoidInPlay) {
-            UpdateHumanoidRenderAnimPose(hm, smoothState, presentationAlpha);
+            renderAnimBackup = ApplyHumanoidRenderAnimPose(hm, smoothState, presentationAlpha);
         }
     #endif
         m->Show(0);
 
 #if HIGH_FPS_PLAY_PRESENTATION
+        RestoreHumanoidRenderAnimPose(renderAnimBackup);
         if (hm->animMatrices) {
-            hm->animMatrices->SetCaptureEnabled(1);
+            hm->animMatrices->SetCaptureEnabled(savedCapture);
         }
 #endif
 
