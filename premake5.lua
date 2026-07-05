@@ -3,7 +3,10 @@ workspace "rechan"
     configurations { "Debug", "Release", "ReleaseASan" }
     location "build"
     startproject "rechan"
-    toolset "v145"
+
+    filter "system:windows"
+        toolset "v145"
+    filter {}
 
 outputdir = "%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}"
 
@@ -82,11 +85,17 @@ project "rechan"
     -- Kept as ConsoleApp so ASan diagnostics print to a console window.
     filter "configurations:ReleaseASan"
         symbols "on"
-        editandcontinue "off"
         targetname "rechan-asan"
+
+    filter { "system:windows", "configurations:ReleaseASan" }
+        editandcontinue "off"
         buildoptions { "/fsanitize=address" }
         -- libp3d is linked without ASan; disable STL container annotations so the
         -- instrumented rechan objects match (avoids LNK2038 annotate_* mismatches).
         defines { "_DISABLE_STL_ANNOTATION" }
+
+    filter { "system:linux", "configurations:ReleaseASan" }
+        buildoptions { "-fsanitize=address" }
+        linkoptions { "-fsanitize=address" }
 
     filter {}
