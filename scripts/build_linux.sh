@@ -8,8 +8,8 @@ fi
 
 config="${1:-release}"
 case "$config" in
-    debug|release) ;;
-    *) echo "usage: $0 [debug|release]" >&2; exit 2 ;;
+    debug|release|shipping) ;;
+    *) echo "usage: $0 [debug|release|shipping]" >&2; exit 2 ;;
 esac
 
 if command -v premake5 >/dev/null 2>&1; then

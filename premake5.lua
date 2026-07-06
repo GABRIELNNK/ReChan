@@ -1,6 +1,6 @@
 workspace "rechan"
     architecture "x86_64"
-    configurations { "Debug", "Release", "ReleaseASan" }
+    configurations { "Debug", "Release", "ReleaseASan", "Shipping" }
     location "build"
     startproject "rechan"
 
@@ -97,5 +97,22 @@ project "rechan"
     filter { "system:linux", "configurations:ReleaseASan" }
         buildoptions { "-fsanitize=address" }
         linkoptions { "-fsanitize=address" }
+
+    filter "configurations:Shipping"
+        defines { "NDEBUG" }
+        runtime "Release"
+        optimize "on"
+
+    filter { "system:windows", "configurations:Shipping" }
+        kind "WindowedApp"
+        entrypoint "mainCRTStartup"
+        postbuildcommands {
+            'powershell -ExecutionPolicy Bypass -File "$(ProjectDir)../scripts/pack-win64.ps1" -Root "$(ProjectDir).."'
+        }
+
+    filter { "system:linux", "configurations:Shipping" }
+        postbuildcommands {
+            'bash ../scripts/pack-linux64.sh ..'
+        }
 
     filter {}
