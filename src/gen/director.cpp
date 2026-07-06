@@ -134,6 +134,13 @@ static s32 start_generic[] = {
     99, 255, 5, 14, kHashJackie, 1, 6, 45, 73, 75,
     98, 99, 0, 5, 8, 4
 };
+// Checkpoint-respawn variant: restores HUD without widescreen bars or timer.
+// PSX: the 45-tick start_generic timer ran during the slow CD load, so input was
+// ready the moment the screen appeared. PC loads instantly so we skip the wait.
+static s32 start_generic_checkpoint[] = {
+    73, 75,  // HudFunc(ShowHud) — 73=HudFunc opcode, 75='K'=ShowHud cmd
+    4        // Return
+};
 
 static s32 start_frantic[] = {
     9, 6, -1, 73, 74, 98, 102, 40, 103, 256,
@@ -841,6 +848,7 @@ static void RegisterKnownDirectorScriptRegions() {
     RegisterScriptRegion(ToVirtualAddress(levelEnd), levelEnd, ScriptArrayWordCount(levelEnd));
     RegisterScriptRegion(ToVirtualAddress(wait_subroutine), wait_subroutine, ScriptArrayWordCount(wait_subroutine));
     RegisterScriptRegion(ToVirtualAddress(defaultBeginScript), defaultBeginScript, ScriptArrayWordCount(defaultBeginScript));
+    RegisterScriptRegion(ToVirtualAddress(start_generic_checkpoint), start_generic_checkpoint, ScriptArrayWordCount(start_generic_checkpoint));
     RegisterScriptRegion(ToVirtualAddress(start_fall), start_fall, ScriptArrayWordCount(start_fall));
     RegisterScriptRegion(ToVirtualAddress(start_door), start_door, ScriptArrayWordCount(start_door));
     RegisterScriptRegion(ToVirtualAddress(slot), slot, ScriptArrayWordCount(slot));
@@ -3101,6 +3109,13 @@ void Director::DetermineLevelIntro() {
             }
 
             default:
+                // Checkpoint respawn on a revisited generic level: skip the
+                // 45-tick widescreen-bar wait. On PSX that timer completed during
+                // the slow CD load, so input was ready the moment the game appeared.
+                // On PC the load is instant, so we use a minimal intro instead.
+                if (Player::s_player && Player::s_player->checkpoint.IsValid()) {
+                    introScript = start_generic_checkpoint;
+                }
                 break;
         }
     }

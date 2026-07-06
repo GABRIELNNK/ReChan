@@ -718,7 +718,8 @@ void DynamicThing::Move() {
     movement.z = velocity.z + half_lfz;
 
     // Step 6: clamp movement magnitude to maxSpeed (XZ only, Y untouched)
-    s32 mag = (s32)rmMag3((f32)movement.x, (f32)movement.y, (f32)movement.z);
+    // PSX: 80062204 calls rmMag3__Flll (integer overload)
+    s32 mag = rmMag3(movement.x, movement.y, movement.z);
     if (maxSpeed < mag) {
         LVector normalized;
         rmV3Normalize(&normalized, &movement);

@@ -269,6 +269,44 @@ inline f32 rmMag3(f32 x, f32 y, f32 z) {
     return std::sqrt(x * x + y * y + z * z);
 }
 
+// rmMag3 - integer 3D magnitude with prescale to avoid overflow (PSX: rmMag3__Flll, 0x8009D6EC)
+// Source: C:\chan\devsys\psx\radlib\SOURCE\MATH\FUNC\MAG3.CPP:17
+inline s32 rmMag3(s32 x, s32 y, s32 z)
+{
+    if (x < 0) x = -x;
+    if (y < 0) y = -y;
+    if (z < 0) z = -z;
+
+    u32 shift = 0;
+    while (x + y + z > 46339)
+    {
+        x >>= 2; y >>= 2; z >>= 2;
+        shift += 2;
+    }
+
+    u32 v = (u32)(x * x + y * y + z * z);
+    u32 r = 0;
+    u32 bit = 1u << 30;
+    while (bit > v) bit >>= 2;
+    while (bit != 0)
+    {
+        if (v >= r + bit) { v -= r + bit; r = (r >> 1) + bit; }
+        else              { r >>= 1; }
+        bit >>= 2;
+    }
+    return (s32)(r << shift);
+}
+
+// rmInverse16 - 16.16 reciprocal approximation (PSX: 0x800AECE8)
+// Returns floor(0x7FFFFFFF / x) * 2, which approximates 2^32 / x.
+// Source: C:\chan\devsys\psx\radlib\SOURCE\MATH\MULTDIV\INVERSE.C:20
+inline s32 rmInverse16(s32 x)
+{
+    if (x == 0)
+        return 0x7FFFFFFF;
+    return (0x7FFFFFFF / x) * 2;
+}
+
 // rmMag2ff - fast 2D magnitude approximation (PSX: radlib MAGFAST.C)
 // Returns max(|a|,|b|) + min(|a|,|b|)/4
 inline s32 rmMag2ff(s32 a, s32 b) {
@@ -381,18 +419,19 @@ inline s32 rmDiv16i(s32 a, s32 b) {
 }
 
 // rmV3Normalize - normalize integer vector to 16.16 fixed-point unit vector
-// PSX: 0x8009DA64 - calls rmMag3, rmInverse16, then scales components.
+// PSX: 0x8009DA64 - calls rmMag3__Flll, rmInverse16, then rmV3Scale.
 // If magnitude is zero, returns {0x10000, 0, 0}.
 // Source: C:\chan\devsys\psx\radlib\SOURCE\MATH\VECTOR\VECT3D.CPP:22
 inline void rmV3Normalize(LVector* out, const LVector* in) {
-    s32 mag = (s32)rmMag3((f32)in->x, (f32)in->y, (f32)in->z);
+    s32 mag = rmMag3(in->x, in->y, in->z);
     if (mag == 0) {
         out->x = 0x10000; out->y = 0; out->z = 0;
         return;
     }
-    out->x = (s32)(((s64)in->x << 16) / mag);
-    out->y = (s32)(((s64)in->y << 16) / mag);
-    out->z = (s32)(((s64)in->z << 16) / mag);
+    s32 inv = rmInverse16(mag);
+    out->x = (s32)(((s64)in->x * inv) >> 16);
+    out->y = (s32)(((s64)in->y * inv) >> 16);
+    out->z = (s32)(((s64)in->z * inv) >> 16);
 }
 
 // rmV3Dot - integer 3D dot product
