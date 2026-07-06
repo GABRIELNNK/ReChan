@@ -2471,10 +2471,6 @@ void Director::ProcessCameraFunc() {
         case DirectorCameraCmd::DeleteAsyncAnim:
             if (camera) {
                 camera->DeleteAsyncAnim();
-                if (camera->HasActiveCameraAnim() && !camera->IsCameraAnimComplete()) {
-                    scriptPtr -= 2;
-                    field68 = 1;
-                }
             }
             break;
 

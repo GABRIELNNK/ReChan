@@ -210,7 +210,6 @@ private:
 
     // +468: camera anim (AnimStructure*, nullptr = use angle-based path in Update)
     AnimStructure* cameraAnim = nullptr;
-    bool pendingDeleteAsyncAnim = false;
 
     // +472: flags bitfield
     // bit 0: path-follow position mode (1 = skip position interpolation in Move)

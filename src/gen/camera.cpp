@@ -1134,9 +1134,6 @@ void Camera::UpdateAnim() {
                 reinterpret_cast<const CameraParamAnim*>(cameraAnim->GetAnimation()),
                 cameraAnim->GetCurrentFrame(),
                 &G_2ptcam);
-            if (pendingDeleteAsyncAnim && IsCameraAnimComplete()) {
-                DeleteAsyncAnim();
-            }
             return;
         }
 
@@ -1148,9 +1145,6 @@ void Camera::UpdateAnim() {
             LookAtTarget(&targetPos);
         }
 
-        if (pendingDeleteAsyncAnim && IsCameraAnimComplete()) {
-            DeleteAsyncAnim();
-        }
     }
 }
 
@@ -1184,7 +1178,6 @@ void Camera::LoadAsyncAnim(s32 animEnum) {
         }
         asyncAnim = nullptr;
     }
-    pendingDeleteAsyncAnim = false;
     asyncAnimEnum = (u16)animEnum;
 
     CamAnimCallback* cb = new CamAnimCallback(animEnum, &asyncAnim);
@@ -1214,8 +1207,6 @@ void Camera::PlayAsyncAnim() {
         delete cameraAnim;
         cameraAnim = nullptr;
     }
-    pendingDeleteAsyncAnim = false;
-
     // PSX: cameraAnim = new AnimStructure(3, asyncAnim, 4, nullptr, nullptr)
     cameraAnim = new AnimStructure(3, asyncAnim, 4, nullptr, nullptr);
     if (!cameraAnim) {
@@ -1236,12 +1227,6 @@ void Camera::PlayAsyncAnim() {
 void Camera::DeleteAsyncAnim() {
     MARKFUNCTION(0x8004A220);
 
-    if (cameraAnim && !IsCameraAnimComplete()) {
-        pendingDeleteAsyncAnim = true;
-        return;
-    }
-
-    pendingDeleteAsyncAnim = false;
     if (cameraAnim) {
         delete cameraAnim;
         cameraAnim = nullptr;
