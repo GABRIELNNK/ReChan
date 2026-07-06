@@ -265,7 +265,7 @@ ActionInput::ActionInput() {
     bindings[ACTION_JUMP] = { { KEY_SPACE, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::A, GpBtn::NONE, GpAxis::NONE, 0 };
     bindings[ACTION_PUNCH] = { { KEY_J, 0 }, { MouseBtn::NONE, MouseBtn::Left }, GpBtn::X, GpBtn::NONE, GpAxis::NONE, 0 };
     bindings[ACTION_KICK] = { { KEY_K, 0 }, { MouseBtn::NONE, MouseBtn::Right }, GpBtn::Y, GpBtn::NONE, GpAxis::NONE, 0 };
-    bindings[ACTION_GRAB] = { { KEY_L, 0 }, { MouseBtn::NONE, MouseBtn::Middle }, GpBtn::B, GpBtn::NONE, GpAxis::NONE, 0 };
+    bindings[ACTION_GRAB] = { { KEY_E, 0 }, { MouseBtn::NONE, MouseBtn::Middle }, GpBtn::B, GpBtn::NONE, GpAxis::NONE, 0 };
     bindings[ACTION_DIVE_ROLL] = { { KEY_LEFT_CONTROL, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::RB, GpBtn::NONE, GpAxis::NONE, 0 };
     bindings[ACTION_STRAFE] = { { KEY_LEFT_SHIFT, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::NONE, GpBtn::NONE, GpAxis::RTrigger, 0.5f };
     bindings[ACTION_COUNTER] = { { KEY_C, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::LB, GpBtn::NONE, GpAxis::NONE, 0 };
