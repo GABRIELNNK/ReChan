@@ -5203,6 +5203,7 @@ void Humanoid::_NISMode() {
     velocity = {};
     contactForce = {};
     maxFallDivisor = 0;
+    groundStandHeight = homePos.y;
 
     if (model) {
         HumanoidModel* humanoidModel = static_cast<HumanoidModel*>(model);
