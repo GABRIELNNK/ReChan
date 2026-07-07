@@ -77,6 +77,15 @@ static bool ShouldReceiveModelShadows(const Model* model, const Thing* owner) {
         && (owner->flags & 0x100u) == 0u
         && (model->modelFlags & 0x20u) == 0u;
 }
+
+// Per-instance ID for shadow self-exclusion
+static u32 GetShadowInstanceId(const Thing* owner) {
+    if (!owner) {
+        return 0;
+    }
+    const u32 id = static_cast<u32>(reinterpret_cast<uintptr_t>(owner));
+    return id != 0 ? id : 0xFFFFFFFFu;
+}
 #endif
 
 static const u8 kStreeMirrorSwapPairs[] = {
@@ -1721,6 +1730,7 @@ void SModel::Show(u32 flags) {
 #if MODERN_GRAPHICS
     if (ShadowCSM::IsCasterPrepass()) {
         if ((backPtr->flags & 0x80u) == 0u && (modelFlags & 0x10u) != 0u && (modelFlags & 0x20u) == 0u) {
+            p3d::context->SetShadowCasterInstanceId(GetShadowInstanceId(backPtr));
             ShadowCSM::DrawCasterIntoCascades(drawable, flags);
         }
 
@@ -1744,12 +1754,14 @@ void SModel::Show(u32 flags) {
     const bool receiveMappedShadows = ShouldReceiveModelShadows(this, backPtr);
     if (receiveMappedShadows) {
         p3d::context->SetReceiveShadows(true);
+        p3d::context->SetShadowReceiverInstanceId(GetShadowInstanceId(backPtr));
     }
 #endif
     drawable->Display(flags);
 #if MODERN_GRAPHICS
     if (receiveMappedShadows) {
         p3d::context->SetReceiveShadows(false);
+        p3d::context->SetShadowReceiverInstanceId(0);
     }
 #endif
 
@@ -2124,6 +2136,7 @@ void GModel::Show(u32 flags) {
 #if MODERN_GRAPHICS
     if (ShadowCSM::IsCasterPrepass()) {
         if ((modelFlags & 0x10u) != 0u && (modelFlags & 0x20u) == 0u) {
+            p3d::context->SetShadowCasterInstanceId(GetShadowInstanceId(backPtr));
             ShadowCSM::DrawCasterIntoCascades(drawable, displayFlags);
         }
 
@@ -2146,12 +2159,14 @@ void GModel::Show(u32 flags) {
     const bool receiveMappedShadows = ShouldReceiveModelShadows(this, backPtr);
     if (receiveMappedShadows) {
         p3d::context->SetReceiveShadows(true);
+        p3d::context->SetShadowReceiverInstanceId(GetShadowInstanceId(backPtr));
     }
 #endif
     drawable->Display(displayFlags);
 #if MODERN_GRAPHICS
     if (receiveMappedShadows) {
         p3d::context->SetReceiveShadows(false);
+        p3d::context->SetShadowReceiverInstanceId(0);
     }
 #endif
 
@@ -2297,6 +2312,7 @@ void EModel::Show(u32 flags) {
 #if MODERN_GRAPHICS
     if (ShadowCSM::IsCasterPrepass()) {
         if ((modelFlags & 0x10u) != 0u && (modelFlags & 0x20u) == 0u) {
+            p3d::context->SetShadowCasterInstanceId(GetShadowInstanceId(backPtr));
             ShadowCSM::DrawCasterIntoCascades(drawable, displayFlags);
         }
 
@@ -2319,12 +2335,14 @@ void EModel::Show(u32 flags) {
     const bool receiveMappedShadows = ShouldReceiveModelShadows(this, backPtr);
     if (receiveMappedShadows) {
         p3d::context->SetReceiveShadows(true);
+        p3d::context->SetShadowReceiverInstanceId(GetShadowInstanceId(backPtr));
     }
 #endif
     drawable->Display(displayFlags);
 #if MODERN_GRAPHICS
     if (receiveMappedShadows) {
         p3d::context->SetReceiveShadows(false);
+        p3d::context->SetShadowReceiverInstanceId(0);
     }
 #endif
 

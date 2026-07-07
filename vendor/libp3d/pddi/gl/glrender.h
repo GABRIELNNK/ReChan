@@ -59,6 +59,8 @@ public:
     u32 GetGLHandle() const { return handle; }
     unsigned int GetNativeHandle() const override { return handle; }
     bool SetRenderTargetStorage(int w, int h, pddiRenderTargetFormat format);
+    // R32UI storage for shadow-caster instance-ID render targets.
+    bool SetIdTargetStorage(int w, int h);
 
 private:
     u32 handle = 0;
@@ -113,18 +115,21 @@ private:
 
 class glRenderTarget : public pddiRenderTarget {
 public:
-    glRenderTarget(int width, int height, pddiRenderTargetFormat format);
+    glRenderTarget(int width, int height, pddiRenderTargetFormat format, bool withInstanceId = false);
     ~glRenderTarget() override;
 
     bool Resize(int width, int height) override;
     int GetWidth() const override { return width; }
     int GetHeight() const override { return height; }
     pddiTexture* GetTexture() const override { return texture; }
+    pddiTexture* GetIdTexture() const override { return idTexture; }
     bool IsValid() const override { return valid; }
     u32 GetFramebuffer() const { return framebuffer; }
 
 private:
     glTexture* texture = nullptr;
+    glTexture* idTexture = nullptr;
+    bool wantsIdAttachment = false;
     u32 framebuffer = 0;
     int width = 0;
     int height = 0;
@@ -251,7 +256,8 @@ public:
     void SetMultisampleEnabled(bool enable) override;
     void ResolveForOverlayPass() override;
     pddiRenderTarget* CreateRenderTarget(int width, int height,
-                                         pddiRenderTargetFormat format) override;
+                                         pddiRenderTargetFormat format,
+                                         bool withInstanceId = false) override;
     bool SetRenderTarget(pddiRenderTarget* target) override;
 
     void DrawFilledCircle(pddiBaseShader* shader,
@@ -290,7 +296,8 @@ public:
     void SetShadowCasterPass(bool enable, const Mat4& lightVP) override;
     void SetReceiveShadows(bool enable) override { receiveShadowsEnabled = enable; }
     void SetShadowCascades(pddiTexture* const* depthTextures, const Mat4* lightVP,
-                           const float* splits, const float* texelWorldSizes, int count) override;
+                           const float* splits, const float* texelWorldSizes,
+                           pddiTexture* const* idTextures, int count) override;
     void SetCameraWorldPos(float x, float y, float z) override {
         cameraWorldPos[0] = x; cameraWorldPos[1] = y; cameraWorldPos[2] = z;
     }
@@ -298,6 +305,9 @@ public:
         shadowLightDir[0] = x; shadowLightDir[1] = y; shadowLightDir[2] = z;
     }
     void SetShadowDebugMode(int mode) override { shadowDebugMode = mode; }
+    void SetShadowCasterInstanceId(u32 id) override { shadowCasterInstanceId = id; }
+    void SetShadowReceiverInstanceId(u32 id) override { shadowReceiverInstanceId = id; }
+    void ClearShadowCasterIdTarget() override;
 
     u32 Get3DProgram() const { return program3D; }
 
@@ -329,16 +339,22 @@ private:
     bool receiveShadowsEnabled = false;
     static constexpr s32 kShadowCascadeCount = 3;
     pddiTexture* shadowDepthTextures[kShadowCascadeCount] = {};
+    pddiTexture* shadowIdTextures[kShadowCascadeCount] = {};
+    u32 shadowCasterInstanceId = 0;
+    u32 shadowReceiverInstanceId = 0;
     Mat4 shadowLightVP[kShadowCascadeCount];
     float shadowCascadeSplits[kShadowCascadeCount] = {};
     float shadowCascadeBlendDistances[kShadowCascadeCount] = {};
     s32 shadowCascadeCount = 0;
     s32 shadowFilterQuality = 0;
-    float shadowBias[kShadowCascadeCount] = { 0.00080f, 0.00060f, 0.00044f };
-    static constexpr float shadowBiasLow[kShadowCascadeCount] = { 0.00120f, 0.00088f, 0.00064f };
-    static constexpr float shadowBiasMedium[kShadowCascadeCount] = { 0.00080f, 0.00060f, 0.00044f };
-    static constexpr float shadowBiasHigh[kShadowCascadeCount] = { 0.00050f, 0.00038f, 0.00028f };
-    static constexpr float shadowBiasVeryHigh[kShadowCascadeCount] = { 0.00032f, 0.00024f, 0.00018f };
+    // Raised versus the original tiers to compensate for the tightened
+    // normal-offset clamp in SampleCoveredCascade (grazing-angle faces now
+    // rely more on this constant/slope bias than on a large normal offset).
+    float shadowBias[kShadowCascadeCount] = { 0.00115f, 0.00085f, 0.00062f };
+    static constexpr float shadowBiasLow[kShadowCascadeCount] = { 0.00170f, 0.00125f, 0.00090f };
+    static constexpr float shadowBiasMedium[kShadowCascadeCount] = { 0.00115f, 0.00085f, 0.00062f };
+    static constexpr float shadowBiasHigh[kShadowCascadeCount] = { 0.00072f, 0.00055f, 0.00040f };
+    static constexpr float shadowBiasVeryHigh[kShadowCascadeCount] = { 0.00046f, 0.00035f, 0.00026f };
     float cameraWorldPos[3] = {};
     float shadowLightDir[3] = { 0.35f, -0.85f, 0.25f };
     float shadowTexelWorldSize[kShadowCascadeCount] = {};

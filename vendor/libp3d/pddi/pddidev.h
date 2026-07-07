@@ -26,6 +26,9 @@ public:
     virtual int GetHeight() const = 0;
     virtual pddiTexture* GetTexture() const = 0;
     virtual bool IsValid() const = 0;
+    // Companion instance-ID texture (R32UI), only non-null when the target
+    // was created with withInstanceId=true (see CreateRenderTarget).
+    virtual pddiTexture* GetIdTexture() const { return nullptr; }
 };
 
 struct pddiBatchVertex {
@@ -214,8 +217,12 @@ public:
 
     // Texture-backed off-screen rendering. Passing nullptr restores the
     // framebuffer and viewport that were active before the first target bind.
+    // withInstanceId requests a companion R32UI colour attachment alongside
+    // a depth-format target (see pddiRenderTarget::GetIdTexture), used for
+    // shadow-caster instance tagging; ignored for non-depth formats.
     virtual pddiRenderTarget* CreateRenderTarget(int width, int height,
-                                                  pddiRenderTargetFormat format) = 0;
+                                                  pddiRenderTargetFormat format,
+                                                  bool withInstanceId = false) = 0;
     virtual bool SetRenderTarget(pddiRenderTarget* target) = 0;
 
     virtual void DrawFilledCircle(pddiBaseShader* shader,
@@ -281,13 +288,31 @@ public:
     // the cascade depth textures/matrices/splits the main pass samples.
     virtual void SetShadowCasterPass(bool enable, const Mat4& lightVP) = 0;
     virtual void SetReceiveShadows(bool enable) = 0;
+    // idTextures (one per cascade, may be nullptr/contain nullptrs if the
+    // renderer doesn't support instance-tagged self-shadow exclusion) are
+    // R32UI textures written by the caster prepass via
+    // SetShadowCasterInstanceId; the main pass samples them to implement
+    // SetShadowReceiverInstanceId self-exclusion (see below).
     virtual void SetShadowCascades(pddiTexture* const* depthTextures, const Mat4* lightVP,
                                    const float* splits, const float* texelWorldSizes,
-                                   int count) = 0;
+                                   pddiTexture* const* idTextures, int count) = 0;
     // World-space camera position, used by the main pass to measure distance
     // for cascade selection (avoids relying on reversed-Z gl_FragCoord.z).
     virtual void SetCameraWorldPos(float x, float y, float z) = 0;
     virtual void SetShadowLightDirection(float x, float y, float z) = 0;
+    // Instance-ID shadow self-exclusion (MODERN_GRAPHICS). During the caster
+    // prepass, SetShadowCasterInstanceId(id) tags every subsequent depth-pass
+    // draw with `id` in a companion per-cascade ID render target (0 reserved
+    // for "no instance", e.g. static world geometry). During the main pass,
+    // SetShadowReceiverInstanceId(id) makes that instance ignore shadow
+    // samples whose caster ID equals its own `id`, so a humanoid/platform's
+    // own nearby limbs or segments don't self-shadow it, while every other
+    // caster still shadows it normally regardless of distance. Pass 0 to
+    // disable self-exclusion for a draw (e.g. static receivers).
+    virtual void SetShadowCasterInstanceId(u32 id) = 0;
+    virtual void SetShadowReceiverInstanceId(u32 id) = 0;
+    // Clears the currently-bound render target's instance-ID attachment to 0
+    virtual void ClearShadowCasterIdTarget() = 0;
     // Debug visualization for the DebugUI Shadows panel: 0=off,
     // 1=tint receivers by selected cascade index, 2=force-darken receivers.
     virtual void SetShadowDebugMode(int mode) = 0;

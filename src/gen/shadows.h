@@ -2,6 +2,7 @@
 
 #include "core.h"
 #include "p3d/p3dmath.h"
+#include <functional>
 
 class Model;
 
@@ -29,6 +30,9 @@ struct ModelFloorHeightState {
 void BeginModelShadowQueue();
 void FlushModelShadowQueue();
 void EndModelShadowQueue();
+
+void QueueLateEntityDraw(std::function<void()> drawFn);
+void FlushLateEntityDrawQueue();
 
 // PSX: ShadowShow (SHADOW.CPP:192, 0x800AED94)
 void ShadowShow(const LVector& center, LVector* points, s32 pointCount);

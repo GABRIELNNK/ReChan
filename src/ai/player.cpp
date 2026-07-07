@@ -374,6 +374,7 @@ void Player::Reset() {
     turnRate = 5500;
     SetDesiredMoveDirection(orientation.y);
     flags |= TF_DYNAMIC | TF_BIT5 | TF_BIT3;
+    flags &= ~0x80;
     // PSX: runSpeed set from humanoid data (GetHumanoidData). Default for Player.
     runSpeed = PLAYER_RUN_FORCE;
     field616 = 0;

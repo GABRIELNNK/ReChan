@@ -4,6 +4,7 @@
 #include "gen/database.h"
 #include "gen/geffect.h"
 #include "gen/particle.h"
+#include "gen/shadows.h"
 #include "ai/humanoid.h"
 #include "ai/obstacle_shared.h"
 
@@ -115,13 +116,15 @@ void Untouchable::Draw() {
         return;
     }
 
-    const Mat4 savedWorld = p3d::context->GetWorldMatrix();
-    Mat4 effectWorld;
-    LVector effectPos = { effectPosX, effectPosY, effectPosZ };
-    p3dBuildTransMatrix((f32)effectPos.x, (f32)effectPos.y, (f32)effectPos.z, effectWorld);
-    p3d::context->SetWorldMatrix(savedWorld * effectWorld);
-    particleMgr->Display();
-    p3d::context->SetWorldMatrix(savedWorld);
+    QueueLateEntityDraw([this]() {
+        const Mat4 savedWorld = p3d::context->GetWorldMatrix();
+        Mat4 effectWorld;
+        LVector effectPos = { effectPosX, effectPosY, effectPosZ };
+        p3dBuildTransMatrix((f32)effectPos.x, (f32)effectPos.y, (f32)effectPos.z, effectWorld);
+        p3d::context->SetWorldMatrix(effectWorld);
+        particleMgr->Display();
+        p3d::context->SetWorldMatrix(savedWorld);
+    });
 }
 
 void Untouchable::UpdatePosition() {

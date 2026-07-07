@@ -219,6 +219,7 @@ void ComEffect_FlushLateRenderQueue(s32 blockNum) {
     }
 
     s_lateComEffectQueue = std::move(remaining);
+
     s_lateComEffectQueueFlushing = false;
     s_lateComEffectQueueEnabled = savedEnabled;
     s_lateComEffectQueueBlock = savedBlock;
@@ -3519,18 +3520,6 @@ void ComEffect::Render(const LVector& pos, const LVector* scale, const LVector* 
         world.m[14] += static_cast<f32>(s_comEffectSeamOffset.z);
     }
 
-    // HACK: fix NISROOF1WIN
-    if (resourceHash == 0x046B83AEu && g_display && g_display->GetCamera()) {
-        const LVector& camPos = g_display->GetCamera()->GetPosition();
-        LVector toCam = { camPos.x - pos.x, camPos.y - pos.y, camPos.z - pos.z };
-        LVector dir = {};
-        rmV3Normalize(&dir, &toCam);
-        static constexpr f32 kTowardCameraNudge = 64.0f;
-        world.m[12] += FIX16_TO_FLOAT(dir.x) * kTowardCameraNudge;
-        world.m[13] += FIX16_TO_FLOAT(dir.y) * kTowardCameraNudge;
-        world.m[14] += FIX16_TO_FLOAT(dir.z) * kTowardCameraNudge;
-    }
-
     p3d::context->SetWorldMatrix(world);
 #if MODERN_GRAPHICS
     if (ShadowCSM::IsCasterPrepass()) {
@@ -3548,7 +3537,9 @@ void ComEffect::Render(const LVector& pos, const LVector* scale, const LVector* 
         p3d::context->SetReceiveShadows(true);
     }
 #endif
+    p3d::context->SetPolygonOffset(true, 16.0f, 32.0f);
     model->drawable->Display(flags);
+    p3d::context->SetPolygonOffset(false);
 #if MODERN_GRAPHICS
     if (receiveMappedShadows) {
         p3d::context->SetReceiveShadows(false);
@@ -3638,7 +3629,9 @@ void ComEffect::Render(const Mat4& worldMatrix, u32 flags) {
         p3d::context->SetReceiveShadows(true);
     }
 #endif
+    p3d::context->SetPolygonOffset(true, 16.0f, 32.0f);
     model->drawable->Display(flags);
+    p3d::context->SetPolygonOffset(false);
 #if MODERN_GRAPHICS
     if (receiveMappedShadows) {
         p3d::context->SetReceiveShadows(false);

@@ -4093,6 +4093,7 @@ void World::DrawEverythingHandler(const LVector* playerPos) {
 
             // Flush queued model shadows after block geometry.
             FlushModelShadowQueue();
+            FlushLateEntityDrawQueue();
         }
     }
 

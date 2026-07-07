@@ -120,7 +120,12 @@ uniform int uRealTextureMode;
 uniform sampler2D uRealTex;
 uniform vec2 uRealTexOffset;
 uniform vec2 uRealTexSize;
+// Instance tag for self-shadow exclusion (see uReceiverInstanceId in the main
+// pass shader); 0 for static world geometry that should never be excluded.
+uniform uint uCasterInstanceId;
+layout(location=0) out uint oCasterId;
 void main() {
+    oCasterId = uCasterInstanceId;
     if (uRealTextureMode != 0 && uHasUV != 0) {
         vec2 puv = mod(vShadowUV + vec2(256.0), vec2(256.0));
         vec2 ruv = (puv - uRealTexOffset) / uRealTexSize;
@@ -217,6 +222,10 @@ uniform int uShadowFilterQuality;
 uniform float uShadowBias[3];
 uniform float uShadowTexelWorldSize[3];
 uniform vec3 uShadowLightDir;
+uniform usampler2D uShadowIdMap0;
+uniform usampler2D uShadowIdMap1;
+uniform usampler2D uShadowIdMap2;
+uniform uint uReceiverInstanceId;
 // Debug visualization (DebugUI Shadows panel): 0=off, 1=tint receivers by
 // selected cascade index, 2=force-darken every receiver fragment.
 uniform int uShadowDebugMode;
@@ -253,7 +262,16 @@ ivec2 ShadowTextureSize(int cascade) {
     return textureSize(uShadowMap2, 0);
 }
 
+uint SampleShadowCasterId(int cascade, vec2 uv) {
+    if (cascade == 0) return texture(uShadowIdMap0, uv).r;
+    if (cascade == 1) return texture(uShadowIdMap1, uv).r;
+    return texture(uShadowIdMap2, uv).r;
+}
+
 float SampleShadowLit(int cascade, vec2 uv, float compareDepth) {
+    if (uReceiverInstanceId != 0u && SampleShadowCasterId(cascade, uv) == uReceiverInstanceId) {
+        return 1.0;
+    }
     if (cascade == 0) return texture(uShadowMap0, vec3(uv, compareDepth));
     if (cascade == 1) return texture(uShadowMap1, vec3(uv, compareDepth));
     return texture(uShadowMap2, vec3(uv, compareDepth));
@@ -298,8 +316,8 @@ float SampleShadowCascade(int cascade, vec4 lightClip) {
     ivec2 mapSize = ShadowTextureSize(cascade);
     vec2 texel = 1.0 / vec2(max(mapSize.x, 1), max(mapSize.y, 1));
     float screenDepthSlope = abs(dFdx(receiverDepth)) + abs(dFdy(receiverDepth));
-    float slopeBias = min(screenDepthSlope * 0.45, 0.00045);
-    float bias = min(uShadowBias[cascade] + slopeBias, 0.0018);
+    float slopeBias = min(screenDepthSlope * 0.6, 0.00065);
+    float bias = min(uShadowBias[cascade] + slopeBias, 0.0026);
     vec2 depthGradient = ReceiverPlaneDepthGradient(uv, receiverDepth);
     float diskRadiusTexels = uShadowFilterQuality == 0 ? 2.6
                             : uShadowFilterQuality == 1 ? 1.6
@@ -312,16 +330,21 @@ float SampleShadowCascade(int cascade, vec4 lightClip) {
     float lit = 0.0;
     for (int i = 0; i < 8; i++) {
         vec2 offset = (rot * kPoissonDisk[i]) * diskRadiusTexels * texel;
-        float tapPlaneBias = abs(clamp(dot(depthGradient, offset), -0.00045, 0.00045));
-        float tapBias = min(bias + tapPlaneBias * 0.5, 0.0022);
+        float tapPlaneBias = abs(clamp(dot(depthGradient, offset), -0.00065, 0.00065));
+        float tapBias = min(bias + tapPlaneBias * 0.5, 0.0032);
         lit += SampleShadowLit(cascade, uv + offset, receiverDepth + tapBias);
     }
     return mix(0.45, 1.0, lit / 8.0);
 }
 
 float SampleCoveredCascade(int cascade, vec3 shadowNormal, out float coverage) {
+    // Clamped to a narrow range so adjacent low-poly facets (which can have
+    // sharply different NdotL) don't get wildly different offset magnitudes --
+    // that per-facet jump in offset was the main source of self-shadow
+    // banding on faceted PS1-era meshes. Grazing angles lean on the
+    // constant/slope depth bias below instead of a large normal offset.
     float NdotL = max(dot(shadowNormal, uShadowLightDir), 0.15);
-    float offsetScale = clamp(1.0 / NdotL, 0.45, 4.0);
+    float offsetScale = clamp(1.0 / NdotL, 0.6, 1.8);
     vec3 offsetPos = vWorldPos + shadowNormal * uShadowTexelWorldSize[cascade] * offsetScale;
     vec4 lightClip = uLightVP[cascade] * vec4(offsetPos, 1.0);
     coverage = ShadowCascadeCoverage(cascade, lightClip);
@@ -937,22 +960,47 @@ bool glTexture::SetRenderTargetStorage(int w, int h, pddiRenderTargetFormat form
     return handle != 0;
 }
 
-glRenderTarget::glRenderTarget(int w, int h, pddiRenderTargetFormat targetFormat)
-    : format(targetFormat) {
+bool glTexture::SetIdTargetStorage(int w, int h) {
+    if (w <= 0 || h <= 0) return false;
+    width = w;
+    height = h;
+    bpp = 32;
+    alphaDepth = 0;
+    if (handle) glDeleteTextures(1, &handle);
+    glGenTextures(1, &handle);
+    glBindTexture(GL_TEXTURE_2D, handle);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R32UI, w, h, 0, GL_RED_INTEGER, GL_UNSIGNED_INT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    filterMode = PDDI_FILTER_NONE;
+    return handle != 0;
+}
+
+glRenderTarget::glRenderTarget(int w, int h, pddiRenderTargetFormat targetFormat, bool withInstanceId)
+    : format(targetFormat), wantsIdAttachment(withInstanceId) {
     Resize(w, h);
 }
 
 glRenderTarget::~glRenderTarget() {
     if (framebuffer) glDeleteFramebuffers(1, &framebuffer);
     if (texture) texture->Release();
+    if (idTexture) idTexture->Release();
 }
 
 bool glRenderTarget::Resize(int w, int h) {
     if (w <= 0 || h <= 0) return false;
-    if (valid && framebuffer && texture && width == w && height == h) return true;
+    const bool needsId = wantsIdAttachment && IsDepthRenderTargetFormat(format);
+    if (valid && framebuffer && texture && (!needsId || idTexture) && width == w && height == h) return true;
     valid = false;
     if (!texture) texture = new glTexture();
     if (!texture->SetRenderTargetStorage(w, h, format)) return false;
+    if (needsId) {
+        if (!idTexture) idTexture = new glTexture();
+        if (!idTexture->SetIdTargetStorage(w, h)) return false;
+    }
     if (!framebuffer) glGenFramebuffers(1, &framebuffer);
 
     GLint previous = 0;
@@ -961,8 +1009,17 @@ bool glRenderTarget::Resize(int w, int h) {
     if (IsDepthRenderTargetFormat(format)) {
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D,
                                texture->GetGLHandle(), 0);
-        glDrawBuffer(GL_NONE);
-        glReadBuffer(GL_NONE);
+        if (needsId) {
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                                   idTexture->GetGLHandle(), 0);
+            static const GLenum kDrawBuffers[1] = { GL_COLOR_ATTACHMENT0 };
+            glDrawBuffers(1, kDrawBuffers);
+            glReadBuffer(GL_NONE);
+        }
+        else {
+            glDrawBuffer(GL_NONE);
+            glReadBuffer(GL_NONE);
+        }
     }
     else {
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
@@ -2147,8 +2204,9 @@ void glContext::ResolveForOverlayPass() {
 }
 
 pddiRenderTarget* glContext::CreateRenderTarget(int width, int height,
-                                                 pddiRenderTargetFormat format) {
-    glRenderTarget* target = new glRenderTarget(width, height, format);
+                                                 pddiRenderTargetFormat format,
+                                                 bool withInstanceId) {
+    glRenderTarget* target = new glRenderTarget(width, height, format, withInstanceId);
     if (!target->IsValid()) {
         target->Release();
         return nullptr;
@@ -2183,6 +2241,14 @@ bool glContext::SetRenderTarget(pddiRenderTarget* target) {
     }
     stateDirty = true;
     return true;
+}
+
+void glContext::ClearShadowCasterIdTarget() {
+    if (!activeRenderTarget || !activeRenderTarget->GetIdTexture()) {
+        return;
+    }
+    static const GLuint kZeroId[4] = { 0, 0, 0, 0 };
+    glClearBufferuiv(GL_COLOR, 0, kZeroId);
 }
 
 void glContext::UpdateMultisampleState() {
@@ -2602,11 +2668,13 @@ void glContext::SetShadowCasterPass(bool enable, const Mat4& lightVP) {
 }
 
 void glContext::SetShadowCascades(pddiTexture* const* depthTextures, const Mat4* lightVPs,
-                                  const float* splits, const float* texelWorldSizes, int count) {
+                                  const float* splits, const float* texelWorldSizes,
+                                  pddiTexture* const* idTextures, int count) {
     shadowCascadeCount = (count < 0) ? 0 : (count > kShadowCascadeCount ? kShadowCascadeCount : count);
     shadowFilterQuality = 0;
     for (s32 i = 0; i < shadowCascadeCount; i++) {
         shadowDepthTextures[i] = depthTextures[i];
+        shadowIdTextures[i] = idTextures ? idTextures[i] : nullptr;
         shadowLightVP[i] = lightVPs[i];
         shadowCascadeSplits[i] = splits[i];
         shadowTexelWorldSize[i] = texelWorldSizes ? texelWorldSizes[i] : 0.0f;
@@ -2631,6 +2699,7 @@ void glContext::SetShadowCascades(pddiTexture* const* depthTextures, const Mat4*
     }
     for (s32 i = shadowCascadeCount; i < kShadowCascadeCount; i++) {
         shadowDepthTextures[i] = nullptr;
+        shadowIdTextures[i] = nullptr;
         shadowCascadeSplits[i] = 0.0f;
         shadowCascadeBlendDistances[i] = 0.0f;
         shadowTexelWorldSize[i] = 0.0f;
@@ -2687,6 +2756,8 @@ void glContext::DrawPrimBuffer(pddiPrimBuffer* buffer, u32 indexOffset, u32 inde
         Mat4 lightMvp = shadowCasterLightVP * worldMatrix;
         glUniformMatrix4fv(glGetUniformLocation(shadowDepthProgram, "uLightMVP"),
                            1, GL_FALSE, lightMvp.Data());
+        glUniform1ui(glGetUniformLocation(shadowDepthProgram, "uCasterInstanceId"),
+                     shadowCasterInstanceId);
 
         auto* glBufShadow = static_cast<glPrimBuffer*>(buffer);
         const u32 vertexFormat = glBufShadow->GetVertexFormat();
@@ -2775,14 +2846,23 @@ void glContext::DrawPrimBuffer(pddiPrimBuffer* buffer, u32 indexOffset, u32 inde
                      shadowCascadeBlendDistances);
         glUniform1fv(glGetUniformLocation(program3D, "uShadowTexelWorldSize[0]"), kShadowCascadeCount,
                      shadowTexelWorldSize);
+        glUniform1ui(glGetUniformLocation(program3D, "uReceiverInstanceId"), shadowReceiverInstanceId);
         static const char* kShadowSamplerNames[kShadowCascadeCount] = {
             "uShadowMap0", "uShadowMap1", "uShadowMap2"
+        };
+        static const char* kShadowIdSamplerNames[kShadowCascadeCount] = {
+            "uShadowIdMap0", "uShadowIdMap1", "uShadowIdMap2"
         };
         for (s32 i = 0; i < shadowCascadeCount; i++) {
             if (!shadowDepthTextures[i]) continue;
             static_cast<glTexture*>(shadowDepthTextures[i])->Bind(2 + i);
             glBindSampler(2 + i, shadowCompareSampler);
             glUniform1i(glGetUniformLocation(program3D, kShadowSamplerNames[i]), 2 + i);
+            if (shadowIdTextures[i]) {
+                static_cast<glTexture*>(shadowIdTextures[i])->Bind(5 + i);
+                glBindSampler(5 + i, 0);
+                glUniform1i(glGetUniformLocation(program3D, kShadowIdSamplerNames[i]), 5 + i);
+            }
         }
     }
 

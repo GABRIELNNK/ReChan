@@ -214,8 +214,12 @@ s32 GEffect::CreateSound() {
 
     const bool hasParticleSystem = (particleMgr && particleMgr->GetSystem());
     if (hasParticleSystem) {
+        if (particleSound) {
+            return 0;
+        }
+
         CSound* createdParticleSound = nullptr;
-        s32 result = CSoundFactory::CreateObject(10000, &createdParticleSound);
+        s32 result = CSoundFactory::CreateObject(10000, &createdParticleSound, nameCRC);
         if (result >= 0 && createdParticleSound) {
             particleSound = static_cast<CParticleEffectSound*>(createdParticleSound);
             return particleSound->Initialize(posRef);
@@ -228,8 +232,12 @@ s32 GEffect::CreateSound() {
         return 0;
     }
 
+    if (worldSound) {
+        return 0;
+    }
+
     CSound* createdSound = nullptr;
-    const s32 result = CSoundFactory::CreateObject(10010, &createdSound);
+    const s32 result = CSoundFactory::CreateObject(10010, &createdSound, nameCRC);
     if (result >= 0 && createdSound) {
         worldSound = static_cast<CWorldEffectSound*>(createdSound);
         return worldSound->Initialize(posRef);
@@ -448,6 +456,11 @@ Effects* GEffect_Create(u32 effectHash,
         if (!particleSystem) {
             return nullptr;
         }
+    }
+
+    const s32 effectType = comEffect ? 4 : 3;
+    if (Effects_Find(effectType, effectHash)) {
+        return nullptr;
     }
 
     GEffect* effect = static_cast<GEffect*>(g_genericEffectPool.head);

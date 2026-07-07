@@ -139,7 +139,8 @@ bool EnsureTargets(s32 resolution, s32 activeCascadeCount) {
 
     for (s32 i = 0; i < activeCascadeCount; i++) {
         s_cascadeTargets[i] = p3d::context->CreateRenderTarget(resolution, resolution,
-                                                               kCascadeDepthFormat);
+                                                               kCascadeDepthFormat,
+                                                               /*withInstanceId=*/true);
         if (!s_cascadeTargets[i]) {
             ShadowCSM::Shutdown();
             return false;
@@ -377,7 +378,7 @@ void ShadowCSM::SetQuality(ShadowQuality quality) {
     if (s_quality == SHADOW_QUALITY_OFF) {
         Shutdown();
         if (p3d::context) {
-            p3d::context->SetShadowCascades(nullptr, nullptr, nullptr, nullptr, 0);
+            p3d::context->SetShadowCascades(nullptr, nullptr, nullptr, nullptr, nullptr, 0);
             p3d::context->SetReceiveShadows(false);
             p3d::context->SetShadowCasterPass(false, Mat4());
         }
@@ -409,7 +410,7 @@ void ShadowCSM::BeginFrame() {
 
     if (s_quality == SHADOW_QUALITY_OFF) {
         if (p3d::context) {
-            p3d::context->SetShadowCascades(nullptr, nullptr, nullptr, nullptr, 0);
+            p3d::context->SetShadowCascades(nullptr, nullptr, nullptr, nullptr, nullptr, 0);
             p3d::context->SetReceiveShadows(false);
             p3d::context->SetShadowCasterPass(false, Mat4());
         }
@@ -542,15 +543,18 @@ void ShadowCSM::BeginFrame() {
         // are otherwise silently no-ops if some earlier alpha-blended draw left it disabled.
         p3d::context->SetBlendMode(PDDI_BLEND_NONE);
         p3d::context->Clear(PDDI_BUFFER_DEPTH);
+        p3d::context->ClearShadowCasterIdTarget();
         p3d::context->SetRenderTarget(nullptr);
     }
 
     pddiTexture* depthTextures[kCascadeCount];
+    pddiTexture* idTextures[kCascadeCount];
     for (s32 i = 0; i < activeCascadeCount; i++) {
         depthTextures[i] = s_cascadeTargets[i]->GetTexture();
+        idTextures[i] = s_cascadeTargets[i]->GetIdTexture();
     }
 
-    p3d::context->SetShadowCascades(depthTextures, s_lightVP, splits, texelWorldSizes, activeCascadeCount);
+    p3d::context->SetShadowCascades(depthTextures, s_lightVP, splits, texelWorldSizes, idTextures, activeCascadeCount);
     p3d::context->SetCameraWorldPos(camX, camY, camZ);
     // uShadowLightDir wants the direction FROM a surface TOWARD the light;
     // lightDir here is the direction the light travels (surface-ward), so negate it.
@@ -725,6 +729,8 @@ void ShadowCSM::DrawBlockCasterIntoCascades(Block* block, const LVector* drawPos
     blockWorld.SetTranslation(static_cast<f32>(drawPos->x),
                               static_cast<f32>(drawPos->y),
                               static_cast<f32>(drawPos->z));
+
+    p3d::context->SetShadowCasterInstanceId(0);
 
     for (s32 i = 0; i < s_activeCascadeCount; i++) {
         p3d::context->SetRenderTarget(s_cascadeTargets[i]);

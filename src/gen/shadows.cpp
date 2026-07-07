@@ -212,7 +212,9 @@ void ShadowShow(const LVector& center, LVector* points, s32 pointCount) {
     p3d::context->EnableZBuffer(true);
     p3d::context->SetCullMode(PDDI_CULL_NONE);
     p3d::context->SetBlendMode(PDDI_BLEND_SUBTRACT);
+    p3d::context->SetPolygonOffset(true, 16.0f, 32.0f);
     p3d::context->DrawPrimBuffer(buffer);
+    p3d::context->SetPolygonOffset(false);
     p3d::context->SetBlendMode(PDDI_BLEND_NONE);
     p3d::context->SetWorldMatrix(savedWorld);
 
@@ -392,4 +394,24 @@ void EndModelShadowQueue() {
 
     s_modelShadowQueueActive = false;
     s_modelShadowQueue.clear();
+}
+
+static std::vector<std::function<void()>> s_lateEntityDrawQueue;
+
+void QueueLateEntityDraw(std::function<void()> drawFn) {
+    s_lateEntityDrawQueue.push_back(std::move(drawFn));
+}
+
+void FlushLateEntityDrawQueue() {
+    if (s_lateEntityDrawQueue.empty()) {
+        return;
+    }
+
+    std::vector<std::function<void()>> pending = std::move(s_lateEntityDrawQueue);
+    s_lateEntityDrawQueue.clear();
+    for (auto& drawFn : pending) {
+        if (drawFn) {
+            drawFn();
+        }
+    }
 }
