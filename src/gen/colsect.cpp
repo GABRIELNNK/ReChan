@@ -448,12 +448,11 @@ s32 CollisionSector::FillWorldWallArray(
         CollisionSector* sector = &g_collisionSectors[sectorIdx];
         if (sector->status == -1) continue;
 
-        // 6-axis AABB overlap test (sector bounds vs search box) (except Y which PSX ignores!)
+        // 6-axis AABB overlap test (sector bounds vs search box)
         if (searchMax.x < sector->boundsMin.x) continue;
         if (sector->boundsMax.x < searchMin.x) continue;
-        // PSX omits Y overlap checks in FillWorldWallArray so LedgePrototype's degenerate Y bounds still pass
-        // if (searchMax.y < sector->boundsMin.y) continue;
-        // if (sector->boundsMax.y < searchMin.y) continue;
+        if (searchMax.y < sector->boundsMin.y) continue;
+        if (sector->boundsMax.y < searchMin.y) continue;
         if (searchMax.z < sector->boundsMin.z) continue;
         if (sector->boundsMax.z < searchMin.z) continue;
 
