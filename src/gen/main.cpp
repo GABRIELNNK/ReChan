@@ -18,6 +18,7 @@
 #include "gen/game.h"
 #include "gen/time.h"
 #include "gen/display.h"
+#include "snd/rsevent.h"
 #include "extra/fecustommenumgr.h"
 #include "extra/assetexporter.h"
 #include "extra/gltfloader.h"
@@ -311,6 +312,11 @@ int main(int argc, char** argv) {
         else {
             rDoTaskList(&rMainTaskList, static_cast<u32>(rFrameCount60));
         }
+
+        // Tick level ambience every frame here (not via an rMainTaskList RTASK):
+        // MenuFade resets rFrameCount60, which stalls task scheduling across
+        // level transitions. This runs in every non-blocking state.
+        jcsUpdateAmbience();
 
         g_time->WaitForFrameEnd(frameStart);
 

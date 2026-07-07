@@ -3,6 +3,7 @@
 #include "snd/sound.h"
 #include "snd/soundid.h"
 #include "snd/rsdworld.h"
+#include "snd/ambience.h"
 #include "snd/adpcm.h"
 #include "radlib/rtask.h"
 #include "p3d/p3dmath.h"
@@ -413,6 +414,19 @@ static s32 g_dialogResultStatus = 0;
 static bool g_dialogStatusUpdateInProgress = false;
 // PSX gp+1188: task returned by jcsInitializeDialog__Fv.
 static RTASK* g_dialogTask = nullptr;
+
+// PSX gp+740: the rsdAmbiance object. PSX services it via an RTASK on
+// rMainTaskList; on PC that scheduling is unreliable because MenuFade resets
+// rFrameCount60 (game.cpp) without re-basing the task list, stalling the task
+// for a long window after every level transition. Instead we tick it directly
+// from the frame loops (jcsUpdateAmbience, called from main.cpp + the menu-fade
+// sub-loop) so its fades/crossfades advance every frame in every game state.
+static Ambiance g_ambiance;
+
+// Called once per frame from the main loop and the blocking menu-fade loop.
+void jcsUpdateAmbience() {
+    g_ambiance.Update();
+}
 
 static bool DialogTraceEnabled() {
     static const bool enabled = std::getenv("RECHAN_DIALOG_TRACE") != nullptr;
@@ -1699,11 +1713,44 @@ static const char* s_musicTable[] = {
 };
 static constexpr s32 MUSIC_TABLE_COUNT = 25;
 
+// PSX: per-location ambience file from LocInfo (@0x800D6588: flag word[2],
+// inline name word[3]). Locations 0-21 all have an ambient bed; 22-24
+// (title/gameover/movie) have none. (g_ambiance itself is defined earlier.)
+static const char* s_ambienceTable[MUSIC_TABLE_COUNT] = {
+    "SNDAMB1", // 0: Chinatown 1
+    "SNDAMB1", // 1: Chinatown 2
+    "SNDAMB1", // 2: Chinatown 3
+    "SNDAMB1", // 3: Chinatown boss
+    "SNDAMB2", // 4: Waterfront 1
+    "SNDAMB2", // 5: Waterfront 2
+    "SNDAMB2", // 6: Waterfront 3
+    "SNDAMB2", // 7: Waterfront boss
+    "SNDAMB3", // 8: Sewer 1
+    "SNDAMB3", // 9: Sewer 2
+    "SNDAMB3", // 10: Sewer 3
+    "SNDAMB3", // 11: Sewer boss
+    "SNDAMB4", // 12: Rooftop 1
+    "SNDAMB4", // 13: Rooftop 2
+    "SNDAMB4", // 14: Rooftop 3
+    "SNDAMB4", // 15: Rooftop boss
+    "SNDAMB5", // 16: Factory 1
+    "SNDAMB5", // 17: Factory 2
+    "SNDAMB5", // 18: Factory 3
+    "SNDAMB5", // 19: Factory boss
+    "SNDAMB6", // 20: Temple
+    "SNDAMB7", // 21: Destination select
+    nullptr,   // 22: Title
+    nullptr,   // 23: Game over
+    nullptr,   // 24: Movie
+};
+
 // PSX: CInteractiveMusicController::Think (MSCCTRLR.CPP:56, 0x80082960)
 // Block-based FAG song switching. Decoded from PSX binary: location 9 (SEWER2)
 // uses blocks 4-34 for song 1 (action), everything else song 0 (calm).
 // Other locations with interactive music decoded similarly.
 void InteractiveMusicControllerThink() {
+    // NOTE: ambience is ticked by jcsUpdateAmbience() from the frame loops, not
+    // here - this Think only runs during gameplay.
     if (!g_sound || !g_blockManager || !Player::s_player) return;
     if (g_deferLevelBeginMusic) return;
 
@@ -1794,12 +1841,14 @@ s32 jcsHandleControlEvent(s32 event, s32 param1, s32 param2, s32 param3) {
             LOG("[rsEvent] Terminate");
             jcsTerminateDialog();
             rsdWorld::StopAllPersistentSounds();
+            g_ambiance.Close();
             g_sound->StopMusic();
             break;
 
         case RS_UNLOAD_LEVEL: // 3 - stop all sounds
             LOG("[rsEvent] UnloadLevel - stop all");
             rsdWorld::StopAllPersistentSounds();
+            g_ambiance.Stop();
             g_sound->StopMusic();
             break;
 
@@ -1815,12 +1864,23 @@ s32 jcsHandleControlEvent(s32 event, s32 param1, s32 param2, s32 param3) {
             if (EnsureDialogDataLoaded()) {
                 ResetDialogHeaderState();
             }
+            // PSX: jcsSetSoundLocation opens the per-location ambient bed
+            // (rsdAmbiance::Open) when LocInfo[loc][2] is set.
+            g_ambiance.Close();
+            if (param1 >= 0 && param1 < MUSIC_TABLE_COUNT && s_ambienceTable[param1]) {
+                g_ambiance.Open(s_ambienceTable[param1]);
+            }
             break;
 
         case RS_LEVEL_BEGIN: // 5 - start music for current location
         {
             g_pauseFlag = 0;
             g_muteFlag = 0;
+            // PSX: jcsStartSound starts the ambient bed alongside music. Use
+            // FadeIn so it ramps up from silence on level entry (rsdAmbiance
+            // starts, then the transition fades the engine in) rather than
+            // popping in at full volume.
+            g_ambiance.FadeIn(1500);
             if (g_deferLevelBeginMusic) {
                 // Decode now, while still hidden behind the loading screen -
                 // only the (cheap) actual playback start is deferred to the
@@ -1944,10 +2004,13 @@ s32 jcsHandleControlEvent(s32 event, s32 param1, s32 param2, s32 param3) {
 
         case 20: // jcsSetAmbienceSpace + optional crossfade
             LOG("[rsEvent] SetAmbienceSpace(%d, crossfade=%d)", param1, param2);
-            // PSX: stores ambienceSpace to gp[0x2E8], then calls
-            // rsdAmbiance::SetSpace if sound state==2 and ambiance object exists.
-            // PC: store space for use by InteractiveMusicControllerThink.
+            // PSX: jcsSetAmbienceCrossFade(dur) then jcsSetAmbienceSpace(space)
+            // -> rsdAmbiance::SetCrossFadeDuration + SetSpace.
             g_currentAmbienceSpace = param1;
+            if (param2 > 0) {
+                g_ambiance.SetCrossFadeDuration(param2);
+            }
+            g_ambiance.SetSpace(param1);
             break;
 
         case 21: // jcsSetListener(playerPos, cameraData) - 3D audio listener
@@ -1990,7 +2053,10 @@ void jcsFadeInEngine(u32 flags) {
         g_sound->UnmuteMusic();
     }
 
-    // PSX: bit 2 -> rsdAmbiance::FadeIn (1500ms) -- requires rsdAmbiance subsystem
+    // PSX: bit 2 -> rsdAmbiance::FadeIn (1500ms)
+    if (flags & 0x04) {
+        g_ambiance.FadeIn(1500);
+    }
 
     if (flags & 0x01) {
         ResumeDialogTimeout(0);
@@ -2019,7 +2085,10 @@ void jcsFadeOutEngine(u32 flags) {
         g_sound->MuteMusic();
     }
 
-    // PSX: bit 2 -> rsdAmbiance::FadeOut(1500) -- requires rsdAmbiance subsystem
+    // PSX: bit 2 -> rsdAmbiance::FadeOut(1500)
+    if (flags & 0x04) {
+        g_ambiance.FadeOut(1500);
+    }
 
     if (flags & 0x01) {
         if (g_dialogStatus >= DialogStatus_PlayingPrimary

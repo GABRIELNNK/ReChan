@@ -53,6 +53,11 @@ extern bool g_deferLevelBeginMusic;
 // Runs per-frame during gameplay; switches FAG song section based on player block.
 void InteractiveMusicControllerThink();
 
+// Ticks the level ambience (rsdAmbiance) fades/crossfades. Must be called once
+// per frame in every game state - from the main loop and the blocking
+// menu-fade/loading sub-loops - so fades advance during menus and transitions.
+void jcsUpdateAmbience();
+
 // Returns non-zero if the dialog handle is still valid.
 s32 jcsValidateHandle(s32 handle);
 

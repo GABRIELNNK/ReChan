@@ -560,6 +560,9 @@ static bool PumpMenuFadeFrame(f64 frameStart) {
     ++rFrameCount;
     ++rFrameCount60;
     rDoTaskList(&rMainTaskList, static_cast<u32>(rFrameCount60));
+    // Keep ambience fades advancing during the blocking menu-fade / loading
+    // sub-loop (the main loop is stalled here, so its tick doesn't run).
+    jcsUpdateAmbience();
     if (g_time) {
         g_time->WaitForFrameEnd(frameStart);
     }
