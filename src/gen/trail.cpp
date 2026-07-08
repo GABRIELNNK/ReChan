@@ -258,7 +258,10 @@ Trails::Trails(s32 maxTrails)
 Trails::~Trails() {
     MARKFUNCTION(0x80079778);
 
-    if (!activeInEffects) {
+    if (activeInEffects) {
+        Effects_RemoveEffect(this);
+    }
+    else {
         g_trailsPoolList.RemNode(this);
     }
 
