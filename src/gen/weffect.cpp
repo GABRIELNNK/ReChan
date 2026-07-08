@@ -3537,7 +3537,7 @@ void ComEffect::Render(const LVector& pos, const LVector* scale, const LVector* 
         p3d::context->SetReceiveShadows(true);
     }
 #endif
-    p3d::context->SetPolygonOffset(true, 16.0f, 32.0f);
+    p3d::context->SetPolygonOffset(true, 1.0f, 24.0f);
     model->drawable->Display(flags);
     p3d::context->SetPolygonOffset(false);
 #if MODERN_GRAPHICS
@@ -3629,7 +3629,7 @@ void ComEffect::Render(const Mat4& worldMatrix, u32 flags) {
         p3d::context->SetReceiveShadows(true);
     }
 #endif
-    p3d::context->SetPolygonOffset(true, 16.0f, 32.0f);
+    p3d::context->SetPolygonOffset(true, 1.0f, 24.0f);
     model->drawable->Display(flags);
     p3d::context->SetPolygonOffset(false);
 #if MODERN_GRAPHICS
