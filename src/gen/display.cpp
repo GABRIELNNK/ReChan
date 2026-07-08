@@ -288,7 +288,9 @@ void Display::BeginFrame() {
         }
         f32 tanHalfX;
 #if DIRECTOR_CUTSCENE_VERT_FOV
-        if (theCamera->HasActiveCameraAnim()) {
+        const bool inDirectedShot = theCamera->HasActiveCameraAnim() ||
+            !theCamera->HasCollisionEnabled();
+        if (inDirectedShot) {
             const f32 intendedHalfX = tanHalfY * DEFAULT_ASPECT_RATIO;
             const f32 intendedHalfY = intendedHalfX / TARGET_ASPECT_RATIO;
             if (cameraAspect > TARGET_ASPECT_RATIO) {

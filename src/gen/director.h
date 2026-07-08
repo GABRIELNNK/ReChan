@@ -393,6 +393,12 @@ public:
     f64 wsLastTimeSec = -1.0;
     f32 wsAccumSec = 0.0f;
 
+    // PC-only: while set, the next widescreen bar/alpha ramp-in snaps instantly
+    // instead of animating (used to avoid a redundant slide/fade-in right after
+    // a loading screen). Expires on its own after a short window so it never
+    // suppresses an unrelated later cutscene's entrance.
+    f64 wsSkipEnterAnimUntil = -1.0;
+
     s32 field68 = 0;                // +68: script loop blocked flag
     s32 enableInput = 0;            // +72: player input enabled (1=yes, 0=NIS disabled)
 
@@ -435,6 +441,7 @@ public:
     s32 TimerStep();
     void Loop();
     void SetDesiredWideScreen();
+    void SkipNextWideScreenEnterAnim();
     void ProcessEdison();
     void ProcessModelFunc();
     void ProcessCameraFunc();

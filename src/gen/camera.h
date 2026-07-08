@@ -60,6 +60,7 @@ public:
     LVector GetCameraVector() const;
     bool HasAsyncAnimLoaded() const { return asyncAnim != nullptr; }
     bool HasActiveCameraAnim() const { return cameraAnim != nullptr; }
+    bool HasCollisionEnabled() const { return hasCollision != 0; }
     bool IsCameraAnimComplete() const;
 
     // Accessors

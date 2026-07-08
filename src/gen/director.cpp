@@ -3312,6 +3312,14 @@ void Director::ProcessDynamicAnimFunc() {
     // PSX: unknown dynamic animation tokens are ignored.
 }
 
+// PC-only. Call right after a loading screen finishes so that if a cutscene
+// enables the widescreen bars immediately afterward, they appear already
+// deployed instead of sliding/fading in on top of the fade the loading
+// screen already did. Bars/alpha ramping back down (exit) still animate.
+void Director::SkipNextWideScreenEnterAnim() {
+    wsSkipEnterAnimUntil = Time::GetTimeInSeconds() + 3.0;
+}
+
 // PSX: HandleWideScreen__8Director (DIRECTOR.CPP:4539, 0x8003ECD4)
 void Director::HandleWideScreen() {
     MARKFUNCTION(0x8003ECD4);
@@ -3327,6 +3335,8 @@ void Director::HandleWideScreen() {
     wsLastTimeSec = now;
     wsAccumSec += dt;
 
+    const bool skipEnterAnim = (wsSkipEnterAnimUntil >= 0.0) && (now <= wsSkipEnterAnimUntil);
+
     while (wsAccumSec >= kTickSec) {
         wsAccumSec -= kTickSec;
 
@@ -3334,20 +3344,26 @@ void Director::HandleWideScreen() {
         const s32 barDesired = wsBarTarget;
 
         if (barCurrent != barDesired) {
-            const s32 barStep = wsBarStep;
-            if (barStep == 256) {
+            if (skipEnterAnim && barDesired > barCurrent) {
                 barCurrent = barDesired;
-            }
-            else if (barCurrent >= barDesired) {
-                barCurrent -= barStep;
-                if (barCurrent < barDesired) {
-                    barCurrent = barDesired;
-                }
+                wsSkipEnterAnimUntil = -1.0;
             }
             else {
-                barCurrent += barStep;
-                if (barCurrent > barDesired) {
+                const s32 barStep = wsBarStep;
+                if (barStep == 256) {
                     barCurrent = barDesired;
+                }
+                else if (barCurrent >= barDesired) {
+                    barCurrent -= barStep;
+                    if (barCurrent < barDesired) {
+                        barCurrent = barDesired;
+                    }
+                }
+                else {
+                    barCurrent += barStep;
+                    if (barCurrent > barDesired) {
+                        barCurrent = barDesired;
+                    }
                 }
             }
         }
@@ -3356,17 +3372,23 @@ void Director::HandleWideScreen() {
             s32& alphaCurrent = wsAlphaCurrent;
             const s32 alphaDesired = wsAlphaTarget;
             if (alphaCurrent != alphaDesired) {
-                const s32 alphaStep = wsAlphaStep;
-                if (alphaCurrent < alphaDesired) {
-                    alphaCurrent += alphaStep;
-                    if (alphaCurrent > alphaDesired) {
-                        alphaCurrent = alphaDesired;
-                    }
+                if (skipEnterAnim && alphaDesired > alphaCurrent) {
+                    alphaCurrent = alphaDesired;
+                    wsSkipEnterAnimUntil = -1.0;
                 }
                 else {
-                    alphaCurrent -= alphaStep;
+                    const s32 alphaStep = wsAlphaStep;
                     if (alphaCurrent < alphaDesired) {
-                        alphaCurrent = alphaDesired;
+                        alphaCurrent += alphaStep;
+                        if (alphaCurrent > alphaDesired) {
+                            alphaCurrent = alphaDesired;
+                        }
+                    }
+                    else {
+                        alphaCurrent -= alphaStep;
+                        if (alphaCurrent < alphaDesired) {
+                            alphaCurrent = alphaDesired;
+                        }
                     }
                 }
             }

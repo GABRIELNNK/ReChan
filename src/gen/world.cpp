@@ -3627,6 +3627,9 @@ bool World::LoadLevelIndex(u32 levelIndex) {
 
     // PSX: StopLogo after load completes
     StopLogo();
+    if (g_director) {
+        g_director->SkipNextWideScreenEnterAnim();
+    }
     return true;
 }
 
@@ -4649,6 +4652,9 @@ void World::LoadPetal(u32 petalIndex) {
 
     // PSX: StopLogo after load completes
     StopLogo();
+    if (g_director) {
+        g_director->SkipNextWideScreenEnterAnim();
+    }
 }
 
 // PSX: DeletePlayerBlendAndAnimData__Fv (WORLD.CPP:2059, 0x80047014)
