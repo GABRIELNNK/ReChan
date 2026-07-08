@@ -523,6 +523,99 @@ void main() {
 }
 )";
 
+static const char* kMovieDenoiseFrag = R"(
+#version 450 core
+in vec2 vUV;
+uniform sampler2D uTex;
+uniform vec4 uTexel;
+uniform float uSharpAmount;
+out vec4 FragColor;
+
+void main() {
+    vec3 c = texture(uTex, vUV).rgb;
+
+    float sigma = mix(0.02, 0.18, clamp(uSharpAmount, 0.0, 1.0));
+    float invSigma2 = 1.0 / (sigma * sigma);
+
+    vec3 result = c;
+    float totalW = 1.0;
+
+    for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+            if (dx == 0 && dy == 0) continue;
+            vec2 off = vec2(float(dx), float(dy)) * uTexel.xy;
+            vec3 s = texture(uTex, vUV + off).rgb;
+            vec3 diff = c - s;
+            float w = exp(-dot(diff, diff) * invSigma2);
+            if (dx != 0 && dy != 0) w *= 0.707;
+            result += s * w;
+            totalW += w;
+        }
+    }
+
+    FragColor = vec4(result / totalW, 1.0);
+}
+)";
+
+static const char* kMovieUpscaleFrag = R"(
+#version 450 core
+in vec2 vUV;
+uniform sampler2D uTex;
+uniform vec4 uTexel;
+out vec4 FragColor;
+
+vec4 CubicWeights(float t) {
+    float t2 = t * t;
+    float t3 = t2 * t;
+    return vec4(-0.5*t3 + t2 - 0.5*t,
+                 1.5*t3 - 2.5*t2 + 1.0,
+                -1.5*t3 + 2.0*t2 + 0.5*t,
+                 0.5*t3 - 0.5*t2);
+}
+
+void main() {
+    vec2 pos = vUV / uTexel.xy - 0.5;
+    vec2 f = fract(pos);
+    vec2 base = (floor(pos) + 0.5) * uTexel.xy;
+
+    vec4 wx = CubicWeights(f.x);
+    vec4 wy = CubicWeights(f.y);
+
+    vec3 color = vec3(0.0);
+    for (int j = 0; j < 4; j++) {
+        vec3 row = vec3(0.0);
+        for (int i = 0; i < 4; i++) {
+            vec2 off = vec2(float(i - 1), float(j - 1)) * uTexel.xy;
+            row += texture(uTex, base + off).rgb * wx[i];
+        }
+        color += row * wy[j];
+    }
+    FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
+}
+)";
+
+static const char* kMovieSharpFrag = R"(
+#version 450 core
+in vec2 vUV;
+uniform sampler2D uTex;
+uniform vec4 uTexel;
+uniform float uSharpAmount;
+out vec4 FragColor;
+
+void main() {
+    vec3 c = texture(uTex, vUV).rgb;
+    vec3 n = texture(uTex, vUV + vec2(0.0, -uTexel.y)).rgb;
+    vec3 s = texture(uTex, vUV + vec2(0.0,  uTexel.y)).rgb;
+    vec3 e = texture(uTex, vUV + vec2( uTexel.x, 0.0)).rgb;
+    vec3 w = texture(uTex, vUV + vec2(-uTexel.x, 0.0)).rgb;
+
+    vec3 blur = (n + s + e + w) * 0.25;
+    vec3 sharp = c + (c - blur) * uSharpAmount;
+
+    FragColor = vec4(clamp(sharp, 0.0, 1.0), 1.0);
+}
+)";
+
 // Soft irregular dot: a textureless sprite with a noise-wobbled edge so it
 // reads as a small jagged debris chip instead of a perfect circle.
 // uShapeSeed offsets the noise per particle so each chip's wobble differs.
@@ -1066,6 +1159,15 @@ void glShader::CreateProgram() {
     }
     else if (type == "dot") {
         fragmentSource = kDotFrag;
+    }
+    else if (type == "moviesharp") {
+        fragmentSource = kMovieSharpFrag;
+    }
+    else if (type == "moviedenoise") {
+        fragmentSource = kMovieDenoiseFrag;
+    }
+    else if (type == "movieupscale") {
+        fragmentSource = kMovieUpscaleFrag;
     }
 
     u32 vs = CompileGLShader(GL_VERTEX_SHADER, vertexSource);

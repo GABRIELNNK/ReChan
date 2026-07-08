@@ -67,3 +67,9 @@
 
 // Spatial audio path for positional world sfx.
 #define MODERN_SPATIAL_AUDIO 1
+
+// Smooths .str movie playback: bilinear GPU texture filtering, bilinear
+// chroma upsampling in the software MDEC decoder, and a bicubic+sharpen
+// resample shader for the fullscreen draw. When disabled, movies render
+// exactly as on original PSX hardware (nearest filtering, blocky chroma).
+#define MODERN_MOVIE_FILTERING 1

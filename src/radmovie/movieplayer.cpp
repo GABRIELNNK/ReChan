@@ -6,6 +6,8 @@
 #include "p3d/context.h"
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
+#include "pddi/pddishad.h"
+#include "pddi/pdditex.h"
 #include "xclib/xcfile.h"
 #include <algorithm>
 #include <chrono>
@@ -293,6 +295,17 @@ void MoviePlayer::Close() {
         videoTexture = nullptr;
     }
 
+#if MODERN_MOVIE_FILTERING
+    if (denoiseFBO) {
+        denoiseFBO->Release();
+        denoiseFBO = nullptr;
+    }
+    if (upscaleFBO) {
+        upscaleFBO->Release();
+        upscaleFBO = nullptr;
+    }
+#endif
+
     fileSize = 0;
     sectorCount = 0;
     currentSector = 0;
@@ -402,6 +415,12 @@ bool MoviePlayer::AdvanceFrame() {
         }
 
         videoTexture->Create(frameWidth, frameHeight, 32, 8, rgbaBuffer);
+
+#if MODERN_MOVIE_FILTERING
+        if (videoTexture->GetTexture()) {
+            videoTexture->GetTexture()->SetFilterMode(PDDI_FILTER_BILINEAR);
+        }
+#endif
 
         // Start audio only after the first decoded frame has actually been
         // uploaded and can be rendered. This keeps audio from running ahead
@@ -582,11 +601,97 @@ void MoviePlayer::Render() {
     }
 
     if (videoTexture) {
-        ScreenDraw::DrawFullscreenAdvanced(
-            videoTexture,
-            frameWidth / (f32)frameHeight,
-            16.0f / 9.0f,
-            true);
+#if MODERN_MOVIE_FILTERING
+        static pddiBaseShader* s_movieShader = p3d::device ? p3d::device->NewShader("moviesharp") : nullptr;
+
+        if (s_movieShader) {
+            if (!denoiseShader)
+                denoiseShader = p3d::device->NewShader("moviedenoise");
+            if (!upscaleShader)
+                upscaleShader = p3d::device->NewShader("movieupscale");
+            if (!denoiseFBO && frameWidth > 0 && frameHeight > 0)
+                denoiseFBO = p3d::context->CreateRenderTarget(frameWidth, frameHeight, PDDI_RENDER_TARGET_RGBA8);
+            if (!upscaleFBO && frameWidth > 0 && frameHeight > 0)
+                upscaleFBO = p3d::context->CreateRenderTarget(1024, 768, PDDI_RENDER_TARGET_RGBA8);
+
+            const f32 srcW = (f32)frameWidth;
+            const f32 srcH = (f32)frameHeight;
+            const f32 upW = 1024.0f;
+            const f32 upH = 768.0f;
+
+            if (denoiseShader && denoiseFBO) {
+                p3d::context->SetRenderTarget(denoiseFBO);
+                denoiseShader->SetTexture(0, videoTexture->GetTexture());
+                denoiseShader->SetVector("uTexel", 1.0f / srcW, 1.0f / srcH, 0.0f, 0.0f);
+                denoiseShader->SetFloat("uSharpAmount", 0.35f);
+                ScreenDraw::DrawShaderQuad(denoiseShader,
+                    0.0f, 0.0f, srcW, srcH,
+                    0.0f, 1.0f, 1.0f, 0.0f, PDDI_BLEND_NONE,
+                    srcW, srcH);
+                p3d::context->SetRenderTarget(nullptr);
+            }
+
+            if (upscaleShader && upscaleFBO && denoiseFBO) {
+                p3d::context->SetRenderTarget(upscaleFBO);
+                upscaleShader->SetTexture(0, denoiseFBO->GetTexture());
+                upscaleShader->SetVector("uTexel", 1.0f / srcW, 1.0f / srcH, 0.0f, 0.0f);
+                ScreenDraw::DrawShaderQuad(upscaleShader,
+                    0.0f, 0.0f, upW, upH,
+                    0.0f, 1.0f, 1.0f, 0.0f, PDDI_BLEND_NONE,
+                    upW, upH);
+                p3d::context->SetRenderTarget(nullptr);
+            }
+
+            const f32 sourceAspect = srcW / srcH;
+            const f32 desiredAspect = 16.0f / 9.0f;
+
+            f32 u0 = 0.0f, v0 = 0.0f, u1 = 1.0f, v1 = 1.0f;
+            if (sourceAspect < desiredAspect) {
+                const f32 visibleHeight = sourceAspect / desiredAspect;
+                const f32 cropY = (1.0f - visibleHeight) * 0.5f;
+                v0 = cropY;
+                v1 = 1.0f - cropY;
+            }
+            else if (sourceAspect > desiredAspect) {
+                const f32 visibleWidth = desiredAspect / sourceAspect;
+                const f32 cropX = (1.0f - visibleWidth) * 0.5f;
+                u0 = cropX;
+                u1 = 1.0f - cropX;
+            }
+
+            f32 x = SCALE_AND_CENTER_X(0.0f);
+            f32 y = 0.0f;
+            f32 w = SCREEN_SCALE_X(DEFAULT_SCREEN_WIDTH);
+            f32 h = SCREEN_HEIGHT;
+            const f32 screenAspect = w / h;
+
+            if (screenAspect > desiredAspect) {
+                const f32 newH = w / desiredAspect;
+                y = (h - newH) * 0.5f;
+                h = newH;
+            }
+            else if (screenAspect < desiredAspect) {
+                const f32 newW = h * desiredAspect;
+                x = x + (w - newW) * 0.5f;
+                w = newW;
+            }
+
+            pddiTexture* finalInput = upscaleFBO ? upscaleFBO->GetTexture() : (denoiseFBO ? denoiseFBO->GetTexture() : videoTexture->GetTexture());
+            s_movieShader->SetTexture(0, finalInput);
+            s_movieShader->SetVector("uTexel", 1.0f / upW, 1.0f / upH, 0.0f, 0.0f);
+            s_movieShader->SetFloat("uSharpAmount", 1.5f);
+
+            ScreenDraw::DrawShaderQuad(s_movieShader, x, y, w, h, u0, v0, u1, v1, PDDI_BLEND_NONE);
+        }
+        else
+#endif
+        {
+            ScreenDraw::DrawFullscreenAdvanced(
+                videoTexture,
+                frameWidth / (f32)frameHeight,
+                16.0f / 9.0f,
+                true);
+        }
     }
 }
 
@@ -854,7 +959,6 @@ void MoviePlayer::DecodeVideoFrame(const u8* demuxData, u32 demuxSize,
         }
     }
 
-
 }
 
 // Bitstream block decoding
@@ -1085,6 +1189,28 @@ static inline s32 ShrRound(s64 val, int bits) {
     return (s32)((val + (1LL << (bits - 1))) >> bits);
 }
 
+#if MODERN_MOVIE_FILTERING
+static inline s32 SampleChromaBilinear(const s32 plane[64], f32 fx, f32 fy) {
+    s32 x0 = (s32)std::floor(fx);
+    s32 y0 = (s32)std::floor(fy);
+    f32 tx = fx - (f32)x0;
+    f32 ty = fy - (f32)y0;
+    s32 x1 = Clamp(x0 + 1, 0, 7);
+    s32 y1 = Clamp(y0 + 1, 0, 7);
+    x0 = Clamp(x0, 0, 7);
+    y0 = Clamp(y0, 0, 7);
+
+    f32 c00 = (f32)plane[y0 * 8 + x0];
+    f32 c10 = (f32)plane[y0 * 8 + x1];
+    f32 c01 = (f32)plane[y1 * 8 + x0];
+    f32 c11 = (f32)plane[y1 * 8 + x1];
+
+    f32 top = c00 + (c10 - c00) * tx;
+    f32 bot = c01 + (c11 - c01) * tx;
+    return (s32)std::lround(top + (bot - top) * ty);
+}
+#endif
+
 void MoviePlayer::MacroblockToRGB(const s32 cr[64], const s32 cb[64],
                                   const s32 y1[64], const s32 y2[64],
                                   const s32 y3[64], const s32 y4[64],
@@ -1100,10 +1226,17 @@ void MoviePlayer::MacroblockToRGB(const s32 cr[64], const s32 cb[64],
             else if (px < 8 && py >= 8) Y = y3[blockIdx];
             else Y = y4[blockIdx];
 
-            // Chroma is subsampled 2:1 in both directions (nearest neighbor)
+            // Chroma is subsampled 2:1 in both directions
+#if MODERN_MOVIE_FILTERING
+            f32 cfx = (px - 0.5f) * 0.5f;
+            f32 cfy = (py - 0.5f) * 0.5f;
+            s32 Cr = SampleChromaBilinear(cr, cfx, cfy);
+            s32 Cb = SampleChromaBilinear(cb, cfx, cfy);
+#else
             int chromaIdx = (py / 2) * 8 + (px / 2);
             s32 Cr = cr[chromaIdx];
             s32 Cb = cb[chromaIdx];
+#endif
 
             // PSX YCbCr -> RGB conversion (jpsxdec PsxYCbCr_int formula)
             // Y is centered at 0, add 128 for display range

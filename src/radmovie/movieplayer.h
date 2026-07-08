@@ -2,6 +2,8 @@
 #include "core.h"
 
 class tTexture;
+class pddiRenderTarget;
+class pddiBaseShader;
 
 // MoviePlayer - plays PSX .STR files with video and audio
 class MoviePlayer {
@@ -126,6 +128,13 @@ private:
     // Decoded frame
     u32* rgbaBuffer = nullptr;    // RGBA pixel buffer (frameWidth * frameHeight)
     tTexture* videoTexture = nullptr;
+
+#if MODERN_MOVIE_FILTERING
+    pddiRenderTarget* denoiseFBO = nullptr;
+    pddiRenderTarget* upscaleFBO = nullptr;
+    pddiBaseShader*   denoiseShader = nullptr;
+    pddiBaseShader*   upscaleShader = nullptr;
+#endif
 
     // Audio state
     s16* audioPCM = nullptr;
