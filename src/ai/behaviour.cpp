@@ -773,13 +773,13 @@ void Behaviour::GrontarDMS(Behaviour* self) {
         comboStateB = 0;
     };
 
-    if (!self->InActiveZone() && distanceToPlayer >= GRONTAR_CLOSE_ATTACK_DIST) {
+    if (!self->InActiveZone() && distanceToPlayer >= GRONTAR_FAR_ATTACK_DIST) {
         LVector zoneCenter = {};
         owner->activeZone->GetActiveZoneCenterPoint(zoneCenter);
         owner->SetTarget(player);
         owner->FacePointDesired(zoneCenter);
         owner->moveSpeed = (s16)self->animConfigPtr->runningSpeed;
-        owner->RequestAction(6);
+        owner->RequestAction(2);
 
         resetComboState();
         return;
