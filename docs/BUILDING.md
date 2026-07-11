@@ -8,7 +8,7 @@ supported. macOS and ARM platforms are not currently supported.
 Install Git, open a terminal, and run:
 
 ```bash
-git clone https://github.com/gennariarmando/rechan.git
+git clone https://github.com/SilverwireGames/ReChan.git
 cd rechan
 ```
 
