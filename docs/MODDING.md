@@ -1,4 +1,4 @@
-# Rechan drag-and-drop mods
+# ReChan drag-and-drop mods
 
 Place each mod in its own folder under `~mods`. No manifest is required.
 The mod folder name is the mod name. Mods load alphabetically unless
