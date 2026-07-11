@@ -524,7 +524,7 @@ s32 BackG::Draw() {
     const s32 scrollY = GetScrollY(pitchAngle);
 
     s32 yawAngle = 0;
-    BackGCartesianToPolar(&polarMagnitude, &yawAngle, fieldC, field4);
+    BackGCartesianToPolar(&polarMagnitude, &yawAngle, field4, fieldC);
 
     const s32 scrollDivisor = static_cast<s16>(s_backgWork.fieldED0);
     if (scrollDivisor == 0) {
@@ -591,20 +591,6 @@ s32 BackG::Draw() {
             haveDynamicExtents = (dynamicW != 0 && dynamicH != 0);
         }
 
-        const s16 vx = entry->vx[entry->field8 & 3u];
-        const s16 vy = entry->vy[entry->field8 & 3u];
-
-        const s32 baseX = 0x100 - (static_cast<s32>(vx) / 8);
-        const s32 baseY = 0x80 - (static_cast<s32>(vy) / 8);
-
-        const s32 wrappedX = (baseX - scrollX + 0x80) & 0x3FF;
-        const s32 drawX = wrappedX - 0x80;
-        if (!needsWideWrapCull && entry->useDynamic == 0u && (wrappedX < 1 || wrappedX > 0x27F)) {
-            continue;
-        }
-
-        const s16 drawY = static_cast<s16>(baseY + scrollY);
-
         const u16 idx8 = entry->field8 & 3u;
         const u16 idxA = entry->fieldA & 3u;
         const u16 idxC = entry->fieldC & 3u;
@@ -618,19 +604,28 @@ s32 BackG::Draw() {
         const s32 entryH = yC - y8;
         const bool haveEntryExtents = (entryW != 0 && entryH != 0);
 
+        const s16 vx = entry->vx[entry->field8 & 3u];
+        const s16 vy = entry->vy[entry->field8 & 3u];
+
+        const s32 baseX = 0x100 - (static_cast<s32>(vx) / 8);
+        const s32 baseY = 0x80 - (static_cast<s32>(vy) / 8);
+
+        const s32 wrappedX = (baseX - scrollX + 0x80) & 0x3FF;
+        const s32 drawX = wrappedX - 0x80;
+        const s16 drawY = static_cast<s16>(baseY + scrollY);
+
         if (entry->useDynamic != 0u && !haveDynamicExtents) {
             continue;
         }
 
-        const bool useWrapCandidates = (entry->useDynamic != 0u) || (needsWideWrapCull && haveEntryExtents);
-        if (useWrapCandidates && haveEntryExtents) {
+        const bool useWrapCandidates = (entry->useDynamic != 0u) || needsWideWrapCull;
+        if (useWrapCandidates) {
             const s32 drawXCandidates[3] = {
                 drawX,
                 drawX - 0x400,
                 drawX + 0x400,
             };
 
-            bool drewAny = false;
             for (s32 candidateIndex = 0; candidateIndex < 3; candidateIndex++) {
                 const s32 candidateX = drawXCandidates[candidateIndex];
 
@@ -654,13 +649,13 @@ s32 BackG::Draw() {
                 else {
                     DrawSprite(entry, static_cast<s16>(candidateX), drawY);
                 }
-
-                drewAny = true;
             }
 
-            if (drewAny) {
-                continue;
-            }
+            continue;
+        }
+
+        if (entry->useDynamic == 0u && (drawX < cullMinX || drawX > cullMaxX)) {
+            continue;
         }
 
         if (drawAsPoly) {
@@ -870,19 +865,9 @@ void BackG::DrawBG() {
         return;
     }
 
-    Block* block = nullptr;
-    const u16 playerBlockNum = Player::s_player->blockNum;
-    const u32 numBlocks = g_blockManager->GetNumBlocks();
-    for (u32 i = 0; i < numBlocks; i++) {
-        Block* candidate = g_blockManager->GetBlock(i);
-        if (candidate && candidate->blockNum == playerBlockNum) {
-            block = candidate;
-            break;
-        }
-    }
-
+    Block* block = g_blockManager->GetBlock(Player::s_player->blockNum);
     if (!block) {
-        return;
+        return; // PC safety guard for out-of-range index; PSX indexes unconditionally
     }
 
     if (block->unk60 != 0) {
