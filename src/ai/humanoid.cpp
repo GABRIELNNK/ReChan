@@ -210,6 +210,9 @@ static s32 WrapLoopFrameReal(s32 frameReal, s32 endFrame) {
     while (frameReal > endFrame) {
         frameReal -= range;
     }
+    if (frameReal < 0) {
+        frameReal = endFrame;
+    }
 
     return frameReal;
 }
@@ -222,7 +225,11 @@ static s32 BuildInterpolatedAnimFrameReal(const AnimStructure* anim, s32 prevFra
 
     s32 frameStep = curFrame - prevFrame;
 
-    if (anim->loopTypeField == ANIM_LOOP || anim->loopTypeField == ANIM_LOOP_REVERSE) {
+    const bool isLoopingAnim = anim->loopTypeField == ANIM_LOOP
+        || anim->loopTypeField == ANIM_LOOP_REVERSE
+        || anim->loopTypeField == ANIM_BLEND;
+
+    if (isLoopingAnim) {
         const s32 range = anim->endFrame + FIX16_ONE;
         if (range > 0) {
             const s32 halfRange = range >> 1;
@@ -237,7 +244,7 @@ static s32 BuildInterpolatedAnimFrameReal(const AnimStructure* anim, s32 prevFra
 
     s32 frameReal = prevFrame + (s32)((f32)frameStep * alpha);
 
-    if (anim->loopTypeField == ANIM_LOOP || anim->loopTypeField == ANIM_LOOP_REVERSE) {
+    if (isLoopingAnim) {
         frameReal = WrapLoopFrameReal(frameReal, anim->endFrame);
     }
     else {
