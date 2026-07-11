@@ -433,6 +433,8 @@ void Blast::Think() {
 
     s32 progress = 0;
 
+    AdvanceBlastFrame(this);
+
     if (blastState == 0) {
         if (stateTimer >= cooldownFrames && requireTrigger == 0) {
             StartBlastFire(this);
@@ -448,7 +450,7 @@ void Blast::Think() {
     }
     else if (blastState == 2) {
         progress = lengthPerFrame * static_cast<s32>(extendFrames);
-        if (stateTimer >= holdFrames) {
+        if (holdFrames >= 0 && stateTimer >= holdFrames) {
             if (retractFrames > 0) {
                 blastState = 3;
                 stateTimer = 0;
@@ -472,8 +474,6 @@ void Blast::Think() {
 
     BuildBlastCollisionBox(this, progress);
     stateTimer++;
-
-    AdvanceBlastFrame(this);
 
     if (hitCooldownTimer <= 0) {
         hitCooldownTimer = hitCooldownFrames;

@@ -98,6 +98,25 @@ struct CBVParamAnimData {
     ~CBVParamAnimData();
 };
 
+// PSX tUVAnim-equivalent per-primitive UV frame animation loaded from chunk 0x600E.
+// Targets a named child geo and replaces its UV words per-frame from a flat table.
+struct UVListAnim {
+    u32 nameUID = 0;
+    u32 targetUID = 0;
+    s32 numFrames = 0;
+    s32 numEntries = 0;
+    u16* uvData = nullptr;        // [numFrames * numEntries] packed UV words (U=low byte, V=high byte)
+    u32* packetOffsets = nullptr; // PSX 0x6010: byte offsets into geo OT buffer, one per entry
+    u32 numPacketOffsets = 0;
+    u32* sortedPerm = nullptr;    // permutation: sortedPerm[k] = j such that packetOffsets[j] is k-th ascending
+
+    UVListAnim() = default;
+    ~UVListAnim();
+
+    // Returns the packed UV word for a given frame and entry index.
+    u16 GetUV(s32 frame, s32 entry) const;
+};
+
 // PSX tClutList-equivalent CLUT animation data loaded from chunk 0x6006.
 // mode==0 updates material cba directly; mode!=0 targets primitive offsets.
 struct ClutAnimData {
@@ -125,6 +144,11 @@ struct MiscAnimNode : public ccMinNode {
     u8 type = 0;           // +19: 1=level, 2=petal
     u32 hash = 0;          // +20
     TransformAnim* anim = nullptr; // +24
+    // Set when the raw anim data behind `anim` was actually multiple concatenated
+    // tTransformAnim blocks (a frame-by-frame pose/texture flip-book) rather than
+    // a single block. `anim` still points at parts[0] for callers that don't check
+    // this; per-frame consumers should resolve the correct part via ResolvePart().
+    CharSequenceAnim* animSequence = nullptr;
     ParamAnimData* paramAnim = nullptr;
     FrameListAnim* frameList = nullptr;
     CompositeAnimData* compositeAnim = nullptr;
@@ -132,6 +156,11 @@ struct MiscAnimNode : public ccMinNode {
     VizAnim* vizAnim = nullptr;
     CBVParamAnimData* cbvParamAnim = nullptr;
     ClutAnimData* clutAnim = nullptr;
+    UVListAnim* uvListAnim = nullptr;
+    // PSX: MakePuppet creates a per-instance tFlip from the shared tAnimation.
+    // When false, this node is a per-ComEffect clone whose sub-object pointers
+    // are borrowed (owned by g_animMgr); the destructor skips deletion.
+    bool ownsSubs = true;
 
     MiscAnimNode() = default;
     ~MiscAnimNode() override;

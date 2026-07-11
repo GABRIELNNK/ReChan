@@ -136,6 +136,9 @@ s32 Effects_DrawEffects(s32 blockNum) {
 
     for (ccMinNode* node = g_effectsList.head; node; node = node->next) {
         Effects* effect = static_cast<Effects*>(static_cast<ccNode*>(node));
+        if (effect->debugDisabled) {
+            continue;
+        }
 
         if (IsDirectorOverlayRoute(effect)) {
             result = 4096;

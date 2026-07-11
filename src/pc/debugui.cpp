@@ -1,6 +1,9 @@
 ﻿#include "gen/common.h"
 #include "pc/debugui.h"
 #include "imgui.h"
+#include <algorithm>
+#include <cmath>
+#include <cstring>
 #include "gen/game.h"
 #include "gen/world.h"
 #include "gen/camera.h"
@@ -45,6 +48,8 @@ static bool sShowAnimation = false;
 static bool sShowGame = false;
 static bool sShowParticles = false;
 static bool sShowDebugging = false;
+static bool sShowEffects = false;
+static char sEffectsFilter[128] = {};
 static bool sShowConsoleNotes = false;
 static bool sShowImGuiDemo = false;
 static s32 sAnimSelectedEnum = 0;
@@ -1539,6 +1544,7 @@ void DebugUI::Draw() {
             ImGui::MenuItem("Game", nullptr, &sShowGame);
             ImGui::MenuItem("Player", nullptr, &sShowPlayer);
             ImGui::MenuItem("Particles", nullptr, &sShowParticles);
+            ImGui::MenuItem("Effects", nullptr, &sShowEffects);
             ImGui::MenuItem("Debugging", nullptr, &sShowDebugging);
 #if MODERN_GRAPHICS
             ImGui::MenuItem("Shadows (CSM)", nullptr, &sShowShadows);
@@ -2079,6 +2085,120 @@ void DebugUI::Draw() {
                 ImGui::Text("Last Spawn Result: %d (%s)",
                             sDebugParticleLastSpawnResult,
                             DebugParticleSpawnResultText(sDebugParticleLastSpawnResult));
+            }
+        }
+        ImGui::End();
+    }
+
+    if (sShowEffects) {
+        if (ImGui::Begin("Effects", &sShowEffects)) {
+            static constexpr s32 kMaxListedEffects = 1024;
+            static Effects* s_effectsList[kMaxListedEffects] = {};
+            const s32 effectCount = Effects_DebugGetActive(s_effectsList, kMaxListedEffects);
+
+            struct EffectRow {
+                Effects* effect;
+                f32 distance;
+                bool hasPos;
+            };
+            static EffectRow s_rows[kMaxListedEffects] = {};
+            s32 rowCount = 0;
+
+            const bool havePlayerPos = Player::s_player != nullptr;
+            LVector playerPos = havePlayerPos ? Player::s_player->pos : LVector{};
+
+            for (s32 i = 0; i < effectCount && i < kMaxListedEffects; i++) {
+                Effects* effect = s_effectsList[i];
+                if (!effect) {
+                    continue;
+                }
+
+                EffectRow& row = s_rows[rowCount++];
+                row.effect = effect;
+                row.hasPos = false;
+                row.distance = 0.0f;
+
+                LVector worldPos = {};
+                if (havePlayerPos && effect->GetDebugWorldPos(&worldPos)) {
+                    const f32 dx = static_cast<f32>(worldPos.x - playerPos.x);
+                    const f32 dy = static_cast<f32>(worldPos.y - playerPos.y);
+                    const f32 dz = static_cast<f32>(worldPos.z - playerPos.z);
+                    row.distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+                    row.hasPos = true;
+                }
+            }
+
+            std::sort(s_rows, s_rows + rowCount, [](const EffectRow& a, const EffectRow& b) {
+                if (a.hasPos != b.hasPos) {
+                    return a.hasPos;
+                }
+                return a.distance < b.distance;
+            });
+
+            ImGui::Text("Active: %d", effectCount);
+            ImGui::SameLine();
+            if (ImGui::Button("Enable All")) {
+                for (s32 i = 0; i < rowCount; i++) {
+                    s_rows[i].effect->debugDisabled = false;
+                }
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Disable All")) {
+                for (s32 i = 0; i < rowCount; i++) {
+                    s_rows[i].effect->debugDisabled = true;
+                }
+            }
+            ImGui::InputText("Filter", sEffectsFilter, sizeof(sEffectsFilter));
+            if (!havePlayerPos) {
+                ImGui::TextDisabled("No player - distances unavailable, list unsorted.");
+            }
+
+            if (ImGui::BeginTable("EffectsTable", 4,
+                                  ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY,
+                                  ImVec2(0, 400))) {
+                ImGui::TableSetupColumn("On", ImGuiTableColumnFlags_WidthFixed, 28.0f);
+                ImGui::TableSetupColumn("Dist", ImGuiTableColumnFlags_WidthFixed, 70.0f);
+                ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 90.0f);
+                ImGui::TableSetupColumn("Details", ImGuiTableColumnFlags_WidthStretch);
+                ImGui::TableSetupScrollFreeze(0, 1);
+                ImGui::TableHeadersRow();
+
+                for (s32 i = 0; i < rowCount; i++) {
+                    Effects* effect = s_rows[i].effect;
+
+                    char label[256] = {};
+                    BuildDebugEffectLabel(label, static_cast<s32>(sizeof(label)), effect, true);
+
+                    if (sEffectsFilter[0] != '\0' && !std::strstr(label, sEffectsFilter)) {
+                        continue;
+                    }
+
+                    ImGui::TableNextRow();
+
+                    ImGui::TableSetColumnIndex(0);
+                    bool enabled = !effect->debugDisabled;
+                    ImGui::PushID(effect);
+                    if (ImGui::Checkbox("##on", &enabled)) {
+                        effect->debugDisabled = !enabled;
+                    }
+                    ImGui::PopID();
+
+                    ImGui::TableSetColumnIndex(1);
+                    if (s_rows[i].hasPos) {
+                        ImGui::Text("%.0f", s_rows[i].distance);
+                    }
+                    else {
+                        ImGui::TextDisabled("--");
+                    }
+
+                    ImGui::TableSetColumnIndex(2);
+                    ImGui::Text("%s", DebugEffectTypeName(effect->effectType));
+
+                    ImGui::TableSetColumnIndex(3);
+                    ImGui::TextUnformatted(label);
+                }
+
+                ImGui::EndTable();
             }
         }
         ImGui::End();

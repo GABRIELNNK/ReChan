@@ -900,7 +900,7 @@ glPrimBuffer::~glPrimBuffer() {
 void glPrimBuffer::SetVertexData(const void* data, u32 count) {
     vertexCount = count;
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, stride * count, data, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, stride * count, data, GL_DYNAMIC_DRAW);
 }
 
 void glPrimBuffer::SetIndices(const u16* indices, u32 count) {

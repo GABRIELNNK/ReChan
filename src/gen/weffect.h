@@ -15,6 +15,7 @@ struct FrameListAnim;
 struct CompositeAnimData;
 struct SequenceAnim;
 struct MiscAnimNode;
+struct UVListAnim;
 struct VizAnim;
 struct ScaleData;
 struct ComEffectScaleBinding;
@@ -94,6 +95,7 @@ private:
     bool ApplyVizAnimFrame(VizAnim* vizAnimData, s32 frame);
     bool ApplyCBVParamAnimFrame(CBVParamAnimData* cbvParamAnimData, s32 frame);
     bool ApplyClutAnimFrame(ClutAnimData* clutAnimData, s32 frame);
+    void ApplyUVListAnimFrame(const UVListAnim* uvAnim, s32 frame);
     bool ApplyMiscAnimFrame(MiscAnimNode* node, s32 frame, bool updateJoints);
     void FastZSortDisplayGCT3(u32 primCount);
     void FastZSortDisplayGCT4(u32 primCount);
@@ -102,6 +104,10 @@ private:
     EModel* eModel = nullptr;
     SModel* sModel = nullptr;
 
+    // PSX: ComEffect+36 = shared tAnimation* from GetMiscAnim (change-detection only).
+    //      ComEffect+40 = per-instance tFlip* from MakePuppet (owned, ownsSubs=false).
+    MiscAnimNode* sharedMiscAnimNode = nullptr;
+    MiscAnimNode* ownedMiscAnimNode = nullptr;
     MiscAnimNode* miscAnimNode = nullptr;
     TransformAnim* miscAnim = nullptr;
     TransformAnim* boundTransformAnim = nullptr;

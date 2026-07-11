@@ -203,6 +203,28 @@ CBVParamAnimData::~CBVParamAnimData() {
     numEntries = 0;
 }
 
+UVListAnim::~UVListAnim() {
+    delete[] uvData;
+    uvData = nullptr;
+    delete[] packetOffsets;
+    packetOffsets = nullptr;
+    delete[] sortedPerm;
+    sortedPerm = nullptr;
+    numFrames = 0;
+    numEntries = 0;
+    numPacketOffsets = 0;
+}
+
+u16 UVListAnim::GetUV(s32 frame, s32 entry) const {
+    if (!uvData || frame < 0 || entry < 0 || entry >= numEntries) {
+        return 0;
+    }
+    if (frame >= numFrames) {
+        frame = numFrames - 1;
+    }
+    return uvData[frame * numEntries + entry];
+}
+
 ClutAnimData::~ClutAnimData() {
     delete[] frames;
     frames = nullptr;
@@ -230,7 +252,14 @@ u16 ClutAnimData::GetFrameValue(s32 frame) const {
 }
 
 MiscAnimNode::~MiscAnimNode() {
-    if (anim) {
+    if (!ownsSubs) return;
+    if (animSequence) {
+        // anim aliases animSequence->parts[0]; the sequence owns it.
+        delete animSequence;
+        animSequence = nullptr;
+        anim = nullptr;
+    }
+    else if (anim) {
         delete anim;
         anim = nullptr;
     }
@@ -268,6 +297,11 @@ MiscAnimNode::~MiscAnimNode() {
     if (clutAnim) {
         delete clutAnim;
         clutAnim = nullptr;
+    }
+
+    if (uvListAnim) {
+        delete uvListAnim;
+        uvListAnim = nullptr;
     }
 }
 

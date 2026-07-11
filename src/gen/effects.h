@@ -19,6 +19,10 @@ public:
     s32 effectType = 0;
     s32 blockNum = -1;
     s32 inEffectsList = 0;
+
+    // DebugUI-only: when set, Effects_DrawEffects skips this instance's
+    // Display() call so its rendering can be isolated for inspection.
+    bool debugDisabled = false;
 };
 
 // PSX: Die__7Effectsii (EFFECTS.CPP:60, 0x8004C6C8)

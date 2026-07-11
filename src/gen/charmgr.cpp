@@ -576,6 +576,17 @@ void FreeAnimMemory(void* ptr) {
     // Defer deletion until FlushPendingFree() to prevent same-frame UAF.
     // Remember the type now while the resource is known-live; stale sequence
     // memory must not be probed later to decide how to delete it.
+    //
+    // Guard against double-registration: if the same ptr is already queued
+    // (e.g. from a rapid DynamicAnimUnload / PurgeLevel overlap), skip it.
+    // A double-delete would crash because IsCharSequenceAnim on freed memory
+    // returns false, causing a CharSequenceAnim to be deleted as TransformAnim.
+    for (s32 i = 0; i < s_pendingFreeCount; ++i) {
+        if (s_pendingFreeAnims[i].ptr == ptr) {
+            return;
+        }
+    }
+
     PendingFreeAnim pending = { ptr, isSequence };
     if (s_pendingFreeCount < CHAR_MAX_ANIMS) {
         s_pendingFreeAnims[s_pendingFreeCount++] = pending;
@@ -610,6 +621,15 @@ void CharacterManager::FlushPendingFree() {
             delete static_cast<TransformAnim*>(pending.ptr);
 
         s_pendingFreeAnims[i] = {};
+
+        // Null out any duplicate of this ptr further in the list so a
+        // double-registration that slipped through FreeAnimMemory's guard
+        // cannot fire a second delete on freed memory.
+        for (s32 j = i + 1; j < s_pendingFreeCount; ++j) {
+            if (s_pendingFreeAnims[j].ptr == pending.ptr) {
+                s_pendingFreeAnims[j] = {};
+            }
+        }
     }
 
     for (s32 i = writeIndex; i < s_pendingFreeCount; ++i) {

@@ -1482,6 +1482,9 @@ static ccList g_wEffectPool;
         if (!__maNode) {                                                                             \
             return 0;                                                                                \
         }                                                                                           \
+        if (__maNode->animSequence) {                                                                \
+            return __maNode->animSequence->numFrames;                                                \
+        }                                                                                           \
         if (__maNode->anim) {                                                                        \
             return __maNode->anim->numFrames;                                                       \
         }                                                                                           \
@@ -1496,6 +1499,9 @@ static ccList g_wEffectPool;
         }                                                                                           \
         if (__maNode->frameList) {                                                                   \
             return __maNode->frameList->numFrames;                                                  \
+        }                                                                                           \
+        if (__maNode->uvListAnim) {                                                                  \
+            return __maNode->uvListAnim->numFrames;                                                 \
         }                                                                                           \
         if (__maNode->vizAnim) {                                                                     \
             return __maNode->vizAnim->numFrames;                                                    \
@@ -2006,12 +2012,17 @@ PaletteData* WEffect::SetupPaletteData(u32 paletteHash, u32 clutMode, u32 flags)
 #define ComEffect_ResetModel(selfPtr)                                                               \
     do {                                                                                            \
         ComEffect* _self = (selfPtr);                                                               \
-        if (_self->miscAnimNode && g_animMgr) {                                                     \
+        if (_self->sharedMiscAnimNode && g_animMgr) {                                              \
             MiscAnimNode* _liveNode = g_animMgr->GetMiscAnim(_self->miscAnimHash);                 \
-            if (_liveNode == _self->miscAnimNode && _liveNode->compositeAnim) {                    \
+            if (_liveNode == _self->sharedMiscAnimNode && _liveNode->compositeAnim) {              \
                 checkForAndFreeSequenceAnims__FP10tAnimation(_liveNode);                            \
             }                                                                                       \
         }                                                                                           \
+        if (_self->ownedMiscAnimNode) {                                                             \
+            delete _self->ownedMiscAnimNode;                                                        \
+            _self->ownedMiscAnimNode = nullptr;                                                     \
+        }                                                                                           \
+        _self->sharedMiscAnimNode = nullptr;                                                        \
                                                                                                     \
         if (_self->scaleBindings) {                                                                  \
             /* Model is destroyed immediately below; cached joint pointers may already be stale. */ \
@@ -2098,15 +2109,35 @@ PaletteData* WEffect::SetupPaletteData(u32 paletteHash, u32 clutMode, u32 flags)
         _self->frameCount = 0;                                                                       \
                                                                                                      \
         if (g_animMgr) {                                                                             \
-            _self->miscAnimNode = g_animMgr->GetMiscAnim(static_cast<u32>(_inMiscAnimHash));       \
-            if (_self->miscAnimNode) {                                                               \
-                _self->miscAnim = _self->miscAnimNode->anim;                                        \
-                _self->frameListAnim = _self->miscAnimNode->frameList;                              \
-                _self->compositeAnim = _self->miscAnimNode->compositeAnim;                          \
-                _self->sequenceAnim = _self->miscAnimNode->sequenceAnim;                            \
-                _self->vizAnim = _self->miscAnimNode->vizAnim;                                      \
+            MiscAnimNode* _sharedNode = g_animMgr->GetMiscAnim(static_cast<u32>(_inMiscAnimHash)); \
+            _self->sharedMiscAnimNode = _sharedNode;                                                \
+            if (_sharedNode) {                                                                       \
+                MiscAnimNode* _clone = new MiscAnimNode();                                          \
+                _clone->ownsSubs      = false;                                                      \
+                _clone->field12       = _sharedNode->field12;                                       \
+                _clone->field16       = _sharedNode->field16;                                       \
+                _clone->field18       = _sharedNode->field18;                                       \
+                _clone->type          = _sharedNode->type;                                          \
+                _clone->hash          = _sharedNode->hash;                                          \
+                _clone->anim          = _sharedNode->anim;                                          \
+                _clone->animSequence  = _sharedNode->animSequence;                                  \
+                _clone->paramAnim     = _sharedNode->paramAnim;                                     \
+                _clone->frameList     = _sharedNode->frameList;                                     \
+                _clone->compositeAnim = _sharedNode->compositeAnim;                                 \
+                _clone->sequenceAnim  = _sharedNode->sequenceAnim;                                  \
+                _clone->vizAnim       = _sharedNode->vizAnim;                                       \
+                _clone->cbvParamAnim  = _sharedNode->cbvParamAnim;                                  \
+                _clone->clutAnim      = _sharedNode->clutAnim;                                      \
+                _clone->uvListAnim    = _sharedNode->uvListAnim;                                    \
+                _self->ownedMiscAnimNode = _clone;                                                  \
+                _self->miscAnimNode      = _clone;                                                  \
+                _self->miscAnim          = _clone->anim;                                            \
+                _self->frameListAnim     = _clone->frameList;                                       \
+                _self->compositeAnim     = _clone->compositeAnim;                                   \
+                _self->sequenceAnim      = _clone->sequenceAnim;                                    \
+                _self->vizAnim           = _clone->vizAnim;                                         \
                                                                                                      \
-                const s32 _resolvedFrameCount = GetMiscAnimFrameCount(_self->miscAnimNode);         \
+                const s32 _resolvedFrameCount = GetMiscAnimFrameCount(_clone);                      \
                 if (_resolvedFrameCount > 0) {                                                       \
                     _self->frameCount = _resolvedFrameCount;                                        \
                 }                                                                                    \
@@ -2120,6 +2151,7 @@ PaletteData* WEffect::SetupPaletteData(u32 paletteHash, u32 clutMode, u32 flags)
     ([&]() -> MiscAnimNode* {                                                                        \
         ComEffect* _self = (selfPtr);                                                                \
         if (!g_animMgr || _self->miscAnimHash == 0) {                                                \
+            _self->sharedMiscAnimNode = nullptr;                                                     \
             _self->miscAnimNode = nullptr;                                                           \
             _self->miscAnim = nullptr;                                                               \
             _self->frameListAnim = nullptr;                                                          \
@@ -2131,8 +2163,35 @@ PaletteData* WEffect::SetupPaletteData(u32 paletteHash, u32 clutMode, u32 flags)
         }                                                                                            \
                                                                                                      \
         MiscAnimNode* _liveNode = g_animMgr->GetMiscAnim(_self->miscAnimHash);                      \
-        if (_liveNode != _self->miscAnimNode) {                                                      \
-            _self->miscAnimNode = _liveNode;                                                         \
+        if (_liveNode != _self->sharedMiscAnimNode) {                                               \
+            _self->sharedMiscAnimNode = _liveNode;                                                  \
+            if (_self->ownedMiscAnimNode) {                                                         \
+                delete _self->ownedMiscAnimNode;                                                    \
+                _self->ownedMiscAnimNode = nullptr;                                                 \
+            }                                                                                        \
+            if (_liveNode) {                                                                         \
+                MiscAnimNode* _clone = new MiscAnimNode();                                          \
+                _clone->ownsSubs      = false;                                                      \
+                _clone->field12       = _liveNode->field12;                                         \
+                _clone->field16       = _liveNode->field16;                                         \
+                _clone->field18       = _liveNode->field18;                                         \
+                _clone->type          = _liveNode->type;                                            \
+                _clone->hash          = _liveNode->hash;                                            \
+                _clone->anim          = _liveNode->anim;                                            \
+                _clone->animSequence  = _liveNode->animSequence;                                    \
+                _clone->paramAnim     = _liveNode->paramAnim;                                       \
+                _clone->frameList     = _liveNode->frameList;                                       \
+                _clone->compositeAnim = _liveNode->compositeAnim;                                   \
+                _clone->sequenceAnim  = _liveNode->sequenceAnim;                                    \
+                _clone->vizAnim       = _liveNode->vizAnim;                                         \
+                _clone->cbvParamAnim  = _liveNode->cbvParamAnim;                                    \
+                _clone->clutAnim      = _liveNode->clutAnim;                                        \
+                _clone->uvListAnim    = _liveNode->uvListAnim;                                      \
+                _self->ownedMiscAnimNode = _clone;                                                  \
+                _self->miscAnimNode      = _clone;                                                  \
+            } else {                                                                                 \
+                _self->miscAnimNode = nullptr;                                                      \
+            }                                                                                        \
             _self->miscAnim = _liveNode ? _liveNode->anim : nullptr;                                \
             _self->boundTransformAnim = nullptr;                                                     \
             _self->frameListAnim = _liveNode ? _liveNode->frameList : nullptr;                      \
@@ -2140,11 +2199,11 @@ PaletteData* WEffect::SetupPaletteData(u32 paletteHash, u32 clutMode, u32 flags)
             _self->sequenceAnim = _liveNode ? _liveNode->sequenceAnim : nullptr;                    \
             _self->vizAnim = _liveNode ? _liveNode->vizAnim : nullptr;                              \
                                                                                                      \
-            const s32 _resolvedFrameCount = GetMiscAnimFrameCount(_liveNode);                       \
+            const s32 _resolvedFrameCount = GetMiscAnimFrameCount(_self->miscAnimNode);             \
             _self->frameCount = (_resolvedFrameCount > 0) ? _resolvedFrameCount : 0;                \
         }                                                                                            \
                                                                                                      \
-        return _liveNode;                                                                            \
+        return _self->miscAnimNode;                                                                  \
     }())
 
 #define ComEffect_ResolveInitialTransform(nodeArg, frameArg, outAnimPtrArg, outFramePtrArg)       \
@@ -2952,8 +3011,99 @@ bool ComEffect::ApplyClutAnimFrame(ClutAnimData* clutAnimData, s32 frame) {
     return true;
 }
 
+void ComEffect::ApplyUVListAnimFrame(const UVListAnim* uvAnim, s32 frame) {
+    if (!uvAnim || !uvAnim->uvData || uvAnim->numFrames <= 0 || uvAnim->numEntries <= 0) {
+        return;
+    }
+    if (frame < 0) {
+        frame = 0;
+    }
+    else if (frame >= uvAnim->numFrames) {
+        frame = uvAnim->numFrames - 1;
+    }
+
+    if (!model || model->drawableType != 3) {
+        return;
+    }
+
+    DrawableETree* drawable = static_cast<DrawableETree*>(model->drawable);
+    if (!drawable || !drawable->original) {
+        return;
+    }
+
+    OriginalETree* etree = drawable->original;
+    OriginalGeo* targetGeo = nullptr;
+    for (u16 i = 0; i < etree->geoPartCount; i++) {
+        if (etree->geoPartHashes[i] == uvAnim->targetUID) {
+            targetGeo = etree->geoParts[i];
+            break;
+        }
+    }
+
+    if (!GeoSupportsDynamicUV(targetGeo)) {
+        return;
+    }
+
+    const u16* frameData = uvAnim->uvData + frame * uvAnim->numEntries;
+    const u32 primCount = targetGeo->dynamicPrimCount;
+
+    // PSX 0x6010 gives byte offsets into the geo OT buffer, one per UV slot.
+    // sortedPerm[k] = j such that packetOffsets[j] is the k-th smallest offset,
+    // giving OT packet order (ascending = prim 0 c0, prim 0 c1, ..., prim N cM).
+    // frameData[j] is the UV for the OT slot at packetOffsets[j].
+    // Without sortedPerm (no 0x6010 data), assume sequential j == k.
+    const u32* perm = (uvAnim->sortedPerm && uvAnim->numPacketOffsets > 0)
+                          ? uvAnim->sortedPerm : nullptr;
+    const u32 slotCount = perm ? uvAnim->numPacketOffsets
+                                : static_cast<u32>(uvAnim->numEntries);
+    u32 k = 0;
+    for (u32 p = 0; p < primCount && k < slotCount; p++) {
+        const u8 cmd = targetGeo->dynamicPrimCmd ? targetGeo->dynamicPrimCmd[p] : 0x3Cu;
+        if (!(cmd & 0x04u)) {
+            continue;
+        }
+        const u32 corners = (cmd & 0x08u) ? 4u : 3u;
+        const u32 start = targetGeo->dynamicPrimStart[p];
+        const u32 count = static_cast<u32>(targetGeo->dynamicPrimVertCount[p]);
+
+        for (u32 c = 0; c < corners && k < slotCount; c++, k++) {
+            const u32 j = perm ? perm[k] : k;
+            if (static_cast<s32>(j) >= uvAnim->numEntries) {
+                continue;
+            }
+            const u16 uvWord = frameData[j];
+            const f32 u = static_cast<f32>(uvWord & 0xFFu);
+            const f32 v = static_cast<f32>((uvWord >> 8) & 0xFFu);
+
+            if (targetGeo->dynamicPrimUVWords) {
+                targetGeo->dynamicPrimUVWords[p * 4u + c] = uvWord;
+            }
+            if (c < count) {
+                const u32 dynCorner = (count - 1u) - c;
+                if ((start + dynCorner) < targetGeo->dynamicVertCount) {
+                    targetGeo->dynamicVerts[start + dynCorner].u = u;
+                    targetGeo->dynamicVerts[start + dynCorner].v = v;
+                }
+            }
+        }
+    }
+
+    if (targetGeo->meshBuffer) {
+        targetGeo->meshBuffer->SetVertexData(targetGeo->dynamicVerts, targetGeo->dynamicVertCount);
+    }
+}
+
 bool ComEffect::ApplyMiscAnimFrame(MiscAnimNode* node, s32 frame, bool updateJoints) {
     if (!node) {
+        return false;
+    }
+
+    if (node->animSequence) {
+        s32 localFrame = 0;
+        TransformAnim* part = node->animSequence->ResolvePart(frame, localFrame);
+        if (part) {
+            return ComEffect_ApplyTransformAnimFrame(this, part, localFrame, updateJoints);
+        }
         return false;
     }
 
@@ -3042,6 +3192,13 @@ bool ComEffect::ApplyMiscAnimFrame(MiscAnimNode* node, s32 frame, bool updateJoi
     if (node->frameList) {
         // Frame-list animation is consumed by SetVertexInfo paths; no joint
         // transform update is required here.
+        return true;
+    }
+
+    if (node->uvListAnim) {
+        if (updateJoints) {
+            ApplyUVListAnimFrame(node->uvListAnim, frame);
+        }
         return true;
     }
 
@@ -3306,12 +3463,19 @@ bool ComEffect::PointInView(const LVector& pos, s32 radius) const {
         return true;
     }
 
-    const s32 projectionX = PsxTruncToS32(port.projectionDistanceX);
-    const s32 projectionY = PsxTruncToS32(port.projectionDistanceY);
-    const s32 marginXRaw = static_cast<s32>((static_cast<s64>(radius) * rmDiv16i(projectionX, vz)) >> 16);
-    const s32 marginYRaw = static_cast<s32>((static_cast<s64>(radius) * rmDiv16i(projectionY, vz)) >> 16);
-    const s32 marginX = static_cast<s32>(static_cast<u16>(marginXRaw));
-    const s32 marginY = static_cast<s32>(static_cast<u16>(marginYRaw));
+    // PSX P3DClipCodeSphere (FRUSTRUM.CPP:442) derives the X margin from the Y margin via a
+    // separate _5tPort_scaleX factor rather than dividing by an independent X projection
+    // distance: marginY = radius*zProjection/depth; marginX = MulShift16(radius*scaleX, zProjection/depth).
+    const s32 zProjection = PsxTruncToS32(port.projectionDistanceY);
+    const s32 scaleX = (port.projectionDistanceY > 0.0f)
+        ? static_cast<s32>((port.projectionDistanceX / port.projectionDistanceY) * 65536.0f)
+        : FIX16_ONE;
+    const s32 zOverDepth = rmDiv16i(zProjection, vz);
+    // PSX masks both margins to the low 16 bits (andi ..., 0xFFFF) before combining with the
+    // signed screen coordinate; preserve that truncation for parity even though it can wrap
+    // for very large radius/close-depth combinations.
+    const s32 marginX = PsxMulShift16Signed(PsxMulShift16Signed(radius, scaleX), zOverDepth) & 0xFFFF;
+    const s32 marginY = PsxMulShift16Signed(radius, zOverDepth) & 0xFFFF;
 
     const s32 clipMaxX = (port.width > 0) ? port.width : 0x7FFF;
     const s32 clipMaxY = (port.height > 0) ? port.height : 0x7FFF;

@@ -759,14 +759,24 @@ static bool RegisterTransformAnimChunk(const u8* chunkBody,
     }
 
     TransformAnim* anim = nullptr;
+    CharSequenceAnim* animSeq = nullptr;
     if (rawSize >= 40) {
         u8* rawCopy = static_cast<u8*>(std::malloc(rawSize));
         if (rawCopy) {
             std::memcpy(rawCopy, permData + permCursor, rawSize);
-            anim = TransformAnim::Parse(rawCopy, rawSize);
-            if (anim) {
-                anim->ownedRawData = rawCopy;
-                if (chunkNameHash != 0) {
+            // ParseMulti handles both single-block and multi-block (concatenated
+            // tTransformAnim, i.e. a frame-by-frame pose flip-book) payloads;
+            // Parse() alone would silently read only the first block.
+            void* parsed = TransformAnim::ParseMulti(rawCopy, rawSize);
+            if (parsed) {
+                if (IsCharSequenceAnim(parsed)) {
+                    animSeq = static_cast<CharSequenceAnim*>(parsed);
+                    anim = animSeq->parts ? animSeq->parts[0] : nullptr;
+                }
+                else {
+                    anim = static_cast<TransformAnim*>(parsed);
+                }
+                if (anim && chunkNameHash != 0) {
                     anim->nameUID = chunkNameHash;
                 }
             }
@@ -783,12 +793,12 @@ static bool RegisterTransformAnimChunk(const u8* chunkBody,
     }
 
     if (!g_animMgr) {
-        delete anim;
+        if (animSeq) delete animSeq; else delete anim;
         return true;
     }
 
     if (g_animMgr->GetMiscAnim(anim->nameUID)) {
-        delete anim;
+        if (animSeq) delete animSeq; else delete anim;
         return true;
     }
 
@@ -796,7 +806,124 @@ static bool RegisterTransformAnimChunk(const u8* chunkBody,
     node->hash = anim->nameUID;
     node->type = animType;
     node->anim = anim;
+    node->animSequence = animSeq;
     g_animMgr->AddAnim(node);
+    return true;
+}
+
+// PSX tUVAnimLoader::Load (UVANIM.CPP:197)
+// Chunk 0x600E: per-primitive UV frame animation targeting a named child geo.
+// Sub-chunk 0x600F carries the frame data; 0x6010 (PSX OT byte offsets) is skipped.
+static bool RegisterUVListAnimChunk(const u8* body, u32 bodySize, u8 animType)
+{
+    if (!body || bodySize < 2 || !g_animMgr) {
+        return true;
+    }
+
+    u32 cursor = 0;
+    u32 nameHash = 0;
+    u32 targetHash = 0;
+    if (!ReadChunkPStringHash(body, bodySize, cursor, &nameHash)) {
+        return true;
+    }
+    if (!ReadChunkPStringHash(body, bodySize, cursor, &targetHash)) {
+        return true;
+    }
+
+    // Skip two u32 fields (PSX: first discarded, second = mode 0=INVGEO/1=INVPRM).
+    if (cursor + 8 > bodySize) {
+        return true;
+    }
+    cursor += 8;
+
+    s32 numFrames = 0;
+    s32 numEntries = 0;
+    u16* uvData = nullptr;
+    u32* packetOffsets = nullptr;
+    u32 numPacketOffsets = 0;
+
+    while (cursor + 6 <= bodySize) {
+        const u16 subId = static_cast<u16>(body[cursor] | (body[cursor + 1] << 8));
+        const u32 subTotal = static_cast<u32>(body[cursor + 2])
+                             | (static_cast<u32>(body[cursor + 3]) << 8)
+                             | (static_cast<u32>(body[cursor + 4]) << 16)
+                             | (static_cast<u32>(body[cursor + 5]) << 24);
+        if (subTotal < 6 || cursor + subTotal > bodySize) {
+            break;
+        }
+
+        const u8* subBody = body + cursor + 6;
+        const u32 subBodySize = subTotal - 6;
+
+        if (subId == 0x600F && subBodySize >= 8) {
+            // numFrames (u32), numEntries (u32), then numFrames*numEntries u16 UV words.
+            numFrames = static_cast<s32>(p3dReadU32LE(subBody + 0));
+            numEntries = static_cast<s32>(p3dReadU32LE(subBody + 4));
+            const u32 dataBytes = static_cast<u32>(numFrames) * static_cast<u32>(numEntries) * 2u;
+            if (numFrames > 0 && numEntries > 0 && subBodySize >= 8u + dataBytes) {
+                uvData = new u16[static_cast<u32>(numFrames) * static_cast<u32>(numEntries)];
+                if (uvData) {
+                    std::memcpy(uvData, subBody + 8, dataBytes);
+                }
+            }
+        }
+        else if (subId == 0x6010 && subBodySize >= 4) {
+            // PSX OT byte offsets: numOffsets (u32) followed by numOffsets u32 values.
+            // Each value is a byte offset into the geo's OT packet buffer for one UV word slot.
+            const u32 n = p3dReadU32LE(subBody);
+            const u32 dataBytes = n * 4u;
+            if (n > 0 && subBodySize >= 4u + dataBytes) {
+                delete[] packetOffsets;
+                packetOffsets = new u32[n];
+                if (packetOffsets) {
+                    std::memcpy(packetOffsets, subBody + 4, dataBytes);
+                    numPacketOffsets = n;
+                }
+            }
+        }
+
+        cursor += subTotal;
+    }
+
+    if (!uvData || numFrames <= 0 || numEntries <= 0) {
+        delete[] uvData;
+        delete[] packetOffsets;
+        return true;
+    }
+
+    if (g_animMgr->GetMiscAnim(nameHash)) {
+        delete[] uvData;
+        delete[] packetOffsets;
+        return true;
+    }
+
+    UVListAnim* uvAnim = new UVListAnim();
+    uvAnim->nameUID = nameHash;
+    uvAnim->targetUID = targetHash;
+    uvAnim->numFrames = numFrames;
+    uvAnim->numEntries = numEntries;
+    uvAnim->uvData = uvData;
+    uvAnim->packetOffsets = packetOffsets;
+    uvAnim->numPacketOffsets = numPacketOffsets;
+
+    // Pre-sort UV data indices by ascending OT byte offset so ApplyUVListAnimFrame
+    // can walk prim/corners in OT order regardless of how 0x6010 lists entries.
+    if (numPacketOffsets > 0 && packetOffsets) {
+        u32* perm = new u32[numPacketOffsets];
+        for (u32 i = 0; i < numPacketOffsets; i++) perm[i] = i;
+        std::sort(perm, perm + numPacketOffsets, [&](u32 a, u32 b) {
+            return packetOffsets[a] < packetOffsets[b];
+        });
+        uvAnim->sortedPerm = perm;
+    }
+
+    MiscAnimNode* node = new MiscAnimNode();
+    node->hash = nameHash;
+    node->type = animType;
+    node->uvListAnim = uvAnim;
+    g_animMgr->AddAnim(node);
+    LOG("[World] UVListAnim 0x%08X -> target 0x%08X (%d frames x %d entries)",
+        nameHash, targetHash, numFrames, numEntries);
     return true;
 }
 
@@ -2320,6 +2447,12 @@ static void LoadGeoPair(
                 }
 
                 permCursor += chunkPermSize;
+            }
+
+            // PSX: tUVAnimLoader::Load (UVANIM.CPP:197)
+            // Chunk 0x600E registers tUVAnim in INVANI (per-primitive UV frame anim).
+            else if (chunkId == 0x600E) {
+                RegisterUVListAnimChunk(chunkBody, chunkSize - 6, static_cast<u8>(storeId));
             }
 
             // PSX: tVertAnimLoader::Load (TVRTLOAD.CPP:32)
