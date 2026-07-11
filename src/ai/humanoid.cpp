@@ -2097,6 +2097,11 @@ void Humanoid::HandleCollisionReactionStates(s32 hitType, s32 impactRegion) {
     }
 }
 
+#if NEW_CHEATS
+static constexpr s32 ONE_PUNCH_LAUNCH_FORCE = 10000;
+static constexpr s32 ONE_PUNCH_LAUNCH_LIFT = 6000;
+#endif
+
 // PSX: HandleCollision__8HumanoidP5Thingle (HUMANOID.CPP:1997)
 void Humanoid::HandleCollision(Thing* other, s32 damage, ...) {
     MARKFUNCTION(0x80064808);
@@ -2200,12 +2205,17 @@ void Humanoid::HandleCollision(Thing* other, s32 damage, ...) {
             appliedDamage = static_cast<s32>((39321LL * static_cast<s64>(appliedDamage)) >> 16);
         }
 
+#if NEW_CHEATS
+        bool onePunchKill = false;
+#endif
+
         if (this != (Humanoid*)Player::s_player) {
 #if NEW_CHEATS
             const bool playerMelee = other == static_cast<Thing*>(Player::s_player)
                 && hitType >= 1 && hitType <= 5;
             if (playerMelee && IsCheatEnabled(CheatOption::OnePunchMan)) {
                 appliedDamage = static_cast<s32>(health);
+                onePunchKill = appliedDamage > 0;
             }
 #endif
             bool setFoe = other->thingType >= 0x191u && other->thingType < 0x1D9u;
@@ -2231,6 +2241,28 @@ void Humanoid::HandleCollision(Thing* other, s32 damage, ...) {
                 heldPickup->field308 = (this == static_cast<Humanoid*>(Player::s_player)) ? 1 : 0;
                 DropPickup(1, 1);
             }
+
+#if NEW_CHEATS
+            if (onePunchKill) {
+                Effects* burst =
+                    GEffect_Create(HUMANOID_LAND_IMPACT_EFFECT_HASH, &pos, nullptr, nullptr, 0, 0x19, 0);
+                if (!burst) {
+                    LOG(
+                        "[EffectsParity] OnePunchMan effect create miss hash=%08X\n",
+                        HUMANOID_LAND_IMPACT_EFFECT_HASH);
+                }
+
+                // Send the victim flying away along its own facing, same
+                // AS_FLYING_BACK reaction a heavy environmental hit would cause.
+                SVector launchDir = {};
+                launchDir.z = static_cast<s16>(orientation.y);
+                AddForce(-ONE_PUNCH_LAUNCH_FORCE, &launchDir);
+                contactForce.y += ONE_PUNCH_LAUNCH_LIFT;
+
+                maxFallDivisor = GetFlyingBackFallDivisor();
+                SetActionState(AS_FLYING_BACK, 0);
+            }
+#endif
         }
     }
 }

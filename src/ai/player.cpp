@@ -24,6 +24,7 @@
 #include "gen/game.h"
 #include "gen/world.h"
 #include "snd/snddrct.h"
+#include "fe/hud.h"
 #if NEW_CHEATS
 #include "extra/cheats.h"
 #endif
@@ -1196,6 +1197,11 @@ void Player::FallingPhysics() {
 static constexpr u32 STUNTQUAKE_EFFECT_HASH = 0x0B0E21C4u;   // same visual as HUMANOID_LAND_IMPACT_EFFECT_HASH
 static constexpr s32 STUNTQUAKE_RADIUS = 2500;
 static constexpr s32 STUNTQUAKE_SHAKE_FRAMES = 0x0F;
+static constexpr s32 STUNTQUAKE_DAMAGE = 10;
+static constexpr s32 STUNTQUAKE_FIGHTING_POINTS = 100;
+static constexpr s32 STUNTQUAKE_COLLISION_TAG_HIT_TYPE = static_cast<s32>(0x80000003u);
+static constexpr s32 STUNTQUAKE_COLLISION_TAG_DAMAGE = static_cast<s32>(0x80000007u);
+static constexpr s32 STUNTQUAKE_COLLISION_TAG_END = 0;
 
 static void TriggerStuntquake(Player* player) {
     if (!player) {
@@ -1224,7 +1230,19 @@ static void TriggerStuntquake(Player* player) {
         if (h->DistanceFromPoint(player->pos) > STUNTQUAKE_RADIUS) {
             continue;
         }
+
+        h->HandleCollision(player, 1,
+            STUNTQUAKE_COLLISION_TAG_HIT_TYPE, 0,
+            STUNTQUAKE_COLLISION_TAG_DAMAGE, STUNTQUAKE_DAMAGE,
+            STUNTQUAKE_COLLISION_TAG_END);
         h->SetActionState(AS_COLLAPSE_STUN, 0);
+
+        if (g_hud) {
+            g_hud->SetFoe(h);
+        }
+        if (g_scoreManager) {
+            g_scoreManager->AddFightingPoints(STUNTQUAKE_FIGHTING_POINTS);
+        }
     }
 }
 #endif

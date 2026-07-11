@@ -456,7 +456,11 @@ static void BobbleHeadUpdate(Humanoid* owner, STreeJoint* joint) {
 
     joint->rotationX = (s16)(joint->rotationX + (s16)model->bobbleAngleX);
     joint->rotationZ = (s16)(joint->rotationZ + (s16)model->bobbleAngleZ);
-    joint->renderScale = 2.2f;
+
+    if (owner->thingType == AITypes::TT_PLAYER)
+        joint->renderScale = 2.2f;
+    else
+        joint->renderScale = 2.8f;
 }
 #endif
 
