@@ -2,23 +2,24 @@
 // Game title
 #define JCS_TITLE "ReChan"
 #define GAME_VERSION "v1.0.0"
-#define UPDATE_REPO_OWNER "gennariarmando"
-#define UPDATE_REPO_NAME "rechan"
+#define UPDATE_REPO_OWNER "SilverwireGames"
+#define UPDATE_REPO_NAME "ReChan"
 
 #define LEGAL_TEXT R"(
 LEGAL NOTICE
-        
-ReChan is an unofficial reimplementation project for Jackie Chan Stuntmaster.
 
-No original game assets, disc images, ROMs, videos, music, voice clips, textures, models, levels, or copyrighted PlayStation data are included or distributed with ReChan. A legally owned copy of the original game is required.
+ReChan is an independent, unofficial reimplementation project for Jackie Chan Stuntmaster.
 
-ReChan is free, non - commercial, and not intended for sale or profit. The source code created for this project is released under the MIT License.
+No original game assets, disc images, ROM data, videos, music, voice recordings, textures, models, levels, or other copyrighted game content are included or distributed with ReChan. A legally obtained copy of the original game is required.
 
-Jackie Chan Stuntmaster and all related trademarks, copyrights, characters, names, logos, assets, and game data remain the property of their respective rights holders.
+ReChan is provided free of charge. The source code developed for this project is released under the MIT License.
 
-ReChan is not affiliated with, endorsed by, sponsored by, or approved by any original developer, publisher, license holder, or rights holder.
+Jackie Chan Stuntmaster and all related trademarks, copyrights, characters, names, logos, assets, and original game data remain the property of their respective owners.
 
-Visit github.com/gennariarmando/rechan for source code, updates, and more information.
+ReChan is not affiliated with, endorsed by, sponsored by, or approved by the original developers, publishers, license holders, or rights holders.
 
-© 2026 _AG / gennariarmando.
+For updates and more information:
+silverwiregames.com/rechan
+
+© 2026 Silverwire Games
 )"
