@@ -1,6 +1,6 @@
-# Building rechan
+# Building ReChan
 
-rechan supports 64-bit x86 (`x86_64`) Windows and Linux. A 32-bit build is not
+ReChan supports 64-bit x86 (`x86_64`) Windows and Linux. A 32-bit build is not
 supported. macOS and ARM platforms are not currently supported.
 
 ## Clone the repository
