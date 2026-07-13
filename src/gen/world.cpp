@@ -739,8 +739,7 @@ static bool RegisterTransformAnimChunk(const u8* chunkBody,
                                        const u8* permData,
                                        u32& permCursor,
                                        u32 permSize,
-                                       u8 animType)
-{
+                                       u8 animType) {
     if (!chunkBody || chunkBodySize < 5 || !permData) {
         return true;
     }
@@ -814,8 +813,7 @@ static bool RegisterTransformAnimChunk(const u8* chunkBody,
 // PSX tUVAnimLoader::Load (UVANIM.CPP:197)
 // Chunk 0x600E: per-primitive UV frame animation targeting a named child geo.
 // Sub-chunk 0x600F carries the frame data; 0x6010 (PSX OT byte offsets) is skipped.
-static bool RegisterUVListAnimChunk(const u8* body, u32 bodySize, u8 animType)
-{
+static bool RegisterUVListAnimChunk(const u8* body, u32 bodySize, u8 animType) {
     if (!body || bodySize < 2 || !g_animMgr) {
         return true;
     }
@@ -845,9 +843,9 @@ static bool RegisterUVListAnimChunk(const u8* body, u32 bodySize, u8 animType)
     while (cursor + 6 <= bodySize) {
         const u16 subId = static_cast<u16>(body[cursor] | (body[cursor + 1] << 8));
         const u32 subTotal = static_cast<u32>(body[cursor + 2])
-                             | (static_cast<u32>(body[cursor + 3]) << 8)
-                             | (static_cast<u32>(body[cursor + 4]) << 16)
-                             | (static_cast<u32>(body[cursor + 5]) << 24);
+            | (static_cast<u32>(body[cursor + 3]) << 8)
+            | (static_cast<u32>(body[cursor + 4]) << 16)
+            | (static_cast<u32>(body[cursor + 5]) << 24);
         if (subTotal < 6 || cursor + subTotal > bodySize) {
             break;
         }
@@ -932,8 +930,7 @@ static bool RegisterFrameListAnimChunk(const u8* chunkBody,
                                        const u8* permData,
                                        u32& permCursor,
                                        u32 permSize,
-                                       u8 animType)
-{
+                                       u8 animType) {
     if (!chunkBody || chunkBodySize < 8 || !permData) {
         return true;
     }
@@ -991,8 +988,7 @@ static bool RegisterSequenceAnimChunk(const u8* chunkBody,
                                       const u8* permData,
                                       u32& permCursor,
                                       u32 permSize,
-                                      u8 animType)
-{
+                                      u8 animType) {
     if (!chunkBody || chunkBodySize < 4 || !permData) {
         return true;
     }
@@ -1753,7 +1749,7 @@ static s32 SwitchDeathState(Thing* /*thing*/, u32 argc, const char** argv) {
 
     static constexpr s32 COLLISION_TAG_HIT_TYPE = static_cast<s32>(0x80000003u);
     Player::s_player->HandleCollision(Player::s_player, 0,
-        -1, COLLISION_TAG_HIT_TYPE, 20, 0x80000004, deathStateIdx, 0);
+                                      -1, COLLISION_TAG_HIT_TYPE, 20, 0x80000004, deathStateIdx, 0);
     return 1;
 }
 
@@ -1861,8 +1857,7 @@ static pddiPrimBuffer* ParseDynGeoPrims(
     std::vector<u32>* outPrimMaterialUID,
     std::vector<u8>* outPrimCmd,
     std::vector<u16>* outPrimUVWords,
-    std::vector<u32>* outPrimPacketOffset)
-{
+    std::vector<u32>* outPrimPacketOffset) {
     if (outUsesSemiTrans) {
         *outUsesSemiTrans = false;
     }
@@ -2163,8 +2158,8 @@ static tPrimGeom* CloneDynGeoVertexPrimGeom(const u8* geoData, u32 geoSize) {
 // decoding the original data already uploaded into world's VRAM (native PSX
 // resolution -- no quality gain, just routed through the same pipeline).
 static void RegisterRealTexture(World* world, const char* name,
-                                 u16 tpage, u16 cba,
-                                 float offsetX, float offsetY, float sizeX, float sizeY) {
+                                u16 tpage, u16 cba,
+                                float offsetX, float offsetY, float sizeX, float sizeY) {
     if (!world) return;
 
 #ifdef MOD_LOADER
@@ -2174,7 +2169,7 @@ static void RegisterRealTexture(World* world, const char* name,
     std::snprintf(levelScope, sizeof(levelScope), "lev%02d", world->GetCurLevelID());
     if (ModLoader::Instance().GetTextureOverrideRGBA(levelScope, name, overrideRgba, overrideW, overrideH)) {
         RealTextureRegistry::Instance().Register(tpage, cba, overrideRgba.data(), overrideW, overrideH,
-                                                  offsetX, offsetY, sizeX, sizeY);
+                                                 offsetX, offsetY, sizeX, sizeY);
         return;
     }
 #endif
@@ -2203,8 +2198,7 @@ static void LoadGeoPair(
     u32 permSize,
     const u8* p3dData,
     u32 p3dSize,
-    s32 storeId)
-{
+    s32 storeId) {
     if (!g_levelManager || !permData || !p3dData || p3dSize < 6) {
         return;
     }
@@ -2213,766 +2207,767 @@ static void LoadGeoPair(
         return;
     }
 
-        std::unordered_map<u32, GeoMaterialInfo> materials;
+    std::unordered_map<u32, GeoMaterialInfo> materials;
 
-        // Track PRM (tPrimGeom) perm locations from 0x6009 chunks for STree lookup
-        struct PrmInfo { u32 permOffset; u32 permSize; };
-        std::unordered_map<u32, PrmInfo> prmMap; // nameHash = perm location
+    // Track PRM (tPrimGeom) perm locations from 0x6009 chunks for STree lookup
+    struct PrmInfo { u32 permOffset; u32 permSize; };
+    std::unordered_map<u32, PrmInfo> prmMap; // nameHash = perm location
 
 #if defined(MOD_LOADER) || defined(REAL_TEXTURE_RENDERING)
-        // CLUT chunks (e.g. "name CLUT") always precede their indexed data chunk
-        // within the stream. Remember each CLUT's VRAM rect by base name so the
-        // matching data chunk can re-quantize+repaint (or register a real-texture
-        // entry for) both as a pair.
-        struct PendingClutRect { s16 rx, ry, rw, rh; };
-        std::unordered_map<std::string, PendingClutRect> pendingGeoCluts;
+    // CLUT chunks (e.g. "name CLUT") always precede their indexed data chunk
+    // within the stream. Remember each CLUT's VRAM rect by base name so the
+    // matching data chunk can re-quantize+repaint (or register a real-texture
+    // entry for) both as a pair.
+    struct PendingClutRect { s16 rx, ry, rw, rh; };
+    std::unordered_map<std::string, PendingClutRect> pendingGeoCluts;
 #endif
 
-        u32 rootSize = p3dReadU32LE(p3dData + 2);
-        u32 chunkEnd = (rootSize < p3dSize) ? rootSize : p3dSize;
-        u32 chunkPos = 6;
-        u32 permCursor = 0;
+    u32 rootSize = p3dReadU32LE(p3dData + 2);
+    u32 chunkEnd = (rootSize < p3dSize) ? rootSize : p3dSize;
+    u32 chunkPos = 6;
+    u32 permCursor = 0;
 
-        while (chunkPos + 6 <= chunkEnd) {
-            u16 chunkId = p3dReadU16LE(p3dData + chunkPos);
-            u32 chunkSize = p3dReadU32LE(p3dData + chunkPos + 2);
-            if (chunkSize < 6 || chunkPos + chunkSize > chunkEnd) {
+    while (chunkPos + 6 <= chunkEnd) {
+        u16 chunkId = p3dReadU16LE(p3dData + chunkPos);
+        u32 chunkSize = p3dReadU32LE(p3dData + chunkPos + 2);
+        if (chunkSize < 6 || chunkPos + chunkSize > chunkEnd) {
+            break;
+        }
+
+        const u8* chunkBody = p3dData + chunkPos + 6;
+        const u32 permBefore = permCursor;
+
+        if (chunkId == 0x6001 || chunkId == 0x6002) {
+            u32 nameCount = p3dReadU32LE(chunkBody + 0);
+            u32 chunkPermSize = p3dReadU32LE(chunkBody + 4);
+            u32 namesPos = 8;
+            std::vector<std::string> names;
+            names.reserve(nameCount);
+
+            for (u32 i = 0; i < nameCount; i++) {
+                if (namesPos >= chunkSize - 6) {
+                    break;
+                }
+                u8 nameLen = chunkBody[namesPos++];
+                if (namesPos + nameLen > chunkSize - 6) {
+                    break;
+                }
+                names.emplace_back(reinterpret_cast<const char*>(chunkBody + namesPos), nameLen);
+                namesPos += nameLen;
+            }
+
+            if (permCursor + chunkPermSize > permSize) {
+                LOG("[World] Geo perm overflow for chunk 0x%04X (need 0x%X, have 0x%X)",
+                    chunkId, permCursor + chunkPermSize, permSize);
                 break;
             }
 
-            const u8* chunkBody = p3dData + chunkPos + 6;
-            const u32 permBefore = permCursor;
+            if (chunkId == 0x6001) {
+                if (nameCount != 0) {
+                    u32 recordSize = chunkPermSize / nameCount;
+                    if (recordSize >= 24) {
+                        for (u32 i = 0; i < nameCount; i++) {
+                            u32 recordOff = permCursor + i * recordSize;
+                            const u8* record = permData + recordOff;
 
-            if (chunkId == 0x6001 || chunkId == 0x6002) {
-                u32 nameCount = p3dReadU32LE(chunkBody + 0);
-                u32 chunkPermSize = p3dReadU32LE(chunkBody + 4);
-                u32 namesPos = 8;
-                std::vector<std::string> names;
-                names.reserve(nameCount);
+                            GeoMaterialInfo info = {};
+                            // PSX primitive command byte lives in the high byte of this word.
+                            info.primCmd = static_cast<u8>((p3dReadU32LE(record + 16) >> 24) & 0xFF);
+                            u32 texInfo = p3dReadU32LE(record + 20);
+                            info.cba = static_cast<u16>(texInfo & 0xFFFF);
+                            info.tpage = static_cast<u16>(texInfo >> 16);
 
-                for (u32 i = 0; i < nameCount; i++) {
-                    if (namesPos >= chunkSize - 6) {
-                        break;
-                    }
-                    u8 nameLen = chunkBody[namesPos++];
-                    if (namesPos + nameLen > chunkSize - 6) {
-                        break;
-                    }
-                    names.emplace_back(reinterpret_cast<const char*>(chunkBody + namesPos), nameLen);
-                    namesPos += nameLen;
-                }
-
-                if (permCursor + chunkPermSize > permSize) {
-                    LOG("[World] Geo perm overflow for chunk 0x%04X (need 0x%X, have 0x%X)",
-                        chunkId, permCursor + chunkPermSize, permSize);
-                    break;
-                }
-
-                if (chunkId == 0x6001) {
-                    if (nameCount != 0) {
-                        u32 recordSize = chunkPermSize / nameCount;
-                        if (recordSize >= 24) {
-                            for (u32 i = 0; i < nameCount; i++) {
-                                u32 recordOff = permCursor + i * recordSize;
-                                const u8* record = permData + recordOff;
-
-                                GeoMaterialInfo info = {};
-                                // PSX primitive command byte lives in the high byte of this word.
-                                info.primCmd = static_cast<u8>((p3dReadU32LE(record + 16) >> 24) & 0xFF);
-                                u32 texInfo = p3dReadU32LE(record + 20);
-                                info.cba = static_cast<u16>(texInfo & 0xFFFF);
-                                info.tpage = static_cast<u16>(texInfo >> 16);
-
-                                u32 materialHash = p3dReadU32LE(record + 0);
-                                if (materialHash == 0 && i < names.size()) {
-                                    materialHash = p3dHash(names[i].c_str());
-                                }
-                                materials[materialHash] = info;
-                                LOG("[GeoMat] hash=0x%08X primCmd=0x%02X tpage=%u cba=%u (tx=%u ty=%u depth=%u clutX=%u clutY=%u)",
-                                    materialHash, info.primCmd, info.tpage, info.cba,
-                                    info.tpage & 0xF, (info.tpage >> 4) & 1, (info.tpage >> 7) & 3,
-                                    (info.cba & 0x3F) * 16, (info.cba >> 6) & 0x1FF);
+                            u32 materialHash = p3dReadU32LE(record + 0);
+                            if (materialHash == 0 && i < names.size()) {
+                                materialHash = p3dHash(names[i].c_str());
                             }
+                            materials[materialHash] = info;
+                            LOG("[GeoMat] hash=0x%08X primCmd=0x%02X tpage=%u cba=%u (tx=%u ty=%u depth=%u clutX=%u clutY=%u)",
+                                materialHash, info.primCmd, info.tpage, info.cba,
+                                info.tpage & 0xF, (info.tpage >> 4) & 1, (info.tpage >> 7) & 3,
+                                (info.cba & 0x3F) * 16, (info.cba >> 6) & 0x1FF);
                         }
                     }
                 }
-                else if (chunkId == 0x6002) {
-                    if (nameCount != 1 || names.empty()) {
-                        LOG("[World] Unsupported multi-geo chunk with %u entries", nameCount);
-                    }
-                    else {
-                        u32 modelHash = p3dReadU32LE(permData + permCursor + 0);
-                        if (!g_levelManager->FindGeo(static_cast<s32>(modelHash))) {
+            }
+            else if (chunkId == 0x6002) {
+                if (nameCount != 1 || names.empty()) {
+                    LOG("[World] Unsupported multi-geo chunk with %u entries", nameCount);
+                }
+                else {
+                    u32 modelHash = p3dReadU32LE(permData + permCursor + 0);
+                    if (!g_levelManager->FindGeo(static_cast<s32>(modelHash))) {
 #ifdef MOD_LOADER
-                            u32 lookupCrc = modelHash ? modelHash : p3dHash(names[0].c_str());
-                            char levelScope[16];
-                            std::snprintf(levelScope, sizeof(levelScope), "lev%02d", world->GetCurLevelID());
-                            const std::string* glbPath = ModLoader::Instance().FindModelOverridePath(
-                                levelScope, names[0].c_str());
-                            if (glbPath) {
-                                    OriginalGeo* modGeo = GLTFLoader::LoadGeo(glbPath->c_str());
-                                    if (modGeo) {
-                                        modGeo->nameCRC = lookupCrc;
-                                        modGeo->SetStoreID(static_cast<s8>(storeId));
-                                        g_levelManager->AddOriginal(modGeo, 0);
-                                        LOG("[ModLoader] Level geo override: '%s' (hash 0x%08X)", names[0].c_str(), lookupCrc);
-                                        permCursor += chunkPermSize;
-                                        chunkPos += chunkSize;
-                                        goto next_chunk;
-                                    }
+                        u32 lookupCrc = modelHash ? modelHash : p3dHash(names[0].c_str());
+                        char levelScope[16];
+                        std::snprintf(levelScope, sizeof(levelScope), "lev%02d", world->GetCurLevelID());
+                        const std::string* glbPath = ModLoader::Instance().FindModelOverridePath(
+                            levelScope, names[0].c_str());
+                        if (glbPath) {
+                            OriginalGeo* modGeo = GLTFLoader::LoadGeo(glbPath->c_str());
+                            if (modGeo) {
+                                modGeo->nameCRC = lookupCrc;
+                                modGeo->SetStoreID(static_cast<s8>(storeId));
+                                g_levelManager->AddOriginal(modGeo, 0);
+                                LOG("[ModLoader] Level geo override: '%s' (hash 0x%08X)", names[0].c_str(), lookupCrc);
+                                permCursor += chunkPermSize;
+                                chunkPos += chunkSize;
+                                goto next_chunk;
                             }
+                        }
 #endif
-                            bool usesSemiTrans = false;
-                            u8 semiTransMode = 0;
-                            std::vector<GeoRenderVertex> dynamicVerts;
-                            std::vector<u16> dynamicVertSourceIndex;
-                            std::vector<u32> dynamicColorList;
-                            std::vector<u32> dynamicPrimStart;
-                            std::vector<u8> dynamicPrimVertCount;
-                            std::vector<u32> dynamicPrimMaterialUID;
-                            std::vector<u8> dynamicPrimCmd;
-                            std::vector<u16> dynamicPrimUVWords;
-                            std::vector<u32> dynamicPrimPacketOffset;
-                            pddiPrimBuffer* buffer = ParseDynGeoPrims(
-                                permData + permCursor,
-                                chunkPermSize,
-                                materials,
-                                &usesSemiTrans,
-                                &semiTransMode,
-                                &dynamicVerts,
-                                &dynamicVertSourceIndex,
-                                &dynamicColorList,
-                                &dynamicPrimStart,
-                                &dynamicPrimVertCount,
-                                &dynamicPrimMaterialUID,
-                                &dynamicPrimCmd,
-                                &dynamicPrimUVWords,
-                                &dynamicPrimPacketOffset);
-                            if (buffer) {
-                                OriginalGeo* original = new OriginalGeo();
-                                original->nameCRC = modelHash ? modelHash : p3dHash(names[0].c_str());
-                                original->SetStoreID(static_cast<s8>(storeId));
-                                original->meshBuffer = buffer;
-                                original->primGeom = CloneRawPrimGeom(permData + permCursor, chunkPermSize);
-                                if (!original->primGeom) {
-                                    original->primGeom = CloneDynGeoVertexPrimGeom(permData + permCursor, chunkPermSize);
-                                }
-                                original->usesSemiTrans = usesSemiTrans;
-                                original->semiTransMode = semiTransMode;
-                                original->bboxMin[0] = p3dReadS32LE(permData + permCursor + 0x18);
-                                original->bboxMin[1] = p3dReadS32LE(permData + permCursor + 0x1C);
-                                original->bboxMin[2] = p3dReadS32LE(permData + permCursor + 0x20);
-                                original->bboxMax[0] = p3dReadS32LE(permData + permCursor + 0x24);
-                                original->bboxMax[1] = p3dReadS32LE(permData + permCursor + 0x28);
-                                original->bboxMax[2] = p3dReadS32LE(permData + permCursor + 0x2C);
-
-                                if (!dynamicVerts.empty()) {
-                                    original->dynamicVertCount = static_cast<u32>(dynamicVerts.size());
-                                    original->dynamicVerts = new GeoRenderVertex[original->dynamicVertCount];
-                                    if (original->dynamicVerts) {
-                                        memcpy(original->dynamicVerts,
-                                               dynamicVerts.data(),
-                                               sizeof(GeoRenderVertex) * original->dynamicVertCount);
-                                    }
-
-                                    if (dynamicVertSourceIndex.size() == original->dynamicVertCount) {
-                                        original->dynamicVertSourceIndex = new u16[original->dynamicVertCount];
-                                        if (original->dynamicVertSourceIndex) {
-                                            memcpy(original->dynamicVertSourceIndex,
-                                                   dynamicVertSourceIndex.data(),
-                                                   sizeof(u16) * original->dynamicVertCount);
-                                        }
-                                    }
-                                }
-
-                                if (!dynamicColorList.empty()) {
-                                    original->dynamicColorCount = static_cast<u32>(dynamicColorList.size());
-                                    original->dynamicColorList = new u32[original->dynamicColorCount];
-                                    if (original->dynamicColorList) {
-                                        memcpy(original->dynamicColorList,
-                                               dynamicColorList.data(),
-                                               sizeof(u32) * original->dynamicColorCount);
-                                    }
-                                    else {
-                                        original->dynamicColorCount = 0;
-                                    }
-                                }
-
-                                if (!dynamicPrimStart.empty()
-                                    && dynamicPrimStart.size() == dynamicPrimVertCount.size()
-                                     && dynamicPrimStart.size() == dynamicPrimMaterialUID.size()
-                                     && dynamicPrimStart.size() == dynamicPrimCmd.size()
-                                     && dynamicPrimUVWords.size() == dynamicPrimStart.size() * 4u
-                                     && dynamicPrimStart.size() == dynamicPrimPacketOffset.size()) {
-                                    original->dynamicPrimCount = static_cast<u32>(dynamicPrimStart.size());
-                                    original->dynamicPrimStart = new u32[original->dynamicPrimCount];
-                                    original->dynamicPrimVertCount = new u8[original->dynamicPrimCount];
-                                    original->dynamicPrimMaterialUID = new u32[original->dynamicPrimCount];
-                                    original->dynamicPrimCmd = new u8[original->dynamicPrimCount];
-                                    original->dynamicPrimUVWords = new u16[original->dynamicPrimCount * 4u];
-                                    original->dynamicPrimPacketOffset = new u32[original->dynamicPrimCount];
-                                    if (original->dynamicPrimStart
-                                        && original->dynamicPrimVertCount
-                                        && original->dynamicPrimMaterialUID
-                                        && original->dynamicPrimCmd
-                                        && original->dynamicPrimUVWords
-                                        && original->dynamicPrimPacketOffset) {
-                                        memcpy(original->dynamicPrimStart,
-                                               dynamicPrimStart.data(),
-                                               sizeof(u32) * original->dynamicPrimCount);
-                                        memcpy(original->dynamicPrimVertCount,
-                                               dynamicPrimVertCount.data(),
-                                               sizeof(u8) * original->dynamicPrimCount);
-                                        memcpy(original->dynamicPrimMaterialUID,
-                                               dynamicPrimMaterialUID.data(),
-                                               sizeof(u32) * original->dynamicPrimCount);
-                                        memcpy(original->dynamicPrimCmd,
-                                             dynamicPrimCmd.data(),
-                                             sizeof(u8) * original->dynamicPrimCount);
-                                        memcpy(original->dynamicPrimUVWords,
-                                             dynamicPrimUVWords.data(),
-                                             sizeof(u16) * original->dynamicPrimCount * 4u);
-                                        memcpy(original->dynamicPrimPacketOffset,
-                                             dynamicPrimPacketOffset.data(),
-                                             sizeof(u32) * original->dynamicPrimCount);
-                                    }
-                                }
-
-                                g_levelManager->AddOriginal(original, 0);
-                                LOG("[World] Loaded Geo model '%s' (hash 0x%08X, store %d)",
-                                    names[0].c_str(), original->nameCRC, storeId);
+                        bool usesSemiTrans = false;
+                        u8 semiTransMode = 0;
+                        std::vector<GeoRenderVertex> dynamicVerts;
+                        std::vector<u16> dynamicVertSourceIndex;
+                        std::vector<u32> dynamicColorList;
+                        std::vector<u32> dynamicPrimStart;
+                        std::vector<u8> dynamicPrimVertCount;
+                        std::vector<u32> dynamicPrimMaterialUID;
+                        std::vector<u8> dynamicPrimCmd;
+                        std::vector<u16> dynamicPrimUVWords;
+                        std::vector<u32> dynamicPrimPacketOffset;
+                        pddiPrimBuffer* buffer = ParseDynGeoPrims(
+                            permData + permCursor,
+                            chunkPermSize,
+                            materials,
+                            &usesSemiTrans,
+                            &semiTransMode,
+                            &dynamicVerts,
+                            &dynamicVertSourceIndex,
+                            &dynamicColorList,
+                            &dynamicPrimStart,
+                            &dynamicPrimVertCount,
+                            &dynamicPrimMaterialUID,
+                            &dynamicPrimCmd,
+                            &dynamicPrimUVWords,
+                            &dynamicPrimPacketOffset);
+                        if (buffer) {
+                            OriginalGeo* original = new OriginalGeo();
+                            original->nameCRC = modelHash ? modelHash : p3dHash(names[0].c_str());
+                            original->SetStoreID(static_cast<s8>(storeId));
+                            original->meshBuffer = buffer;
+                            original->primGeom = CloneRawPrimGeom(permData + permCursor, chunkPermSize);
+                            if (!original->primGeom) {
+                                original->primGeom = CloneDynGeoVertexPrimGeom(permData + permCursor, chunkPermSize);
                             }
-                        }
-                    }
-                }
+                            original->usesSemiTrans = usesSemiTrans;
+                            original->semiTransMode = semiTransMode;
+                            original->bboxMin[0] = p3dReadS32LE(permData + permCursor + 0x18);
+                            original->bboxMin[1] = p3dReadS32LE(permData + permCursor + 0x1C);
+                            original->bboxMin[2] = p3dReadS32LE(permData + permCursor + 0x20);
+                            original->bboxMax[0] = p3dReadS32LE(permData + permCursor + 0x24);
+                            original->bboxMax[1] = p3dReadS32LE(permData + permCursor + 0x28);
+                            original->bboxMax[2] = p3dReadS32LE(permData + permCursor + 0x2C);
 
-                permCursor += chunkPermSize;
-            }
+                            if (!dynamicVerts.empty()) {
+                                original->dynamicVertCount = static_cast<u32>(dynamicVerts.size());
+                                original->dynamicVerts = new GeoRenderVertex[original->dynamicVertCount];
+                                if (original->dynamicVerts) {
+                                    memcpy(original->dynamicVerts,
+                                           dynamicVerts.data(),
+                                           sizeof(GeoRenderVertex) * original->dynamicVertCount);
+                                }
 
-            // PSX: tUVAnimLoader::Load (UVANIM.CPP:197)
-            // Chunk 0x600E registers tUVAnim in INVANI (per-primitive UV frame anim).
-            else if (chunkId == 0x600E) {
-                RegisterUVListAnimChunk(chunkBody, chunkSize - 6, static_cast<u8>(storeId));
-            }
-
-            // PSX: tVertAnimLoader::Load (TVRTLOAD.CPP:32)
-            // Chunk 0x6004 consumes perm payload and registers tFrameList in INVANI.
-            else if (chunkId == 0x6004) {
-                if (!RegisterFrameListAnimChunk(chunkBody,
-                                                chunkSize - 6,
-                                                permData,
-                                                permCursor,
-                                                permSize,
-                                                static_cast<u8>(storeId))) {
-                    break;
-                }
-            }
-
-            // PSX: tClutAnimLoader::Load (TCLTLOAD.CPP:29)
-            // Chunk 0x6006 registers tClutList in INVANI.
-            else if (chunkId == 0x6006) {
-                if (!RegisterClutAnimChunk(chunkBody, chunkSize - 6, static_cast<u8>(storeId))) {
-                    break;
-                }
-            }
-
-            // PSX: tTranAnimLoader2::Load (TRANLOAD.CPP:98)
-            // Chunk 0x6400 consumes perm payload and registers tTransformAnim in INVANI.
-            else if (chunkId == 0x6400) {
-                if (!RegisterTransformAnimChunk(chunkBody,
-                                                chunkSize - 6,
-                                                permData,
-                                                permCursor,
-                                                permSize,
-                                                static_cast<u8>(storeId))) {
-                    break;
-                }
-            }
-
-            // PSX: tSequenceAnimLoader::Load (SEQUENCE.CPP:26)
-            // Chunk 0x6040 consumes perm payload and registers a tSequenceAnim in INVANI.
-            else if (chunkId == 0x6040) {
-                if (!RegisterSequenceAnimChunk(chunkBody,
-                                               chunkSize - 6,
-                                               permData,
-                                               permCursor,
-                                               permSize,
-                                               static_cast<u8>(storeId))) {
-                    break;
-                }
-            }
-
-            // PSX: tCompAnimLoader::Load (COMPANIM.CPP:78)
-            // Chunk 0x4007 defines tCompositeAnim parts by animation name.
-            else if (chunkId == 0x4007) {
-                RegisterCompositeAnimChunk(chunkBody, chunkSize - 6, static_cast<u8>(storeId));
-            }
-
-            // PSX: tParamAnimLoader::Load (PARAMLOAD.CPP:279)
-            // Chunk 0x4300 registers tParamAnim in INVANI.
-            else if (chunkId == 0x4300) {
-                if (!RegisterParamAnimChunk(chunkBody, chunkSize - 6, static_cast<u8>(storeId))) {
-                    break;
-                }
-            }
-
-            // PSX: tVizAnimLoader::Load (VIZANIM.CPP:116)
-            // Chunk 0x4020 registers tVizAnim in INVANI (used by composite VIZ_* parts).
-            else if (chunkId == 0x4020) {
-                RegisterVizAnimChunk(chunkBody, chunkSize - 6, static_cast<u8>(storeId));
-            }
-
-            // PSX: tCBVParamAnimLoader::Load (CBVPARAM.CPP:243)
-            // Chunk 0x6021 registers cbv_* misc anim tables in INVANI.
-            else if (chunkId == 0x6021) {
-                if (!RegisterCBVParamAnimChunk(chunkBody, chunkSize - 6, static_cast<u8>(storeId))) {
-                    break;
-                }
-            }
-
-            // PSX PALDATA.CPP: 0x8C00/0x8C01 use shared palette metadata + perm cursor.
-            else if (chunkId == 0x8C00 || chunkId == 0x8C01) {
-                if (!LoadPaletteData(chunkId, chunkBody, chunkSize - 6, permData, permCursor, permSize)) {
-                    LOG("[World] Failed loading palette chunk 0x%04X", chunkId);
-                    break;
-                }
-            }
-
-            // PSX SCALEDAT.CPP: 0x8B01 consumes variable-size perm payload.
-            else if (chunkId == 0x8B01) {
-                if (!LoadScaleData(chunkId, chunkBody, chunkSize - 6, permData, permCursor, permSize)) {
-                    LOG("[World] Failed loading ScaleData chunk 0x%04X", chunkId);
-                    break;
-                }
-            }
-
-            else if (chunkId == 0x8C20 || chunkId == 0x8C21) {
-                LoadUVPrimData(chunkId, chunkBody, chunkSize - 6,
-                               permData, permCursor, permSize);
-            }
-
-            else if (chunkId == 0x8C30 || chunkId == 0x8C31) {
-                LoadCBVPrimData(chunkId, chunkBody, chunkSize - 6,
-                                permData, permCursor, permSize);
-            }
-
-            else if (chunkId == 0x8A00) {
-                LoadWEffectChunk(chunkBody, chunkSize - 6);
-            }
-
-            else if (chunkId == 0x8A10) {
-                GEffect_LoadChunk(chunkBody, chunkSize - 6);
-            }
-
-            else if (chunkId == 0x8A20) {
-                Obstacle_LoadAnimChunk(chunkBody, chunkSize - 6);
-            }
-
-            else if (chunkId == 0x8A30) {
-                LoadParticleSystemChunk(chunkBody, chunkSize - 6);
-            }
-
-            // PSX: tETreeLoader::Load / myETreeLoaderCallback (STREAM.CPP:678)
-            // Chunk 0x6140 = tETree. Body: pstring name, u16 jointCount, sub-chunks 0x6141.
-            // Creates OriginalETree and registers in LevelManager for FindModel lookups.
-            else if (chunkId == 0x6140) {
-                u32 bodyLen = chunkSize - 6;
-                if (bodyLen >= 3) {
-                    u8 nameLen = chunkBody[0];
-                    if ((u32)(1 + nameLen + 2) <= bodyLen) {
-                        char nameBuf[256];
-                        u32 copyLen = (nameLen < 255) ? nameLen : 255;
-                        memcpy(nameBuf, chunkBody + 1, copyLen);
-                        nameBuf[copyLen] = '\0';
-
-                        u32 nameHash = p3dHash(nameBuf);
-                        struct ETreePartEntry {
-                            u32 jointHash;
-                            u32 modelHash;
-                            u32 jointFlags;
-                            s16 rotX;
-                            s16 rotY;
-                            s16 rotZ;
-                            s32 transX;
-                            s32 transY;
-                            s32 transZ;
-                        };
-                        std::vector<ETreePartEntry> geoPartEntries;
-
-                        u32 subCursor = 1u + static_cast<u32>(nameLen) + 2u;
-                        while (subCursor + 6 <= bodyLen) {
-                            const u16 subChunkId = p3dReadU16LE(chunkBody + subCursor);
-                            const u32 subChunkSize = p3dReadU32LE(chunkBody + subCursor + 2);
-                            if (subChunkSize < 6 || subCursor + subChunkSize > bodyLen) {
-                                break;
-                            }
-
-                            if (subChunkId == 0x6141) {
-                                const u8* subBody = chunkBody + subCursor + 6;
-                                const u32 subBodyLen = subChunkSize - 6;
-                                u32 subBodyCursor = 0;
-                                u32 jointNameHash = 0;
-                                u32 modelNameHash = 0;
-
-                                if (ReadChunkPStringHash(subBody, subBodyLen, subBodyCursor, &jointNameHash)
-                                    && ReadChunkPStringHash(subBody, subBodyLen, subBodyCursor, &modelNameHash)
-                                    && modelNameHash != 0
-                                    && modelNameHash != nameHash) {
-                                    ETreePartEntry entry = {};
-                                    entry.jointHash = jointNameHash;
-                                    entry.modelHash = modelNameHash;
-
-                                    // ETLOAD AddJoint reads these fields in order after the two names.
-                                    if (subBodyCursor + 22 <= subBodyLen) {
-                                        entry.jointFlags = p3dReadU32LE(subBody + subBodyCursor);
-                                        subBodyCursor += 4;
-                                        entry.rotX = p3dReadS16LE(subBody + subBodyCursor);
-                                        subBodyCursor += 2;
-                                        entry.rotY = p3dReadS16LE(subBody + subBodyCursor);
-                                        subBodyCursor += 2;
-                                        entry.rotZ = p3dReadS16LE(subBody + subBodyCursor);
-                                        subBodyCursor += 2;
-                                        entry.transX = p3dReadS32LE(subBody + subBodyCursor);
-                                        subBodyCursor += 4;
-                                        entry.transY = p3dReadS32LE(subBody + subBodyCursor);
-                                        subBodyCursor += 4;
-                                        entry.transZ = p3dReadS32LE(subBody + subBodyCursor);
-                                        subBodyCursor += 4;
+                                if (dynamicVertSourceIndex.size() == original->dynamicVertCount) {
+                                    original->dynamicVertSourceIndex = new u16[original->dynamicVertCount];
+                                    if (original->dynamicVertSourceIndex) {
+                                        memcpy(original->dynamicVertSourceIndex,
+                                               dynamicVertSourceIndex.data(),
+                                               sizeof(u16) * original->dynamicVertCount);
                                     }
-
-                                    geoPartEntries.push_back(entry);
                                 }
                             }
 
-                            subCursor += subChunkSize;
-                        }
-
-                        // PSX: always creates ETree (no duplicate check against Geo list).
-                        // Both Geo and ETree can coexist with the same nameCRC in different lists.
-                        OriginalETree* et = new OriginalETree();
-                        et->nameCRC = nameHash;
-                        et->SetStoreID(static_cast<s8>(storeId));
-
-                        if (!geoPartEntries.empty()) {
-                            const u16 partCount = static_cast<u16>(geoPartEntries.size());
-                            et->geoPartCount = partCount;
-                            et->geoPartHashes = new u32[partCount]();
-                            et->geoPartJointHashes = new u32[partCount]();
-                            et->geoParts = new OriginalGeo*[partCount]();
-
-                            et->skeleton = new STreeData();
-                            if (et->skeleton) {
-                                et->skeleton->numJoints = partCount;
-                                et->skeleton->numMapEntries = partCount;
-                                et->skeleton->joints = static_cast<STreeJoint*>(std::calloc(partCount, sizeof(STreeJoint)));
-                                et->skeleton->jointOrderMap = static_cast<u32*>(std::malloc(sizeof(u32) * partCount));
-                                if (!et->skeleton->joints || !et->skeleton->jointOrderMap) {
-                                    delete et->skeleton;
-                                    et->skeleton = nullptr;
-                                }
-                            }
-
-                            static constexpr u32 ETREE_FLAG_PUSH = 0x00010000;
-                            static constexpr u32 ETREE_FLAG_POP = 0x00020000;
-                            static constexpr u32 ETREE_FLAG_DRAW = 0x00040000;
-                            static constexpr u32 ETREE_FLAG_TRANSFORM_MASK = 0x00300000;
-
-                            u16 resolvedParts = 0;
-                            for (u16 partIndex = 0; partIndex < partCount; partIndex++) {
-                                const ETreePartEntry& entry = geoPartEntries[partIndex];
-                                const u32 modelHash = entry.modelHash;
-                                et->geoPartJointHashes[partIndex] = entry.jointHash;
-                                et->geoPartHashes[partIndex] = modelHash;
-
-                                OriginalBasic* geoBasic = g_levelManager->FindGeo(static_cast<s32>(modelHash));
-                                if (geoBasic && geoBasic->GetType() == 0) {
-                                    et->geoParts[partIndex] = static_cast<OriginalGeo*>(geoBasic);
-                                    if (et->geoParts[partIndex] && et->geoParts[partIndex]->meshBuffer) {
-                                        resolvedParts++;
-                                    }
-                                }
-
-                                if (et->skeleton && et->skeleton->joints && et->skeleton->jointOrderMap) {
-                                    STreeJoint& joint = et->skeleton->joints[partIndex];
-                                    et->skeleton->jointOrderMap[partIndex] = partIndex;
-                                    joint.nameUID = entry.jointHash;
-                                    joint.flags = 0;
-                                    if (entry.jointFlags & ETREE_FLAG_PUSH) {
-                                        joint.flags |= STF_PUSH_MATRIX;
-                                    }
-                                    if (entry.jointFlags & ETREE_FLAG_POP) {
-                                        joint.flags |= STF_POP_MATRIX;
-                                    }
-                                    if ((entry.jointFlags & ETREE_FLAG_TRANSFORM_MASK) == ETREE_FLAG_TRANSFORM_MASK) {
-                                        joint.flags |= STF_TRANSFORM;
-                                    }
-                                    if (entry.jointFlags & ETREE_FLAG_DRAW) {
-                                        joint.flags |= STF_HAS_MESH;
-                                    }
-
-                                    joint.rotationX = entry.rotX;
-                                    joint.rotationY = entry.rotY;
-                                    joint.rotationZ = entry.rotZ;
-                                    joint.translationX = entry.transX;
-                                    joint.translationY = entry.transY;
-                                    joint.translationZ = entry.transZ;
-
-                                    joint.bindRotationX = entry.rotX;
-                                    joint.bindRotationY = entry.rotY;
-                                    joint.bindRotationZ = entry.rotZ;
-                                    joint.bindTranslationX = entry.transX;
-                                    joint.bindTranslationY = entry.transY;
-                                    joint.bindTranslationZ = entry.transZ;
-                                    joint.captureBufferIdx = -1;
-                                    joint.renderScale = 1.0f;
-                                }
-
-                                LOG("[World] ETree '%s' part[%u] jointHash=0x%08X modelHash=0x%08X resolved=%d",
-                                    nameBuf,
-                                    partIndex,
-                                    et->geoPartJointHashes ? et->geoPartJointHashes[partIndex] : 0,
-                                    modelHash,
-                                    (et->geoParts[partIndex] && et->geoParts[partIndex]->meshBuffer) ? 1 : 0);
-                            }
-
-                            LOG("[World] ETree '%s' parts=%u resolved=%u", nameBuf, partCount, resolvedParts);
-                        }
-
-                        g_levelManager->AddOriginal(et, 0);
-                        LOG("[World] Loaded ETree '%s' (hash 0x%08X, store %d)", nameBuf, nameHash, storeId);
-                    }
-                }
-            }
-
-            else if (chunkId == 0x6008 && world) {
-                u32 p = 0;
-                u32 bodyLen = chunkSize - 6;
-                if (bodyLen < 1) { chunkPos += chunkSize; continue; }
-                u8 nameLen = chunkBody[p++];
-                std::string geoTexName(reinterpret_cast<const char*>(chunkBody + p), nameLen);
-                p += nameLen;
-                // PStrings may be padded with trailing nulls/spaces for alignment.
-                while (!geoTexName.empty() && (geoTexName.back() == ' ' || geoTexName.back() == '\0'))
-                    geoTexName.pop_back();
-                if (p + 12 > bodyLen) { chunkPos += chunkSize; continue; }
-                s16 rx = p3dReadS16LE(chunkBody + p); p += 2;
-                s16 ry = p3dReadS16LE(chunkBody + p); p += 2;
-                s16 rw = p3dReadS16LE(chunkBody + p); p += 2;
-                s16 rh = p3dReadS16LE(chunkBody + p); p += 2;
-                p += 4; // skip type
-                if (rw > 0 && rh > 0 && rw <= 1024 && rh <= 512 &&
-                    p + (u32)(rw * rh * 2) <= bodyLen) {
-                    world->UploadToVRAM(rx, ry, rw, rh, chunkBody + p);
-                    LOG("[GeoTex] VRAM upload: x=%d y=%d w=%d h=%d", rx, ry, rw, rh);
-
-#if defined(MOD_LOADER) || defined(REAL_TEXTURE_RENDERING)
-                    static constexpr const char* kClutSuffix = " CLUT";
-                    const size_t suffixPos = geoTexName.size() >= 5 ? geoTexName.size() - 5 : std::string::npos;
-                    const bool isClut = suffixPos != std::string::npos && geoTexName.compare(suffixPos, 5, kClutSuffix) == 0;
-
-                    if (isClut) {
-                        pendingGeoCluts[geoTexName.substr(0, suffixPos)] = PendingClutRect{ rx, ry, rw, rh };
-                    }
-                    else {
-                        auto clutIt = pendingGeoCluts.find(geoTexName);
-                        if (clutIt != pendingGeoCluts.end()) {
-                            const PendingClutRect& clutRect = clutIt->second;
-                            const s16 paletteColorCount = clutRect.rw * clutRect.rh;
-#ifdef MOD_LOADER
-                            std::vector<u16> clutOverride, indexOverride;
-                            char levelScope[16];
-                            std::snprintf(levelScope, sizeof(levelScope), "lev%02d", world->GetCurLevelID());
-                            if (ModLoader::Instance().GetIndexedTextureOverride(
-                                    levelScope, geoTexName.c_str(), rw, rh, paletteColorCount,
-                                    clutOverride, indexOverride)) {
-                                world->UploadToVRAM(clutRect.rx, clutRect.ry, clutRect.rw, clutRect.rh,
-                                                     reinterpret_cast<const u8*>(clutOverride.data()));
-                                world->UploadToVRAM(rx, ry, rw, rh, reinterpret_cast<const u8*>(indexOverride.data()));
-                                LOG("[ModLoader] Geo texture override: %s", geoTexName.c_str());
-                            }
-#endif
-#ifdef REAL_TEXTURE_RENDERING
-                            {
-                                const u8 ttx = static_cast<u8>(rx / 64), tty = static_cast<u8>(ry / 256);
-                                const int dep = (paletteColorCount == 256) ? 1 : 0;
-                                const u16 tpage = static_cast<u16>(ttx | (tty << 4) | (dep << 7));
-                                const u16 cba = static_cast<u16>((clutRect.rx / 16) | (clutRect.ry << 6));
-                                const int bppDiv = (paletteColorCount == 256) ? 2 : 4;
-                                RegisterRealTexture(world, geoTexName.c_str(), tpage, cba,
-                                                     static_cast<float>(rx - ttx * 64) * bppDiv,
-                                                     static_cast<float>(ry - tty * 256),
-                                                     static_cast<float>(rw) * bppDiv,
-                                                     static_cast<float>(rh));
-                            }
-#endif
-                        }
-                        else {
-#ifdef MOD_LOADER
-                            std::vector<u16> overridePixels;
-                            char levelScope[16];
-                            std::snprintf(levelScope, sizeof(levelScope), "lev%02d", world->GetCurLevelID());
-                            if (ModLoader::Instance().GetTextureOverridePixels(levelScope, geoTexName.c_str(), rw, rh, overridePixels)) {
-                                world->UploadToVRAM(rx, ry, rw, rh, reinterpret_cast<const u8*>(overridePixels.data()));
-                                LOG("[ModLoader] Geo texture override: %s", geoTexName.c_str());
-                            }
-#endif
-#ifdef REAL_TEXTURE_RENDERING
-                            {
-                                const u8 ttx = static_cast<u8>(rx / 64), tty = static_cast<u8>(ry / 256);
-                                const u16 tpage = static_cast<u16>(ttx | (tty << 4) | (2 << 7));
-                                RegisterRealTexture(world, geoTexName.c_str(), tpage, 0,
-                                                     static_cast<float>(rx - ttx * 64),
-                                                     static_cast<float>(ry - tty * 256),
-                                                     static_cast<float>(rw),
-                                                     static_cast<float>(rh));
-                            }
-#endif
-                        }
-                    }
-#endif
-                }
-            }
-
-            // PSX: tPrimLoader::Load (TPRMLOAD.CPP:61, 0x80088A80)
-            // Chunk 0x6009 = tPrimGeom. Body: u32 permSize, p-string name.
-            // Creates tPrimGeom from perm data at current cursor, stores in P3D inventory.
-            // PC: record perm offset/size for later STree lookup, advance permCursor.
-            else if (chunkId == 0x6009) {
-                u32 bodyLen = chunkSize - 6;
-                if (bodyLen >= 5) {
-                    u32 prmPermSize = p3dReadU32LE(chunkBody + 0);
-                    u8 prmNameLen = chunkBody[4];
-                    if ((u32)(5 + prmNameLen) <= bodyLen) {
-                        char prmNameBuf[256];
-                        u32 copyLen = (prmNameLen < 255) ? prmNameLen : 255;
-                        memcpy(prmNameBuf, chunkBody + 5, copyLen);
-                        prmNameBuf[copyLen] = '\0';
-                        u32 prmHash = p3dHash(prmNameBuf);
-
-                        if (permCursor + prmPermSize <= permSize) {
-                            prmMap[prmHash] = { permCursor, prmPermSize };
-                            LOG("[World] PRM '%s' (hash 0x%08X) at permOff=%u size=%u",
-                                prmNameBuf, prmHash, permCursor, prmPermSize);
-                        }
-                        permCursor += prmPermSize;
-                    }
-                }
-            }
-
-            // PSX: tSTreeLoader::Load / mySTreeLoaderCallback (STREAM.CPP:704, 0x8009976C)
-            // Chunk 0x6120 = tSTree. Body: p-string name, u16 jointCount, p-string prmName,
-            // u32 permSize, sub-chunks 0x6121 (tSJoint), optional 0x6122 (joint map).
-            // Creates OriginalSTree with nameCRC, references PRM for geometry data.
-            // PC: create OriginalSTree, build mesh from PRM perm data, register via AddOriginal.
-            else if (chunkId == 0x6120) {
-                u32 bodyLen = chunkSize - 6;
-                u32 p = 0;
-                if (bodyLen >= 3) {
-                    u8 nameLen = chunkBody[p++];
-                    if (p + nameLen + 2 <= bodyLen) {
-                        char nameBuf[256];
-                        u32 copyLen = (nameLen < 255) ? nameLen : 255;
-                        memcpy(nameBuf, chunkBody + p, copyLen);
-                        nameBuf[copyLen] = '\0';
-                        p += nameLen;
-
-                        u16 jointCount = p3dReadU16LE(chunkBody + p); p += 2;
-
-                        // Read PRM name
-                        char prmNameBuf[256] = {};
-                        if (p < bodyLen) {
-                            u8 prmNameLen = chunkBody[p++];
-                            u32 prmCopy = (prmNameLen < 255) ? prmNameLen : 255;
-                            if (p + prmCopy <= bodyLen) {
-                                memcpy(prmNameBuf, chunkBody + p, prmCopy);
-                                prmNameBuf[prmCopy] = '\0';
-                                p += prmNameLen;
-                            }
-                        }
-
-                        // Read permSize (perm consumed by STree joint data)
-                        u32 streePermSize = 0;
-                        if (p + 4 <= bodyLen) {
-                            streePermSize = p3dReadU32LE(chunkBody + p);
-                            p += 4;
-                        }
-
-                        u32 nameHash = p3dHash(nameBuf);
-
-                        OriginalSTree* original = new OriginalSTree();
-                        original->nameCRC = nameHash;
-                        original->SetStoreID(static_cast<s8>(storeId));
-                        original->xformVertsCallback = RP_XformVertsLitCBF_CL;
-                        original->fixUpPolysCallback = RP_FixUpPolysCBF_CL;
-                        original->skeleton = ParseSTreeChunk(chunkBody, bodyLen, false);
-
-                        // Look up PRM geometry data from perm
-                        u32 prmHash = p3dHash(prmNameBuf);
-                        auto prmIt = prmMap.find(prmHash);
-                        if (prmIt != prmMap.end()) {
-                            const PrmInfo& prm = prmIt->second;
-                            if (prm.permOffset + prm.permSize <= permSize) {
-                                if (original->skeleton) {
-                                    BuildPerJointMeshes(original,
-                                        permData + prm.permOffset, prm.permSize);
-                                }
-
-                                if (original->skeleton && original->skinData &&
-                                    original->skeleton->joints &&
-                                    original->skeleton->numJoints > 0 &&
-                                    original->skeleton->joints[0].meshBuffer) {
-                                    LOG("[World] STree '%s' skinned mesh built from PRM '%s' (%u verts, %u joints)",
-                                        nameBuf, prmNameBuf,
-                                        original->skeleton->joints[0].meshBuffer->GetVertexCount(),
-                                        original->skeleton->numJoints);
+                            if (!dynamicColorList.empty()) {
+                                original->dynamicColorCount = static_cast<u32>(dynamicColorList.size());
+                                original->dynamicColorList = new u32[original->dynamicColorCount];
+                                if (original->dynamicColorList) {
+                                    memcpy(original->dynamicColorList,
+                                           dynamicColorList.data(),
+                                           sizeof(u32) * original->dynamicColorCount);
                                 }
                                 else {
-                                    pddiPrimBuffer* meshBuf = BuildPrimBufferFromRawPrimGeom(
-                                        permData + prm.permOffset, prm.permSize
-#ifdef REAL_TEXTURE_RENDERING
-                                        , &original->realTexGroups
-#endif
-                                        );
-                                    if (meshBuf) {
-                                        original->meshBuffer = meshBuf;
-                                        LOG("[World] STree '%s' mesh built from PRM '%s' (%u verts)",
-                                            nameBuf, prmNameBuf, meshBuf->GetVertexCount());
-                                    }
-                                    else {
-                                        LOG("[World] STree '%s' PRM '%s' mesh parse failed",
-                                            nameBuf, prmNameBuf);
-                                    }
+                                    original->dynamicColorCount = 0;
                                 }
                             }
-                        } else {
-                            LOG("[World] STree '%s' PRM '%s' not found in prmMap",
-                                nameBuf, prmNameBuf);
+
+                            if (!dynamicPrimStart.empty()
+                                && dynamicPrimStart.size() == dynamicPrimVertCount.size()
+                                && dynamicPrimStart.size() == dynamicPrimMaterialUID.size()
+                                && dynamicPrimStart.size() == dynamicPrimCmd.size()
+                                && dynamicPrimUVWords.size() == dynamicPrimStart.size() * 4u
+                                && dynamicPrimStart.size() == dynamicPrimPacketOffset.size()) {
+                                original->dynamicPrimCount = static_cast<u32>(dynamicPrimStart.size());
+                                original->dynamicPrimStart = new u32[original->dynamicPrimCount];
+                                original->dynamicPrimVertCount = new u8[original->dynamicPrimCount];
+                                original->dynamicPrimMaterialUID = new u32[original->dynamicPrimCount];
+                                original->dynamicPrimCmd = new u8[original->dynamicPrimCount];
+                                original->dynamicPrimUVWords = new u16[original->dynamicPrimCount * 4u];
+                                original->dynamicPrimPacketOffset = new u32[original->dynamicPrimCount];
+                                if (original->dynamicPrimStart
+                                    && original->dynamicPrimVertCount
+                                    && original->dynamicPrimMaterialUID
+                                    && original->dynamicPrimCmd
+                                    && original->dynamicPrimUVWords
+                                    && original->dynamicPrimPacketOffset) {
+                                    memcpy(original->dynamicPrimStart,
+                                           dynamicPrimStart.data(),
+                                           sizeof(u32) * original->dynamicPrimCount);
+                                    memcpy(original->dynamicPrimVertCount,
+                                           dynamicPrimVertCount.data(),
+                                           sizeof(u8) * original->dynamicPrimCount);
+                                    memcpy(original->dynamicPrimMaterialUID,
+                                           dynamicPrimMaterialUID.data(),
+                                           sizeof(u32) * original->dynamicPrimCount);
+                                    memcpy(original->dynamicPrimCmd,
+                                           dynamicPrimCmd.data(),
+                                           sizeof(u8) * original->dynamicPrimCount);
+                                    memcpy(original->dynamicPrimUVWords,
+                                           dynamicPrimUVWords.data(),
+                                           sizeof(u16) * original->dynamicPrimCount * 4u);
+                                    memcpy(original->dynamicPrimPacketOffset,
+                                           dynamicPrimPacketOffset.data(),
+                                           sizeof(u32) * original->dynamicPrimCount);
+                                }
+                            }
+
+                            g_levelManager->AddOriginal(original, 0);
+                            LOG("[World] Loaded Geo model '%s' (hash 0x%08X, store %d)",
+                                names[0].c_str(), original->nameCRC, storeId);
                         }
-
-                        g_levelManager->AddOriginal(original, 0);
-                        permCursor += streePermSize;
-
-                        LOG("[World] Loaded STree '%s' (hash 0x%08X, %u joints, store %d)",
-                            nameBuf, nameHash, jointCount, storeId);
                     }
                 }
             }
 
-            if (storeId == 2 && ((permBefore >= 32000 && permBefore <= 34000)
-                || chunkId == 0x8C20 || chunkId == 0x8C21)) {
-                LOG("[World] GeoPair chunk: store=%d id=0x%04X chunkPos=%u bodyLen=%u permBefore=%u permAfter=%u",
-                    storeId,
-                    chunkId,
-                    chunkPos,
-                    chunkSize - 6,
-                    permBefore,
-                    permCursor);
-            }
-
-            next_chunk:
-            chunkPos += chunkSize;
+            permCursor += chunkPermSize;
         }
+
+        // PSX: tUVAnimLoader::Load (UVANIM.CPP:197)
+        // Chunk 0x600E registers tUVAnim in INVANI (per-primitive UV frame anim).
+        else if (chunkId == 0x600E) {
+            RegisterUVListAnimChunk(chunkBody, chunkSize - 6, static_cast<u8>(storeId));
+        }
+
+        // PSX: tVertAnimLoader::Load (TVRTLOAD.CPP:32)
+        // Chunk 0x6004 consumes perm payload and registers tFrameList in INVANI.
+        else if (chunkId == 0x6004) {
+            if (!RegisterFrameListAnimChunk(chunkBody,
+                chunkSize - 6,
+                permData,
+                permCursor,
+                permSize,
+                static_cast<u8>(storeId))) {
+                break;
+            }
+        }
+
+        // PSX: tClutAnimLoader::Load (TCLTLOAD.CPP:29)
+        // Chunk 0x6006 registers tClutList in INVANI.
+        else if (chunkId == 0x6006) {
+            if (!RegisterClutAnimChunk(chunkBody, chunkSize - 6, static_cast<u8>(storeId))) {
+                break;
+            }
+        }
+
+        // PSX: tTranAnimLoader2::Load (TRANLOAD.CPP:98)
+        // Chunk 0x6400 consumes perm payload and registers tTransformAnim in INVANI.
+        else if (chunkId == 0x6400) {
+            if (!RegisterTransformAnimChunk(chunkBody,
+                chunkSize - 6,
+                permData,
+                permCursor,
+                permSize,
+                static_cast<u8>(storeId))) {
+                break;
+            }
+        }
+
+        // PSX: tSequenceAnimLoader::Load (SEQUENCE.CPP:26)
+        // Chunk 0x6040 consumes perm payload and registers a tSequenceAnim in INVANI.
+        else if (chunkId == 0x6040) {
+            if (!RegisterSequenceAnimChunk(chunkBody,
+                chunkSize - 6,
+                permData,
+                permCursor,
+                permSize,
+                static_cast<u8>(storeId))) {
+                break;
+            }
+        }
+
+        // PSX: tCompAnimLoader::Load (COMPANIM.CPP:78)
+        // Chunk 0x4007 defines tCompositeAnim parts by animation name.
+        else if (chunkId == 0x4007) {
+            RegisterCompositeAnimChunk(chunkBody, chunkSize - 6, static_cast<u8>(storeId));
+        }
+
+        // PSX: tParamAnimLoader::Load (PARAMLOAD.CPP:279)
+        // Chunk 0x4300 registers tParamAnim in INVANI.
+        else if (chunkId == 0x4300) {
+            if (!RegisterParamAnimChunk(chunkBody, chunkSize - 6, static_cast<u8>(storeId))) {
+                break;
+            }
+        }
+
+        // PSX: tVizAnimLoader::Load (VIZANIM.CPP:116)
+        // Chunk 0x4020 registers tVizAnim in INVANI (used by composite VIZ_* parts).
+        else if (chunkId == 0x4020) {
+            RegisterVizAnimChunk(chunkBody, chunkSize - 6, static_cast<u8>(storeId));
+        }
+
+        // PSX: tCBVParamAnimLoader::Load (CBVPARAM.CPP:243)
+        // Chunk 0x6021 registers cbv_* misc anim tables in INVANI.
+        else if (chunkId == 0x6021) {
+            if (!RegisterCBVParamAnimChunk(chunkBody, chunkSize - 6, static_cast<u8>(storeId))) {
+                break;
+            }
+        }
+
+        // PSX PALDATA.CPP: 0x8C00/0x8C01 use shared palette metadata + perm cursor.
+        else if (chunkId == 0x8C00 || chunkId == 0x8C01) {
+            if (!LoadPaletteData(chunkId, chunkBody, chunkSize - 6, permData, permCursor, permSize)) {
+                LOG("[World] Failed loading palette chunk 0x%04X", chunkId);
+                break;
+            }
+        }
+
+        // PSX SCALEDAT.CPP: 0x8B01 consumes variable-size perm payload.
+        else if (chunkId == 0x8B01) {
+            if (!LoadScaleData(chunkId, chunkBody, chunkSize - 6, permData, permCursor, permSize)) {
+                LOG("[World] Failed loading ScaleData chunk 0x%04X", chunkId);
+                break;
+            }
+        }
+
+        else if (chunkId == 0x8C20 || chunkId == 0x8C21) {
+            LoadUVPrimData(chunkId, chunkBody, chunkSize - 6,
+                           permData, permCursor, permSize);
+        }
+
+        else if (chunkId == 0x8C30 || chunkId == 0x8C31) {
+            LoadCBVPrimData(chunkId, chunkBody, chunkSize - 6,
+                            permData, permCursor, permSize);
+        }
+
+        else if (chunkId == 0x8A00) {
+            LoadWEffectChunk(chunkBody, chunkSize - 6);
+        }
+
+        else if (chunkId == 0x8A10) {
+            GEffect_LoadChunk(chunkBody, chunkSize - 6);
+        }
+
+        else if (chunkId == 0x8A20) {
+            Obstacle_LoadAnimChunk(chunkBody, chunkSize - 6);
+        }
+
+        else if (chunkId == 0x8A30) {
+            LoadParticleSystemChunk(chunkBody, chunkSize - 6);
+        }
+
+        // PSX: tETreeLoader::Load / myETreeLoaderCallback (STREAM.CPP:678)
+        // Chunk 0x6140 = tETree. Body: pstring name, u16 jointCount, sub-chunks 0x6141.
+        // Creates OriginalETree and registers in LevelManager for FindModel lookups.
+        else if (chunkId == 0x6140) {
+            u32 bodyLen = chunkSize - 6;
+            if (bodyLen >= 3) {
+                u8 nameLen = chunkBody[0];
+                if ((u32)(1 + nameLen + 2) <= bodyLen) {
+                    char nameBuf[256];
+                    u32 copyLen = (nameLen < 255) ? nameLen : 255;
+                    memcpy(nameBuf, chunkBody + 1, copyLen);
+                    nameBuf[copyLen] = '\0';
+
+                    u32 nameHash = p3dHash(nameBuf);
+                    struct ETreePartEntry {
+                        u32 jointHash;
+                        u32 modelHash;
+                        u32 jointFlags;
+                        s16 rotX;
+                        s16 rotY;
+                        s16 rotZ;
+                        s32 transX;
+                        s32 transY;
+                        s32 transZ;
+                    };
+                    std::vector<ETreePartEntry> geoPartEntries;
+
+                    u32 subCursor = 1u + static_cast<u32>(nameLen) + 2u;
+                    while (subCursor + 6 <= bodyLen) {
+                        const u16 subChunkId = p3dReadU16LE(chunkBody + subCursor);
+                        const u32 subChunkSize = p3dReadU32LE(chunkBody + subCursor + 2);
+                        if (subChunkSize < 6 || subCursor + subChunkSize > bodyLen) {
+                            break;
+                        }
+
+                        if (subChunkId == 0x6141) {
+                            const u8* subBody = chunkBody + subCursor + 6;
+                            const u32 subBodyLen = subChunkSize - 6;
+                            u32 subBodyCursor = 0;
+                            u32 jointNameHash = 0;
+                            u32 modelNameHash = 0;
+
+                            if (ReadChunkPStringHash(subBody, subBodyLen, subBodyCursor, &jointNameHash)
+                                && ReadChunkPStringHash(subBody, subBodyLen, subBodyCursor, &modelNameHash)
+                                && modelNameHash != 0
+                                && modelNameHash != nameHash) {
+                                ETreePartEntry entry = {};
+                                entry.jointHash = jointNameHash;
+                                entry.modelHash = modelNameHash;
+
+                                // ETLOAD AddJoint reads these fields in order after the two names.
+                                if (subBodyCursor + 22 <= subBodyLen) {
+                                    entry.jointFlags = p3dReadU32LE(subBody + subBodyCursor);
+                                    subBodyCursor += 4;
+                                    entry.rotX = p3dReadS16LE(subBody + subBodyCursor);
+                                    subBodyCursor += 2;
+                                    entry.rotY = p3dReadS16LE(subBody + subBodyCursor);
+                                    subBodyCursor += 2;
+                                    entry.rotZ = p3dReadS16LE(subBody + subBodyCursor);
+                                    subBodyCursor += 2;
+                                    entry.transX = p3dReadS32LE(subBody + subBodyCursor);
+                                    subBodyCursor += 4;
+                                    entry.transY = p3dReadS32LE(subBody + subBodyCursor);
+                                    subBodyCursor += 4;
+                                    entry.transZ = p3dReadS32LE(subBody + subBodyCursor);
+                                    subBodyCursor += 4;
+                                }
+
+                                geoPartEntries.push_back(entry);
+                            }
+                        }
+
+                        subCursor += subChunkSize;
+                    }
+
+                    // PSX: always creates ETree (no duplicate check against Geo list).
+                    // Both Geo and ETree can coexist with the same nameCRC in different lists.
+                    OriginalETree* et = new OriginalETree();
+                    et->nameCRC = nameHash;
+                    et->SetStoreID(static_cast<s8>(storeId));
+
+                    if (!geoPartEntries.empty()) {
+                        const u16 partCount = static_cast<u16>(geoPartEntries.size());
+                        et->geoPartCount = partCount;
+                        et->geoPartHashes = new u32[partCount]();
+                        et->geoPartJointHashes = new u32[partCount]();
+                        et->geoParts = new OriginalGeo * [partCount]();
+
+                        et->skeleton = new STreeData();
+                        if (et->skeleton) {
+                            et->skeleton->numJoints = partCount;
+                            et->skeleton->numMapEntries = partCount;
+                            et->skeleton->joints = static_cast<STreeJoint*>(std::calloc(partCount, sizeof(STreeJoint)));
+                            et->skeleton->jointOrderMap = static_cast<u32*>(std::malloc(sizeof(u32) * partCount));
+                            if (!et->skeleton->joints || !et->skeleton->jointOrderMap) {
+                                delete et->skeleton;
+                                et->skeleton = nullptr;
+                            }
+                        }
+
+                        static constexpr u32 ETREE_FLAG_PUSH = 0x00010000;
+                        static constexpr u32 ETREE_FLAG_POP = 0x00020000;
+                        static constexpr u32 ETREE_FLAG_DRAW = 0x00040000;
+                        static constexpr u32 ETREE_FLAG_TRANSFORM_MASK = 0x00300000;
+
+                        u16 resolvedParts = 0;
+                        for (u16 partIndex = 0; partIndex < partCount; partIndex++) {
+                            const ETreePartEntry& entry = geoPartEntries[partIndex];
+                            const u32 modelHash = entry.modelHash;
+                            et->geoPartJointHashes[partIndex] = entry.jointHash;
+                            et->geoPartHashes[partIndex] = modelHash;
+
+                            OriginalBasic* geoBasic = g_levelManager->FindGeo(static_cast<s32>(modelHash));
+                            if (geoBasic && geoBasic->GetType() == 0) {
+                                et->geoParts[partIndex] = static_cast<OriginalGeo*>(geoBasic);
+                                if (et->geoParts[partIndex] && et->geoParts[partIndex]->meshBuffer) {
+                                    resolvedParts++;
+                                }
+                            }
+
+                            if (et->skeleton && et->skeleton->joints && et->skeleton->jointOrderMap) {
+                                STreeJoint& joint = et->skeleton->joints[partIndex];
+                                et->skeleton->jointOrderMap[partIndex] = partIndex;
+                                joint.nameUID = entry.jointHash;
+                                joint.flags = 0;
+                                if (entry.jointFlags & ETREE_FLAG_PUSH) {
+                                    joint.flags |= STF_PUSH_MATRIX;
+                                }
+                                if (entry.jointFlags & ETREE_FLAG_POP) {
+                                    joint.flags |= STF_POP_MATRIX;
+                                }
+                                if ((entry.jointFlags & ETREE_FLAG_TRANSFORM_MASK) == ETREE_FLAG_TRANSFORM_MASK) {
+                                    joint.flags |= STF_TRANSFORM;
+                                }
+                                if (entry.jointFlags & ETREE_FLAG_DRAW) {
+                                    joint.flags |= STF_HAS_MESH;
+                                }
+
+                                joint.rotationX = entry.rotX;
+                                joint.rotationY = entry.rotY;
+                                joint.rotationZ = entry.rotZ;
+                                joint.translationX = entry.transX;
+                                joint.translationY = entry.transY;
+                                joint.translationZ = entry.transZ;
+
+                                joint.bindRotationX = entry.rotX;
+                                joint.bindRotationY = entry.rotY;
+                                joint.bindRotationZ = entry.rotZ;
+                                joint.bindTranslationX = entry.transX;
+                                joint.bindTranslationY = entry.transY;
+                                joint.bindTranslationZ = entry.transZ;
+                                joint.captureBufferIdx = -1;
+                                joint.renderScale = 1.0f;
+                            }
+
+                            LOG("[World] ETree '%s' part[%u] jointHash=0x%08X modelHash=0x%08X resolved=%d",
+                                nameBuf,
+                                partIndex,
+                                et->geoPartJointHashes ? et->geoPartJointHashes[partIndex] : 0,
+                                modelHash,
+                                (et->geoParts[partIndex] && et->geoParts[partIndex]->meshBuffer) ? 1 : 0);
+                        }
+
+                        LOG("[World] ETree '%s' parts=%u resolved=%u", nameBuf, partCount, resolvedParts);
+                    }
+
+                    g_levelManager->AddOriginal(et, 0);
+                    LOG("[World] Loaded ETree '%s' (hash 0x%08X, store %d)", nameBuf, nameHash, storeId);
+                }
+            }
+        }
+
+        else if (chunkId == 0x6008 && world) {
+            u32 p = 0;
+            u32 bodyLen = chunkSize - 6;
+            if (bodyLen < 1) { chunkPos += chunkSize; continue; }
+            u8 nameLen = chunkBody[p++];
+            std::string geoTexName(reinterpret_cast<const char*>(chunkBody + p), nameLen);
+            p += nameLen;
+            // PStrings may be padded with trailing nulls/spaces for alignment.
+            while (!geoTexName.empty() && (geoTexName.back() == ' ' || geoTexName.back() == '\0'))
+                geoTexName.pop_back();
+            if (p + 12 > bodyLen) { chunkPos += chunkSize; continue; }
+            s16 rx = p3dReadS16LE(chunkBody + p); p += 2;
+            s16 ry = p3dReadS16LE(chunkBody + p); p += 2;
+            s16 rw = p3dReadS16LE(chunkBody + p); p += 2;
+            s16 rh = p3dReadS16LE(chunkBody + p); p += 2;
+            p += 4; // skip type
+            if (rw > 0 && rh > 0 && rw <= 1024 && rh <= 512 &&
+                p + (u32)(rw * rh * 2) <= bodyLen) {
+                world->UploadToVRAM(rx, ry, rw, rh, chunkBody + p);
+                LOG("[GeoTex] VRAM upload: x=%d y=%d w=%d h=%d", rx, ry, rw, rh);
+
+#if defined(MOD_LOADER) || defined(REAL_TEXTURE_RENDERING)
+                static constexpr const char* kClutSuffix = " CLUT";
+                const size_t suffixPos = geoTexName.size() >= 5 ? geoTexName.size() - 5 : std::string::npos;
+                const bool isClut = suffixPos != std::string::npos && geoTexName.compare(suffixPos, 5, kClutSuffix) == 0;
+
+                if (isClut) {
+                    pendingGeoCluts[geoTexName.substr(0, suffixPos)] = PendingClutRect{ rx, ry, rw, rh };
+                }
+                else {
+                    auto clutIt = pendingGeoCluts.find(geoTexName);
+                    if (clutIt != pendingGeoCluts.end()) {
+                        const PendingClutRect& clutRect = clutIt->second;
+                        const s16 paletteColorCount = clutRect.rw * clutRect.rh;
+#ifdef MOD_LOADER
+                        std::vector<u16> clutOverride, indexOverride;
+                        char levelScope[16];
+                        std::snprintf(levelScope, sizeof(levelScope), "lev%02d", world->GetCurLevelID());
+                        if (ModLoader::Instance().GetIndexedTextureOverride(
+                            levelScope, geoTexName.c_str(), rw, rh, paletteColorCount,
+                            clutOverride, indexOverride)) {
+                            world->UploadToVRAM(clutRect.rx, clutRect.ry, clutRect.rw, clutRect.rh,
+                                                reinterpret_cast<const u8*>(clutOverride.data()));
+                            world->UploadToVRAM(rx, ry, rw, rh, reinterpret_cast<const u8*>(indexOverride.data()));
+                            LOG("[ModLoader] Geo texture override: %s", geoTexName.c_str());
+                        }
+#endif
+#ifdef REAL_TEXTURE_RENDERING
+                        {
+                            const u8 ttx = static_cast<u8>(rx / 64), tty = static_cast<u8>(ry / 256);
+                            const int dep = (paletteColorCount == 256) ? 1 : 0;
+                            const u16 tpage = static_cast<u16>(ttx | (tty << 4) | (dep << 7));
+                            const u16 cba = static_cast<u16>((clutRect.rx / 16) | (clutRect.ry << 6));
+                            const int bppDiv = (paletteColorCount == 256) ? 2 : 4;
+                            RegisterRealTexture(world, geoTexName.c_str(), tpage, cba,
+                                                static_cast<float>(rx - ttx * 64) * bppDiv,
+                                                static_cast<float>(ry - tty * 256),
+                                                static_cast<float>(rw) * bppDiv,
+                                                static_cast<float>(rh));
+                        }
+#endif
+                    }
+                    else {
+#ifdef MOD_LOADER
+                        std::vector<u16> overridePixels;
+                        char levelScope[16];
+                        std::snprintf(levelScope, sizeof(levelScope), "lev%02d", world->GetCurLevelID());
+                        if (ModLoader::Instance().GetTextureOverridePixels(levelScope, geoTexName.c_str(), rw, rh, overridePixels)) {
+                            world->UploadToVRAM(rx, ry, rw, rh, reinterpret_cast<const u8*>(overridePixels.data()));
+                            LOG("[ModLoader] Geo texture override: %s", geoTexName.c_str());
+                        }
+#endif
+#ifdef REAL_TEXTURE_RENDERING
+                        {
+                            const u8 ttx = static_cast<u8>(rx / 64), tty = static_cast<u8>(ry / 256);
+                            const u16 tpage = static_cast<u16>(ttx | (tty << 4) | (2 << 7));
+                            RegisterRealTexture(world, geoTexName.c_str(), tpage, 0,
+                                                static_cast<float>(rx - ttx * 64),
+                                                static_cast<float>(ry - tty * 256),
+                                                static_cast<float>(rw),
+                                                static_cast<float>(rh));
+                        }
+#endif
+                    }
+                }
+#endif
+            }
+        }
+
+        // PSX: tPrimLoader::Load (TPRMLOAD.CPP:61, 0x80088A80)
+        // Chunk 0x6009 = tPrimGeom. Body: u32 permSize, p-string name.
+        // Creates tPrimGeom from perm data at current cursor, stores in P3D inventory.
+        // PC: record perm offset/size for later STree lookup, advance permCursor.
+        else if (chunkId == 0x6009) {
+            u32 bodyLen = chunkSize - 6;
+            if (bodyLen >= 5) {
+                u32 prmPermSize = p3dReadU32LE(chunkBody + 0);
+                u8 prmNameLen = chunkBody[4];
+                if ((u32)(5 + prmNameLen) <= bodyLen) {
+                    char prmNameBuf[256];
+                    u32 copyLen = (prmNameLen < 255) ? prmNameLen : 255;
+                    memcpy(prmNameBuf, chunkBody + 5, copyLen);
+                    prmNameBuf[copyLen] = '\0';
+                    u32 prmHash = p3dHash(prmNameBuf);
+
+                    if (permCursor + prmPermSize <= permSize) {
+                        prmMap[prmHash] = { permCursor, prmPermSize };
+                        LOG("[World] PRM '%s' (hash 0x%08X) at permOff=%u size=%u",
+                            prmNameBuf, prmHash, permCursor, prmPermSize);
+                    }
+                    permCursor += prmPermSize;
+                }
+            }
+        }
+
+        // PSX: tSTreeLoader::Load / mySTreeLoaderCallback (STREAM.CPP:704, 0x8009976C)
+        // Chunk 0x6120 = tSTree. Body: p-string name, u16 jointCount, p-string prmName,
+        // u32 permSize, sub-chunks 0x6121 (tSJoint), optional 0x6122 (joint map).
+        // Creates OriginalSTree with nameCRC, references PRM for geometry data.
+        // PC: create OriginalSTree, build mesh from PRM perm data, register via AddOriginal.
+        else if (chunkId == 0x6120) {
+            u32 bodyLen = chunkSize - 6;
+            u32 p = 0;
+            if (bodyLen >= 3) {
+                u8 nameLen = chunkBody[p++];
+                if (p + nameLen + 2 <= bodyLen) {
+                    char nameBuf[256];
+                    u32 copyLen = (nameLen < 255) ? nameLen : 255;
+                    memcpy(nameBuf, chunkBody + p, copyLen);
+                    nameBuf[copyLen] = '\0';
+                    p += nameLen;
+
+                    u16 jointCount = p3dReadU16LE(chunkBody + p); p += 2;
+
+                    // Read PRM name
+                    char prmNameBuf[256] = {};
+                    if (p < bodyLen) {
+                        u8 prmNameLen = chunkBody[p++];
+                        u32 prmCopy = (prmNameLen < 255) ? prmNameLen : 255;
+                        if (p + prmCopy <= bodyLen) {
+                            memcpy(prmNameBuf, chunkBody + p, prmCopy);
+                            prmNameBuf[prmCopy] = '\0';
+                            p += prmNameLen;
+                        }
+                    }
+
+                    // Read permSize (perm consumed by STree joint data)
+                    u32 streePermSize = 0;
+                    if (p + 4 <= bodyLen) {
+                        streePermSize = p3dReadU32LE(chunkBody + p);
+                        p += 4;
+                    }
+
+                    u32 nameHash = p3dHash(nameBuf);
+
+                    OriginalSTree* original = new OriginalSTree();
+                    original->nameCRC = nameHash;
+                    original->SetStoreID(static_cast<s8>(storeId));
+                    original->xformVertsCallback = RP_XformVertsLitCBF_CL;
+                    original->fixUpPolysCallback = RP_FixUpPolysCBF_CL;
+                    original->skeleton = ParseSTreeChunk(chunkBody, bodyLen, false);
+
+                    // Look up PRM geometry data from perm
+                    u32 prmHash = p3dHash(prmNameBuf);
+                    auto prmIt = prmMap.find(prmHash);
+                    if (prmIt != prmMap.end()) {
+                        const PrmInfo& prm = prmIt->second;
+                        if (prm.permOffset + prm.permSize <= permSize) {
+                            if (original->skeleton) {
+                                BuildPerJointMeshes(original,
+                                                    permData + prm.permOffset, prm.permSize);
+                            }
+
+                            if (original->skeleton && original->skinData &&
+                                original->skeleton->joints &&
+                                original->skeleton->numJoints > 0 &&
+                                original->skeleton->joints[0].meshBuffer) {
+                                LOG("[World] STree '%s' skinned mesh built from PRM '%s' (%u verts, %u joints)",
+                                    nameBuf, prmNameBuf,
+                                    original->skeleton->joints[0].meshBuffer->GetVertexCount(),
+                                    original->skeleton->numJoints);
+                            }
+                            else {
+                                pddiPrimBuffer* meshBuf = BuildPrimBufferFromRawPrimGeom(
+                                    permData + prm.permOffset, prm.permSize
+#ifdef REAL_TEXTURE_RENDERING
+                                    , &original->realTexGroups
+#endif
+                                );
+                                if (meshBuf) {
+                                    original->meshBuffer = meshBuf;
+                                    LOG("[World] STree '%s' mesh built from PRM '%s' (%u verts)",
+                                        nameBuf, prmNameBuf, meshBuf->GetVertexCount());
+                                }
+                                else {
+                                    LOG("[World] STree '%s' PRM '%s' mesh parse failed",
+                                        nameBuf, prmNameBuf);
+                                }
+                            }
+                        }
+                    }
+                    else {
+                        LOG("[World] STree '%s' PRM '%s' not found in prmMap",
+                            nameBuf, prmNameBuf);
+                    }
+
+                    g_levelManager->AddOriginal(original, 0);
+                    permCursor += streePermSize;
+
+                    LOG("[World] Loaded STree '%s' (hash 0x%08X, %u joints, store %d)",
+                        nameBuf, nameHash, jointCount, storeId);
+                }
+            }
+        }
+
+        if (storeId == 2 && ((permBefore >= 32000 && permBefore <= 34000)
+            || chunkId == 0x8C20 || chunkId == 0x8C21)) {
+            LOG("[World] GeoPair chunk: store=%d id=0x%04X chunkPos=%u bodyLen=%u permBefore=%u permAfter=%u",
+                storeId,
+                chunkId,
+                chunkPos,
+                chunkSize - 6,
+                permBefore,
+                permCursor);
+        }
+
+next_chunk:
+        chunkPos += chunkSize;
     }
+}
 
 static void LoadGeoPairsInRange(
     World* world,
@@ -2983,8 +2978,7 @@ static void LoadGeoPairsInRange(
     u32 rangeEnd,
     const char* permMagic,
     const char* p3dMagic,
-    s32 storeId)
-{
+    s32 storeId) {
     (void)p3dMagic;
 
     for (u32 i = rangeStart; i < rangeEnd; i++) {
@@ -3022,8 +3016,7 @@ static bool LoadBlocksForPetalFromStream(
     const std::vector<u8>& streamData,
     u32 targetPetal,
     u32 startBlockNum,
-    const char* logTag)
-{
+    const char* logTag) {
     if (streamData.empty()) {
         return false;
     }
@@ -3052,8 +3045,8 @@ static bool LoadBlocksForPetalFromStream(
 
     const u32 petalStart = wdbIndices[petalIndex];
     const u32 petalEnd = (petalIndex + 1 < (u32)wdbIndices.size())
-                             ? wdbIndices[petalIndex + 1]
-                             : (u32)entries.size();
+        ? wdbIndices[petalIndex + 1]
+        : (u32)entries.size();
 
     std::vector<const u8*> blkPtrs;
     std::vector<u32> blkSizes;
@@ -3673,31 +3666,31 @@ bool World::LoadLevelIndex(u32 levelIndex) {
             if (previousLevelIndex < (u32)levelCount) {
                 const s32 prevLevelID = levelList[previousLevelIndex * 2];
                 switch (prevLevelID) {
-                case 6:
-                    mappedPrevLevel = true;
-                    break;
-                case 8:
-                    previousLevelIndex = (u32)LevelIDToIndex(5);
-                    mappedPrevLevel = true;
-                    break;
-                case 11:
-                    previousLevelIndex = (u32)LevelIDToIndex(1);
-                    mappedPrevLevel = true;
-                    break;
-                case 12:
-                    previousLevelIndex = (u32)LevelIDToIndex(2);
-                    mappedPrevLevel = true;
-                    break;
-                case 13:
-                    previousLevelIndex = (u32)LevelIDToIndex(3);
-                    mappedPrevLevel = true;
-                    break;
-                case 14:
-                    previousLevelIndex = (u32)LevelIDToIndex(4);
-                    mappedPrevLevel = true;
-                    break;
-                default:
-                    break;
+                    case 6:
+                        mappedPrevLevel = true;
+                        break;
+                    case 8:
+                        previousLevelIndex = (u32)LevelIDToIndex(5);
+                        mappedPrevLevel = true;
+                        break;
+                    case 11:
+                        previousLevelIndex = (u32)LevelIDToIndex(1);
+                        mappedPrevLevel = true;
+                        break;
+                    case 12:
+                        previousLevelIndex = (u32)LevelIDToIndex(2);
+                        mappedPrevLevel = true;
+                        break;
+                    case 13:
+                        previousLevelIndex = (u32)LevelIDToIndex(3);
+                        mappedPrevLevel = true;
+                        break;
+                    case 14:
+                        previousLevelIndex = (u32)LevelIDToIndex(4);
+                        mappedPrevLevel = true;
+                        break;
+                    default:
+                        break;
                 }
             }
 
@@ -3730,7 +3723,8 @@ bool World::LoadLevelIndex(u32 levelIndex) {
                     }
                 }
                 g_arrowInside = 1;
-            } else {
+            }
+            else {
                 returnPos = sOrigDestSelectReturnPos;
                 if (g_hud) {
                     g_hud->DisplayTake(player->livesLeft, 1);
@@ -3867,8 +3861,8 @@ bool World::Load(const std::string& lcfPath) {
     // Determine entry range for this petal: [wdbIndex, nextWdbIndex)
     u32 petalStart = wdbIndices[petalIdx];
     u32 petalEnd = (petalIdx + 1 < (u32)wdbIndices.size())
-                       ? wdbIndices[petalIdx + 1]
-                       : (u32)entries.size();
+        ? wdbIndices[petalIdx + 1]
+        : (u32)entries.size();
 
     LOG("[World] Loading petal %u/%u (entries %u-%u) from %s",
         petalIdx, (u32)wdbIndices.size(), petalStart, petalEnd - 1, lcfPath.c_str());
@@ -4669,9 +4663,13 @@ void World::LoadPetal(u32 petalIndex) {
     g_wEffectChunkCount = 0;
     g_particleSystemChunkCount = 0;
 
-    // Petal load is a new level segment; clear per-level score/collect state first.
     if (g_scoreManager) {
-        g_scoreManager->HandleLevelBegin();
+        if (Player::s_player && Player::s_player->checkpoint.IsValid()) {
+            g_scoreManager->HandleCheckpointBegin();
+        }
+        else {
+            g_scoreManager->HandleLevelBegin();
+        }
     }
 
     if (g_hud) {
@@ -4704,8 +4702,8 @@ void World::LoadPetal(u32 petalIndex) {
 
         u32 petalStart = wdbIndices[pi];
         u32 petalEnd = (pi + 1 < (u32)wdbIndices.size())
-                           ? wdbIndices[pi + 1]
-                           : (u32)entries.size();
+            ? wdbIndices[pi + 1]
+            : (u32)entries.size();
 
         LOG("[World] LoadPetal %u: entries %u-%u", pi, petalStart, petalEnd - 1);
 

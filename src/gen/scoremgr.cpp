@@ -358,10 +358,12 @@ void ScoreManager::HandleCheckpointBegin() {
     *reinterpret_cast<s32*>(&currentGrade) = checkpointGradeCollect;
 
     for (s32 i = 0; i < 10; i++) {
+        collectibleRegistry[i] = 0;
         if (collectibleGot[i] != 2) {
             collectibleGot[i] = 0;
         }
     }
+    collectibleCount = 0;
 
     fightingChainTotal = 0;
 }
