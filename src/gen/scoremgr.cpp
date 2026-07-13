@@ -578,7 +578,7 @@ bool ScoreManager::IsDrunkenMasterSuitEnabled() {
         enabled = totalDragons >= 6;
     }
 
-    if (levelID == 7 && totalDragons == 20) {
+    if (levelID == 7 && totalDragons >= 20) { // actually == 20 boh
         drunkenMasterUnlocked = 1;
     }
 

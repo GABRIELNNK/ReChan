@@ -3112,8 +3112,6 @@ static void UploadPngToVRAMPage(PsxVRAM& vram, u16 tpage, const char* pngPath) {
 #endif
 
 void World::LoadTPGTextures(const u8* lcfData, u32 lcfSize) {
-    vram.Clear();
-
     // Re-parse stream header to find TPG entries
     if (lcfSize < 4) return;
     u32 count = (lcfData[0] << 24) | (lcfData[1] << 16) | (lcfData[2] << 8) | lcfData[3];

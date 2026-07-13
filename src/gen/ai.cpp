@@ -1049,11 +1049,6 @@ void AI::Populate() {
                             player->SetActionState(AS_STAND, 0);
                         }
                     }
-
-                    // Keep player textures resident on populate. This refreshes
-                    // the currently selected suit texture page without touching
-                    // player animation slot mappings.
-                    g_characterManager->LoadCharTexture((u32)AITypes::TT_PLAYER);
                 }
             }
         }

@@ -538,6 +538,16 @@ void AnimStructure::ProcessHumanoidCB() {
 // PSX: ReAttachTree__13AnimStructurell (0x80070B6C)
 void AnimStructure::ReAttachTree(s32 type, s32 animEnum) {
     MARKFUNCTION(0x80070B6C);
+
+    // Keep flip->tree pointed at the model's current skeleton
+    if (flip && model) {
+        OriginalSTree* active = GetActiveSTree(model->drawable);
+        if (active && active->skeleton && flip->tree != active->skeleton) {
+            flip->tree = active->skeleton;
+            flip->dirty = 1;
+        }
+    }
+
     if (!g_characterManager) {
         return;
     }
@@ -545,22 +555,22 @@ void AnimStructure::ReAttachTree(s32 type, s32 animEnum) {
     if (!raw) {
         return;
     }
-    if (IsCameraParamAnim(raw)) {
+
+    if (IsCameraParamAnim(raw) || IsCharSequenceAnim(raw)) {
         return;
     }
+
     rawAnimation = raw;
-    if (IsCharSequenceAnim(rawAnimation)) {
-        sequence = static_cast<CharSequenceAnim*>(raw);
-        animation = sequence->parts ? sequence->parts[0] : nullptr;
+    sequence = nullptr;
+    animation = static_cast<TransformAnim*>(raw);
+
+
+    if (flip && model) {
+        OriginalSTree* active = GetActiveSTree(model->drawable);
+        if (active && active->skeleton) {
+            flip->Attach(active->skeleton, animation);
+        }
     }
-    else {
-        sequence = nullptr;
-        animation = static_cast<TransformAnim*>(raw);
-    }
-    // PSX: reattaches flip to new animation
-    if (flip && animation) {
-        flip->anim = animation;
-        flip->dirty = 1;
-    }
-    ResetCountsToAnim();
+
+    // PSX calls flip->Update() here
 }
