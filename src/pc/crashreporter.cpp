@@ -9,7 +9,7 @@
 #include <exception>
 
 static constexpr const char* kIssueUrl =
-"https://github.com/gennariarmando/rechan/issues/new";
+"https://github.com/SilverwireGames/ReChan/issues/new";
 
 #if defined(RC_PLATFORM_WINDOWS)
 
@@ -179,7 +179,7 @@ static void WriteCrashReport(EXCEPTION_POINTERS* exceptionInfo, const char* reas
 
     WriteHandle(report,
                 "\r\nPlease open an issue at:\r\n"
-                "https://github.com/gennariarmando/rechan/issues/new\r\n"
+                "https://github.com/SilverwireGames/ReChan/issues/new\r\n"
                 "Attach this report and its matching .dmp file.\r\n");
 #if !defined(NDEBUG)
     WriteHandle(report,
@@ -358,7 +358,7 @@ static void FatalSignalHandler(int signalNumber, siginfo_t* signalInfo, void*) {
         AppendFileToFd(report, "/etc/os-release");
         WriteFd(report,
                 "\nPlease open an issue at:\n"
-                "https://github.com/gennariarmando/rechan/issues/new\n"
+                "https://github.com/SilverwireGames/ReChan/issues/new\n"
                 "Attach this crash report.\n");
 #if !defined(NDEBUG)
         WriteFd(report,
