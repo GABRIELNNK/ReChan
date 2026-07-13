@@ -328,7 +328,9 @@ void Player::Think() {
     if (humanoidSound) {
         humanoidSound->Think();
     }
-    PlayerSingleEncounterCheak();
+    if (PlayerSingleEncounterCheak()) {
+        PlayPlayerTauntResponse();
+    }
 
     if (model) {
         HumanoidModel* hm = static_cast<HumanoidModel*>(model);
