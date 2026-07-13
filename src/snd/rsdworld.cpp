@@ -160,8 +160,14 @@ static bool RsdSampleToWax(u32 rsdSampleId, u32& outBank, u32& outSample) {
 // PSX: PlayTransient__8rsdWorldlPC10tagLVectorUsUsUsUl (0x80080234)
 // On PSX: GetObjectVolumes -> rsdGetVoice -> rsdSetVolume -> rsdSetPitch -> rsdVoiceOn
 // On PC: map sample, convert params, play via AudioEngine
+static bool g_isDialogTransient = false;
+void rsdWorld::SetDialogTransient(bool isDialog) { g_isDialogTransient = isDialog; }
+
 s32 rsdWorld::PlayTransientPositional(u32 sampleId, void* posPtr, u16 volume, s16 pitch, u16 pan, u32 flags) {
     MARKFUNCTION(0x80080234);
+
+    const bool isDialog = g_isDialogTransient;
+    g_isDialogTransient = false;
 
     if (volume == 0 || !g_sound) {
         return 0;
@@ -183,7 +189,8 @@ s32 rsdWorld::PlayTransientPositional(u32 sampleId, void* posPtr, u16 volume, s1
 
     f32 fVolL = PsxVolToFloat(volL);
     f32 fVolR = PsxVolToFloat(volR);
-    f32 vol = (fVolL + fVolR) * 0.5f * g_sound->effectsVolume;
+    f32 chanVol = isDialog ? g_sound->dialogVolume : g_sound->effectsVolume;
+    f32 vol = (fVolL + fVolR) * 0.5f * chanVol;
     f32 pcPan = 0.0f;
     if (fVolL + fVolR > 0.0f) {
         pcPan = (fVolR - fVolL) / (fVolL + fVolR);
@@ -199,7 +206,7 @@ s32 rsdWorld::PlayTransientPositional(u32 sampleId, void* posPtr, u16 volume, s1
     AudioVoice v = AUDIO_VOICE_INVALID;
 #if MODERN_SPATIAL_AUDIO
     if (objPos != nullptr) {
-        const f32 vol = PsxVolToFloat(volume) * g_sound->effectsVolume;
+        const f32 vol = PsxVolToFloat(volume) * chanVol;
         v = AudioEngine::PlaySample3D(s, *objPos, vol, false, true, 0.0f, ModernSpatialMaxDistance(flags));
     }
     else

@@ -16,6 +16,7 @@ namespace rsdWorld {
     // pan: pan value
     // flags: additional flags
     s32 PlayTransientPositional(u32 sampleId, void* posPtr, u16 volume, s16 pitch, u16 pan, u32 flags);
+    void SetDialogTransient(bool isDialog);
 
     // PSX: PlayTransient__8rsdWorldlUsUsUsUi (RSDUTIL.CPP:615, 0x80080334)
     // Non-positional variant: takes separate L/R volumes

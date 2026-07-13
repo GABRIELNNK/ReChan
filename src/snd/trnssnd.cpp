@@ -149,6 +149,7 @@ s32 CGenericTransientSound::TriggerDialogWorld(u16 pan) {
     u16 psxVol = PsxVol100(vol);
     s16 psxPitch = PsxPitch200(pitch);
 
+    rsdWorld::SetDialogTransient(true);
     return rsdWorld::PlayTransientPositional(sampleId, posPtr, psxVol, psxPitch, pan, 0);
 }
 
