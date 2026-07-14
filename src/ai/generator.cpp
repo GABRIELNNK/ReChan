@@ -135,7 +135,7 @@ void Generator::AnalyzeMesh(DBRoot* root) {
     }
 
     const DBAttrib* attrib15 = root->FindAttrib(15);
-    health = static_cast<u16>(attrib15->value);
+    blockNum = static_cast<u16>(attrib15->value);
 
     dbRoot.SetName(GetName(), 0);
     dbRoot.pos = pos;
@@ -166,7 +166,7 @@ void Generator::Reset() {
     MARKFUNCTION(0x80011250);
 
     field196 = 0;
-    generateCount = 0;
+    generateCount = field200;
 
     for (s32 i = 0; i < attribArrayCount; i++) {
         ThingHandle* handle = attribArray[i];
@@ -191,11 +191,13 @@ void Generator::Think() {
         else {
             field180++;
             if (field180 > field184) {
-                field196--;
-                GenerateObject(i);
-            }
-            else if (generateCount <= 0) {
-                attribArray[i] = nullptr;
+                if (generateCount > 0) {
+                    field196--;
+                    GenerateObject(i);
+                }
+                else {
+                    attribArray[i] = nullptr;
+                }
             }
         }
     }
