@@ -1027,6 +1027,9 @@ void AI::Populate() {
                     static_cast<u32>(player->checkpoint.field44),
                     static_cast<u32>(player->checkpoint.field48));
 
+                player->groundStandHeight = player->pos.y;
+                player->jumpReturnHeight = player->pos.y;
+
                 player->UpdatePosition();
                 player->flags |= TF_ACTIVATED;
 
