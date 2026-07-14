@@ -438,6 +438,7 @@ private:
     void UpdateMouseCursorVisibility(); // mouse-move/click reactivation + keyboard/gamepad hide, shared by every page including non-interactive popups
     s32 GetBoundValue(const Entry& e) const;
     void ApplyValue(const Entry& e, s32 v);
+    void PlayValueChangeFeedback(const Entry& entry);
     void PlaySound(s32 id) const;
     void RefreshSaveSlots();
     void ClampSaveSlotScroll();

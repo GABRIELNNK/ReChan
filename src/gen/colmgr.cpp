@@ -307,26 +307,6 @@ void HandleThingWall(DynamicThing* thing, s32 radius, s32 height, s32 checkHeigh
     // Hand/foot collision for player combat
     HTW_HandleHandFootCollisions(thing);
 
-    // Corner safety clamp (not present on PSX): the sweep-based slide pass above and
-    // the CheckArrayWallIntersection depenetration pass each push independently along
-    // their own wall's normal. At a corner formed by two walls, their pushes can sum
-    // to a net displacement that reverses past the entity's own start position -
-    // i.e. shoves it backward opposite the direction it was moving, felt as getting
-    // kicked away just from grazing a corner. Legitimate slides/stops always keep the
-    // dot product with the intended movement >= 0, so only the pathological
-    // reversal case is clamped here; normal single-wall contact is unaffected.
-    {
-        const s64 intendedX = (s64)savedHomePosX - thing->pos.x;
-        const s64 intendedZ = (s64)savedHomePosZ - thing->pos.z;
-        const s64 actualX = (s64)HTW_HomePosX - thing->pos.x;
-        const s64 actualZ = (s64)HTW_HomePosZ - thing->pos.z;
-        const s64 dot = intendedX * actualX + intendedZ * actualZ;
-        if (dot < 0) {
-            HTW_HomePosX = thing->pos.x;
-            HTW_HomePosZ = thing->pos.z;
-        }
-    }
-
     // Combat wall hit tracking for humanoids
     s32 alreadyTarget = 0;
     if (thing->thingType < 29) {

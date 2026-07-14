@@ -24,6 +24,9 @@ static u32 g_dialogHeaderSize = 0;
 static u32 g_dialogDataBaseOffset = 0;
 static u16 g_lastDialogChoiceOffset = 0;
 static s32 g_forcedDialogVariant = -1;
+// Set for the duration of jcsPlaySpecificDialog's load+play call. The random
+// dialog picker's anti-repeat guard.
+static bool g_forcedDialogPlay = false;
 
 static void SetDlgStatus(s32 status);
 
@@ -761,6 +764,15 @@ static void StopDialogEntryVoice(DialogEntry* entry) {
     entry->voice = AUDIO_VOICE_INVALID;
 }
 
+static void UpdateActiveDialogVoiceVolumes(f32 volume) {
+    for (s32 i = 0; i < DIALOG_ENTRY_COUNT; ++i) {
+        DialogEntry& entry = g_dialogEntries[i];
+        if (entry.valid && entry.voice != AUDIO_VOICE_INVALID) {
+            AudioEngine::SetVoiceVolume(entry.voice, volume);
+        }
+    }
+}
+
 static void ReleaseDialogEntry(DialogEntry* entry) {
     if (!entry) {
         return;
@@ -1173,7 +1185,7 @@ static s32 PlayLoadedState(s32 playPosition, s32 nextState) {
     }
 
     const bool clipAlreadyUsed = (DialogHeaderU8((u32)clipEntry) & 0x80) != 0;
-    if (clipEntry == g_lastDialogChoiceOffset || clipAlreadyUsed) {
+    if (!g_forcedDialogPlay && (clipEntry == g_lastDialogChoiceOffset || clipAlreadyUsed)) {
         KillDialogByHandleInternal(g_primaryDialogHandle);
         return 0;
     }
@@ -1989,6 +2001,7 @@ s32 jcsHandleControlEvent(s32 event, s32 param1, s32 param2, s32 param3) {
             f32 vol = (f32)param1 * 0.83f / 100.0f;
             LOG("[rsEvent] SetDialogVol(%d -> %.2f)", param1, vol);
             g_sound->SetDialogVolume(vol);
+            UpdateActiveDialogVoiceVolumes(vol);
             break;
         }
 
@@ -2233,16 +2246,19 @@ void jcsStartDialog() {
     g_dialogSystemStarted = 1;
 }
 
-s32 jcsPlaySpecificDialog(s32 character, s32 dialogId, u32 variant) {
+s32 jcsPlaySpecificDialog(s32 character, s32 dialogId, u32 variant, u32 timeout) {
     rsEvent(RS_STOP_DIALOG, 0, 0, 0);
     jcsStartDialog();
     g_forcedDialogVariant = static_cast<s32>(variant);
+    g_forcedDialogPlay = true;
     const s32 handle = rsEvent(RS_LOAD_DIALOG, character, dialogId, 255);
     g_forcedDialogVariant = -1;
+    s32 result = handle;
     if (handle != 0) {
-        if (rsEvent(RS_PLAY_DIALOG, handle, 0, 360) == 0) {
-            return 0;
+        if (rsEvent(RS_PLAY_DIALOG, handle, 0, timeout) == 0) {
+            result = 0;
         }
     }
-    return handle;
+    g_forcedDialogPlay = false;
+    return result;
 }

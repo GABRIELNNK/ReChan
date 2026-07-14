@@ -81,4 +81,4 @@ void jcsStartDialog();
 
 // Menu/UI helper: stops any current dialog and plays one exact randomized
 // variant. Returns the dialog handle, or 0 if it could not be loaded.
-s32 jcsPlaySpecificDialog(s32 character, s32 dialogId, u32 variant);
+s32 jcsPlaySpecificDialog(s32 character, s32 dialogId, u32 variant, u32 timeout = 360);

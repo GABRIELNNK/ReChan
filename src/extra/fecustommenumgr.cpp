@@ -2116,7 +2116,7 @@ s32 feCustomMenuMgr::Invoke() {
             Adjust(scroll > 0 ? 1 : -1);
 
             if (prevVal != GetBoundValue(*e)) {
-                PlaySound(GetValueChangeSoundId(*e));
+                PlayValueChangeFeedback(*e);
             }
         }
     }
@@ -2135,14 +2135,14 @@ s32 feCustomMenuMgr::Invoke() {
         Adjust(-1);
 
         if (prevVal != GetBoundValue(*e)) {
-            PlaySound(GetValueChangeSoundId(*e));
+            PlayValueChangeFeedback(*e);
         }
     }
     if (g_actionInput->JustPressed(ACTION_MENU_RIGHT)) {
         Adjust(1);
 
         if (prevVal != GetBoundValue(*e)) {
-            PlaySound(GetValueChangeSoundId(*e));
+            PlayValueChangeFeedback(*e);
         }
     }
 
@@ -2987,6 +2987,15 @@ void feCustomMenuMgr::ApplyValue(const Entry& e, s32 v) {
     }
 #endif
     g_settings.Save(SETTINGS_PATH);
+}
+
+void feCustomMenuMgr::PlayValueChangeFeedback(const Entry& entry) {
+    if (entry.type == EntryType_Slider && entry.binding == EntryBinding_DialogVol) {
+        jcsPlaySpecificDialog(0, 23, 0);
+        return;
+    }
+
+    PlaySound(GetValueChangeSoundId(entry));
 }
 
 void feCustomMenuMgr::PlaySound(s32 id) const {

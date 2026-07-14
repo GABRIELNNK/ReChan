@@ -82,12 +82,14 @@ inline s32 PsxRmDiv16i(s32 numerator, s32 denominator) {
         negative = !negative;
     }
 
-    while (numeratorAbs <= 0x1FFFFFFFu) {
-        shift -= 2;
-        if (shift == 0) {
-            break;
+    if (numeratorAbs <= 0x1FFFFFFFu) {
+        while (shift != 0) {
+            numeratorAbs *= 4u;
+            shift -= 2;
+            if (numeratorAbs > 0x1FFFFFFFu) {
+                break;
+            }
         }
-        numeratorAbs *= 4u;
     }
 
     const u32 scaledDenominator = denominatorAbs >> shift;
