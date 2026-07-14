@@ -1,6 +1,7 @@
 ﻿#include "gen/common.h"
 #include "ai/ladder.h"
 #include "ai/humanoid.h"
+#include "ai/activezn.h"
 #include "ai/platform.h"
 #include "ai/player.h"
 #include "gen/ai.h"
@@ -232,11 +233,17 @@ s32 Ladder::DeathCheck() {
     if (!deathThing && deathCheckCRC != 0 && g_ai) {
         ccNode* n = g_ai->activeZoneList.FindNodeCRC((u32)deathCheckCRC);
         if (n) {
-            deathThing = static_cast<Thing*>(n);
+            deathThing = static_cast<ActiveZone*>(n);
         }
     }
 
-    if (!deathThing || !(deathThing->flags & TF_ACTIVATED)) {
+    // deathThing not found yet
+    if (!deathThing) {
+        return deathCountdown;
+    }
+
+    // PSX DeathCheck__6Ladder (0x8008A0B4)
+    if (deathThing->memberCount == 0) {
         deathCountdown--;
         if (deathCountdown <= 0) {
             Trigger();

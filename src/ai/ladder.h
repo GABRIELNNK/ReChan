@@ -1,6 +1,8 @@
 #pragma once
 #include "ai/obstacle.h"
 
+class ActiveZone;
+
 class Ladder : public Obstacle {
 public:
     s32 deathCountdown = 3;
@@ -20,7 +22,7 @@ public:
     s32 teleportTargetCRC = 0;
     s32 hatchCloseCRC = 0;
     s32 deathCheckCRC = 0;
-    Thing* deathThing = nullptr;
+    ActiveZone* deathThing = nullptr;
 
     Ladder(const LVector* pos, u16 type);
     ~Ladder() override;
