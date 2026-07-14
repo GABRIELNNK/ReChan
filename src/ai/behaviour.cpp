@@ -4,6 +4,7 @@
 #include "ai/cominter.h"
 #include "ai/humanoid.h"
 #include "ai/obstacle.h"
+#include "ai/pickup.h"
 #include "ai/player.h"
 #include "ai/thing.h"
 #include "gen/ai.h"
@@ -2769,9 +2770,8 @@ void Behaviour::NDMS(Behaviour* b) {
 
     Thing* pickup = g_ai ? g_ai->GetPickupWithinReach(owner) : nullptr;
     if (pickup) {
-        // PSX checks pickup +0x14C before requesting throw/grab action.
-        const s32 pickupStrayWeapon = *reinterpret_cast<s32*>(reinterpret_cast<u8*>(pickup) + 0x14C);
-        if (pickupStrayWeapon != 0) {
+        Pickup* p = static_cast<Pickup*>(pickup);
+        if (p->field332 != 0) {
             owner->RequestAction(7);
             return;
         }
@@ -2886,7 +2886,7 @@ void Behaviour::NDMS(Behaviour* b) {
             return;
         }
 
-        if ((u32)(actionState - 46) < 9u && randomCircling < (s32)b->animConfigPtr->aggression) {
+        if ((u32)(actionState - 46) < 9u && (s32)b->animConfigPtr->aggression < randomCircling) {
             b->nextHandlerThisOffset = 0;
             b->nextHandlerDispatch = -1;
             b->nextHandler = NDMS;
@@ -2907,7 +2907,7 @@ void Behaviour::NDMS(Behaviour* b) {
             else if (facingAway && randomAggression - 70 < (s32)b->animConfigPtr->attackFreq) {
                 decision = 7;
             }
-            else if (randomCircling < (s32)b->animConfigPtr->aggression) {
+            else if ((s32)b->animConfigPtr->aggression < randomCircling) {
                 b->nextHandlerThisOffset = 0;
                 b->nextHandlerDispatch = -1;
                 b->nextHandler = NDMS;
@@ -2932,7 +2932,7 @@ void Behaviour::NDMS(Behaviour* b) {
             else if (facingAway && randomAggression - 70 < (s32)b->animConfigPtr->attackFreq) {
                 decision = 7;
             }
-            else if (randomCircling < (s32)b->animConfigPtr->aggression) {
+            else if ((s32)b->animConfigPtr->aggression < randomCircling) {
                 b->nextHandlerThisOffset = 0;
                 b->nextHandlerDispatch = -1;
                 b->nextHandler = NDMS;
@@ -3003,7 +3003,7 @@ void Behaviour::NDMS(Behaviour* b) {
                 decision = b->NavigateEnemies(2);
             }
         }
-        else if (randomAggression < (s32)b->animConfigPtr->attackFreq) {
+        else if (randomAggression >= (s32)b->animConfigPtr->attackFreq) {
             decision = 5;
         }
         else if (randomDistancing < (s32)b->animConfigPtr->distancing) {
