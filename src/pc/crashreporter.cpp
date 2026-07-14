@@ -77,11 +77,9 @@ static void WriteMiniDump(EXCEPTION_POINTERS* exceptionInfo) {
     }
 
     MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), dump,
-                      static_cast<MINIDUMP_TYPE>(MiniDumpWithDataSegs |
-                      MiniDumpWithPrivateReadWriteMemory |
-                      MiniDumpWithIndirectlyReferencedMemory |
-                      MiniDumpWithProcessThreadData |
-                      MiniDumpScanMemory),
+                      static_cast<MINIDUMP_TYPE>(MiniDumpWithIndirectlyReferencedMemory |
+                      MiniDumpScanMemory |
+                      MiniDumpWithThreadInfo),
                       infoPtr, nullptr, nullptr);
     CloseHandle(dump);
 }
