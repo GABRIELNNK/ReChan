@@ -3,6 +3,7 @@
 #include "snd/sound.h"
 #include "snd/soundid.h"
 #include "snd/rsdworld.h"
+#include "snd/sndmath.h"
 #include "snd/ambience.h"
 #include "snd/adpcm.h"
 #include "radlib/rtask.h"
@@ -24,11 +25,35 @@ static u32 g_dialogHeaderSize = 0;
 static u32 g_dialogDataBaseOffset = 0;
 static u16 g_lastDialogChoiceOffset = 0;
 static s32 g_forcedDialogVariant = -1;
-// Set for the duration of jcsPlaySpecificDialog's load+play call. The random
-// dialog picker's anti-repeat guard.
-static bool g_forcedDialogPlay = false;
+
+// PC: pending real position for the next RS_PLAY_DIALOG call - see
+// SetPendingDialogPlayPosition in rsevent.h.
+static LVector g_pendingDialogPlayPosition = {};
+static bool g_hasPendingDialogPlayPosition = false;
+
+static bool g_DebugDialogTrace = false;
+
+void SetPendingDialogPlayPosition(const LVector* pos) {
+    if (pos) {
+        g_pendingDialogPlayPosition = *pos;
+        g_hasPendingDialogPlayPosition = true;
+    }
+    else {
+        g_hasPendingDialogPlayPosition = false;
+    }
+}
+
+static bool ConsumePendingDialogPlayPosition(LVector& outPos) {
+    if (!g_hasPendingDialogPlayPosition) {
+        return false;
+    }
+    outPos = g_pendingDialogPlayPosition;
+    g_hasPendingDialogPlayPosition = false;
+    return true;
+}
 
 static void SetDlgStatus(s32 status);
+static bool DialogTraceEnabled();
 
 struct DialogClipSelection {
     u32 start = 0;
@@ -253,6 +278,10 @@ static bool SelectDialogClipOffset(s32 character, s32 dialogID, u32* outStart, u
 
         // PSX SelectDialog rejects immediate repeat selection instead of rerolling.
         if (g_forcedDialogVariant < 0 && choiceOffset == g_lastDialogChoiceOffset) {
+            if (DialogTraceEnabled()) {
+                LOG("[DialogTrace] SELECT-REPEAT bail char=%d dialog=%d choiceOffset=%u lastChoice=%u clipCount=%u",
+                    character, dialogID, choiceOffset, g_lastDialogChoiceOffset, (u32)clipCount);
+            }
             SetDlgStatus(9);
             return false;
         }
@@ -335,6 +364,13 @@ static AudioSample LoadDialogSampleFromSelection(s32 character, s32 dialogID,
     const u8* clipData = &g_dialogFileData[selection.start];
     const u32 clipSize = selection.ByteSize();
     std::vector<s16> pcm = SpuAdpcm::Decode(clipData, clipSize, true);
+    if (DialogTraceEnabled()) {
+        LOG("[DialogTrace] decode char=%d dialog=%d variant=%u sectors=%u adpcmBytes=%u "
+            "start=0x%X pcmFrames=%u dur=%.3fs",
+            character, dialogID, selection.variant, selection.sectors, clipSize,
+            selection.start, (u32)pcm.size(),
+            (f32)pcm.size() / (f32)DIALOG_RATE);
+    }
     if (pcm.empty()) {
         return AUDIO_SAMPLE_INVALID;
     }
@@ -395,6 +431,14 @@ static s32 g_dialogSystemStarted = 0;
 static s32 g_dialogLoadPending = 0;
 static s32 g_dialogLoadPendingState = -1;
 static s32 g_dialogLoadCompletionState = -1;
+// A transfer owns its completion. Deferred states are allowed to relabel the
+// pending transfer (as on PSX), but unrelated task ticks must not dispatch the
+// CD callback and consume a dialog state transition.
+static s32 g_dialogLoadDueFrame = -1;
+static u32 g_dialogLoadSerial = 0;
+// A real CD completion is asynchronous. One frame is enough to retain the
+// load window without allowing a normal play request to complete it early.
+static constexpr s32 kDialogLoadLatencyFrames = 1;
 // PSX: gp+3520/gp+3524 - deferred dialog character and id.
 static s32 g_deferredDialogCharacter = 0;
 static s32 g_deferredDialogId = 0;
@@ -412,6 +456,15 @@ struct DialogQueueInfo {
 };
 static_assert(sizeof(DialogQueueInfo) == 32, "DialogQueueInfo must match PSX g_Dlg row size");
 static DialogQueueInfo g_dialogQueues[2] = {};
+// PC: real (non-truncated) position paired 1:1 with g_dialogQueues[], kept
+// outside DialogQueueInfo so that struct keeps mirroring the 32-byte PSX
+// g_Dlg row exactly. playPosition above stays a raw s32 for ABI fidelity;
+// this is what actually feeds spatial audio at play time.
+struct DialogQueuePosition {
+    LVector pos = {};
+    bool hasPos = false;
+};
+static DialogQueuePosition g_dialogQueuePos[2] = {};
 // PSX: gp+1236 - SetDlgStatus output value.
 static s32 g_dialogResultStatus = 0;
 static bool g_dialogStatusUpdateInProgress = false;
@@ -432,8 +485,7 @@ void jcsUpdateAmbience() {
 }
 
 static bool DialogTraceEnabled() {
-    static const bool enabled = std::getenv("RECHAN_DIALOG_TRACE") != nullptr;
-    return enabled;
+    return g_DebugDialogTrace;
 }
 
 enum DialogStatus : s32 {
@@ -464,6 +516,7 @@ static void StopDialogEntryVoice(DialogEntry* entry);
 static void ReleaseDialogEntry(DialogEntry* entry);
 static void ClearDialogPendingLoadState();
 static void BeginDialogPendingLoad(s32 pendingState);
+static bool CompletePendingDialogLoad(bool force);
 static void CDDoneCallback();
 static void LoadDialogToAudioMemory();
 static void UpdateDialogStatusFromSlots();
@@ -472,12 +525,13 @@ static s32 DialogTask(RTASK* task);
 static RTASK* jcsInitializeDialog();
 static void jcsTerminateDialog();
 static s32 IsPrimaryHandle(s32 handle);
-static s32 PlayDialogHandle(DialogEntry* entry);
-static s32 PlayLoadedState(s32 playPosition, s32 nextState);
-static s32 PlayDialogRequest(s32 handleParam, s32 playPosition, u32 timeout);
+static s32 PlayDialogHandle(DialogEntry* entry, const LVector* posPtr);
+static s32 PlayLoadedState(s32 playPosition, const LVector* posPtr, s32 nextState);
+static s32 PlayDialogRequest(s32 handleParam, s32 playPosition, const LVector* posPtr, u32 timeout);
 static s32 RequestLoadDialog(s32 existingHandle, s32 character, s32 dialogId,
                              s32 priority, s32 queue, s32 state);
 static s32 jcsLoadDialog(s32 character, s32 dialogId, s32 priority);
+static void KillAllDialogHandles();
 static s32 jcsStopDialog();
 
 // PSX: SetDlgStatus__F9DlgStatus
@@ -497,10 +551,11 @@ static void ResetDialogQueueInfo(s32 queue) {
 
     g_dialogQueues[queue] = {};
     g_dialogQueues[queue].dialogId = 112;
+    g_dialogQueuePos[queue] = {};
 }
 
 // PSX: UpdateTimeOut__FUlPC10tagLVector5Queue
-static s32 UpdateDialogTimeout(u32 timeout, s32 playPosition, s32 queue) {
+static s32 UpdateDialogTimeout(u32 timeout, s32 playPosition, const LVector* posPtr, s32 queue) {
     if (timeout == 0u) {
         SetDlgStatus(7);
         return 0;
@@ -514,6 +569,13 @@ static s32 UpdateDialogTimeout(u32 timeout, s32 playPosition, s32 queue) {
     const s32 frameCounter = GetDialogFrameCounter();
     q.playPosition = playPosition;
     q.timeoutFrame = frameCounter + static_cast<s32>(timeout);
+    if (posPtr) {
+        g_dialogQueuePos[queue].pos = *posPtr;
+        g_dialogQueuePos[queue].hasPos = true;
+    }
+    else {
+        g_dialogQueuePos[queue].hasPos = false;
+    }
     return 1;
 }
 
@@ -621,6 +683,11 @@ static s32 KillDialogByHandleInternal(s32 handleParam) {
     const s32 handle = handleParam;
     if (!jcsValidateHandle(handle)) {
         return 0;
+    }
+
+    if (DialogTraceEnabled()) {
+        LOG("[DialogTrace] KILL handle=%d state=%d primary=%d secondary=%d",
+            handle, g_dialogStatus, g_primaryDialogHandle, g_secondaryDialogHandle);
     }
 
     switch (g_dialogStatus) {
@@ -791,6 +858,7 @@ static void ClearDialogPendingLoadState() {
     g_dialogLoadPending = 0;
     g_dialogLoadPendingState = -1;
     g_dialogLoadCompletionState = -1;
+    g_dialogLoadDueFrame = -1;
 }
 
 // PSX: CheckFlushCount__F5Queue (JCSDLG.CPP:1859, 0x80043700)
@@ -829,7 +897,8 @@ static void ProcessDialogLoadedStates() {
             SetDlgStatus(12);
         }
         else {
-            PlayDialogRequest(q0.handle, q0.playPosition, 0u);
+            const DialogQueuePosition& qPos = g_dialogQueuePos[0];
+            PlayDialogRequest(q0.handle, q0.playPosition, qPos.hasPos ? &qPos.pos : nullptr, 0u);
         }
     }
     else {
@@ -892,12 +961,30 @@ static void ProcessDialogPlayingStates() {
 
 // PSX: DialogTask__FP6_RTASK (JCSDLG.CPP:1957, 0x80043808)
 static void ProcessDialogTask() {
+    CompletePendingDialogLoad(false);
+
     ProcessDialogLoadedStates();
     ProcessDialogPlayingStates();
 
     if (g_dialogStatus == DialogStatus_PlayingPrimaryState14) {
         CheckDialogFlushCount(1);
     }
+}
+
+// PC: services the dialog state machine every frame. PSX's StartLoad
+// (JCSDLG.CPP:3208) issues a real async CD read and registers CDDoneCallback
+// via rCDSetCallBack - the CD controller's own interrupt fires it as soon as
+// the real disc read finishes, entirely decoupled from DialogTask's 16-tick
+// RTASK schedule (DialogTask only does status-driven housekeeping: retry a
+// deferred play once loaded, notice a finished voice). PC's decode is
+// synchronous/instant, so the closest match to that interrupt is servicing the
+// pending-load completion every frame instead of waiting for DialogTask's next
+// tick (up to 16 frames later) - which was starving short timeouts and
+// short-lived per-frame-retried callers. DialogTask still runs on its own
+// 16-tick schedule too; calling both is harmless; this just makes the loaded
+// transition (and the retry/finish checks that depend on it) prompt.
+void jcsUpdateDialogCD() {
+    ProcessDialogTask();
 }
 
 // PSX: DialogTask__FP6_RTASK (JCSDLG.CPP:1957, 0x80043808)
@@ -1003,10 +1090,13 @@ static void CDDoneDefer(s32 queue, s32 reloadState, s32 fallbackState) {
 
 // PSX: CDDoneCallback__Flll (JCSDLG.CPP:1700, 0x80043568)
 static void CDDoneCallback() {
-    if (g_dialogLoadPending == 0) {
-        return;
-    }
-
+    // PSX has no "is a load still pending" guard here - it reads gp+1212
+    // (current status) and dispatches unconditionally on whatever it is right
+    // now. A guard on g_dialogLoadPending is wrong: that flag is legitimately
+    // cleared by unrelated state transitions (e.g. a secondary being promoted
+    // to primary) that can happen before this fires, and dropping the call in
+    // that case permanently strands the state machine instead of letting the
+    // switch's own state-specific handling (or its default no-op) apply.
     switch (g_dialogStatus) {
         case DialogStatus_LoadRequestedPrimary:
             LoadDialogToAudioMemory();
@@ -1145,7 +1235,8 @@ static DialogEntry* AllocateDialogEntry() {
     return entry;
 }
 
-static s32 PlayDialogHandle(DialogEntry* entry) {
+// PSX: PlayLoaded__FPC10tagLVector5State (JCSDLG.CPP:2664, 0x8004406C)
+static s32 PlayDialogHandle(DialogEntry* entry, const LVector* posPtr) {
     if (!entry || !entry->valid || !g_sound) {
         return 0;
     }
@@ -1163,16 +1254,37 @@ static s32 PlayDialogHandle(DialogEntry* entry) {
         entry->voice = AUDIO_VOICE_INVALID;
     }
 
-    entry->voice = AudioEngine::PlaySample(entry->sample, g_sound->dialogVolume, 0.0f, false);
+    f32 pan = 0.0f;
+    f32 vol = g_sound->dialogVolume;
+    if (posPtr) {
+        u16 volL = 0;
+        u16 volR = 0;
+        rsdWorld::ComputeObjectVolumes(0xFFFFu, posPtr, volL, volR, 5000);
+        const f32 fVolL = PsxVolToFloat(volL);
+        const f32 fVolR = PsxVolToFloat(volR);
+        vol = (fVolL + fVolR) * 0.5f * g_sound->dialogVolume;
+        if (fVolL + fVolR > 0.0f) {
+            pan = (fVolR - fVolL) / (fVolL + fVolR);
+        }
+    }
+
+    entry->voice = AudioEngine::PlaySample(entry->sample, vol, pan, false);
+
     if (entry->voice == AUDIO_VOICE_INVALID) {
+        if (DialogTraceEnabled()) {
+            LOG("[DialogTrace] AUDIO-START-FAILED handle=%d (voice pool exhausted?)", entry->handle);
+        }
         return 0;
     }
 
+    if (DialogTraceEnabled()) {
+        LOG("[DialogTrace] AUDIO-START handle=%d voice=%u", entry->handle, entry->voice);
+    }
     return 1;
 }
 
 // PSX: PlayLoaded__FPC10tagLVector5State (JCSDLG.CPP:2664, 0x8004406C)
-static s32 PlayLoadedState(s32 playPosition, s32 nextState) {
+static s32 PlayLoadedState(s32 playPosition, const LVector* posPtr, s32 nextState) {
     DialogEntry* primaryEntry = FindDialogEntry(g_primaryDialogHandle);
     if (!primaryEntry || !IsPrimaryHandle(primaryEntry->handle)) {
         return 0;
@@ -1185,7 +1297,11 @@ static s32 PlayLoadedState(s32 playPosition, s32 nextState) {
     }
 
     const bool clipAlreadyUsed = (DialogHeaderU8((u32)clipEntry) & 0x80) != 0;
-    if (!g_forcedDialogPlay && (clipEntry == g_lastDialogChoiceOffset || clipAlreadyUsed)) {
+    if (clipEntry == g_lastDialogChoiceOffset || clipAlreadyUsed) {
+        if (DialogTraceEnabled()) {
+            LOG("[DialogTrace] PLAY-GUARD kill clipEntry=%u lastChoice=%u alreadyUsed=%d headerByte=0x%02X",
+                clipEntry, g_lastDialogChoiceOffset, clipAlreadyUsed ? 1 : 0, DialogHeaderU8((u32)clipEntry));
+        }
         KillDialogByHandleInternal(g_primaryDialogHandle);
         return 0;
     }
@@ -1199,7 +1315,7 @@ static s32 PlayLoadedState(s32 playPosition, s32 nextState) {
         StopDialogEntryVoice(&other);
     }
 
-    const s32 started = PlayDialogHandle(primaryEntry);
+    const s32 started = PlayDialogHandle(primaryEntry, posPtr);
     if (started == 0) {
         KillDialogByHandleInternal(g_primaryDialogHandle);
         return 0;
@@ -1218,7 +1334,7 @@ static s32 PlayLoadedState(s32 playPosition, s32 nextState) {
 }
 
 // PSX: jcsPlayDialog__FlPC10tagLVectorUl (JCSDLG.CPP:1121, 0x80043044)
-static s32 PlayDialogRequest(s32 handleParam, s32 playPosition, u32 timeout) {
+static s32 PlayDialogRequest(s32 handleParam, s32 playPosition, const LVector* posPtr, u32 timeout) {
     if (DialogTraceEnabled()) {
         LOG("[DialogTrace] play req handleParam=%d resolved=%d timeout=%u state=%d primary=%d secondary=%d",
             handleParam, ResolveDialogHandleParam(handleParam), timeout,
@@ -1247,39 +1363,39 @@ static s32 PlayDialogRequest(s32 handleParam, s32 playPosition, u32 timeout) {
 
         case DialogStatus_LoadRequestedPrimary:
         case DialogStatus_LoadDeferredPrimary:
-            return UpdateDialogTimeout(timeout, playPosition, 0);
+            return UpdateDialogTimeout(timeout, playPosition, posPtr, 0);
 
         case DialogStatus_LoadedPrimary:
-            return PlayLoadedState(playPosition, DialogStatus_PlayingPrimary);
+            return PlayLoadedState(playPosition, posPtr, DialogStatus_PlayingPrimary);
 
         case DialogStatus_LoadedPrimaryWithDeferred:
             if (!IsPrimaryHandle(handle)) {
-                return UpdateDialogTimeout(timeout, playPosition, 1);
+                return UpdateDialogTimeout(timeout, playPosition, posPtr, 1);
             }
-            return PlayLoadedState(playPosition, DialogStatus_PlayingPrimaryWithSecondary);
+            return PlayLoadedState(playPosition, posPtr, DialogStatus_PlayingPrimaryWithSecondary);
 
         case DialogStatus_LoadedPrimaryWithDeferredFromState2:
             if (!IsPrimaryHandle(handle)) {
-                return UpdateDialogTimeout(timeout, playPosition, 1);
+                return UpdateDialogTimeout(timeout, playPosition, posPtr, 1);
             }
-            return PlayLoadedState(playPosition, DialogStatus_PlayingPrimaryState12);
+            return PlayLoadedState(playPosition, posPtr, DialogStatus_PlayingPrimaryState12);
 
         case DialogStatus_LoadedPrimaryWithDeferredFromState3:
             if (IsSecondaryHandle(handle)) {
                 SetDlgStatus(7);
                 return 0;
             }
-            return PlayLoadedState(playPosition, DialogStatus_PlayingPrimaryState13);
+            return PlayLoadedState(playPosition, posPtr, DialogStatus_PlayingPrimaryState13);
 
         case DialogStatus_LoadedPrimaryAndSecondary:
             if (IsPrimaryHandle(handle)) {
-                return PlayLoadedState(playPosition, DialogStatus_PlayingPrimaryState14);
+                return PlayLoadedState(playPosition, posPtr, DialogStatus_PlayingPrimaryState14);
             }
             if (g_secondaryDialogPriority < g_primaryDialogPriority) {
-                return UpdateDialogTimeout(timeout, playPosition, 1);
+                return UpdateDialogTimeout(timeout, playPosition, posPtr, 1);
             }
             KillDialogByHandleInternal(g_primaryDialogHandle);
-            return PlayLoadedState(playPosition, DialogStatus_PlayingPrimary);
+            return PlayLoadedState(playPosition, posPtr, DialogStatus_PlayingPrimary);
 
         case DialogStatus_PlayingPrimaryWithSecondary:
         case DialogStatus_PlayingPrimaryState12:
@@ -1287,7 +1403,7 @@ static s32 PlayDialogRequest(s32 handleParam, s32 playPosition, u32 timeout) {
             if (!IsSecondaryHandle(handle)) {
                 return 1;
             }
-            return UpdateDialogTimeout(timeout, playPosition, 1);
+            return UpdateDialogTimeout(timeout, playPosition, posPtr, 1);
 
         case DialogStatus_PlayingPrimaryState13:
             if (IsSecondaryHandle(handle)) {
@@ -1362,6 +1478,40 @@ static void BeginDialogPendingLoad(s32 pendingState) {
     g_dialogLoadPending = 1;
     g_dialogLoadPendingState = pendingState;
     g_dialogLoadCompletionState = DialogCompletionStateForLoadState(pendingState);
+    g_dialogLoadDueFrame = GetDialogFrameCounter() + kDialogLoadLatencyFrames;
+    ++g_dialogLoadSerial;
+    if (g_dialogLoadSerial == 0) {
+        ++g_dialogLoadSerial;
+    }
+}
+
+static bool CompletePendingDialogLoad(bool force) {
+    if (g_dialogLoadPending == 0) {
+        return false;
+    }
+
+    const s32 frameCounter = GetDialogFrameCounter();
+    if (!force && g_dialogLoadDueFrame >= 0 && frameCounter < g_dialogLoadDueFrame) {
+        // rFrameCount60 is reset by menu/loading transitions. A due frame from
+        // before that reset must be ready on the next task tick, not delayed
+        // until the old absolute frame is reached again.
+        if (g_dialogLoadDueFrame - frameCounter <= kDialogLoadLatencyFrames) {
+            return false;
+        }
+    }
+
+    const u32 completedSerial = g_dialogLoadSerial;
+    if (DialogTraceEnabled()) {
+        LOG("[DialogTrace] CD-DONE serial=%u state=%d pendingState=%d completionState=%d force=%d",
+            completedSerial, g_dialogStatus, g_dialogLoadPendingState,
+            g_dialogLoadCompletionState, force ? 1 : 0);
+    }
+
+    CDDoneCallback();
+    if (g_dialogLoadPending != 0 && g_dialogLoadSerial == completedSerial) {
+        ClearDialogPendingLoadState();
+    }
+    return true;
 }
 
 static void ReleaseDialogQueueSlot(s32 queue, s32 keepHandle) {
@@ -1461,7 +1611,6 @@ static s32 StartLoadDialog(s32 existingHandle, s32 character, s32 dialogId, s32 
     AssignDialogEntryToQueue(entry, queue, loadInfo.selection.choiceOffset, loadInfo.selection.sectors);
     UpdateDialogState(state);
     BeginDialogPendingLoad(state);
-    CDDoneCallback();
     SetDlgStatus(0);
     return entry->handle;
 }
@@ -1527,7 +1676,11 @@ static s32 LoadAllReadyDialog(s32 character, s32 dialogId, s32 priority) {
     }
 
     KillDialogByHandleInternal(g_dialogQueues[queue].handle);
-    return StartLoadDialog(0, character, dialogId, priority, loadInfo, queue,
+    // PSX LoadAllReady uses the computed queue for the conflict check and the
+    // kill above, but hardcodes the StartLoad destination to queue 1 - so a
+    // queue-0 eviction leaves queue 0 empty and the new dialog lands in
+    // queue 1 anyway. Reproduced verbatim (SLUS_006.84_full.c:75681-75688).
+    return StartLoadDialog(0, character, dialogId, priority, loadInfo, 1,
                            DialogStatus_LoadedPrimaryWithDeferred);
 }
 
@@ -1645,7 +1798,15 @@ static s32 rsDialogEvent(s32 event, s32 param1, s32 param2, s32 param3) {
             return jcsLoadDialog(param1, param2, param3);
 
         case RS_PLAY_DIALOG:
-            return PlayDialogRequest(param1, param2, static_cast<u32>(param3));
+        {
+            LVector pos = {};
+            const bool hasPos = ConsumePendingDialogPlayPosition(pos);
+            const s32 playResult = PlayDialogRequest(param1, param2, hasPos ? &pos : nullptr, static_cast<u32>(param3));
+            if (DialogTraceEnabled()) {
+                LOG("[DialogTrace] RS_PLAY_DIALOG handle=%d timeout=%d returned=%d", param1, param3, playResult);
+            }
+            return playResult;
+        }
 
         case RS_STOP_DIALOG:
         {
@@ -1862,6 +2023,16 @@ s32 jcsHandleControlEvent(s32 event, s32 param1, s32 param2, s32 param3) {
             rsdWorld::StopAllPersistentSounds();
             g_ambiance.Stop();
             g_sound->StopMusic();
+            if (DialogTraceEnabled()) {
+                LOG("[DialogTrace] UNLOAD pre-kill state=%d primary=%d secondary=%d started=%d lastChoice=%u",
+                    g_dialogStatus, g_primaryDialogHandle, g_secondaryDialogHandle,
+                    g_dialogSystemStarted, g_lastDialogChoiceOffset);
+            }
+            KillAllDialogHandles();
+            if (DialogTraceEnabled()) {
+                LOG("[DialogTrace] UNLOAD post-kill state=%d primary=%d secondary=%d started=%d",
+                    g_dialogStatus, g_primaryDialogHandle, g_secondaryDialogHandle, g_dialogSystemStarted);
+            }
             break;
 
         case RS_SET_LOCATION: // 4 - set sound location (music + SFX bank)
@@ -2226,15 +2397,19 @@ s32 jcsQueryDialogPriority(s32 handle) {
     return g_secondaryDialogPriority;
 }
 
-// PSX: jcsStopDialog__Fv (JCSDLG.CPP:1586, 0x8004345C)
-static s32 jcsStopDialog() {
-    MARKFUNCTION(0x8004345C);
-
-    // PSX KillAllDialog kills secondary first, then primary.
+// PSX: KillAllDialog__Fv - kills secondary first, then primary.
+static void KillAllDialogHandles() {
     const s32 secondaryHandle = g_secondaryDialogHandle;
     const s32 primaryHandle = g_primaryDialogHandle;
     KillDialogByHandleInternal(secondaryHandle);
     KillDialogByHandleInternal(primaryHandle);
+}
+
+// PSX: jcsStopDialog__Fv (JCSDLG.CPP:1586, 0x8004345C)
+static s32 jcsStopDialog() {
+    MARKFUNCTION(0x8004345C);
+
+    KillAllDialogHandles();
     g_dialogSystemStarted = 0;
     return 0;
 }
@@ -2246,19 +2421,32 @@ void jcsStartDialog() {
     g_dialogSystemStarted = 1;
 }
 
-s32 jcsPlaySpecificDialog(s32 character, s32 dialogId, u32 variant, u32 timeout) {
-    rsEvent(RS_STOP_DIALOG, 0, 0, 0);
-    jcsStartDialog();
-    g_forcedDialogVariant = static_cast<s32>(variant);
-    g_forcedDialogPlay = true;
-    const s32 handle = rsEvent(RS_LOAD_DIALOG, character, dialogId, 255);
-    g_forcedDialogVariant = -1;
-    s32 result = handle;
-    if (handle != 0) {
-        if (rsEvent(RS_PLAY_DIALOG, handle, 0, timeout) == 0) {
-            result = 0;
-        }
+AudioSample LoadDialogClipSample(s32 character, s32 dialogId, s32 variant) {
+    const s32 savedForcedVariant = g_forcedDialogVariant;
+    g_forcedDialogVariant = variant;
+    DialogClipSelection selection;
+    const bool gotSelection = SelectDialogClip(character, dialogId, &selection);
+    g_forcedDialogVariant = savedForcedVariant;
+
+    if (!gotSelection) {
+        return AUDIO_SAMPLE_INVALID;
     }
-    g_forcedDialogPlay = false;
-    return result;
+
+    AudioSample sample = LoadDialogSampleFromSelection(character, dialogId, selection);
+    if (sample == AUDIO_SAMPLE_INVALID) {
+        return AUDIO_SAMPLE_INVALID;
+    }
+
+    if (variant < 0) {
+        // Mirrors PlayLoadedState's anti-repeat bookkeeping (JCSDLG.CPP:2664)
+        // so this counts as "the last clip played" the same way a real play
+        // would - only for the randomized pick; a forced exact variant is a
+        // fixed UI tick and shouldn't perturb variety for anyone else.
+        if ((u32)selection.choiceOffset < g_dialogHeader.size()) {
+            g_dialogHeader[selection.choiceOffset] |= 0x80;
+        }
+        g_lastDialogChoiceOffset = selection.choiceOffset;
+    }
+
+    return sample;
 }

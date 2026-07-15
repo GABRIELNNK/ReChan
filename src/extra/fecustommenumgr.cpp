@@ -36,6 +36,7 @@
 #include "version.h"
 #endif
 
+#include "extra/dialogpreview.h"
 #include "extra/shadowcsm.h"
 
 feCustomMenuMgr* g_feCustomMenuMgr = nullptr;
@@ -1187,6 +1188,8 @@ s32 feCustomMenuMgr::Invoke() {
     if (!m_active)
         return (s32)GameResult::ResumePlay;
 
+    DialogPreview::Update();
+
     m_result = 1;
     UpdateMouseCursorVisibility();
 
@@ -2210,10 +2213,8 @@ void feCustomMenuMgr::SetPage(MenuPage page) {
 #endif
 
     if (m_currPage == MenuPage_Quitting && m_prevPage != MenuPage_Quitting) {
-        // Jackie character 0, quit line 75, exact variant 0. The one-second
-        // quitting page gives the ~0.59s clip and async dialog load time room
-        // to finish before GameState::End tears down audio.
-        jcsPlaySpecificDialog(0, 75, 0);
+        // Jackie character 0, quit line 75, fixed variant.
+        DialogPreview::Play(0, 75, 0);
     }
 
     if (m_currPage == MenuPage_None) {
@@ -2310,12 +2311,12 @@ void feCustomMenuMgr::Activate(MenuPage startPage) {
 
     if (startPage == MenuPage_Pause && g_game && g_game->GetState() == GameState::Play) {
         s32 track = 23;
-        rsEvent(RS_LOAD_AND_PLAY_DIALOG, 0, track, 0x1C);
+        DialogPreview::Play(0, track);
     }
     else if (startPage == MenuPage_Location) {
         World* world = g_game ? g_game->GetWorld() : nullptr;
         s32 track = (world && world->GetCurLevelID() == 7) ? 18 : 23;
-        rsEvent(RS_LOAD_AND_PLAY_DIALOG, 0, track, 0x1C);
+        DialogPreview::Play(0, track);
     }
 
     SetPage(startPage);
@@ -2991,7 +2992,7 @@ void feCustomMenuMgr::ApplyValue(const Entry& e, s32 v) {
 
 void feCustomMenuMgr::PlayValueChangeFeedback(const Entry& entry) {
     if (entry.type == EntryType_Slider && entry.binding == EntryBinding_DialogVol) {
-        jcsPlaySpecificDialog(0, 23, 0);
+        DialogPreview::Play(0, 23, 0, 0.3f);
         return;
     }
 

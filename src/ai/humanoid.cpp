@@ -5818,6 +5818,7 @@ s32 Humanoid::PlayDialog(u32 dialogID, s32 priority) {
         return 0;
     }
     if (soundHandle && jcsValidateHandle(soundHandle)) {
+        SetPendingDialogPlayPosition(&pos);
         if (rsEvent(RS_PLAY_DIALOG, soundHandle, (s32)(intptr_t)&pos, priority) != 0) {
             return 1;
         }
@@ -5847,6 +5848,7 @@ s32 Humanoid::PlayDialogBasedOnPriority(s32 minPriority, s32 maxPriority) {
     s32 dialogPriority = jcsQueryDialogPriority(soundHandle);
     if (dialogPriority >= minPriority) {
         if (maxPriority >= dialogPriority) {
+            SetPendingDialogPlayPosition(&pos);
             if (rsEvent(RS_PLAY_DIALOG, soundHandle, (s32)(intptr_t)&pos, 30) != 0) {
                 return 1;
             }

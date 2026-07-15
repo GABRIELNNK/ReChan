@@ -136,6 +136,10 @@ static void GetObjectVolumesPsx(u16 baseVol, const LVector* objPos, u16& outVolL
     outVolR = attenuate(distR);
 }
 
+void rsdWorld::ComputeObjectVolumes(u16 baseVol, const LVector* objPos, u16& outVolL, u16& outVolR, u32 extraRange) {
+    GetObjectVolumesPsx(baseVol, objPos, outVolL, outVolR, extraRange);
+}
+
 // PC: resolve rsd sample ID to the active WAX bank.
 // PSX loads one bank at a time; rsd sample IDs (0-70) index directly
 // into the single active bank's 71-entry descriptor table.

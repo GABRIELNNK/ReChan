@@ -1,5 +1,8 @@
 #pragma once
 #include "core.h"
+#include "pc/audio.h"
+
+struct LVector;
 
 // PSX: rsSoundEvent enum values (inferred from usage)
 enum rsSoundEvent : s32 {
@@ -58,6 +61,15 @@ void InteractiveMusicControllerThink();
 // menu-fade/loading sub-loops - so fades advance during menus and transitions.
 void jcsUpdateAmbience();
 
+// Services the dialog state machine (CD-load completion + loaded/playing
+// housekeeping) every frame. Must be called once per frame alongside
+// jcsUpdateAmbience() - from the main loop and the blocking menu-fade/loading
+// sub-loops - so a dialog load completes promptly instead of waiting on
+// DialogTask's own 16-tick RTASK schedule. See the definition in rsevent.cpp
+// for why: real PSX's CD-read completion is an async hardware callback,
+// decoupled from DialogTask's schedule.
+void jcsUpdateDialogCD();
+
 // Returns non-zero if the dialog handle is still valid.
 s32 jcsValidateHandle(s32 handle);
 
@@ -79,6 +91,6 @@ s32 jcsQueryDialogPriority(s32 handle);
 // Initializes dialog runtime state for a fresh load.
 void jcsStartDialog();
 
-// Menu/UI helper: stops any current dialog and plays one exact randomized
-// variant. Returns the dialog handle, or 0 if it could not be loaded.
-s32 jcsPlaySpecificDialog(s32 character, s32 dialogId, u32 variant, u32 timeout = 360);
+// PC: synchronously selects and decodes a dialog clip from RSDIALOG.DLG
+AudioSample LoadDialogClipSample(s32 character, s32 dialogId, s32 variant = -1);
+void SetPendingDialogPlayPosition(const LVector* pos);

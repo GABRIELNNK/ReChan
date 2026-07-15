@@ -565,6 +565,7 @@ static bool PumpMenuFadeFrame(f64 frameStart) {
     // Keep ambience fades advancing during the blocking menu-fade / loading
     // sub-loop (the main loop is stalled here, so its tick doesn't run).
     jcsUpdateAmbience();
+    jcsUpdateDialogCD();
     if (g_time) {
         g_time->WaitForFrameEnd(frameStart);
     }
@@ -604,8 +605,6 @@ void Game::MenuFade() {
         }
     }
     FadeEnd();
-
-    rFrameCount60 = 0;
 }
 
 #if CUSTOM_MENU
@@ -1527,6 +1526,8 @@ bool Game::gsPlayState(Game* game) {
             if (g_director) {
                 g_director->Process();
             }
+
+            jcsUpdateDialogCD();
             AdvanceGameplayAnimationOneTick();
         }
 
@@ -1552,6 +1553,8 @@ bool Game::gsPlayState(Game* game) {
             g_time->Step();
         }
         ProcessHandlerList(game->handlerSet1.handlerList);
+
+        jcsUpdateDialogCD();
         AdvanceGameplayAnimationOneTick();
     }
 

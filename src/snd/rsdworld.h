@@ -18,6 +18,14 @@ namespace rsdWorld {
     s32 PlayTransientPositional(u32 sampleId, void* posPtr, u16 volume, s16 pitch, u16 pan, u32 flags);
     void SetDialogTransient(bool isDialog);
 
+    // PSX: GetObjectVolumes__8rsdWorld... - computes PSX-accurate stereo L/R
+    // volume falloff for a sound at objPos relative to the listener. Shared
+    // by PlayTransientPositional/rsdPersistent and dialog playback
+    // (rsevent.cpp), which has its own sample/voice pipeline and can't reuse
+    // PlayTransientPositional wholesale (that resolves samples through a WAX
+    // sound bank; dialog samples are pre-decoded from RSDIALOG.DLG).
+    void ComputeObjectVolumes(u16 baseVol, const LVector* objPos, u16& outVolL, u16& outVolR, u32 extraRange);
+
     // PSX: PlayTransient__8rsdWorldlUsUsUsUi (RSDUTIL.CPP:615, 0x80080334)
     // Non-positional variant: takes separate L/R volumes
     // volL: left channel PSX SPU volume

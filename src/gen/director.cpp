@@ -1174,8 +1174,6 @@ Director::Director() {
     wsAlphaStep = 10;
     wsAlphaCurrent = 0;
     wsAlphaTarget = 0;
-    wsLastTimeSec = -1.0;
-    wsAccumSec = 0.0f;
     field68 = 0;
     enableInput = 0;
 }
@@ -1224,8 +1222,6 @@ void Director::InternalReset() {
     wsAlphaStep = 10;
     wsAlphaCurrent = 0;
     wsAlphaTarget = 0;
-    wsLastTimeSec = -1.0;
-    wsAccumSec = 0.0f;
 
     handlerSetB.PurgeHandlers();
     enableInput = 1;
@@ -1325,6 +1321,10 @@ void Director::TriggerGotoPoint(s32 x, s32 y, s32 z, Thing* thing) {
 // PSX: Process__8Director (DIRECTOR.CPP:2806, 0x8003C298)
 void Director::Process() {
     MARKFUNCTION(0x8003C298);
+
+    // PC: PSX called HandleWideScreen from the same draw-adjacent function as
+    // DrawWideScreenPolys (0x8003BB34)
+    HandleWideScreen();
 
     // PSX iterates the two internal handler chains BEFORE the scriptPtr null check.
     // Each node: lw $v0, 0x18($a0) = funcPtr; lw $s0, 0($a0) = next; jalr $v0 (no args).
@@ -2111,6 +2111,7 @@ void Director::Process() {
                     s32 posArg = 0;
                     if (Player::s_player) {
                         posArg = (s32)(intptr_t)&Player::s_player->pos;
+                        SetPendingDialogPlayPosition(&Player::s_player->pos);
                     }
                     started = rsEvent(RS_PLAY_DIALOG, handle, posArg, 64);
                 }
@@ -2127,6 +2128,7 @@ void Director::Process() {
                     s32 posArg = 0;
                     if (Player::s_player) {
                         posArg = (s32)(intptr_t)&Player::s_player->pos;
+                        SetPendingDialogPlayPosition(&Player::s_player->pos);
                     }
                     started = rsEvent(RS_PLAY_DIALOG, handle, posArg, 100);
                 }
@@ -3324,77 +3326,47 @@ void Director::SkipNextWideScreenEnterAnim() {
 void Director::HandleWideScreen() {
     MARKFUNCTION(0x8003ECD4);
 
-    constexpr f32 kTickSec = 1.0f / 30.0f;
-    const f64 now = Time::GetTimeInSeconds();
-    f32 dt = kTickSec;
-    if (wsLastTimeSec >= 0.0) {
-        dt = (f32)(now - wsLastTimeSec);
-        if (dt < 0.0f) dt = 0.0f;
-        if (dt > 0.25f) dt = 0.25f; // clamp stalls
-    }
-    wsLastTimeSec = now;
-    wsAccumSec += dt;
+    const bool skipEnterAnim = (wsSkipEnterAnimUntil >= 0.0) &&
+                               (Time::GetTimeInSeconds() <= wsSkipEnterAnimUntil);
 
-    const bool skipEnterAnim = (wsSkipEnterAnimUntil >= 0.0) && (now <= wsSkipEnterAnimUntil);
-
-    while (wsAccumSec >= kTickSec) {
-        wsAccumSec -= kTickSec;
-
-        s32& barCurrent = wsBarCurrent;
-        const s32 barDesired = wsBarTarget;
-
-        if (barCurrent != barDesired) {
-            if (skipEnterAnim && barDesired > barCurrent) {
-                barCurrent = barDesired;
-                wsSkipEnterAnimUntil = -1.0;
-            }
-            else {
-                const s32 barStep = wsBarStep;
-                if (barStep == 256) {
-                    barCurrent = barDesired;
-                }
-                else if (barCurrent >= barDesired) {
-                    barCurrent -= barStep;
-                    if (barCurrent < barDesired) {
-                        barCurrent = barDesired;
-                    }
-                }
-                else {
-                    barCurrent += barStep;
-                    if (barCurrent > barDesired) {
-                        barCurrent = barDesired;
-                    }
-                }
-            }
+    if (wsBarCurrent != wsBarTarget) {
+        if (skipEnterAnim && wsBarTarget > wsBarCurrent) {
+            wsBarCurrent = wsBarTarget;
+            wsSkipEnterAnimUntil = -1.0;
         }
-
-        if (barCurrent) {
-            s32& alphaCurrent = wsAlphaCurrent;
-            const s32 alphaDesired = wsAlphaTarget;
-            if (alphaCurrent != alphaDesired) {
-                if (skipEnterAnim && alphaDesired > alphaCurrent) {
-                    alphaCurrent = alphaDesired;
-                    wsSkipEnterAnimUntil = -1.0;
-                }
-                else {
-                    const s32 alphaStep = wsAlphaStep;
-                    if (alphaCurrent < alphaDesired) {
-                        alphaCurrent += alphaStep;
-                        if (alphaCurrent > alphaDesired) {
-                            alphaCurrent = alphaDesired;
-                        }
-                    }
-                    else {
-                        alphaCurrent -= alphaStep;
-                        if (alphaCurrent < alphaDesired) {
-                            alphaCurrent = alphaDesired;
-                        }
-                    }
-                }
+        else if (wsBarStep == 256) {
+            wsBarCurrent = wsBarTarget;
+        }
+        else if (wsBarCurrent >= wsBarTarget) {
+            wsBarCurrent -= wsBarStep;
+            if (wsBarCurrent < wsBarTarget) {
+                wsBarCurrent = wsBarTarget;
             }
         }
         else {
-            wsAlphaCurrent = 0;
+            wsBarCurrent += wsBarStep;
+            if (wsBarCurrent > wsBarTarget) {
+                wsBarCurrent = wsBarTarget;
+            }
+        }
+    }
+
+    if (wsBarCurrent && wsAlphaCurrent != wsAlphaTarget) {
+        if (skipEnterAnim && wsAlphaTarget > wsAlphaCurrent) {
+            wsAlphaCurrent = wsAlphaTarget;
+            wsSkipEnterAnimUntil = -1.0;
+        }
+        else if (wsAlphaCurrent < wsAlphaTarget) {
+            wsAlphaCurrent += wsAlphaStep;
+            if (wsAlphaCurrent > wsAlphaTarget) {
+                wsAlphaCurrent = wsAlphaTarget;
+            }
+        }
+        else {
+            wsAlphaCurrent -= wsAlphaStep;
+            if (wsAlphaCurrent < wsAlphaTarget) {
+                wsAlphaCurrent = wsAlphaTarget;
+            }
         }
     }
 }
@@ -3407,6 +3379,18 @@ void Director::DrawWideScreenPolys() {
     MARKFUNCTION(0x8003ED90);
 
     if (wsBarCurrent == 0 || wsAlphaCurrent == 0) {
+        return;
+    }
+
+    if (wsBarTarget >= 120) {
+        const f32 barHeight = (static_cast<f32>(wsBarCurrent) / 240.0f) * SCREEN_HEIGHT;
+        if (barHeight <= 0.0f) {
+            return;
+        }
+        ScreenDraw::DrawColoredRect(0.0f, 0.0f, SCREEN_WIDTH, barHeight,
+                                    0, 0, 0, (u8)wsAlphaCurrent);
+        ScreenDraw::DrawColoredRect(0.0f, SCREEN_HEIGHT - barHeight, SCREEN_WIDTH, barHeight,
+                                    0, 0, 0, (u8)wsAlphaCurrent);
         return;
     }
 
@@ -3595,13 +3579,11 @@ void runDirector(Handler* h) {
 }
 
 // DrawDirectorOverlays (DIRECTOR.CPP:2578, 0x8003BB34) - handler callback
-// We reorder and keep widescreen bars on top: HandleWideScreen -> DrawEffects(4096)
-// -> DrawWideScreenPolys.
+// We reorder and keep widescreen bars on top: DrawEffects(4096) -> DrawWideScreenPolys.
+// HandleWideScreen no longer runs here - see the call site in Director::Process().
 void DrawDirectorOverlays(Handler* h) {
     MARKFUNCTION(0x8003BB34);
     if (g_director) {
-        g_director->HandleWideScreen();
-
         // Overlay effects still sample PSX-style world VRAM pages. Ensure
         // overlay rendering starts from deterministic world texture state.
         if (p3d::context) {

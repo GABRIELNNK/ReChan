@@ -390,9 +390,6 @@ public:
     s32 wsAlphaCurrent = 0;         // +60: current alpha (0..255)
     s32 wsAlphaTarget = 0;          // +64: target alpha
 
-    f64 wsLastTimeSec = -1.0;
-    f32 wsAccumSec = 0.0f;
-
     // PC-only: while set, the next widescreen bar/alpha ramp-in snaps instantly
     // instead of animating (used to avoid a redundant slide/fade-in right after
     // a loading screen). Expires on its own after a short window so it never

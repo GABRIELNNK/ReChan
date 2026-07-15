@@ -314,10 +314,8 @@ int main(int argc, char** argv) {
             rDoTaskList(&rMainTaskList, static_cast<u32>(rFrameCount60));
         }
 
-        // Tick level ambience every frame here (not via an rMainTaskList RTASK):
-        // MenuFade resets rFrameCount60, which stalls task scheduling across
-        // level transitions. This runs in every non-blocking state.
         jcsUpdateAmbience();
+        jcsUpdateDialogCD();
 
         g_time->WaitForFrameEnd(frameStart);
 
