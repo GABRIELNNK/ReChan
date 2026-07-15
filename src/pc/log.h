@@ -3,6 +3,7 @@
 #include <cstdarg>
 #include <fstream>
 #include <mutex>
+#include <vector>
 
 class Log {
 public:
@@ -13,6 +14,10 @@ public:
 
     void LogMessage(const char* fmt, ...);
     void LogMessageV(const char* fmt, va_list args);
+
+    std::vector<std::string> GetMessageStack() const {
+        return m_MessageStack;
+    }
 
 private:
     Log();
@@ -26,6 +31,7 @@ private:
 private:
     std::ofstream m_File;
     std::mutex m_Mutex;
+    std::vector<std::string> m_MessageStack;
 };
 
 #if defined(NDEBUG)

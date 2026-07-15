@@ -46,6 +46,8 @@
 #include "pddi/pddidev.h"
 #include "pc/settings.h"
 #include "radlib/rtask.h"
+#include "pc/textmgr.h"
+#include "extra/version.h"
 
 #include <thread>
 
@@ -1923,12 +1925,12 @@ bool Game::gsQueueLevelLoad(Game* game) {
     }
 #else
     DisplayTIM("RUNFIRST.TIM");
-#endif
 
     // PSX: ShowLoadingScreenText(gameMenu, levelId, petalTarget)
     if (g_gameMenu) {
         g_gameMenu->ShowLoadingScreenText(world->GetTargetLevelIndex(), world->GetTargetPetalIndex());
     }
+#endif
 
     // PSX: LoadOverlay(levelType==7) - load code overlay
     // PSX: BossAI overlay switch for levels 1-7 vs 8,11-14
@@ -2539,3 +2541,37 @@ void Game::PlayFadeInHandlerCB(Handler*) {
     ScreenDraw::DrawColoredQuad(0, 0, 0, (u8)(255 - s_fadeCounter));
 }
 #endif
+
+void DrawDebugInfo() {
+#ifdef DEBUG
+    if (g_textManager) {
+        g_textManager->SetFontByName("Legal");
+        g_textManager->SetScale(SCREEN_SCALE_Y(0.15f), SCREEN_SCALE_Y(0.15f));
+        g_textManager->SetAlignment(TextAlign_Left);
+        g_textManager->SetWrapWidth(0.0f);
+        g_textManager->SetLineSpacing(0);
+        g_textManager->SetPromptsEnabled(false);
+        g_textManager->SetShadow(false);
+        g_textManager->SetOutline(true);
+        g_textManager->SetColor(255, 255, 0);
+
+        char ver[64];
+        std::snprintf(ver, sizeof(ver), "RECHAN DEBUG BUILD %s", GAME_VERSION);
+
+        g_textManager->PrintString(ver,
+                                   HudX(0.0f),
+                                   HudY(0.0f));
+
+
+        g_textManager->SetScale(SCREEN_SCALE_Y(0.108f), SCREEN_SCALE_Y(0.108f));
+
+        s32 i = 0;
+        for (auto& it : Log::Get().GetMessageStack()) {
+            g_textManager->PrintString(it.c_str(),
+                                       HudX(0.0f),
+                                       HudY(32.0f + 4.0f * i));
+            i++;
+        }
+    }
+#endif
+}

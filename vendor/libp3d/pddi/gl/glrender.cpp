@@ -1467,16 +1467,16 @@ void glDisplay::PollEvents() {
     }
 }
 
-void glDisplay::SetOverlayCallback(OverlayCallback cb) {
-    overlayCallback = cb;
+void glDisplay::AddOverlayCallback(OverlayCallback cb) {
+    overlayCallbacks.push_back(cb);
 }
 
 void glDisplay::RenderOverlay() {
     if (!imguiFrameStarted) {
         return;
     }
-    if (overlayCallback) {
-        overlayCallback();
+    for (auto& cb : overlayCallbacks) {
+        cb();
     }
 
     ImGuiIO& io = ImGui::GetIO();

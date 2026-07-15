@@ -1,5 +1,4 @@
 #include "log.h"
-#include <cstring>
 
 Log& Log::Get() {
     static Log instance;
@@ -53,6 +52,13 @@ void Log::LogMessageV(const char* fmt, va_list args) {
     }
 
     WriteToConsole(finalBuffer);
+
+
+    if (m_MessageStack.size() > 20) {
+        m_MessageStack.erase(m_MessageStack.begin());
+    }
+
+    m_MessageStack.push_back(finalBuffer);
 }
 
 void Log::WriteToConsole(const char* text) {

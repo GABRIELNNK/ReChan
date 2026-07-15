@@ -209,3 +209,4 @@ private:
 extern Game* g_game;
 extern s32 g_directorActive;
 
+extern void DrawDebugInfo();

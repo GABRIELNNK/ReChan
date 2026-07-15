@@ -91,6 +91,9 @@ static void DrawLoadingScreen(u8 fill) {
 // (255 = fully black), used to fade the loading screen in/out instead of
 // cutting to/from it instantly.
 static void PresentLoadingFrameFaded(u8 fill, u8 blackAlpha) {
+    if (p3d::display) {
+        p3d::display->PollEvents();
+    }
     g_display->BeginFrame();
     DrawLoadingScreen(fill);
     if (blackAlpha > 0) {
@@ -104,6 +107,9 @@ static void PresentLoadingFrame(u8 fill) {
 }
 
 static void PresentLoadingFrame_Tex(tTexture* tex) {
+    if (p3d::display) {
+        p3d::display->PollEvents();
+    }
     g_display->BeginFrame();
     ScreenDraw::DrawFullscreen(tex);
     g_display->EndFrame();

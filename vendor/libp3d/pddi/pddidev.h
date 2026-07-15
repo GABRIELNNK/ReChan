@@ -168,7 +168,7 @@ public:
 
     // Overlay draw callback (called by RenderOverlay)
     using OverlayCallback = void(*)();
-    virtual void SetOverlayCallback(OverlayCallback cb) = 0;
+    virtual void AddOverlayCallback(OverlayCallback cb) = 0;
     virtual void RenderOverlay() = 0;
 };
 

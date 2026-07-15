@@ -181,7 +181,7 @@ public:
     void SetWndProc(pddiWndProc proc) override;
 
     // Overlay
-    void SetOverlayCallback(OverlayCallback cb) override;
+    void AddOverlayCallback(OverlayCallback cb) override;
     void RenderOverlay() override;
 
     // Viewport
@@ -193,7 +193,7 @@ private:
     GLFWwindow* window = nullptr;
     bool imguiInitialized = false;
     bool imguiFrameStarted = false;
-    OverlayCallback overlayCallback = nullptr;
+    std::vector<OverlayCallback> overlayCallbacks = {};
     int fbWidth = 0;
     int fbHeight = 0;
     int windowedX = 100, windowedY = 100;

@@ -201,7 +201,8 @@ int main(int argc, char** argv) {
 #endif
 
     p3d::display->SetWndProc(OnWndProc);
-    p3d::display->SetOverlayCallback(DebugUI::Draw);
+    p3d::display->AddOverlayCallback(DebugUI::Draw);
+    p3d::display->AddOverlayCallback(DrawDebugInfo);
 
     rTaskInit(100);
     rInitTaskList(&rMainTaskList);
