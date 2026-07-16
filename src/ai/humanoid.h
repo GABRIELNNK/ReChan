@@ -106,6 +106,7 @@ enum StateDispatch : u16 {
     SD_GOT_HIT_HIGH = 30,
     SD_GOT_HIT_MED = 31,
     SD_GOT_HIT_LOW = 32,
+    SD_TEETER = 32,
     SD_WALLJUMP = 33,
     // PSX vtable slot 34 dispatches to _Hotfoot__8Humanoid.
     SD_COLLAPSE = 34,

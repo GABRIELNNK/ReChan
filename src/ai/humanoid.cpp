@@ -1273,7 +1273,9 @@ void Humanoid::Think() {
     // Dante/Butch) call LoadEnemyTaunts unconditionally every Think tick;
     // other types only roll for it while not AS_STAND_ANIM. PSX also gates
     // non-boss rolls on a shared last-taunt-frame cooldown (gp+0x6E8/+0x6F8)
-    {
+    //
+    // PC: skip this while the actor is under explicit director/NIS control
+    if (!isDirectorControlledNis) {
         bool isBossTypeForTaunt = false;
         switch (thingType) {
             case AITypes::TT_GRONTAR:

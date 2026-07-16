@@ -1323,8 +1323,11 @@ void Director::Process() {
     MARKFUNCTION(0x8003C298);
 
     // PC: PSX called HandleWideScreen from the same draw-adjacent function as
-    // DrawWideScreenPolys (0x8003BB34)
-    HandleWideScreen();
+
+    struct WideScreenStepGuard {
+        Director* self;
+        ~WideScreenStepGuard() { self->HandleWideScreen(); }
+    } wideScreenStepGuard{this};
 
     // PSX iterates the two internal handler chains BEFORE the scriptPtr null check.
     // Each node: lw $v0, 0x18($a0) = funcPtr; lw $s0, 0($a0) = next; jalr $v0 (no args).
@@ -2108,12 +2111,8 @@ void Director::Process() {
                 const s32 valid = (handle != 0 && jcsValidateHandle(handle)) ? 1 : 0;
                 s32 started = 0;
                 if (valid) {
-                    s32 posArg = 0;
-                    if (Player::s_player) {
-                        posArg = (s32)(intptr_t)&Player::s_player->pos;
-                        SetPendingDialogPlayPosition(&Player::s_player->pos);
-                    }
-                    started = rsEvent(RS_PLAY_DIALOG, handle, posArg, 64);
+                    SetPendingDialogPlayPosition(nullptr);
+                    started = rsEvent(RS_PLAY_DIALOG, handle, 0, 64);
                 }
                 scriptPtr += 1;
                 break;
@@ -2125,12 +2124,8 @@ void Director::Process() {
                 const s32 valid = (handle != 0 && jcsValidateHandle(handle)) ? 1 : 0;
                 s32 started = 0;
                 if (valid) {
-                    s32 posArg = 0;
-                    if (Player::s_player) {
-                        posArg = (s32)(intptr_t)&Player::s_player->pos;
-                        SetPendingDialogPlayPosition(&Player::s_player->pos);
-                    }
-                    started = rsEvent(RS_PLAY_DIALOG, handle, posArg, 100);
+                    SetPendingDialogPlayPosition(nullptr);
+                    started = rsEvent(RS_PLAY_DIALOG, handle, 0, 100);
                 }
                 scriptPtr += 1;
                 break;

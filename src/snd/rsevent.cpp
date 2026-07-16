@@ -7,6 +7,7 @@
 #include "snd/ambience.h"
 #include "snd/adpcm.h"
 #include "radlib/rtask.h"
+#include "gen/time.h"
 #include "p3d/p3dmath.h"
 #include "xclib/xcfile.h"
 #include "gen/blockmgr.h"
@@ -25,13 +26,16 @@ static u32 g_dialogHeaderSize = 0;
 static u32 g_dialogDataBaseOffset = 0;
 static u16 g_lastDialogChoiceOffset = 0;
 static s32 g_forcedDialogVariant = -1;
+// Menu-preview-only random pick: uniform over all variants, no anti-repeat
+// check, never touches g_lastDialogChoiceOffset/used-bits. See LoadDialogClipSample.
+static constexpr s32 kIsolatedRandomVariant = -2;
 
 // PC: pending real position for the next RS_PLAY_DIALOG call - see
 // SetPendingDialogPlayPosition in rsevent.h.
 static LVector g_pendingDialogPlayPosition = {};
 static bool g_hasPendingDialogPlayPosition = false;
 
-static bool g_DebugDialogTrace = false;
+static bool g_DebugDialogTrace = true;
 
 void SetPendingDialogPlayPosition(const LVector* pos) {
     if (pos) {
@@ -239,6 +243,9 @@ static bool SelectDialogClipOffset(s32 character, s32 dialogID, u32* outStart, u
             selected = static_cast<u32>(g_forcedDialogVariant);
             if (selected >= clipCount) return false;
         }
+        else if (g_forcedDialogVariant == kIsolatedRandomVariant) {
+            selected = (u32)rmRangedRandom((s32)clipCount);
+        }
         else {
             u8 available[256] = {};
             u32 availableCount = 0;
@@ -277,7 +284,9 @@ static bool SelectDialogClipOffset(s32 character, s32 dialogID, u32* outStart, u
         const u16 choiceOffset = (u16)(clipSizeTableOffset + selected);
 
         // PSX SelectDialog rejects immediate repeat selection instead of rerolling.
-        if (g_forcedDialogVariant < 0 && choiceOffset == g_lastDialogChoiceOffset) {
+        // Only gameplay's own shared random pick (-1) participates in this -
+        // the isolated menu-preview pick has no notion of "last played".
+        if (g_forcedDialogVariant == -1 && choiceOffset == g_lastDialogChoiceOffset) {
             if (DialogTraceEnabled()) {
                 LOG("[DialogTrace] SELECT-REPEAT bail char=%d dialog=%d choiceOffset=%u lastChoice=%u clipCount=%u",
                     character, dialogID, choiceOffset, g_lastDialogChoiceOffset, (u32)clipCount);
@@ -507,7 +516,7 @@ enum DialogStatus : s32 {
 };
 
 static s32 GetDialogFrameCounter() {
-    return rFrameCount60;
+    return g_time ? (s32)g_time->GetFrameCounter() : rFrameCount60;
 }
 
 s32 jcsValidateHandle(s32 handle);
@@ -671,7 +680,8 @@ static void UpgradeDialogInfoAndState(s32 state) {
     g_secondaryDialogPriority = -1;
     ResetDialogQueueInfo(1);
     UpdateDialogState(state);
-    ClearDialogPendingLoadState();
+    // PC: the promoted queue-0 entry is already fully decoded
+    BeginDialogPendingLoad(state);
 }
 
 static void UpgradeToPrimaryState() {
@@ -2423,7 +2433,7 @@ void jcsStartDialog() {
 
 AudioSample LoadDialogClipSample(s32 character, s32 dialogId, s32 variant) {
     const s32 savedForcedVariant = g_forcedDialogVariant;
-    g_forcedDialogVariant = variant;
+    g_forcedDialogVariant = (variant >= 0) ? variant : kIsolatedRandomVariant;
     DialogClipSelection selection;
     const bool gotSelection = SelectDialogClip(character, dialogId, &selection);
     g_forcedDialogVariant = savedForcedVariant;
@@ -2432,21 +2442,10 @@ AudioSample LoadDialogClipSample(s32 character, s32 dialogId, s32 variant) {
         return AUDIO_SAMPLE_INVALID;
     }
 
-    AudioSample sample = LoadDialogSampleFromSelection(character, dialogId, selection);
-    if (sample == AUDIO_SAMPLE_INVALID) {
-        return AUDIO_SAMPLE_INVALID;
-    }
-
-    if (variant < 0) {
-        // Mirrors PlayLoadedState's anti-repeat bookkeeping (JCSDLG.CPP:2664)
-        // so this counts as "the last clip played" the same way a real play
-        // would - only for the randomized pick; a forced exact variant is a
-        // fixed UI tick and shouldn't perturb variety for anyone else.
-        if ((u32)selection.choiceOffset < g_dialogHeader.size()) {
-            g_dialogHeader[selection.choiceOffset] |= 0x80;
-        }
-        g_lastDialogChoiceOffset = selection.choiceOffset;
-    }
-
-    return sample;
+    // Deliberately never touches g_lastDialogChoiceOffset/g_dialogHeader's
+    // used-bits, for either an exact or a randomized pick - this function is
+    // menu-preview-only and must not perturb gameplay's own variety/anti-repeat
+    // state (or vice versa: get rejected because gameplay happened to just
+    // play the same clip).
+    return LoadDialogSampleFromSelection(character, dialogId, selection);
 }

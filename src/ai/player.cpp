@@ -1055,6 +1055,7 @@ void Player::ProcessAction() {
         case SD_CLIMB_LADDER:  _ClimbLadder(); return;
         case SD_LADDER_DISMOUNT: _LadderDismount(); return;
         case SD_WALLJUMP:      _WallJump(); return;
+        case SD_TEETER:        _Teetering(); return;
         default: Humanoid::ProcessAction(); return;
     }
 }
@@ -1763,7 +1764,7 @@ void Player::_Stand() {
             homePos.y = floorHeight;
         }
         else {
-            SetActionState(AS_FALL, 3);
+            SetActionState(AS_FALL, 0);
         }
         goto standPostDispatch;
     }
