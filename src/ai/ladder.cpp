@@ -126,17 +126,7 @@ void Ladder::Reset() {
     MARKFUNCTION(0x80089F70);
     World* world = g_game ? g_game->GetWorld() : nullptr;
     s32 levelID = world ? world->GetCurLevelID() : 0;
-    // PSX Reset checks hatchTriggerCRC (field at +0xA4). Ladders without a
-    // death-check target are already usable and should not self-trigger on spawn.
-    if (hatchTriggerCRC != 0 && levelID == 7) {
-        state = 1;
-    }
-    else if (deathCheckCRC == 0) {
-        state = 2;
-    }
-    else {
-        state = 0;
-    }
+    state = (hatchTriggerCRC != 0 && levelID == 7) ? 1 : 0;
     cutscenePending = 0;
     deathCountdown = 3;
 }
@@ -230,19 +220,16 @@ void Ladder::CloseHatch() {
 s32 Ladder::DeathCheck() {
     MARKFUNCTION(0x8008A070);
 
-    if (!deathThing && deathCheckCRC != 0 && g_ai) {
-        ccNode* n = g_ai->activeZoneList.FindNodeCRC((u32)deathCheckCRC);
-        if (n) {
-            deathThing = static_cast<ActiveZone*>(n);
-        }
-    }
-
-    // deathThing not found yet
     if (!deathThing) {
+        ccNode* n = g_ai ? g_ai->activeZoneList.FindNodeCRC((u32)deathCheckCRC) : nullptr;
+        deathThing = static_cast<ActiveZone*>(n);
+        if (deathThing) {
+            return deathCountdown;
+        }
+        Trigger();
         return deathCountdown;
     }
 
-    // PSX DeathCheck__6Ladder (0x8008A0B4)
     if (deathThing->memberCount == 0) {
         deathCountdown--;
         if (deathCountdown <= 0) {
