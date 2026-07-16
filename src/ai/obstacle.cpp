@@ -631,6 +631,9 @@ bool Obstacle::LedgeCheck(const tagCollisionBox& box, const LVector& normal, con
         return false;
     }
 
+    if (hum->velocity.y > 0)
+        return false;
+
     const s32 actionState = hum->actionState;
     if (actionState == (s32)AS_PUNCH_ATTACK
         || actionState == (s32)AS_KICK_ATTACK

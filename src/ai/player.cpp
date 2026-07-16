@@ -2143,11 +2143,13 @@ void Player::_Jump() {
                     field728 = 0;
                 }
             }
+
+            // PSX: vtable+228 = CheckForLedges (return value not checked)
+            CheckForLedges();
         }
     }
 
-    // PSX: vtable+228 = CheckForLedges (return value not checked)
-    CheckForLedges();
+
 
     // PSX: fall transition: velocity.y <= 0 AND jumpReturnHeight - homePos.y >= 2561
     if (velocity.y <= 0) {
@@ -2177,7 +2179,12 @@ void Player::_Fall() {
     CheckForLanding();
 
     // PSX: if NOT on ground, check for ledges (vtable+228)
-    if (!(flags & TF_ON_GROUND)) {
+    u32 cb = (u32)commandBits;
+    s32 hasDir = 0;
+    if (((cb >> 2) & 1) || ((cb >> 6) & 1) || ((cb >> 4) & 1) || ((cb >> 3) & 1)) {
+        hasDir = 1;
+    }
+    if (!(flags & TF_ON_GROUND) && hasDir) {
         CheckForLedges();
     }
 }
