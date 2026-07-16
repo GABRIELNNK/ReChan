@@ -35,7 +35,7 @@ static constexpr s32 kIsolatedRandomVariant = -2;
 static LVector g_pendingDialogPlayPosition = {};
 static bool g_hasPendingDialogPlayPosition = false;
 
-static bool g_DebugDialogTrace = true;
+static bool g_DebugDialogTrace = false;
 
 void SetPendingDialogPlayPosition(const LVector* pos) {
     if (pos) {
