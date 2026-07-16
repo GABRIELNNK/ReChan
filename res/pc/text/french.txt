@@ -460,6 +460,9 @@ NOTE:
 [FE_LVL]
 Niveau %d
 
+[FE_ZONE]
+Zone %d
+
 [FE_LOC_CHN]
 Quartier chinois
 

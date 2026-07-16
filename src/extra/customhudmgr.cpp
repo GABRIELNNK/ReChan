@@ -14,6 +14,7 @@
 #include "gen/time.h"
 #include "gen/world.h"
 #include "extra/customtext.h"
+#include "pc/inputaction.h"
 #include "pc/textmgr.h"
 #include "pc/tim.h"
 #include "snd/fesnd.h"
@@ -154,6 +155,13 @@ static const f32 kHitTextShakeFrequency = 16.0f;
 static const f32 kHitTextShakeAmpX = 2.6f;
 static const f32 kHitTextShakeAmpY = 1.7f;
 static const f32 kHitTextShakePhaseY = 1.5707963f;
+
+// Level/zone text (once on level start):
+static const f32 kLevelZoneFadeInSeconds = 0.35f;
+static const f32 kLevelZoneHoldSeconds = 2.5f;
+static const f32 kLevelZoneFadeOutSeconds = 0.35f;
+static const char* kLevelZoneLevelFallbackToken = "FE_LVL";
+static const char* kLevelZoneZoneFallbackToken = "FE_ZONE";
 
 // Tally layout and style tuning.
 static const f32 kTallyPanelX = 20.0f;
@@ -939,6 +947,31 @@ static bool IsLiveHumanoidHudTarget(const Thing* thing) {
     return g_ai && IsThingInList(g_ai->humanoidList, thing);
 }
 
+static const char* FindActiveBossName() {
+    if (!g_ai) {
+        return nullptr;
+    }
+
+    for (ccMinNode* node = g_ai->humanoidList.head; node; node = node->next) {
+        const Thing* thing = static_cast<const Thing*>(node);
+        switch (thing->thingType) {
+            case AITypes::TT_GRONTAR:
+            case AITypes::TT_PAUL:
+            case AITypes::TT_OSCAR:
+            case AITypes::TT_DANTE:
+            case AITypes::TT_BUTCH:
+            {
+                const char* name = thing->GetName();
+                return (name && name[0]) ? name : nullptr;
+            }
+            default:
+                break;
+        }
+    }
+
+    return nullptr;
+}
+
 static void CopyUpperAscii(char* dst, s32 dstSize, const char* src) {
     if (!dst || dstSize <= 0) {
         return;
@@ -1069,6 +1102,7 @@ void CustomHudMgr::RestartDebugTallyPreview() {
 
 void CustomHudMgr::OnLevelLoad() {
     m_levelLoaded = true;
+    m_levelZonePendingAutoShow = true;
 }
 
 void CustomHudMgr::OnLevelUnload() {
@@ -1089,6 +1123,9 @@ void CustomHudMgr::OnLevelUnload() {
     m_tallyGradeVisible = false;
     m_tallyRDragonDelayTimer = -1.0f;
     m_tallyRDragonVisible = false;
+    m_levelZoneToastTimer = -1.0f;
+    m_levelZoneReleaseTimer = -1.0f;
+    m_levelZonePendingAutoShow = false;
 }
 
 void CustomHudMgr::EnsureAssetsLoaded() {
@@ -1327,6 +1364,7 @@ void CustomHudMgr::Render(const HUD& hud) {
     }
 
     DrawAutosaveOverlay();
+    DrawLevelZoneOverlay(hud);
 
     SetHudDrawAlpha(1.0f);
 
@@ -1344,13 +1382,128 @@ void CustomHudMgr::DrawAutosaveOverlay() const {
         const char* text = g_customText.GetString("FE_AUTO_FAIL");
         if (!text) text = "Auto save failed.";
         if (BeginHudText(kHudBodyFontName, 0.30f, TextAlign_Right,
-                         255, 224, 160, 255, true, true)) {
+            255, 224, 160, 255, true, true)) {
             g_textManager->PrintString(text, HudX(DEFAULT_SCREEN_WIDTH - 14.0f), HudY(DEFAULT_SCREEN_HEIGHT - 24.0f));
         }
         return;
     }
 
     g_feCustomMenuMgr->RenderAutosaveSpinner(HudX(DEFAULT_SCREEN_WIDTH - 24.0f), HudY(DEFAULT_SCREEN_HEIGHT - 20.0f), 1.0f);
+}
+
+void CustomHudMgr::DrawLevelZoneOverlay(const HUD& hud) {
+    if (IsHubLevelActive()) {
+        m_levelZoneToastTimer = -1.0f;
+        m_levelZoneReleaseTimer = -1.0f;
+        m_levelZonePendingAutoShow = false;
+        return;
+    }
+
+    World* world = g_game ? g_game->GetWorld() : nullptr;
+
+    if (m_levelZonePendingAutoShow && hud.visible) {
+        m_levelZonePendingAutoShow = false;
+        m_levelZoneToastTimer = 0.0f;
+        m_levelZoneReleaseTimer = -1.0f;
+    }
+
+    if (m_levelZoneToastTimer < 0.0f) {
+        return;
+    }
+
+    if (m_levelZoneReleaseTimer < 0.0f) {
+        const f32 minVisibleSeconds = kLevelZoneFadeInSeconds + kLevelZoneHoldSeconds;
+        if (m_levelZoneToastTimer >= minVisibleSeconds) {
+            m_levelZoneReleaseTimer = 0.0f;
+        }
+    }
+
+    f32 toastAlpha;
+    if (m_levelZoneReleaseTimer >= 0.0f) {
+        f32 heldAlpha = m_levelZoneToastTimer / kLevelZoneFadeInSeconds;
+        if (heldAlpha > 1.0f) {
+            heldAlpha = 1.0f;
+        }
+
+        const f32 t = m_levelZoneReleaseTimer;
+        m_levelZoneReleaseTimer += GetHudDeltaSeconds();
+        if (t >= kLevelZoneFadeOutSeconds) {
+            m_levelZoneToastTimer = -1.0f;
+            m_levelZoneReleaseTimer = -1.0f;
+            return;
+        }
+        toastAlpha = heldAlpha * (1.0f - t / kLevelZoneFadeOutSeconds);
+    }
+    else {
+        const f32 t = m_levelZoneToastTimer;
+        m_levelZoneToastTimer += GetHudDeltaSeconds();
+        toastAlpha = (t < kLevelZoneFadeInSeconds) ? (t / kLevelZoneFadeInSeconds) : 1.0f;
+    }
+
+    if (!world) {
+        return;
+    }
+
+    const u32 levelIndex = world->GetCurrentLevelIndex();
+    const u32 petalIndex = world->GetCurrentPetalIndex();
+
+    const char* zoneToken = GetSpecialLocationToken(world->GetCurLevelID());
+    const char* zoneText = zoneToken ? g_customText.GetString(zoneToken) : nullptr;
+    if (!zoneText || !zoneText[0]) {
+        zoneText = world->GetLevelNameFromIndex(levelIndex);
+    }
+
+    char zoneLine[64];
+    if (zoneText && zoneText[0]) {
+        CopyUpperAscii(zoneLine, (s32)sizeof(zoneLine), zoneText);
+    }
+    else {
+        const char* zoneFallbackFormat = g_customText.GetString(kLevelZoneZoneFallbackToken);
+        if (!zoneFallbackFormat || !zoneFallbackFormat[0]) {
+            zoneFallbackFormat = "Zone %d";
+        }
+        std::snprintf(zoneLine, sizeof(zoneLine), zoneFallbackFormat, levelIndex + 1);
+    }
+
+    const char* curPetalName = world->GetPetalNameFromIndex(levelIndex, petalIndex);
+    while (curPetalName && (*curPetalName == ' ' || *curPetalName == '\t')) {
+        curPetalName++;
+    }
+    const bool isBossStage = curPetalName && std::strcmp(curPetalName, "boss") == 0;
+
+    char levelLine[64];
+    if (isBossStage) {
+        const char* bossName = FindActiveBossName();
+        if (!bossName && HUD::szBossStatic[0] != 0) {
+            bossName = HUD::szBossStatic;
+        }
+        if (!bossName || !bossName[0]) {
+            bossName = g_customText.GetString(kHudBossLabelToken);
+        }
+        if (!bossName || !bossName[0]) {
+            bossName = "Boss";
+        }
+        CopyUpperAscii(levelLine, (s32)sizeof(levelLine), bossName);
+    }
+    else {
+        const char* levelFallbackFormat = g_customText.GetString(kLevelZoneLevelFallbackToken);
+        if (!levelFallbackFormat || !levelFallbackFormat[0]) {
+            levelFallbackFormat = "Level %d";
+        }
+        std::snprintf(levelLine, sizeof(levelLine), levelFallbackFormat, petalIndex + 1);
+    }
+
+    const f32 prevHudAlpha = s_hudDrawAlpha;
+    SetHudDrawAlpha(toastAlpha);
+
+    const f32 x = HudX(DEFAULT_SCREEN_WIDTH - 14.0f);
+    if (BeginHudText(kHudBodyFontName, 0.5f, TextAlign_Right,
+        255, 224, 160, 255, true, true)) {
+        g_textManager->PrintString(zoneLine, x, HudY(DEFAULT_SCREEN_HEIGHT - 54.0f));
+        g_textManager->PrintString(levelLine, x, HudY(DEFAULT_SCREEN_HEIGHT - 34.0f));
+    }
+
+    SetHudDrawAlpha(prevHudAlpha);
 }
 
 void CustomHudMgr::DrawGameplayHud(const HUD& hud) {
@@ -1481,13 +1634,13 @@ void CustomHudMgr::DrawPlayerHealthCard(const HUD& hud) {
 // Shared by DrawBossHealthCard/DrawFoeHealthCard: animates and draws one
 // enemy health bar above `target`, using the caller's own animation state.
 static void DrawOneEnemyHealthCard(const hdHealth& health,
-                                    const Thing* target,
-                                    const char* label,
-                                    f32* healthRatio,
-                                    f32* healthDamageRatio,
-                                    f32* damageHoldTimer,
-                                    f32* healthShakeTimer,
-                                    const Thing** animTarget) {
+                                   const Thing* target,
+                                   const char* label,
+                                   f32* healthRatio,
+                                   f32* healthDamageRatio,
+                                   f32* damageHoldTimer,
+                                   f32* healthShakeTimer,
+                                   const Thing** animTarget) {
     if (!target || !IsLiveHumanoidHudTarget(target)) {
         return;
     }
@@ -1686,36 +1839,36 @@ void CustomHudMgr::DrawInventoryCard(const HUD& hud) {
 
     if (showRedDragonCounter) {
         DrawPulsingIconQuadAtScreenX(m_redDragonTex ? m_redDragonTex : m_greyDragonTex,
-                                    screenRedX,
-                                    topY,
-                                    iconSize,
-                                    redPulse,
-                                    redIconShakeX,
-                                    redIconShakeY);
+                                     screenRedX,
+                                     topY,
+                                     iconSize,
+                                     redPulse,
+                                     redIconShakeX,
+                                     redIconShakeY);
     }
     DrawPulsingIconQuadAtScreenX(m_goldDragonTex ? m_goldDragonTex : m_redDragonTex,
-                                screenGoldX,
-                                topY,
-                                iconSize,
-                                goldPulse,
-                                goldIconShakeX,
-                                goldIconShakeY);
+                                 screenGoldX,
+                                 topY,
+                                 iconSize,
+                                 goldPulse,
+                                 goldIconShakeX,
+                                 goldIconShakeY);
     DrawPulsingIconQuadAtScreenX(m_takeTex,
-                                screenLivesX,
-                                topY,
-                                iconSize,
-                                livesPulse,
-                                livesIconShakeX,
-                                livesIconShakeY);
+                                 screenLivesX,
+                                 topY,
+                                 iconSize,
+                                 livesPulse,
+                                 livesIconShakeX,
+                                 livesIconShakeY);
 
     if (showRedDragonCounter)
         DrawPulsingIconQuadAtScreenX(m_clockTex,
-                                    screenTimerX,
-                                    topY,
-                                    iconSize,
-                                    0.0f,
-                                    0.0f,
-                                    0.0f);
+                                     screenTimerX,
+                                     topY,
+                                     iconSize,
+                                     0.0f,
+                                     0.0f,
+                                     0.0f);
 
     if (showRedDragonCounter) {
         const s32 redBoost = (s32)(redPulse * kInventoryPulseTextColorBoost);

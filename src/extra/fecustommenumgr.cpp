@@ -124,7 +124,7 @@ struct LocationRuntimeInfo {
     const char* levelName = nullptr;
 };
 
-static const char* GetSpecialLocationToken(s32 levelID) {
+const char* GetSpecialLocationToken(s32 levelID) {
     switch (levelID) {
         case 1:
         case 11: return "FE_LOC_CHN";

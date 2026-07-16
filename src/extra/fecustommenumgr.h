@@ -17,6 +17,8 @@ class tTexture;
 class pddiBaseShader;
 class pddiRenderTarget;
 
+const char* GetSpecialLocationToken(s32 levelID);
+
 enum MenuPage : s32 {
     MenuPage_None,
     MenuPage_Frontend,

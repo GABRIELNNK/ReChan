@@ -73,6 +73,11 @@ private:
     s32 m_prevHitCount = 0;
     f32 m_hitTextShakeTimer = 0.0f;
 
+    f32 m_levelZoneToastTimer = -1.0f;
+    f32 m_levelZoneReleaseTimer = -1.0f;
+
+    bool m_levelZonePendingAutoShow = false;
+
     bool m_tallyVisible = false;
     s32 m_tallyFightDisplay = 0;
     s32 m_tallyComboDisplay = 0;
@@ -115,6 +120,7 @@ private:
     void DrawDestinationBanner(const HUD& hud) const;
     void DrawTallyOverlay(const HUD& hud);
     void DrawAutosaveOverlay() const;
+    void DrawLevelZoneOverlay(const HUD& hud);
 };
 
 extern CustomHudMgr g_customHudMgr;

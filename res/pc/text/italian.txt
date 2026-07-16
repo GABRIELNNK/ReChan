@@ -460,6 +460,9 @@ VALUTAZIONE:
 [FE_LVL]
 Livello %d
 
+[FE_ZONE]
+Zona %d
+
 [FE_LOC_CHN]
 Chinatown
 

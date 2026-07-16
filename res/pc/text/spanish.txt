@@ -460,6 +460,9 @@ NOTA:
 [FE_LVL]
 Nivel %d
 
+[FE_ZONE]
+Zona %d
+
 [FE_LOC_CHN]
 Barrio chino
 

@@ -460,6 +460,9 @@ GRADE:
 [FE_LVL]
 Level %d
 
+[FE_ZONE]
+Zone %d
+
 [FE_LOC_CHN]
 Chinatown
 
