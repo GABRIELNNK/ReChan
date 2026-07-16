@@ -21,7 +21,7 @@ static constexpr s32 BLAST_FORCE_SCALE = 1000 << 16;
 static constexpr s32 BLAST_DEFAULT_HALF_WIDTH = 0;
 
 static s32 BlastSll16(s32 value) {
-    return static_cast<s32>(static_cast<u32>(value) << 16);
+    return static_cast<s32>(static_cast<s64>(value) << 16);
 }
 
 static s32 BlastAttribValue(const DBRoot* root, u32 id, s32 defaultValue = 0) {
@@ -280,17 +280,20 @@ void Blast::AnalyzeMesh(DBRoot* root) {
     maxForceY = MulShift16(normalizedDirection.y, forceMax) << 16;
     maxForceZ = MulShift16(normalizedDirection.z, forceMax) << 16;
 
-    if (const s32 value = BlastAttribValue(root, 16); value != 0) {
-        minForceX = BlastSll16(value);
-        maxForceX = BlastSll16(value);
+    u32 rawForceX = 0;
+    if (root && root->FindAttribValue(16, &rawForceX)) {
+        minForceX = BlastSll16(static_cast<s32>(rawForceX));
+        maxForceX = BlastSll16(static_cast<s32>(rawForceX));
     }
-    if (const s32 value = BlastAttribValue(root, 17); value != 0) {
-        minForceY = BlastSll16(value);
-        maxForceY = BlastSll16(value);
+    u32 rawForceY = 0;
+    if (root && root->FindAttribValue(17, &rawForceY)) {
+        minForceY = BlastSll16(static_cast<s32>(rawForceY));
+        maxForceY = BlastSll16(static_cast<s32>(rawForceY));
     }
-    if (const s32 value = BlastAttribValue(root, 18); value != 0) {
-        minForceZ = BlastSll16(value);
-        maxForceZ = BlastSll16(value);
+    u32 rawForceZ = 0;
+    if (root && root->FindAttribValue(18, &rawForceZ)) {
+        minForceZ = BlastSll16(static_cast<s32>(rawForceZ));
+        maxForceZ = BlastSll16(static_cast<s32>(rawForceZ));
     }
 
     minForceX = ScaleBlastForce(minForceX);
@@ -450,7 +453,7 @@ void Blast::Think() {
     }
     else if (blastState == 2) {
         progress = lengthPerFrame * static_cast<s32>(extendFrames);
-        if (holdFrames >= 0 && stateTimer >= holdFrames) {
+        if (stateTimer >= holdFrames) {
             if (retractFrames > 0) {
                 blastState = 3;
                 stateTimer = 0;
