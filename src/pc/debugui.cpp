@@ -2388,6 +2388,19 @@ void DebugUI::Draw() {
                     p->Debug_StopAnimation();
                 }
 
+                if (ImGui::IsKeyPressed(ImGuiKey::ImGuiKey_Space)) {
+                    if (sAnimSelectedEnum == p->debugAnimOverrideEnum &&
+                        p->debugAnimOverrideActive && !p->debugAnimOverridePaused) {
+                        p->Debug_PauseAnimation();
+                    }
+                    else if (sAnimSelectedEnum == p->debugAnimOverrideEnum &&
+                             p->debugAnimOverridePaused) {
+                        p->Debug_ResumeAnimation();
+                    }
+                    else
+                        p->Debug_PlayAnimation(sAnimSelectedEnum, sAnimSelectedLoopType);
+                }
+
                 const u32 animCharType = p->debugModelCharType;
                 CharSlot* animSlot = nullptr;
                 if (g_characterManager) {
