@@ -1097,7 +1097,7 @@ void Platform::MovePassengers() {
         }
 
         if (isActive) {
-            if (platformFlags & 0x1) {
+            if (platformFlags & 0x10000) {
                 RotateAroundY(pos.x, pos.z, field_188, savedHome.x, savedHome.z);
                 passenger->orientation.y += field_188;
             }
