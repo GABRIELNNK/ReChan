@@ -1782,10 +1782,13 @@ void Player::_Stand() {
         if (anim) {
             s32 curAnim = anim->animEnum;
 
-            // PSX: flags2 bit 18 -> taunt idle (anim 47)
-            if ((flags2 >> 18) & 1) {
+            // PSX: flags bit 18 -> taunt idle (anim 47)
+            if ((flags >> 18) & 1) {
                 if (curAnim != PLAYER_ANIM_TAUNT_IDLE) {
                     m->SetAnim(PLAYER_ANIM_TAUNT_IDLE, 4, 0, 0);
+                    if (LoadDialog(96, 51)) {
+                        PlayDialog(96, 180);
+                    }
                     playerFlags &= ~PF_COMBAT_READY;
                 }
             }

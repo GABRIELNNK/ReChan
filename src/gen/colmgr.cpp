@@ -467,9 +467,8 @@ void HandleThingFloor(DynamicThing* thing, s32 radius, s32 yMinOffset, s32 check
 
     s32 bestFloorH = floorHNew;
 
-    // Pass 3: bone-based floor query for humanoids
-    if (humanoid) {
-        HumanoidModel* hmodel = (HumanoidModel*)humanoid->model;
+    if (thing == (DynamicThing*)Player::s_player) {
+        HumanoidModel* hmodel = (HumanoidModel*)thing->model;
         if (hmodel && hmodel->animMatrices) {
             s32* boneMatrix = AnimationMatrices::GetMatrix(hmodel->animMatrices, 5);
             if (boneMatrix) {
@@ -492,67 +491,62 @@ void HandleThingFloor(DynamicThing* thing, s32 radius, s32 yMinOffset, s32 check
                 bestFloorH = boneFloorH;
             }
         }
+
+        // Camera look-ahead edge detection
+        s32 sinVal = rmSin16(thing->orientation.y);
+        s32 cosVal = rmSin16((s16)(thing->orientation.y + 0x4000));
+
+        LVector lookAheadPos;
+        lookAheadPos.x = testPosOld.x + (s32)(((s64)g_camLookAheadDist * (s64)sinVal) >> 16);
+        lookAheadPos.y = testPosOld.y + checkHeight;
+        lookAheadPos.z = testPosOld.z + (s32)(((s64)g_camLookAheadDist * (s64)cosVal) >> 16);
+
+        s32 lookFloorH, lookCeilH;
+        LVector lookFloorNorm = {};
+        LVector lookCeilNorm = {};
+        s32 lookRailing = 0;
+        LVector lookRailCorr = {};
+
+        CollisionSector::GetArrayFloorAndCeilingHeight(
+            floorArray, floorCount,
+            lookFloorH, lookCeilH, lookFloorNorm, lookCeilNorm,
+            &lookRailing, &lookRailCorr, &lookAheadPos, 16);
+
+        if (lookFloorH + g_camEdgeThreshold >= floorHNew) {
+            g_camEdgeCounter = 0;
+        }
+        else {
+            g_camEdgeCounter++;
+        }
+        if (g_camEdgeMaxCount >= g_camEdgeCounter) {
+            thing->flags &= ~0x40000;
+        }
+        else {
+            thing->flags |= 0x40000;
+        }
     }
-    else {
-        // Non-humanoid path: use global player's bone matrix for floor query
-        // Then do camera look-ahead edge detection
-        Player* player = Player::s_player;
-        if (player) {
-            HumanoidModel* pmodel = (HumanoidModel*)player->model;
-            if (pmodel && pmodel->animMatrices) {
-                s32* boneMatrix = AnimationMatrices::GetMatrix(pmodel->animMatrices, 5);
-                if (boneMatrix) {
-                    LVector bonePos;
-                    bonePos.x = boneMatrix[5];
-                    bonePos.y = boneMatrix[6];
-                    bonePos.z = boneMatrix[7];
+    else if (humanoid) {
+        HumanoidModel* hmodel = (HumanoidModel*)humanoid->model;
+        if (hmodel && hmodel->animMatrices) {
+            s32* boneMatrix = AnimationMatrices::GetMatrix(hmodel->animMatrices, 5);
+            if (boneMatrix) {
+                LVector bonePos;
+                bonePos.x = boneMatrix[5];
+                bonePos.y = boneMatrix[6];
+                bonePos.z = boneMatrix[7];
 
-                    s32 boneFloorH, boneCeilH;
-                    LVector boneFloorNorm = {};
-                    LVector boneCeilNorm = {};
-                    s32 boneRailing = 0;
-                    LVector boneRailCorr = {};
+                s32 boneFloorH, boneCeilH;
+                LVector boneFloorNorm = {};
+                LVector boneCeilNorm = {};
+                s32 boneRailing = 0;
+                LVector boneRailCorr = {};
 
-                    CollisionSector::GetArrayFloorAndCeilingHeight(
-                        floorArray, floorCount,
-                        boneFloorH, boneCeilH, boneFloorNorm, boneCeilNorm,
-                        &boneRailing, &boneRailCorr, &bonePos, g_boneFloorRadius);
+                CollisionSector::GetArrayFloorAndCeilingHeight(
+                    floorArray, floorCount,
+                    boneFloorH, boneCeilH, boneFloorNorm, boneCeilNorm,
+                    &boneRailing, &boneRailCorr, &bonePos, g_boneFloorRadius);
 
-                    bestFloorH = boneFloorH;
-                }
-            }
-
-            // Camera look-ahead edge detection
-            s32 sinVal = rmSin16(player->orientation.y);
-            s32 cosVal = rmSin16((s16)(player->orientation.y + 0x4000));
-
-            LVector lookAheadPos;
-            lookAheadPos.x = testPosOld.x + (s32)(((s64)g_camLookAheadDist * (s64)sinVal) >> 16);
-            lookAheadPos.y = testPosOld.y + checkHeight;
-            lookAheadPos.z = testPosOld.z + (s32)(((s64)g_camLookAheadDist * (s64)cosVal) >> 16);
-
-            s32 lookFloorH, lookCeilH;
-            LVector lookFloorNorm = {};
-            LVector lookCeilNorm = {};
-            s32 lookRailing = 0;
-            LVector lookRailCorr = {};
-
-            CollisionSector::GetArrayFloorAndCeilingHeight(
-                floorArray, floorCount,
-                lookFloorH, lookCeilH, lookFloorNorm, lookCeilNorm,
-                &lookRailing, &lookRailCorr, &lookAheadPos, 16);
-
-            if (lookFloorH + g_camEdgeThreshold >= floorHNew) {
-                g_camEdgeCounter = 0;
-            }
-            else {
-                g_camEdgeCounter++;
-            }
-            if (g_camEdgeMaxCount >= g_camEdgeCounter) {
-                thing->flags &= ~0x40000;
-            }
-            else {
-                thing->flags |= 0x40000;
+                bestFloorH = boneFloorH;
             }
         }
     }
