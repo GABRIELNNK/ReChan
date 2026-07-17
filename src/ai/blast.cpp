@@ -36,7 +36,7 @@ static u32 BlastAttribStringHash(const DBRoot* root, u32 id) {
 
     const DBAttrib* attrib = root->FindAttrib(id);
     const char* str = attrib ? attrib->GetAttribString() : nullptr;
-    return (str && str[0] != '\0') ? p3dHash(str) : 0;
+    return str ? p3dHash(str) : 0;
 }
 
 static bool BlastUsesFramedEffect(const Blast* blast) {
@@ -93,7 +93,6 @@ static void StartBlastFire(Blast* blast) {
     }
 
     SetBlastStateFrame(blast, 1);
-    blast->CreateSound();
 }
 
 static void BuildBlastCollisionBox(Blast* blast, s32 progress) {
@@ -178,18 +177,15 @@ static s32 ScaleBlastRatioByFrames(s32 ratio, s32 frames) {
     return MulShift16(ratio, frames);
 }
 
-static void ApplyBlastWindForce(Blast* blast, Humanoid* hum) {
+static bool ApplyBlastWindForce(Blast* blast, Humanoid* hum) {
     if (!blast || !hum) {
-        return;
+        return false;
     }
 
     const s32 blastLength = rmMag3ff(
         blast->endPosX - blast->pos.x,
         blast->endPosY - blast->pos.y,
         blast->endPosZ - blast->pos.z);
-    if (blastLength <= 0) {
-        return;
-    }
 
     const s32 humDistance = rmMag3ff(
         hum->pos.x - blast->pos.x,
@@ -216,6 +212,8 @@ static void ApplyBlastWindForce(Blast* blast, Humanoid* hum) {
     hum->contactForce.x += forceX;
     hum->contactForce.y += forceY;
     hum->contactForce.z += forceZ;
+
+    return forceX != 0 || forceY != 0 || forceZ != 0;
 }
 
 Blast::Blast(const LVector* pos, u16 type)
@@ -518,7 +516,7 @@ void Blast::HandleHumanoidCollision(Humanoid* hum) {
         return;
     }
 
-    ApplyBlastWindForce(this, hum);
+    const bool hasForce = ApplyBlastWindForce(this, hum);
 
     if (hitCooldownTimer != 0) {
         return;
@@ -528,12 +526,17 @@ void Blast::HandleHumanoidCollision(Humanoid* hum) {
         return;
     }
 
-    hum->HandleCollision(
-        this,
-        1,
-        COLLISION_TAG_HIT_TYPE,
-        BLAST_HIT_TYPE_FIRE,
-        COLLISION_TAG_DAMAGE,
-        collisionDamage,
-        COLLISION_TAG_END);
+    hum->SubtractHitPoints(static_cast<u16>(collisionDamage));
+
+    if (hasForce) {
+        hum->HandleCollision(
+            this,
+            1,
+            COLLISION_TAG_HIT_TYPE,
+            BLAST_HIT_TYPE_FIRE,
+            COLLISION_TAG_END);
+    }
+    else {
+        hum->HandleCollisionSound(BLAST_HIT_TYPE_FIRE);
+    }
 }

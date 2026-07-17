@@ -591,13 +591,13 @@ s32 ParticleSystem::ParseData(const u8* body, u32 bodySize) {
             const s32 v0 = readLongStream() << 16;
             const s32 v1 = readLongStream() << 16;
             const s32 v2 = readLongStream() << 16;
-            const s32 v3 = readLongStream() << 16;
 
             if (v2 <= 0) {
                 stats->scaleBase = 0x10000;
                 stats->scaleRange = 0;
             }
             else {
+                const s32 v3 = readLongStream() << 16;
                 stats->scaleBase = rmDiv16i(v0, v2);
                 stats->scaleRange = rmDiv16i(v1, v3);
             }
@@ -618,9 +618,12 @@ s32 ParticleSystem::ParseData(const u8* body, u32 bodySize) {
             const s32 v0 = readLongStream() << 16;
             const s32 v1 = readLongStream() << 16;
             const s32 v2 = readLongStream() << 16;
-            const s32 v3 = readLongStream() << 16;
 
+            // PSX only issues the 4th GetLong (and only applies the values)
+            // when the denominator is positive; otherwise it falls straight
+            // through to the next chunk after 3 longs.
             if (v2 > 0) {
+                const s32 v3 = readLongStream() << 16;
                 stats->accelBase = rmDiv16i(v0, v2);
                 stats->accelRange = rmDiv16i(v1, v3);
                 flags |= 4u;
@@ -1097,11 +1100,6 @@ s32 ParticleSystem::InitParticles(const LVector& origin) {
 
         const s32 scaleRandom = MulHi16FromLo32(stats->scaleRange, RandomSigned16());
         s32 scale = scaleRandom + stats->scaleBase;
-
-        if ((stats->flags & 0x2000u) != 0u && info->life != 0) {
-            const s32 invLife = Reciprocal16(static_cast<s32>(info->life));
-            scale = static_cast<s32>((static_cast<s64>(scale) * invLife) >> 16);
-        }
 
         info->scale = scale;
 
