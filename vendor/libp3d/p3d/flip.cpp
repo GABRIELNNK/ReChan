@@ -215,76 +215,23 @@ void* TransformAnim::ParseMulti(u8* rawData, u32 rawSize) {
 
     const u32 baseUID = p3dReadU32LE(rawData + 0);
 
-    // Estimate the byte extent of a tTransformAnim block so we know where the next
-    // block could start.  We find the highest byte offset referenced by any channel's
-    // key-time or key-value arrays, relative to blockStart.
-    auto EstimateBlockEnd = [](const u8* raw, u32 rawSz, u32 blockStart) -> u32 {
-        if (blockStart + 40 > rawSz) return blockStart + 40;
-        const s32 numRot   = (s32)p3dReadU32LE(raw + blockStart + 24);
-        const s32 numTrans = (s32)p3dReadU32LE(raw + blockStart + 28);
-        const u32 rotOff   = p3dReadU32LE(raw + blockStart + 32) * 4;
-        const u32 transOff = p3dReadU32LE(raw + blockStart + 36) * 4;
-        u32 maxEnd = blockStart + 40;
-
-        auto chkOff = [&](u32 o) { if (o < rawSz && o > maxEnd) maxEnd = o; };
-
-        // Rot channel array
-        if (rotOff < rawSz && numRot > 0 && numRot <= 100) {
-            chkOff(blockStart + rotOff + (u32)numRot * 4);
-            for (s32 i = 0; i < numRot; i++) {
-                u32 ao = blockStart + rotOff + (u32)i * 4;
-                if (ao + 4 > rawSz) break;
-                u32 chOff = p3dReadU32LE(raw + ao) * 4 + blockStart;
-                if (chOff + 24 > rawSz) break;
-                u32 nk = p3dReadU32LE(raw + chOff + 8);
-                if (nk == 0 || nk > 4096) continue;
-                u32 kt = p3dReadU32LE(raw + chOff + 12) * 4 + blockStart;
-                u32 kv = p3dReadU32LE(raw + chOff + 16) * 4 + blockStart;
-                chkOff(kt + nk);        // u8 times
-                chkOff(kv + nk * 4);   // worst-case value size
-            }
-        }
-        // Trans channel array
-        if (transOff < rawSz && numTrans > 0 && numTrans <= 10) {
-            chkOff(blockStart + transOff + (u32)numTrans * 4);
-            for (s32 i = 0; i < numTrans; i++) {
-                u32 ao = blockStart + transOff + (u32)i * 4;
-                if (ao + 4 > rawSz) break;
-                u32 chOff = p3dReadU32LE(raw + ao) * 4 + blockStart;
-                if (chOff + 20 > rawSz) break;
-                u32 nk = p3dReadU32LE(raw + chOff + 8);
-                if (nk == 0 || nk > 4096) continue;
-                u32 kt = p3dReadU32LE(raw + chOff + 12) * 4 + blockStart;
-                u32 kv = p3dReadU32LE(raw + chOff + 16) * 4 + blockStart;
-                chkOff(kt + nk);
-                chkOff(kv + nk * 6);   // 3DOF s16 * 3 = 6 bytes each
-            }
-        }
-        return maxEnd;
-    };
-
     // Find all consecutive blocks: nameUID must be baseUID+0, +1, +2, ...
-    // Each next block must start within a small window after the previous one ends
-    // to avoid false-positive matches in the middle of channel data.
-    static constexpr u32 kBlockSearchWindow = 64; // bytes of padding/alignment slack
+    // Scan the whole remaining buffer for each next UID; narrow search windows can
+    // miss valid block starts when packed data does not match our size estimate.
     u32 blockOffsets[16];
     u32 numBlocks = 1;
     blockOffsets[0] = 0;
 
     u32 nextUID = baseUID + 1;
-    u32 searchFrom = EstimateBlockEnd(rawData, rawSize, 0);
     while (numBlocks < 16) {
-        // Round up to 4-byte alignment and search within kBlockSearchWindow
-        u32 searchStart = (searchFrom + 3u) & ~3u;
-        u32 searchEnd = searchStart + kBlockSearchWindow;
-        if (searchEnd > rawSize) searchEnd = rawSize;
+        // Keep block order monotonic and scan forward through the whole blob.
+        const u32 searchStart = blockOffsets[numBlocks - 1] + 4;
         bool found = false;
-        for (u32 off = searchStart; off + 40 <= searchEnd; off += 4) {
+        for (u32 off = searchStart; off + 40 <= rawSize; off += 4) {
             const u32 uid = p3dReadU32LE(rawData + off);
             if (uid == nextUID && IsValidTransformAnimHeader(rawData, rawSize, off)) {
                 blockOffsets[numBlocks++] = off;
                 nextUID++;
-                searchFrom = EstimateBlockEnd(rawData, rawSize, off);
                 found = true;
                 break;
             }
