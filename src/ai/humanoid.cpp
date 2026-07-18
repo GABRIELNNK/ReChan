@@ -101,6 +101,7 @@ static constexpr s32 BACK_GRAB_MIN_RELATIVE_ANGLE = 5461;
 static constexpr u32 BACK_GRAB_RELATIVE_ANGLE_RANGE = 0xD8E3;
 static constexpr u16 HUMANOID_STUN_DURATION = 66;
 static constexpr s32 HUMANOID_ANIM_DEAD = 17;
+static constexpr s32 HUMANOID_ANIM_CRUSHED = 84;
 static constexpr u32 HUMANOID_STUN_EFFECT_HASH = 0x004CC954u;
 static constexpr u32 HUMANOID_LAND_IMPACT_EFFECT_HASH = 0x0B0E21C4u;
 static constexpr u32 HUMANOID_STRIKE_IMPACT_EFFECT_HASH = 0x03E24164u;
@@ -3207,6 +3208,16 @@ void Humanoid::SetActionState(u32 state, s32 param) {
             field348 = 8;
             break;
         }
+        case AS_GOT_HIT_CRUSHER:
+            if (model) {
+                Model* m = static_cast<Model*>(model);
+                m->SetAnim(HUMANOID_ANIM_CRUSHED, param, 0, 0);
+            }
+            health = 0;
+            field344 = 0;
+            stateDispatch = SD_GOT_HIT_CRUSHER;
+            field348 = 8;
+            break;
         case AS_NIS_MODE:
             field344 = 0;
             stateDispatch = SD_NIS_MODE;
@@ -3286,6 +3297,7 @@ void Humanoid::ProcessAction() {
         case SD_THROW_CHARACTER_RECEIVE: ThrowCharacterReceive(); break;
         case SD_THROW_FREE_FALL: ThrowFreeFall(); break;
         case SD_GOT_HIT_FREEFORM: GotHitFreeForm(); break;
+        case SD_GOT_HIT_CRUSHER: GotHitCrusher(); break;
         case SD_DANTE_MISSILE_PREPARE:        _MissilePrepare(); break;
         case SD_DANTE_MISSILE_ATTACK:         _MissileAttack(); break;
         case SD_DANTE_TARGET_MISSILE_ATTACK:  _TargetMissileAttack(); break;
@@ -5193,6 +5205,21 @@ void Humanoid::GotHitFreeForm() {
     }
 
     maxFallDivisor = 0;
+}
+
+void Humanoid::GotHitCrusher() {
+    MARKFUNCTION(0x80068A14);
+
+    // PSX: waits for the crush animation (HUMANOID_ANIM_CRUSHED) set in
+    // SetActionState to finish - loopCount only goes nonzero once a
+    // non-looping anim has played through - before actually dying.
+    if (!model) {
+        return;
+    }
+    AnimStructure* anim = static_cast<AnimStructure*>(static_cast<Model*>(model)->animStructure);
+    if (anim && anim->loopCount != 0) {
+        SetActionState(AS_DEAD, 0);
+    }
 }
 
 // PSX: LetGoOfLedge__8Humanoid (HUMANOID.CPP:8735, 0x8006C478)

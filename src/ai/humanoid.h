@@ -74,6 +74,8 @@ enum ActionState : u32 {
     AS_BACK_GRAB_RECEIVE_LATCH = 61,
     AS_BACK_GRAB_RECEIVE = 62,
     AS_THROW_FREE_FALL = 63,
+    AS_GOT_HIT_CRUSHER = 64, // PSX case 64: crush death (dispatches via GotHitCrusher)
+    AS_GOT_HIT_FIRE = 65,    // PSX case 65: fire death (dispatches via GotHitFire), not yet wired
     AS_GET_UP = 68,
     AS_COLLAPSE_STUN = 69,   // PSX case 69: drop pickups + collapse recover dispatch
     AS_FLYING_BACK_CHECK = 70,
@@ -162,6 +164,7 @@ enum StateDispatch : u16 {
     SD_BUTCH_STOMP = 275,
     SD_BUTCH_CHARGE = 276,
     SD_BUTCH_THROW_POT = 277,
+    SD_GOT_HIT_CRUSHER = 278,
 };
 
 // Humanoid - DynamicThing with combat, animation, and AI state
@@ -479,6 +482,7 @@ public:
     s32 TestAndSetWeaponKungFU();
     s32 TestWallContextFightingRequestRemap();
     void GotHitFreeForm();
+    void GotHitCrusher();
     void PrepareLedgeLatch(const LVector& correctionPos, const LVector& normal);
     s32 CheckForLanding();
     bool CheckForLedges();

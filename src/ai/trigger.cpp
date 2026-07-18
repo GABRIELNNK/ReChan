@@ -131,7 +131,7 @@ bool TriggerThing::HandleCollision(Thing* source) {
         if (!target) {
             ccNode* node = g_ai->moveList.FindNodeCRC(targetHashes[i]);
             if (node) {
-                target = dynamic_cast<Obstacle*>(static_cast<Thing*>(node));
+                target = static_cast<Obstacle*>(static_cast<Thing*>(node));
                 cachedTargets[i] = target;
             }
         }
