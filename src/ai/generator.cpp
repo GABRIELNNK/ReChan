@@ -147,7 +147,7 @@ void Generator::AnalyzeMesh(DBRoot* root) {
     field176++;
     dbRoot.AddPermanentAttribString((u32)field176, 5, modelNameBuffer);
     field176++;
-    dbRoot.AddPermanentAttribNumber((u32)field176, 15, (u32)health);
+    dbRoot.AddPermanentAttribNumber((u32)field176, 15, (u32)blockNum);
     field176++;
 }
 
@@ -190,7 +190,7 @@ void Generator::Think() {
         }
         else {
             field180++;
-            if (field180 > field184) {
+            if (static_cast<u32>(field180) > static_cast<u32>(field184)) {
                 if (generateCount > 0) {
                     field196--;
                     GenerateObject(i);
@@ -235,29 +235,14 @@ void EnemyGenerator::GenerateObject(s32 param) {
     LVector spawnPos = pos;
 
     if (targetCount != 0) {
-        const u32 startIdx = rmRangedRandom(targetCount);
-        u32 idx = startIdx;
+        const u32 idx = rmRangedRandom(targetCount);
+        SubZoneVolume* subZone = subZoneVolumes[idx];
 
-        while (true) {
-            SubZoneVolume* subZone = subZoneVolumes[idx];
-            if (!subZone) {
-                break;
-            }
-
-            if (!subZone->IsInSubZoneVolume(Player::s_player)) {
-                break;
-            }
-
-            idx = (idx + 1) % targetCount;
-            if (idx == startIdx) {
-                goto spawn_enemy;
-            }
+        if (!subZone || !subZone->IsInSubZoneVolume(Player::s_player)) {
+            spawnPos = spawnPoints[idx];
         }
-
-        spawnPos = spawnPoints[idx];
     }
 
-spawn_enemy:
     Thing* generated = g_ai->AddThingNoTagList(
         nullptr,
         generateType,
@@ -291,7 +276,7 @@ void EnemyGenerator::AnalyzeMesh(DBRoot* root) {
 
     orientation.x = 0;
     orientation.y = root->field44;
-    orientation.z = root->field48;
+    orientation.z = 0;
 
     Obstacle::AnalyzeMesh(root);
 
@@ -521,8 +506,8 @@ void ThrowingGenerator::GenerateObject(s32 param) {
     s32 velX = 0;
     s32 velZ = 0;
     if (mag != 0) {
-        velX = static_cast<s32>(((static_cast<s64>(dx) * static_cast<s64>(scale))) / mag);
-        velZ = static_cast<s32>(((static_cast<s64>(dz) * static_cast<s64>(scale))) / mag);
+        velX = static_cast<s32>(static_cast<s64>(dx) * static_cast<s64>(scale)) / mag;
+        velZ = static_cast<s32>(static_cast<s64>(dz) * static_cast<s64>(scale)) / mag;
     }
 
     DynamicThing* dynamic = static_cast<DynamicThing*>(generated);
@@ -538,7 +523,8 @@ void ThrowingGenerator::GenerateObject(s32 param) {
 
 bool ThrowingGenerator::TargetInFOF() const {
     MARKFUNCTION(0x80011DC8);
-    const s32 angle = rmATan216((s32)((playerTrackX - pos.x) << 16), (s32)((playerTrackZ - pos.z) << 16));
+    const s32 angle = static_cast<s32>(static_cast<s16>(
+        rmATan216((s32)((playerTrackX - pos.x) << 16), (s32)((playerTrackZ - pos.z) << 16))));
     return angle >= fofAngleStart && angle <= fofAngleEnd;
 }
 
@@ -650,7 +636,8 @@ void ThrowingGenerator::Think() {
 
     if (playerTrackX != 0 || field244 != 0 || playerTrackZ != 0) {
         if (field224 <= 0) {
-            if (TargetInFOF()) {
+            const bool inFOF = TargetInFOF();
+            if (inFOF) {
                 GenerateObject(0);
                 field224 = field220;
             }

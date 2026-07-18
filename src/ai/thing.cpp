@@ -1,5 +1,6 @@
 #include "gen/common.h"
 #include "ai/thing.h"
+#include "ai/obstacle_shared.h"
 #include "gen/blockmgr.h"
 #include "gen/database.h"
 #include "gen/game.h"
@@ -72,6 +73,7 @@ Thing::Thing(const LVector* initialPos, u16 type) {
 // PSX: _._5Thing (THING.CPP:458)
 Thing::~Thing() {
     MARKFUNCTION(0x80061640);
+    ObstacleForgetRenderTransform(this);
     DeleteModel();
     RemAllPassengers();
     if (thingHandle) {
@@ -97,6 +99,14 @@ void Thing::Draw() {
     LVector drawOrient = orientation;
 
     if (model) {
+#if MODERN_GRAPHICS
+        if (!ShadowCSM::IsCasterPrepass()) {
+            ObstacleBuildRenderTransform(this, pos, orientation, drawPos, drawOrient);
+        }
+#else
+        ObstacleBuildRenderTransform(this, pos, orientation, drawPos, drawOrient);
+#endif
+
         // PSX: copies pos/orientation to model, then calls Show
         Model* m = static_cast<Model*>(model);
         m->posX = drawPos.x;
