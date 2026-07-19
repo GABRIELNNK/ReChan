@@ -39,6 +39,7 @@
 #include "extra/assetexporter_ui.h"
 #include "p3d/context.h"
 #include "extra/shadowcsm.h"
+#include "snd/snddrct.h"
 
 static bool sEnabled = false;
 static bool sShowPlayer = false;
@@ -2517,6 +2518,15 @@ void DebugUI::Draw() {
                 ImGui::Text("Music: %s", g_sound->musicPlaying ? "yes" : "no");
                 ImGui::Text("Active: %d", g_sound->activeFlag);
             }
+            static s32 soundIndex = 0;
+            static s32 soundStep = 10;
+
+            ImGui::InputInt("Sound ID", &soundIndex);
+
+            if (ImGui::Button("Play Sound") || ImGui::IsKeyPressed(ImGuiKey::ImGuiKey_Space)) {
+                CSoundDirect::PlayTransient(soundIndex, nullptr, 0, 0);
+            }
+
         }
         ImGui::End();
     }

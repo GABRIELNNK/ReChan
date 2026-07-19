@@ -506,6 +506,7 @@ void Table::UpdatePosition() {
 void Table::Throw(s32 a, s32 b, const LVector& matrix, const LVector& contactPos) {
     MARKFUNCTION(0x80015260);
     DynamicObstacle::Throw(a, b, matrix, contactPos);
+    CSoundDirect::PlayTransient(211, &pos, 0, 0);
 }
 
 void Table::HandlePickupCollision(Thing* pickup) {
