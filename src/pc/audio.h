@@ -7,6 +7,14 @@ using AudioVoice = u32;   // handle to a playing voice
 static constexpr AudioSample AUDIO_SAMPLE_INVALID = 0;
 static constexpr AudioVoice AUDIO_VOICE_INVALID = 0;
 
+// PSX: rsdAllocVoice__FUc priority byte (RSDBACH.CPP). Higher wins; steals lower.
+enum AudioPriority : u8 {
+    AUDIO_PRIO_AMBIENCE = 16,
+    AUDIO_PRIO_SFX      = 64,   // default for PlaySample / PlaySample3D
+    AUDIO_PRIO_SFX_HIGH = 128,
+    AUDIO_PRIO_DIALOGUE = 255,
+};
+
 // AudioEngine - PC audio abstraction over miniaudio
 // All game code accesses audio through this interface only
 class AudioEngine {
@@ -23,7 +31,8 @@ public:
     static void UnloadAllSamples();
 
     // Voice playback
-    static AudioVoice PlaySample(AudioSample sample, f32 volume = 1.0f, f32 pan = 0.0f, bool loop = false);
+    static AudioVoice PlaySample(AudioSample sample, f32 volume = 1.0f, f32 pan = 0.0f, bool loop = false,
+        u8 priority = AUDIO_PRIO_SFX);
     static AudioVoice PlaySample3D(
         AudioSample sample,
         const LVector& position,
@@ -31,7 +40,15 @@ public:
         bool loop = false,
         bool applyDistanceAttenuation = true,
         f32 minDistance = 0.0f,
-        f32 maxDistance = 10000.0f);
+        f32 maxDistance = 10000.0f,
+        u8 priority = AUDIO_PRIO_SFX);
+
+    // PSX: reserved/locked voice - jcsSetLevelDialog captures gp+1220 via rsdLockVoice.
+    static AudioVoice ReserveVoice(u8 priority);
+    static void ReleaseVoice(AudioVoice reserved);
+    static AudioVoice PlayOnReservedVoice(AudioVoice reserved, AudioSample sample,
+        f32 volume = 1.0f, f32 pan = 0.0f);
+
     static void StopVoice(AudioVoice voice);
     static void StopAllVoices();
     static bool IsVoicePlaying(AudioVoice voice);

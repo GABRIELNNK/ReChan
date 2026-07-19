@@ -37,6 +37,8 @@ struct InternalVoice {
     f64 startTimeSec = 0.0;
     bool overdueLogged = false;
     u32 generation = 0;
+    u8 priority = 0;      // rsdAllocVoice priority; higher resists stealing
+    bool locked = false;  // reserved voice (rsdLockVoice): never allocated/stolen by the pool
 };
 
 struct ListenerState {
@@ -101,6 +103,18 @@ static InternalVoice* ResolveVoice(AudioVoice voice, u32* outSlot = nullptr) {
     if (!v.active || v.generation != generation) return nullptr;
     if (outSlot) *outSlot = slot;
     return &v;
+}
+
+// PSX: rsdAllocVoice__FUc (RSDBACH.CPP). Free-unlocked first, else steal first
+// unlocked voice with priority < requested. MAX_VOICES on failure. Holds g_voiceMutex.
+static u32 AllocVoiceSlot(u8 priority) {
+    for (u32 i = 0; i < MAX_VOICES; i++) {
+        if (!g_voices[i].active && !g_voices[i].locked) return i;
+    }
+    for (u32 i = 0; i < MAX_VOICES; i++) {
+        if (!g_voices[i].locked && g_voices[i].priority < priority) return i;
+    }
+    return MAX_VOICES;
 }
 
 static ListenerState g_listener;
@@ -831,39 +845,38 @@ void AudioEngine::UnloadAllSamples() {
     }
 }
 
-AudioVoice AudioEngine::PlaySample(AudioSample sample, f32 volume, f32 pan, bool loop) {
+AudioVoice AudioEngine::PlaySample(AudioSample sample, f32 volume, f32 pan, bool loop, u8 priority) {
     if (!g_initialized || sample == AUDIO_SAMPLE_INVALID) return AUDIO_VOICE_INVALID;
 
     std::lock_guard<std::mutex> lock(g_voiceMutex);
 
-    // Find free voice slot
-    for (u32 i = 0; i < MAX_VOICES; i++) {
-        if (!g_voices[i].active) {
-            g_voices[i].sample = sample;
-            g_voices[i].positionF = 0.0;
-            g_voices[i].volume = volume;
-            g_voices[i].fadeStartVolume = volume;
-            g_voices[i].fadeTargetVolume = volume;
-            g_voices[i].fadeFramesTotal = 0;
-            g_voices[i].fadeFramesRemaining = 0;
-            g_voices[i].pan = pan;
-            g_voices[i].pitch = 1.0f;
-            g_voices[i].worldPos = {};
-            g_voices[i].minDistance = 0.0f;
-            g_voices[i].maxDistance = 10000.0f;
-            g_voices[i].spatial = false;
-            g_voices[i].applyDistanceAttenuation = false;
-            g_voices[i].loop = loop;
-            g_voices[i].active = true;
-            g_voices[i].startTimeSec = AudioNowSeconds();
-            g_voices[i].overdueLogged = false;
-            g_voices[i].generation++;
-            return (g_voices[i].generation << kVoiceSlotBits) | (i + 1);
-        }
+    const u32 i = AllocVoiceSlot(priority);
+    if (i >= MAX_VOICES) {
+        LOG("AudioEngine: no free voice slots (priority=%u)", priority);
+        return AUDIO_VOICE_INVALID;
     }
 
-    LOG("AudioEngine: no free voice slots");
-    return AUDIO_VOICE_INVALID;
+    g_voices[i].sample = sample;
+    g_voices[i].positionF = 0.0;
+    g_voices[i].volume = volume;
+    g_voices[i].fadeStartVolume = volume;
+    g_voices[i].fadeTargetVolume = volume;
+    g_voices[i].fadeFramesTotal = 0;
+    g_voices[i].fadeFramesRemaining = 0;
+    g_voices[i].pan = pan;
+    g_voices[i].pitch = 1.0f;
+    g_voices[i].worldPos = {};
+    g_voices[i].minDistance = 0.0f;
+    g_voices[i].maxDistance = 10000.0f;
+    g_voices[i].spatial = false;
+    g_voices[i].applyDistanceAttenuation = false;
+    g_voices[i].loop = loop;
+    g_voices[i].active = true;
+    g_voices[i].startTimeSec = AudioNowSeconds();
+    g_voices[i].overdueLogged = false;
+    g_voices[i].priority = priority;
+    g_voices[i].generation++;
+    return (g_voices[i].generation << kVoiceSlotBits) | (i + 1);
 }
 
 AudioVoice AudioEngine::PlaySample3D(
@@ -873,38 +886,104 @@ AudioVoice AudioEngine::PlaySample3D(
     bool loop,
     bool applyDistanceAttenuation,
     f32 minDistance,
-    f32 maxDistance) {
+    f32 maxDistance,
+    u8 priority) {
     if (!g_initialized || sample == AUDIO_SAMPLE_INVALID) return AUDIO_VOICE_INVALID;
 
     std::lock_guard<std::mutex> lock(g_voiceMutex);
 
-    for (u32 i = 0; i < MAX_VOICES; i++) {
-        if (!g_voices[i].active) {
-            g_voices[i].sample = sample;
-            g_voices[i].positionF = 0.0;
-            g_voices[i].volume = volume;
-            g_voices[i].fadeStartVolume = volume;
-            g_voices[i].fadeTargetVolume = volume;
-            g_voices[i].fadeFramesTotal = 0;
-            g_voices[i].fadeFramesRemaining = 0;
-            g_voices[i].pan = 0.0f;
-            g_voices[i].pitch = 1.0f;
-            g_voices[i].worldPos = position;
-            g_voices[i].minDistance = minDistance;
-            g_voices[i].maxDistance = (maxDistance > minDistance) ? maxDistance : (minDistance + 1.0f);
-            g_voices[i].spatial = true;
-            g_voices[i].applyDistanceAttenuation = applyDistanceAttenuation;
-            g_voices[i].loop = loop;
-            g_voices[i].active = true;
-            g_voices[i].startTimeSec = AudioNowSeconds();
-            g_voices[i].overdueLogged = false;
-            g_voices[i].generation++;
-            return (g_voices[i].generation << kVoiceSlotBits) | (i + 1);
-        }
+    const u32 i = AllocVoiceSlot(priority);
+    if (i >= MAX_VOICES) {
+        LOG("AudioEngine: no free voice slots (priority=%u)", priority);
+        return AUDIO_VOICE_INVALID;
     }
 
-    LOG("AudioEngine: no free voice slots");
-    return AUDIO_VOICE_INVALID;
+    g_voices[i].sample = sample;
+    g_voices[i].positionF = 0.0;
+    g_voices[i].volume = volume;
+    g_voices[i].fadeStartVolume = volume;
+    g_voices[i].fadeTargetVolume = volume;
+    g_voices[i].fadeFramesTotal = 0;
+    g_voices[i].fadeFramesRemaining = 0;
+    g_voices[i].pan = 0.0f;
+    g_voices[i].pitch = 1.0f;
+    g_voices[i].worldPos = position;
+    g_voices[i].minDistance = minDistance;
+    g_voices[i].maxDistance = (maxDistance > minDistance) ? maxDistance : (minDistance + 1.0f);
+    g_voices[i].spatial = true;
+    g_voices[i].applyDistanceAttenuation = applyDistanceAttenuation;
+    g_voices[i].loop = loop;
+    g_voices[i].active = true;
+    g_voices[i].startTimeSec = AudioNowSeconds();
+    g_voices[i].overdueLogged = false;
+    g_voices[i].priority = priority;
+    g_voices[i].generation++;
+    return (g_voices[i].generation << kVoiceSlotBits) | (i + 1);
+}
+
+// PSX: jcsSetLevelDialog captures gp+1220 via rsdGetVoice/rsdLockVoice.
+AudioVoice AudioEngine::ReserveVoice(u8 priority) {
+    if (!g_initialized) return AUDIO_VOICE_INVALID;
+
+    std::lock_guard<std::mutex> lock(g_voiceMutex);
+
+    const u32 i = AllocVoiceSlot(priority);
+    if (i >= MAX_VOICES) {
+        LOG("AudioEngine: ReserveVoice failed, no slot (priority=%u)", priority);
+        return AUDIO_VOICE_INVALID;
+    }
+
+    g_voices[i] = InternalVoice{};
+    g_voices[i].priority = priority;
+    g_voices[i].locked = true;
+    g_voices[i].active = false;
+    g_voices[i].generation++;
+    return (g_voices[i].generation << kVoiceSlotBits) | (i + 1);
+}
+
+void AudioEngine::ReleaseVoice(AudioVoice reserved) {
+    if (reserved == AUDIO_VOICE_INVALID) return;
+    std::lock_guard<std::mutex> lock(g_voiceMutex);
+    const u32 slot = (reserved & kVoiceSlotMask) - 1u;
+    if (slot >= MAX_VOICES) return;
+    g_voices[slot].active = false;
+    g_voices[slot].locked = false;
+}
+
+// Resolves by slot only (ignores generation) so the reservation handle stays valid across lines.
+AudioVoice AudioEngine::PlayOnReservedVoice(AudioVoice reserved, AudioSample sample, f32 volume, f32 pan) {
+    if (!g_initialized || sample == AUDIO_SAMPLE_INVALID || reserved == AUDIO_VOICE_INVALID) {
+        return AUDIO_VOICE_INVALID;
+    }
+
+    std::lock_guard<std::mutex> lock(g_voiceMutex);
+
+    const u32 i = (reserved & kVoiceSlotMask) - 1u;
+    if (i >= MAX_VOICES || !g_voices[i].locked) return AUDIO_VOICE_INVALID;
+
+    const u8 priority = g_voices[i].priority;
+    g_voices[i].sample = sample;
+    g_voices[i].positionF = 0.0;
+    g_voices[i].volume = volume;
+    g_voices[i].fadeStartVolume = volume;
+    g_voices[i].fadeTargetVolume = volume;
+    g_voices[i].fadeFramesTotal = 0;
+    g_voices[i].fadeFramesRemaining = 0;
+    g_voices[i].pan = pan;
+    g_voices[i].pitch = 1.0f;
+    g_voices[i].worldPos = {};
+    g_voices[i].minDistance = 0.0f;
+    g_voices[i].maxDistance = 10000.0f;
+    g_voices[i].spatial = false;
+    g_voices[i].applyDistanceAttenuation = false;
+    g_voices[i].loop = false;
+    g_voices[i].active = true;
+    g_voices[i].startTimeSec = AudioNowSeconds();
+    g_voices[i].overdueLogged = false;
+    g_voices[i].priority = priority;
+    g_voices[i].locked = true;
+    g_voices[i].generation++;
+    return (g_voices[i].generation << kVoiceSlotBits) | (i + 1);
 }
 
 void AudioEngine::StopVoice(AudioVoice voice) {
@@ -925,15 +1004,7 @@ bool AudioEngine::IsVoicePlaying(AudioVoice voice) {
     u32 slot = 0;
     InternalVoice* vp = ResolveVoice(voice, &slot);
     if (!vp) {
-        if (voice != AUDIO_VOICE_INVALID) {
-            static bool loggedOnce[MAX_VOICES * 4] = {};
-            const u32 idx = voice % (MAX_VOICES * 4);
-            if (!loggedOnce[idx]) {
-                loggedOnce[idx] = true;
-                LOG("[AudioTrace] IsVoicePlaying(%u) - handle does not resolve (stale/reused slot or invalid)", voice);
-            }
-        }
-        return false;
+        return false; // normal end-of-voice: handle no longer resolves
     }
     InternalVoice& v = *vp;
 

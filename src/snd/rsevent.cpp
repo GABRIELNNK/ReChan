@@ -436,6 +436,8 @@ static s32 g_secondaryDialogPriority = -1;
 static s32 g_dialogStatus = 0;
 // PSX: gp+1208 - dialog system enabled by jcsStartDialog / disabled by jcsStopDialog.
 static s32 g_dialogSystemStarted = 0;
+// PSX: gp+1220 - dialogue voice captured/locked by jcsSetLevelDialog.
+static AudioVoice g_dialogReservedVoice = AUDIO_VOICE_INVALID;
 // Host bookkeeping for the PSX CD completion callback state transition.
 static s32 g_dialogLoadPending = 0;
 static s32 g_dialogLoadPendingState = -1;
@@ -916,7 +918,20 @@ static void ProcessDialogLoadedStates() {
     }
 
     if (g_dialogStatus == DialogStatus_LoadedPrimaryAndSecondary) {
-        CheckDialogFlushCount(1);
+        DialogQueueInfo& q1 = g_dialogQueues[1];
+        if (q1.timeoutFrame != 0) {
+            const s32 frameCounter = GetDialogFrameCounter();
+            if (q1.timeoutFrame < frameCounter) {
+                KillDialogByHandleInternal(q1.handle);
+            }
+            else {
+                const DialogQueuePosition& q1Pos = g_dialogQueuePos[1];
+                PlayDialogRequest(q1.handle, q1.playPosition, q1Pos.hasPos ? &q1Pos.pos : nullptr, 0u);
+            }
+        }
+        else {
+            CheckDialogFlushCount(1);
+        }
     }
 }
 
@@ -1278,7 +1293,14 @@ static s32 PlayDialogHandle(DialogEntry* entry, const LVector* posPtr) {
         }
     }
 
-    entry->voice = AudioEngine::PlaySample(entry->sample, vol, pan, false);
+    // PSX plays every line through the locked gp+1220 voice; fall back to a
+    // top-priority pool voice if the reservation is unavailable.
+    if (g_dialogReservedVoice != AUDIO_VOICE_INVALID) {
+        entry->voice = AudioEngine::PlayOnReservedVoice(g_dialogReservedVoice, entry->sample, vol, pan);
+    }
+    if (entry->voice == AUDIO_VOICE_INVALID) {
+        entry->voice = AudioEngine::PlaySample(entry->sample, vol, pan, false, AUDIO_PRIO_DIALOGUE);
+    }
 
     if (entry->voice == AUDIO_VOICE_INVALID) {
         if (DialogTraceEnabled()) {
@@ -1400,9 +1422,6 @@ static s32 PlayDialogRequest(s32 handleParam, s32 playPosition, const LVector* p
         case DialogStatus_LoadedPrimaryAndSecondary:
             if (IsPrimaryHandle(handle)) {
                 return PlayLoadedState(playPosition, posPtr, DialogStatus_PlayingPrimaryState14);
-            }
-            if (g_secondaryDialogPriority < g_primaryDialogPriority) {
-                return UpdateDialogTimeout(timeout, playPosition, posPtr, 1);
             }
             KillDialogByHandleInternal(g_primaryDialogHandle);
             return PlayLoadedState(playPosition, posPtr, DialogStatus_PlayingPrimary);
@@ -2420,6 +2439,10 @@ static s32 jcsStopDialog() {
     MARKFUNCTION(0x8004345C);
 
     KillAllDialogHandles();
+    if (g_dialogReservedVoice != AUDIO_VOICE_INVALID) {
+        AudioEngine::ReleaseVoice(g_dialogReservedVoice);
+        g_dialogReservedVoice = AUDIO_VOICE_INVALID;
+    }
     g_dialogSystemStarted = 0;
     return 0;
 }
@@ -2428,6 +2451,9 @@ static s32 jcsStopDialog() {
 void jcsStartDialog() {
     MARKFUNCTION(0x8004344C);
 
+    if (g_dialogReservedVoice == AUDIO_VOICE_INVALID) {
+        g_dialogReservedVoice = AudioEngine::ReserveVoice(AUDIO_PRIO_DIALOGUE);
+    }
     g_dialogSystemStarted = 1;
 }
 
