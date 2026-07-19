@@ -15,6 +15,12 @@
 #include "snd/snddrct.h"
 
 static constexpr s32 COLLECT_FLOAT_STEP = 1092;
+static constexpr s32 COLLECT_PICKUP_PAD_XZ = 96;  // PC: extra grab margin on each XZ side
+static constexpr s32 COLLECT_PICKUP_PAD_Y = 64;   // PC: extra grab margin on each Y side
+
+static bool CollectibleBoxLooksValid(const tagCollisionBox& box) {
+    return box.maxX >= box.minX && box.maxY >= box.minY && box.maxZ >= box.minZ;
+}
 static constexpr s32 COLLECT_MISC_ANIM_MAX_DEPTH = 16;
 static constexpr u32 COLLECT_ENTITY_TYPE_COMPOSITE_ANIM = 0x00010001u;
 static constexpr u32 COLLECT_ENTITY_TYPE_TREE_FLIP = 0x00020003u;
@@ -417,6 +423,20 @@ void Collectible::AnalyzeMesh(DBRoot* root) {
     else {
         mModelIndex = -1;
         ObstacleFillCollisionBox(localBox, root, 5);
+    }
+
+    // PC: enlarge the pickup box a little so collectibles are easier to catch.
+    if (CollectibleBoxLooksValid(localBox)) {
+        auto pad = [](s16 v, s32 amount, bool grow) -> s16 {
+            const s32 r = grow ? (v + amount) : (v - amount);
+            return static_cast<s16>(r < -0x7FFF ? -0x7FFF : (r > 0x7FFF ? 0x7FFF : r));
+        };
+        localBox.minX = pad(localBox.minX, COLLECT_PICKUP_PAD_XZ, false);
+        localBox.minZ = pad(localBox.minZ, COLLECT_PICKUP_PAD_XZ, false);
+        localBox.maxX = pad(localBox.maxX, COLLECT_PICKUP_PAD_XZ, true);
+        localBox.maxZ = pad(localBox.maxZ, COLLECT_PICKUP_PAD_XZ, true);
+        localBox.minY = pad(localBox.minY, COLLECT_PICKUP_PAD_Y, false);
+        localBox.maxY = pad(localBox.maxY, COLLECT_PICKUP_PAD_Y, true);
     }
 
     SetCollisionBox(localBox);
