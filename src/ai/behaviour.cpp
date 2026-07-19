@@ -2693,7 +2693,7 @@ void Behaviour::BackOutOfTheFight(Behaviour* b) {
 void Behaviour::NDMS(Behaviour* b) {
     MARKFUNCTION(0x80075BE4);
 
-    if (!b || !b->owner) {
+    if (!b || !b->owner || !b->animConfigPtr) {
         return;
     }
 
