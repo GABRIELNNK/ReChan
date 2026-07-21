@@ -73,6 +73,8 @@ s16 g_selectedLevel = -1;   // gp+44: queued level ID (-1 = none)
 s32 g_directorActive = 0;   // gp+20: directorTimeOut gate used by gsPlayState
 s32 g_feInitialized = 0;    // gp+88: FE memory puddle initialized
 
+bool g_drawDebugConsole = false;
+
 const Game::StateFunc Game::sStateTable[static_cast<int>(GameState::COUNT)] = {
     gsNullState,
     gsIntroState,
@@ -2567,6 +2569,9 @@ void DrawDebugInfo() {
 
 
         g_textManager->SetScale(SCREEN_SCALE_Y(0.108f), SCREEN_SCALE_Y(0.108f));
+
+        if (!g_drawDebugConsole)
+            return;
 
         s32 i = 0;
         for (auto& it : Log::Get().GetMessageStack()) {

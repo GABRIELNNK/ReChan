@@ -38,6 +38,9 @@ project "libp3d"
         libp3d_root .. "/vendor/sdl2/**.cc",
         libp3d_root .. "/vendor/sdl2/**.mm",
         libp3d_root .. "/vendor/sdl2/**.m",
+
+        libp3d_root .. "/pddi/null/**.h",
+        libp3d_root .. "/pddi/null/**.cpp",
     }
 
     includedirs {
@@ -144,10 +147,24 @@ project "libp3d"
             "SDL_MAIN_HANDLED",
         }
 
+    filter "configurations:Headless"
+        removefiles {
+            libp3d_root .. "/pddi/gl/**.h",
+            libp3d_root .. "/pddi/gl/**.cpp",
+        }
+        files {
+            libp3d_root .. "/pddi/null/**.h",
+            libp3d_root .. "/pddi/null/**.cpp",
+        }
+
     filter "configurations:Debug"
         runtime "Debug"
         symbols "on"
 
     filter "configurations:Release*"
+        runtime "Release"
+        optimize "on"
+
+    filter "configurations:Headless"
         runtime "Release"
         optimize "on"

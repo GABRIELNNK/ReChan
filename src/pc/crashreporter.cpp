@@ -189,6 +189,10 @@ static void WriteCrashReport(EXCEPTION_POINTERS* exceptionInfo, const char* reas
 }
 
 static void NotifyUser() {
+#if defined(RC_PLATFORM_NULL)
+    // Headless/null-hardware build: no display to show a dialog on.
+    return;
+#endif
     if (std::getenv("RECHAN_CRASH_REPORTER_NO_DIALOG")) return;
 
     char message[1024];
@@ -233,6 +237,16 @@ void CrashReporter::Install() {
     std::set_terminate(TerminateHandler);
     std::signal(SIGABRT, CrtSignalHandler);
 }
+
+#elif defined(RC_PLATFORM_SWITCH)
+
+// Deliberately minimal no-op for this toolchain-validation milestone: no
+// <execinfo.h> (glibc-only, absent from newlib), no fork()/execlp() (no
+// process model on Horizon OS), no sigaction-based fault handling (Switch
+// has no equivalent POSIX signal delivery for hardware faults -- real crash
+// reporting here would hook libnx's own fatal-error/diagFatal path instead,
+// left for a later pass once there's an actual Switch build to crash).
+void CrashReporter::Install() {}
 
 #else
 
@@ -304,6 +318,10 @@ static void NotifyUser() {
     WriteFd(STDERR_FILENO, message);
     WriteFd(STDERR_FILENO, "\n");
 
+#if defined(RC_PLATFORM_NULL)
+    // Headless/null-hardware build: no display server to show a dialog on.
+    // The stderr write above is the only notification.
+#else
     if (s_suppressDialog) return;
 
     const pid_t child = fork();
@@ -313,6 +331,7 @@ static void NotifyUser() {
         execlp("xmessage", "xmessage", "-center", message, static_cast<char*>(nullptr));
         _exit(127);
     }
+#endif
 }
 
 static void FatalSignalHandler(int signalNumber, siginfo_t* signalInfo, void*) {

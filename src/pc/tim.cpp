@@ -3,7 +3,7 @@
 #include "pc/tim.h"
 #include "gen/config.h"
 #include "p3d/texture.h"
-#include "p3d/filepath.h"
+#include "p3d/fileio.h"
 #include "p3d/shader.h"
 #include "p3d/matrix.h"
 #include "p3d/context.h"
@@ -44,7 +44,7 @@ TimImage* Tim::LoadFromFile(const char* path) {
             const std::string* pngPath = ModLoader::Instance().GetTexturePath(crc);
             if (pngPath) {
                 int w, h, ch;
-                const std::string resolvedPngPath = p3d::ResolvePathCaseInsensitive(*pngPath);
+                const std::string resolvedPngPath = p3d::io::ResolvePath(*pngPath);
                 unsigned char* px = stbi_load(resolvedPngPath.c_str(), &w, &h, &ch, 4);
                 if (px) {
                     TimImage* img = new TimImage();

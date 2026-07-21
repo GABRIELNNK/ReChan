@@ -10,7 +10,7 @@
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
 #include "p3d/texture.h"
-#include "p3d/filepath.h"
+#include "p3d/fileio.h"
 #ifdef REAL_TEXTURE_RENDERING
 #include "extra/realtexture.h"
 #include "vendor/stb/stb_image.h"
@@ -76,21 +76,42 @@ static bool RegisterMaterialTexture(const cgltf_material* material, const char* 
     if (!material || !glbPath) return false;
     const cgltf_texture_view& view = material->pbr_metallic_roughness.base_color_texture;
     const cgltf_image* image = (view.texture) ? view.texture->image : nullptr;
-    if (!image || !image->uri || !image->uri[0]) return false;
+    if (!image) return false;
 
-    // Exported assets deliberately use adjacent, ordinary PNG files. Embedded
-    // data URIs are rejected for now so malformed input cannot allocate an
-    // unbounded decoded buffer through this path.
-    const std::string uri = image->uri;
-    if (uri.rfind("data:", 0) == 0) return false;
-    const std::filesystem::path glbDir = std::filesystem::path(glbPath).parent_path();
-    const std::filesystem::path pngPath = (glbDir / uri).lexically_normal();
     int width = 0, height = 0, channels = 0;
-    const std::string resolvedPngPath = p3d::ResolvePathCaseInsensitive(pngPath.string());
-    unsigned char* rgba = stbi_load(resolvedPngPath.c_str(), &width, &height, &channels, 4);
+    unsigned char* rgba = nullptr;
+
+    if (image->buffer_view) {
+        const uint8_t* bytes = cgltf_buffer_view_data(image->buffer_view);
+        if (bytes) {
+            rgba = stbi_load_from_memory(bytes, static_cast<int>(image->buffer_view->size),
+                                          &width, &height, &channels, 4);
+        }
+    }
+    else if (image->uri && image->uri[0]) {
+        // Exported assets deliberately use adjacent, ordinary PNG files. Embedded
+        // data URIs are rejected for now so malformed input cannot allocate an
+        // unbounded decoded buffer through this path.
+        const std::string uri = image->uri;
+        if (uri.rfind("data:", 0) != 0) {
+            const std::filesystem::path glbDir = std::filesystem::path(glbPath).parent_path();
+            const std::filesystem::path pngPath = (glbDir / uri).lexically_normal();
+            const std::string resolvedPngPath = p3d::io::ResolvePath(pngPath.string());
+            rgba = stbi_load(resolvedPngPath.c_str(), &width, &height, &channels, 4);
+        }
+    }
+
     if (!rgba) return false;
     RealTextureRegistry::Instance().Register(tpage, cba, rgba, width, height, 0.0f, 0.0f, 1.0f, 1.0f);
     stbi_image_free(rgba);
+
+    // A modded asset just supplied a real texture - make sure the render
+    // path that actually samples it is on, rather than leaving modders to
+    // discover the debugui "Real Textures" toggle themselves.
+    if (p3d::context && !p3d::context->IsRealTextureModeEnabled()) {
+        p3d::context->SetRealTextureMode(true);
+    }
+
     return true;
 }
 #endif
@@ -263,6 +284,10 @@ static pddiPrimBuffer* BuildMeshBuffer(
         }
         *outSkinData = importedSkin;
     }
+    else if (skin && outSkinData) {
+        LOG("[GLTFLoader] Skin incomplete (joints/weights missing or malformed on some "
+            "vertices); falling back to a static, unskinned mesh: %s", glbPath);
+    }
     LOG("[GLTFLoader] Built mesh: %zu vertices, %zu indices", vertices.size(), indices.size());
     return buffer;
 }
@@ -285,17 +310,27 @@ static STreeData* BuildSkeleton(const cgltf_data* data) {
         return nullptr;
     }
 
+    u32 recognizedJoints = 0;
     for (u32 i = 0; i < skeleton->numJoints; ++i) {
-        const char* name = skin.joints[i] ? skin.joints[i]->name : nullptr;
+        const cgltf_node* jointNode = skin.joints[i];
+        const char* name = jointNode ? jointNode->name : nullptr;
+        const char* extras = (jointNode && jointNode->extras.data) ? jointNode->extras.data : nullptr;
         unsigned int nameUID = 0;
         unsigned int flags = 0;
         int capture = -1, tx = 0, ty = 0, tz = 0, rx = 0, ry = 0, rz = 0;
-        if (!name || std::sscanf(name, "rch_%x_%x_%d_%d_%d_%d_%d_%d_%d",
+        if (!extras || std::sscanf(extras,
+            "{\"rchNameUID\":%u,\"rchFlags\":%u,\"rchCapture\":%d,"
+            "\"rchTx\":%d,\"rchTy\":%d,\"rchTz\":%d,\"rchRx\":%d,\"rchRy\":%d,\"rchRz\":%d}",
             &nameUID, &flags, &capture, &tx, &ty, &tz, &rx, &ry, &rz) != 9) {
-            LOG("[GLTFLoader] Skin joint metadata missing; using static fallback: %s",
+            LOG("[GLTFLoader] Joint metadata missing on '%s'; treating as inert foreign bone",
                 name ? name : "<unnamed>");
-            delete skeleton;
-            return nullptr;
+            nameUID = name ? p3dHash(name) : 0;
+            flags = 0;
+            capture = -1;
+            tx = ty = tz = 0;
+            rx = ry = rz = 0;
+        } else {
+            ++recognizedJoints;
         }
 
         STreeJoint& joint = skeleton->joints[i];
@@ -315,6 +350,49 @@ static STreeData* BuildSkeleton(const cgltf_data* data) {
         skeleton->jointOrderMap[i] = i;
     }
 
+    if (recognizedJoints == 0) {
+        LOG("[GLTFLoader] No recognized joints in skin; using static fallback");
+        delete skeleton;
+        return nullptr;
+    }
+
+    const char* mapMarker = nullptr;
+    for (cgltf_size i = 0; i < skin.joints_count && !mapMarker; ++i) {
+        const cgltf_node* jointNode = skin.joints[i];
+        if (jointNode && jointNode->extras.data) {
+            mapMarker = std::strstr(jointNode->extras.data, "\"rchJointOrderMap\":[");
+        }
+    }
+    if (mapMarker) {
+        mapMarker += std::strlen("\"rchJointOrderMap\":[");
+        std::vector<u32> paramNameUIDs;
+        const char* p = mapMarker;
+        while (*p && *p != ']') {
+            char* end = nullptr;
+            unsigned long v = std::strtoul(p, &end, 10);
+            if (end == p) break;
+            paramNameUIDs.push_back(static_cast<u32>(v));
+            p = end;
+            while (*p == ',' || *p == ' ') ++p;
+        }
+        if (!paramNameUIDs.empty()) {
+            std::free(skeleton->jointOrderMap);
+            skeleton->numMapEntries = static_cast<u32>(paramNameUIDs.size());
+            skeleton->jointOrderMap = static_cast<u32*>(std::malloc(sizeof(u32) * skeleton->numMapEntries));
+            for (u32 param = 0; param < skeleton->numMapEntries; ++param) {
+                u32 targetJoint = 0;
+                for (u32 j = 0; j < skeleton->numJoints; ++j) {
+                    if (skeleton->joints[j].nameUID == paramNameUIDs[param]) {
+                        targetJoint = j;
+                        break;
+                    }
+                }
+                skeleton->jointOrderMap[param] = targetJoint;
+            }
+            LOG("[GLTFLoader] Restored jointOrderMap: %u parameter entries", skeleton->numMapEntries);
+        }
+    }
+
     LOG("[GLTFLoader] Imported engine skeleton: %u joints", skeleton->numJoints);
     return skeleton;
 }
@@ -327,7 +405,7 @@ OriginalSTree* GLTFLoader::LoadSTree(const char* path) {
     cgltf_options options = {};
     cgltf_data* data = nullptr;
 
-    const std::string resolvedPath = p3d::ResolvePathCaseInsensitive(path);
+    const std::string resolvedPath = p3d::io::ResolvePath(path);
     cgltf_result result = cgltf_parse_file(&options, resolvedPath.c_str(), &data);
     if (result != cgltf_result_success) {
         LOG("[GLTFLoader] Failed to parse GLB: %s", path);
@@ -416,7 +494,7 @@ OriginalGeo* GLTFLoader::LoadGeo(const char* path) {
     cgltf_options options = {};
     cgltf_data* data = nullptr;
 
-    const std::string resolvedPath = p3d::ResolvePathCaseInsensitive(path);
+    const std::string resolvedPath = p3d::io::ResolvePath(path);
     cgltf_result result = cgltf_parse_file(&options, resolvedPath.c_str(), &data);
     if (result != cgltf_result_success) {
         LOG("[GLTFLoader] Failed to parse GLB: %s", path);
@@ -484,7 +562,7 @@ OriginalETree* GLTFLoader::LoadETree(const char* path) {
     cgltf_options options = {};
     cgltf_data* data = nullptr;
 
-    const std::string resolvedPath = p3d::ResolvePathCaseInsensitive(path);
+    const std::string resolvedPath = p3d::io::ResolvePath(path);
     cgltf_result result = cgltf_parse_file(&options, resolvedPath.c_str(), &data);
     if (result != cgltf_result_success) {
         LOG("[GLTFLoader] Failed to parse GLB: %s", path);

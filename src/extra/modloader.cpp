@@ -4,14 +4,14 @@
 #ifdef MOD_LOADER
 
 #include "pc/log.h"
+#include "pc/apppaths.h"
 #include "p3d/hash.h"
-#include "p3d/filepath.h"
+#include "p3d/fileio.h"
 #include "vendor/stb/stb_image.h"
 #include <algorithm>
 #include <cstring>
 #include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #include <sstream>
 
 static ModLoader s_instance;
@@ -20,8 +20,8 @@ ModLoader& ModLoader::Instance() {
     return s_instance;
 }
 
-static constexpr const char* kModsDir = "~mods";
-static constexpr const char* kIniPath = "~mods/mods.ini";
+static constexpr const char* kModsDir = apppaths::kModsDir;
+static constexpr const char* kIniPath = apppaths::kModsIniPath;
 
 static u32 HashAssetBytes(const u8* data, size_t size) {
     u32 hash = 2166136261u;
@@ -39,8 +39,9 @@ static u32 ReadBE32(const u8* data) {
 
 static bool IsUnmodifiedRechanPng(const std::string& path, const u8* rgba, int width, int height) {
     if (!rgba || width <= 0 || height <= 0) return false;
-    std::ifstream file(p3d::ResolvePathCaseInsensitive(path), std::ios::binary);
-    std::vector<u8> png((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    auto pngData = p3d::io::ReadFile(p3d::io::ResolvePath(path));
+    if (!pngData) return false;
+    const std::vector<u8>& png = *pngData;
     if (png.size() < 12) return false;
     size_t pos = 8;
     while (pos + 12 <= png.size()) {
@@ -151,10 +152,7 @@ static bool ParseBool(const std::string& text, bool defaultValue) {
 }
 
 static void WriteDefaultIni(const std::string& path) {
-    std::ofstream file(path);
-    if (!file.is_open()) return;
-
-    file <<
+    static constexpr const char* kDefaultIni =
         "; Mod Loader settings\n"
         ";\n"
         "; Every folder placed under mods/ is loaded automatically - no extra\n"
@@ -175,12 +173,15 @@ static void WriteDefaultIni(const std::string& path) {
         "\n"
         "[blacklist]\n"
         "; List mod folder names below to disable them without deleting them.\n";
+    p3d::io::WriteTextFile(path, kDefaultIni);
+    p3d::io::InvalidateResolveCache(kModsDir);
 }
 
 static ModLoaderConfig ReadConfig(const std::string& path) {
     ModLoaderConfig config;
-    std::ifstream file(p3d::ResolvePathCaseInsensitive(path));
-    if (!file.is_open()) return config;
+    auto text = p3d::io::ReadTextFile(p3d::io::ResolvePath(path));
+    if (!text) return config;
+    std::istringstream file(*text);
 
     std::string currentSection;
     std::string line;
@@ -424,17 +425,16 @@ int ModLoader::ScanCategory(
 }
 
 bool ModLoader::EnsureStorage() {
-    std::error_code ec;
-    if (!std::filesystem::is_directory(kModsDir)) {
-        if (!std::filesystem::create_directories(kModsDir, ec) && ec) {
-            LOG("[ModLoader] Failed to create %s: %s", kModsDir, ec.message().c_str());
+    if (!p3d::io::DirExists(kModsDir)) {
+        if (!p3d::io::CreateDirectories(kModsDir)) {
+            LOG("[ModLoader] Failed to create %s", kModsDir);
             return false;
         }
         LOG("[ModLoader] Created mod directory: %s", kModsDir);
     }
-    if (!std::filesystem::exists(kIniPath)) {
+    if (!p3d::io::FileExists(kIniPath)) {
         WriteDefaultIni(kIniPath);
-        if (!std::filesystem::exists(kIniPath)) {
+        if (!p3d::io::FileExists(kIniPath)) {
             LOG("[ModLoader] Failed to create %s", kIniPath);
             return false;
         }
@@ -444,18 +444,21 @@ bool ModLoader::EnsureStorage() {
 }
 
 static bool WriteConfig(const std::string& path, const ModLoaderConfig& config) {
-    std::ofstream file(path, std::ios::trunc);
-    if (!file.is_open()) return false;
+    std::ostringstream out;
+    out << "; Mod Loader settings\n\n"
+        << "[general]\n"
+        << "enabled = " << (config.enabled ? "true" : "false") << "\n"
+        << "verbose = " << (config.verbose ? "true" : "false") << "\n\n"
+        << "[load_order]\n";
+    for (const std::string& name : config.loadOrder) out << name << "\n";
+    out << "\n[blacklist]\n";
+    for (const std::string& name : config.blacklist) out << name << "\n";
 
-    file << "; Mod Loader settings\n\n"
-         << "[general]\n"
-         << "enabled = " << (config.enabled ? "true" : "false") << "\n"
-         << "verbose = " << (config.verbose ? "true" : "false") << "\n\n"
-         << "[load_order]\n";
-    for (const std::string& name : config.loadOrder) file << name << "\n";
-    file << "\n[blacklist]\n";
-    for (const std::string& name : config.blacklist) file << name << "\n";
-    return file.good();
+    const bool ok = p3d::io::WriteTextFile(path, out.str());
+    if (ok) {
+        p3d::io::InvalidateResolveCache(kModsDir);
+    }
+    return ok;
 }
 
 // Query API
@@ -521,7 +524,7 @@ bool ModLoader::GetTextureOverrideRGBA(
     if (!path) return false;
 
     int channels;
-    const std::string resolvedPath = p3d::ResolvePathCaseInsensitive(*path);
+    const std::string resolvedPath = p3d::io::ResolvePath(*path);
     unsigned char* px = stbi_load(resolvedPath.c_str(), &outWidth, &outHeight, &channels, 4);
     if (!px) return false;
     if (IsUnmodifiedRechanPng(*path, px, outWidth, outHeight)) {
@@ -541,7 +544,7 @@ bool ModLoader::GetTextureOverridePixels(const char* scope, const char* name, s1
     if (!path) return false;
 
     int pw, ph, channels;
-    const std::string resolvedPath = p3d::ResolvePathCaseInsensitive(*path);
+    const std::string resolvedPath = p3d::io::ResolvePath(*path);
     unsigned char* px = stbi_load(resolvedPath.c_str(), &pw, &ph, &channels, 4);
     if (!px) return false;
     if (IsUnmodifiedRechanPng(*path, px, pw, ph)) {
@@ -579,7 +582,7 @@ bool ModLoader::GetIndexedTextureOverride(
     if (!path) return false;
 
     int pw, ph, channels;
-    const std::string resolvedPath = p3d::ResolvePathCaseInsensitive(*path);
+    const std::string resolvedPath = p3d::io::ResolvePath(*path);
     unsigned char* px = stbi_load(resolvedPath.c_str(), &pw, &ph, &channels, 4);
     if (!px) return false;
     if (IsUnmodifiedRechanPng(*path, px, pw, ph)) {
@@ -684,7 +687,7 @@ const std::string* ModLoader::GetDataPath(u32 crc) const {
 bool ModLoader::IsUnmodifiedTextureDump(const char* path) const {
     if (!path || !path[0]) return false;
     int width = 0, height = 0, channels = 0;
-    const std::string resolvedPath = p3d::ResolvePathCaseInsensitive(path);
+    const std::string resolvedPath = p3d::io::ResolvePath(path);
     unsigned char* rgba = stbi_load(resolvedPath.c_str(), &width, &height, &channels, 4);
     if (!rgba) return false;
     const bool unchanged = IsUnmodifiedRechanPng(path, rgba, width, height);
@@ -743,10 +746,9 @@ const std::string* ModLoader::FindSoundOverridePath(const char* scope, const cha
 // format AssetExporter::WritePCMWav produces, and what any common WAV editor
 // exports by default.
 static bool ReadWavPCM16(const std::string& path, std::vector<s16>& outPcm, u32& outSampleRate, u32& outChannels) {
-    std::ifstream file(p3d::ResolvePathCaseInsensitive(path), std::ios::binary);
-    if (!file.is_open()) return false;
-
-    std::vector<u8> data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    auto fileData = p3d::io::ReadFile(p3d::io::ResolvePath(path));
+    if (!fileData) return false;
+    std::vector<u8> data = std::move(*fileData);
     if (data.size() < 12 || memcmp(data.data(), "RIFF", 4) != 0 || memcmp(data.data() + 8, "WAVE", 4) != 0) {
         return false;
     }

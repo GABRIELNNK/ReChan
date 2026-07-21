@@ -1,6 +1,6 @@
 workspace "rechan"
     architecture "x86_64"
-    configurations { "Debug", "Release", "ReleaseASan", "Shipping" }
+    configurations { "Debug", "Release", "ReleaseASan", "Shipping", "Headless" }
     location "build"
     startproject "rechan"
 
@@ -66,6 +66,18 @@ project "rechan"
             "GL", "X11", "Xcursor", "Xi", "Xinerama", "Xrandr",
             "SDL2", "pthread", "dl", "m",
         }
+
+    filter "configurations:Headless"
+        defines { "NDEBUG", "RC_PLATFORM_NULL" }
+        runtime "Release"
+        optimize "on"
+        symbols "on"
+
+    filter { "system:linux", "configurations:Headless" }
+        removelinks { "GL", "X11", "Xcursor", "Xi", "Xinerama", "Xrandr", "SDL2" }
+
+    filter { "system:windows", "configurations:Headless" }
+        removelinks { "opengl32" }
 
     filter "configurations:Debug"
         runtime "Debug"

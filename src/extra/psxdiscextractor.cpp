@@ -1,6 +1,7 @@
 #include "gen/common.h"
 #include "extra/psxdiscextractor.h"
 #include "p3d/byteread.h"
+#include "p3d/fileio.h"
 
 #include <cstdio>
 #include <cstring>
@@ -9,37 +10,11 @@
 #include <stdexcept>
 #include <filesystem>
 
-#ifdef RC_PLATFORM_WINDOWS
-#define NOMINMAX // windows.h's max/min macros would otherwise break std::max/std::min below
-#include <windows.h>
-#else
-#include <sys/stat.h>
-#endif
-
 PsxDiscExtractor* g_psxDiscExtractor = nullptr;
 
-static bool fileExists(const char* path) {
-#ifdef RC_PLATFORM_WINDOWS
-    DWORD attr = GetFileAttributesA(path);
-    return attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY);
-#else
-    struct stat st;
-    return stat(path, &st) == 0 && S_ISREG(st.st_mode);
-#endif
-}
-
-static bool dirExists(const char* path) {
-#ifdef RC_PLATFORM_WINDOWS
-    DWORD attr = GetFileAttributesA(path);
-    return attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY);
-#else
-    struct stat st;
-    return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
-#endif
-}
-
 bool PsxDiscExtractor::AreAssetsPresent() {
-    return dirExists("xc") && dirExists("fe") && dirExists("tim") && fileExists("license.tim");
+    return p3d::io::DirExists("xc") && p3d::io::DirExists("fe") && p3d::io::DirExists("tim")
+        && p3d::io::FileExists("license.tim");
 }
 
 enum class RawKind { None, Raw2352, Raw2336 };
@@ -108,16 +83,13 @@ struct DirEntry {
 class IsoReader {
 public:
     explicit IsoReader(const std::string& path) {
-        m_file = fopen(path.c_str(), "rb");
-        if (!m_file) {
+        if (!m_file.Open(path, p3d::io::FileHandle::Mode::Read, /*resolveCase=*/false)) {
             throw std::runtime_error("Could not open disc image: " + path);
         }
         DetectLayout();
     }
 
-    ~IsoReader() {
-        if (m_file) fclose(m_file);
-    }
+    ~IsoReader() = default;
 
     IsoReader(const IsoReader&) = delete;
     IsoReader& operator=(const IsoReader&) = delete;
@@ -142,11 +114,11 @@ public:
 
     std::vector<u8> ReadRawSector(u32 lba) const {
         const long offset = (long)lba * m_layout.sectorSize;
-        if (fseek(m_file, offset, SEEK_SET) != 0) {
+        if (!m_file.Seek(offset, SEEK_SET)) {
             throw std::runtime_error("Failed seeking raw sector");
         }
         std::vector<u8> data((size_t)m_layout.sectorSize);
-        if (fread(data.data(), 1, data.size(), m_file) != data.size()) {
+        if (m_file.Read(data.data(), data.size()) != data.size()) {
             throw std::runtime_error("Failed reading raw sector");
         }
         return data;
@@ -179,11 +151,11 @@ public:
 private:
     std::vector<u8> ReadLogicalBlock(u32 lba, const SectorLayout& layout) const {
         const long offset = (long)lba * layout.sectorSize + layout.dataOffset;
-        if (fseek(m_file, offset, SEEK_SET) != 0) {
+        if (!m_file.Seek(offset, SEEK_SET)) {
             throw std::runtime_error("Failed seeking logical block");
         }
         std::vector<u8> data((size_t)layout.dataSize);
-        if (fread(data.data(), 1, data.size(), m_file) != data.size()) {
+        if (m_file.Read(data.data(), data.size()) != data.size()) {
             throw std::runtime_error("Failed reading logical block");
         }
         return data;
@@ -207,7 +179,7 @@ private:
         throw std::runtime_error("Could not detect a supported PSX disc layout");
     }
 
-    FILE* m_file = nullptr;
+    mutable p3d::io::FileHandle m_file;
     SectorLayout m_layout{};
 };
 
@@ -309,17 +281,11 @@ std::string JoinPath(const std::vector<std::string>& parts) {
 void WriteFile(const std::string& path, const std::vector<u8>& data) {
     std::filesystem::path outPath(path);
     if (outPath.has_parent_path()) {
-        std::filesystem::create_directories(outPath.parent_path());
+        p3d::io::CreateDirectories(outPath.parent_path().string());
     }
-    FILE* f = fopen(path.c_str(), "wb");
-    if (!f) {
-        throw std::runtime_error("Could not write file: " + path);
-    }
-    if (!data.empty() && fwrite(data.data(), 1, data.size(), f) != data.size()) {
-        fclose(f);
+    if (!p3d::io::WriteFile(path, data)) {
         throw std::runtime_error("Failed writing file: " + path);
     }
-    fclose(f);
 }
 
 static constexpr const char* kExpectedSerial = "SLUS-00684";
@@ -431,16 +397,16 @@ void PsxDiscExtractor::StartExtractAsync() {
 }
 
 void PsxDiscExtractor::ScanThreadFunc() {
-    std::error_code ec;
-    std::filesystem::create_directories(kDiscImageDir, ec);
+    p3d::io::CreateDirectories(kDiscImageDir);
 
     m_candidates.clear();
-    if (std::filesystem::is_directory(kDiscImageDir, ec)) {
-        for (const auto& entry : std::filesystem::directory_iterator(kDiscImageDir, ec)) {
-            if (!entry.is_regular_file(ec)) continue;
-            std::string ext = ToLower(entry.path().extension().string());
+    if (p3d::io::DirExists(kDiscImageDir)) {
+        for (const p3d::io::DirEntryInfo& entry : p3d::io::ListDirectory(kDiscImageDir, /*recursive=*/false)) {
+            if (entry.isDirectory) continue;
+            const size_t dot = entry.name.find_last_of('.');
+            const std::string ext = (dot != std::string::npos) ? ToLower(entry.name.substr(dot)) : std::string();
             if (ext == ".bin" || ext == ".iso") {
-                m_candidates.push_back(entry.path().string());
+                m_candidates.push_back(entry.fullPath);
             }
         }
     }

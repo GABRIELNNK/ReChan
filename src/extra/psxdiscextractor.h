@@ -1,5 +1,6 @@
 #pragma once
 #include "core.h"
+#include "pc/apppaths.h"
 #include <thread>
 #include <atomic>
 #include <string>
@@ -33,7 +34,7 @@ public:
     // Sentinel check for whether extracted PSX assets are already present (relative to CWD).
     static bool AreAssetsPresent();
 
-    static constexpr const char* kDiscImageDir = "discimage";
+    static constexpr const char* kDiscImageDir = apppaths::kDiscImageDir;
 
 private:
     void ScanThreadFunc();

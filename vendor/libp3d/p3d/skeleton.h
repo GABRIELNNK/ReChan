@@ -30,6 +30,9 @@ enum STreeFlag : u32 {
 struct STreeJoint {
     u32 nameUID;              // +0: p3dHash of joint name
     u32 flags;                // +4: runtime flags (pre-computed in file)
+    // PC-only: human-readable joint name (e.g. "Bip01 Head"), preserved from
+    // the source PString for editor/export display. Not present on PSX.
+    char name[64] = {};
     s32 translationX;         // +12: set by animation system
     s32 translationY;         // +16
     s32 translationZ;         // +20

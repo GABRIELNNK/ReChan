@@ -1,12 +1,26 @@
 #include "gen/common.h"
 #include "pc/audio.h"
 #include "gen/config.h"
-#include "p3d/filepath.h"
+#include "p3d/fileio.h"
 #include "miniaudio.h"
 #include <vector>
 #include <mutex>
 #include <cmath>
 #include <chrono>
+
+#if defined(RC_PLATFORM_SWITCH)
+// Switch output goes through libnx audout (48kHz, 2ch, s16) instead of
+// miniaudio (which has no Horizon OS backend). The whole mixing/voice engine
+// -- audioCallback and everything below -- is reused unchanged; only the
+// device output layer differs. See the RC_PLATFORM_SWITCH branches in
+// Init/Shutdown and SwitchAudioThreadFunc.
+#include <switch.h>
+#include <malloc.h>
+#include <cstdlib>
+#include <cstring>
+#include <thread>
+#include <atomic>
+#endif
 
 // Internal sample storage
 struct InternalSample {
@@ -720,6 +734,49 @@ static void audioCallback(ma_device* device, void* output, const void* /*input*/
     }
 }
 
+#if defined(RC_PLATFORM_SWITCH)
+// --- libnx audout output backend -------------------------------------------
+// A dedicated thread double-buffers audio: wait for a played buffer to free,
+// run the shared mixer (audioCallback) to produce f32, convert to s16, and
+// re-queue it. 1024 frames @ 48kHz ~= 21ms per buffer.
+static constexpr u32 kSwitchAudioFrames = 1024;
+static std::thread g_switchAudioThread;
+static std::atomic<bool> g_switchAudioRun{false};
+static AudioOutBuffer g_switchBuffers[2] = {};
+static void* g_switchBufferMem[2] = { nullptr, nullptr };
+static f32* g_switchMixBuffer = nullptr;
+
+static void SwitchAudioThreadFunc() {
+    const u32 channels = g_outputChannels;
+    const u32 frames = kSwitchAudioFrames;
+    const u32 samples = frames * channels;
+
+    while (g_switchAudioRun.load(std::memory_order_relaxed)) {
+        AudioOutBuffer* released = nullptr;
+        u32 releasedCount = 0;
+        // 100ms timeout so shutdown (run flag cleared) is noticed promptly
+        // even if playback stalls.
+        Result rc = audoutWaitPlayFinish(&released, &releasedCount, 100000000ULL);
+        if (R_FAILED(rc) || releasedCount == 0 || !released) {
+            continue;
+        }
+
+        // Reuse the platform-independent mixer. Passing nullptr for the
+        // device makes it fall back to g_outputChannels (see audioCallback).
+        audioCallback(nullptr, g_switchMixBuffer, nullptr, frames);
+
+        s16* dst = static_cast<s16*>(released->buffer);
+        for (u32 i = 0; i < samples; i++) {
+            f32 s = g_switchMixBuffer[i];
+            s = s > 1.0f ? 1.0f : (s < -1.0f ? -1.0f : s);
+            dst[i] = static_cast<s16>(s * 32767.0f);
+        }
+        released->data_size = samples * sizeof(s16);
+        audoutAppendAudioOutBuffer(released);
+    }
+}
+#endif // RC_PLATFORM_SWITCH
+
 // AudioEngine implementation
 
 bool AudioEngine::Init() {
@@ -750,6 +807,62 @@ bool AudioEngine::Init() {
     g_listener = {};
     g_listener.valid = false;
 
+#if defined(RC_PLATFORM_SWITCH)
+    // Real audio on Switch via libnx audout (RC_PLATFORM_NULL is also defined
+    // on this build to gate the auto-updater etc., but audio is now live, so
+    // this branch takes precedence over the null no-op below).
+    if (R_FAILED(audoutInitialize())) {
+        LOG("AudioEngine: audoutInitialize failed");
+        return false;
+    }
+    if (R_FAILED(audoutStartAudioOut())) {
+        LOG("AudioEngine: audoutStartAudioOut failed");
+        audoutExit();
+        return false;
+    }
+
+    g_deviceSampleRate = audoutGetSampleRate();     // 48000
+    g_outputChannels   = audoutGetChannelCount();   // 2
+    if (g_outputChannels == 0) g_outputChannels = DEFAULT_MIX_CHANNELS;
+
+    const u32 frames = kSwitchAudioFrames;
+    const size_t dataBytes = (size_t)frames * g_outputChannels * sizeof(s16);
+    const size_t alignedBytes = (dataBytes + 0xFFF) & ~(size_t)0xFFF; // audout wants 0x1000 alignment/size
+
+    g_switchMixBuffer = static_cast<f32*>(malloc((size_t)frames * g_outputChannels * sizeof(f32)));
+    bool alloc_ok = (g_switchMixBuffer != nullptr);
+    for (int i = 0; i < 2 && alloc_ok; i++) {
+        g_switchBufferMem[i] = memalign(0x1000, alignedBytes);
+        if (!g_switchBufferMem[i]) { alloc_ok = false; break; }
+        memset(g_switchBufferMem[i], 0, alignedBytes);
+        g_switchBuffers[i].next        = nullptr;
+        g_switchBuffers[i].buffer      = g_switchBufferMem[i];
+        g_switchBuffers[i].buffer_size = alignedBytes;
+        g_switchBuffers[i].data_size   = dataBytes;
+        g_switchBuffers[i].data_offset = 0;
+        audoutAppendAudioOutBuffer(&g_switchBuffers[i]);
+    }
+    if (!alloc_ok) {
+        LOG("AudioEngine: Switch audio buffer alloc failed");
+        audoutStopAudioOut();
+        audoutExit();
+        free(g_switchMixBuffer); g_switchMixBuffer = nullptr;
+        for (int i = 0; i < 2; i++) { free(g_switchBufferMem[i]); g_switchBufferMem[i] = nullptr; }
+        return false;
+    }
+
+    g_switchAudioRun.store(true, std::memory_order_relaxed);
+    g_switchAudioThread = std::thread(SwitchAudioThreadFunc);
+
+    g_initialized = true;
+    LOG("AudioEngine: initialized (Switch audout %u Hz, %u ch, %u frames/buf)",
+        g_deviceSampleRate, g_outputChannels, frames);
+    return true;
+#elif defined(RC_PLATFORM_NULL)
+    g_initialized = true;
+    LOG("AudioEngine: initialized (headless/null backend, no device)");
+    return true;
+#else
     ma_device_config config = ma_device_config_init(ma_device_type_playback);
     config.playback.format = ma_format_f32;
     config.playback.channels = 0; // Native device channel layout.
@@ -778,16 +891,31 @@ bool AudioEngine::Init() {
     LOG("AudioEngine: initialized (device %u Hz, %u ch, period %u frames)",
         g_deviceSampleRate, g_outputChannels, config.periodSizeInFrames);
     return true;
+#endif
 }
 
 void AudioEngine::Shutdown() {
     if (!g_initialized) return;
 
+#if defined(RC_PLATFORM_SWITCH)
+    // Stop the audio thread first (so it stops touching voices/samples), then
+    // tear down audout and the buffers.
+    g_switchAudioRun.store(false, std::memory_order_relaxed);
+    if (g_switchAudioThread.joinable()) g_switchAudioThread.join();
+#endif
+
     StopAllVoices();
     StopMusic();
     UnloadAllSamples();
 
+#if defined(RC_PLATFORM_SWITCH)
+    audoutStopAudioOut();
+    audoutExit();
+    free(g_switchMixBuffer); g_switchMixBuffer = nullptr;
+    for (int i = 0; i < 2; i++) { free(g_switchBufferMem[i]); g_switchBufferMem[i] = nullptr; }
+#elif !defined(RC_PLATFORM_NULL)
     ma_device_uninit(&g_device);
+#endif
     g_initialized = false;
 
     LOG("AudioEngine: shutdown");
@@ -1126,7 +1254,7 @@ bool AudioEngine::PlayMusic(const char* path, f32 volume, bool loop) {
     std::lock_guard<std::mutex> lock(g_musicMutex);
 
     ma_decoder_config decoderConfig = ma_decoder_config_init(ma_format_f32, MUSIC_CHANNELS, g_deviceSampleRate);
-    const std::string resolvedPath = p3d::ResolvePathCaseInsensitive(path);
+    const std::string resolvedPath = p3d::io::ResolvePath(path);
     if (ma_decoder_init_file(resolvedPath.c_str(), &decoderConfig, &g_musicDecoder) != MA_SUCCESS) {
         LOG("AudioEngine: failed to load music '%s'", path);
         return false;

@@ -269,6 +269,13 @@ public:
     // Create/destroy a raw R16UI texture for PSX VRAM upload
     virtual u32  CreateVRAMTexture(int w, int h, const u16* data) = 0;
     virtual void DestroyVRAMTexture(u32 handle) = 0;
+    // Re-uploads pixel data into an existing VRAM texture (same w/h as it
+    // was created with) without reallocating GPU storage. Used for frequent,
+    // same-size refreshes (e.g. Director::updateVramAnims' per-frame
+    // flipbook updates) where a destroy+recreate cycle every frame is both
+    // wasteful and, on tighter GPU memory budgets, can exhaust the
+    // allocator; a no-op safety net if handle is 0.
+    virtual void UpdateVRAMTexture(u32 handle, int w, int h, const u16* data) = 0;
 
     // Real-texture rendering: an alternate 3D texturing path that samples a
     // real 2D texture (bound via SetTexture) instead of the PSX VRAM atlas.

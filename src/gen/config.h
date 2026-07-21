@@ -60,7 +60,12 @@
 // resolution/palette cap for ModLoader texture overrides.
 #define REAL_TEXTURE_RENDERING 1
 
+// Downloads a release archive and self-restarts the process
+#if defined(RC_PLATFORM_NULL)
+#define AUTO_UPDATER 0
+#else
 #define AUTO_UPDATER (CUSTOM_MENU && 1)
+#endif
 
 // Graphics improvements shadows and post processing.
 #define MODERN_GRAPHICS 1

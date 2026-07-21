@@ -15,7 +15,13 @@ static constexpr u16 CHUNK_STREE_MAPPING = 0x4123;
 static constexpr u16 CHUNK_REST_POSE     = 0x6125;
 
 // Read PString: u8 length prefix + chars. Returns name hash.
-static u32 ReadPString(const u8* data, u32 maxLen, u32& outBytesRead) {
+// When outName is provided, also copies the decoded string there (truncated
+// to outNameCap - 1, always null-terminated).
+static u32 ReadPString(const u8* data, u32 maxLen, u32& outBytesRead,
+                       char* outName = nullptr, u32 outNameCap = 0) {
+    if (outName && outNameCap > 0) {
+        outName[0] = '\0';
+    }
     if (maxLen < 1) {
         outBytesRead = 0;
         return 0;
@@ -30,6 +36,11 @@ static u32 ReadPString(const u8* data, u32 maxLen, u32& outBytesRead) {
     std::memcpy(buf, data + 1, copyLen);
     buf[copyLen] = '\0';
     outBytesRead = 1 + len;
+    if (outName && outNameCap > 0) {
+        u32 nameCopyLen = (copyLen < outNameCap - 1) ? copyLen : outNameCap - 1;
+        std::memcpy(outName, buf, nameCopyLen);
+        outName[nameCopyLen] = '\0';
+    }
     return p3dHash(buf);
 }
 
@@ -256,9 +267,9 @@ void STreeData::ComputeWorldMatricesWithCallbacks(Mat4* outMatrices) {
 static bool ParseJointChunk(const u8* data, u32 dataSize, STreeJoint* out) {
     u32 p = 0;
 
-    // PString -> nameUID
+    // PString -> nameUID (+ human-readable name for PC-only tooling)
     u32 nameBytes = 0;
-    out->nameUID = ReadPString(data + p, dataSize - p, nameBytes);
+    out->nameUID = ReadPString(data + p, dataSize - p, nameBytes, out->name, sizeof(out->name));
     p += nameBytes;
 
     // Long -> flags (PSX stores pre-computed traversal flags here)

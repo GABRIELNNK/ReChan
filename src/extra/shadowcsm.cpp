@@ -372,6 +372,20 @@ void ShadowCSM::SetQuality(ShadowQuality quality) {
         quality = SHADOW_QUALITY_OFF;
     }
 
+#if defined(RC_PLATFORM_SWITCH)
+    // Shadows are force-disabled on Switch, regardless of the persisted
+    // setting or menu selection. The cascade shadow map is by far the
+    // newest/heaviest 3D subsystem: per-cascade depth + R32UI instance-id
+    // render targets (up to 8192x8192 = ~1.5GB at VERY_HIGH, which the
+    // Switch's 4GB shared RAM can't back), a whole extra shadow-caster
+    // render pass, and the instance-id path whose GLES port drives a
+    // float fragment output into an integer colour attachment -- an invalid
+    // GL state that mesa's Switch driver can abort() on (a guest-side fatal).
+    // Cutting shadows here keeps the first working Switch 3D scene to the
+    // core geometry+VRAM-texture path; re-enabling is a later, separate task.
+    quality = SHADOW_QUALITY_OFF;
+#endif
+
     const ShadowQuality previousQuality = s_quality;
     s_quality = quality;
 

@@ -1,5 +1,6 @@
 #pragma once
 #include "core.h"
+#include "pc/apppaths.h"
 
 struct GameSettings {
     bool Load(const char* path);
@@ -8,4 +9,4 @@ struct GameSettings {
 
 extern GameSettings g_settings;
 
-static constexpr const char* SETTINGS_PATH = "userfiles/game.ini";
+static constexpr const char* SETTINGS_PATH = apppaths::kSettingsPath;

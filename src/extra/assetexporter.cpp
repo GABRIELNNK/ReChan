@@ -11,13 +11,13 @@
 #include "p3d/byteread.h"
 #include "p3d/hash.h"
 #include "p3d/texture.h"
-#include "p3d/filepath.h"
+#include "p3d/fileio.h"
 #include "snd/adpcm.h"
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
+#include <sstream>
 #include <map>
 #include <set>
 #include <unordered_map>
@@ -76,8 +76,8 @@ void AssetExporter::ClearCatalog() {
 // Directory scanners
 
 void AssetExporter::ScanRCHARS() {
-    const std::string rcharsDir = p3d::ResolvePathCaseInsensitive("RCHARS");
-    if (!std::filesystem::is_directory(rcharsDir)) {
+    const std::string rcharsDir = p3d::io::ResolvePath("RCHARS");
+    if (!p3d::io::DirExists(rcharsDir)) {
         LOG("[AssetExporter] RCHARS/ directory not found");
         return;
     }
@@ -90,8 +90,8 @@ void AssetExporter::ScanRCHARS() {
         char rrPath[256];
         std::snprintf(rrPath, sizeof(rrPath), "RCHARS/%s.RR", name);
 
-        const std::string resolvedRrPath = p3d::ResolvePathCaseInsensitive(rrPath);
-        if (!std::filesystem::exists(resolvedRrPath)) continue;
+        const std::string resolvedRrPath = p3d::io::ResolvePath(rrPath);
+        if (!p3d::io::FileExists(resolvedRrPath)) continue;
 
         u32 crc = p3dHash(name);
 
@@ -112,8 +112,8 @@ void AssetExporter::ScanRCHARS() {
 }
 
 void AssetExporter::ScanRCHARS_Textures() {
-    const std::string rcharsDir = p3d::ResolvePathCaseInsensitive("RCHARS");
-    if (!std::filesystem::is_directory(rcharsDir)) return;
+    const std::string rcharsDir = p3d::io::ResolvePath("RCHARS");
+    if (!p3d::io::DirExists(rcharsDir)) return;
 
     for (s32 type = 0; type < 29; type++) {
         const char* name = g_charNameTable[type];
@@ -121,8 +121,8 @@ void AssetExporter::ScanRCHARS_Textures() {
 
         char rrPath[256];
         std::snprintf(rrPath, sizeof(rrPath), "RCHARS/%s.RR", name);
-        const std::string resolvedRrPath = p3d::ResolvePathCaseInsensitive(rrPath);
-        if (!std::filesystem::exists(resolvedRrPath)) continue;
+        const std::string resolvedRrPath = p3d::io::ResolvePath(rrPath);
+        if (!p3d::io::FileExists(resolvedRrPath)) continue;
 
         std::string lowerName = name;
         std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(),
@@ -148,18 +148,18 @@ void AssetExporter::ScanLevelDirectory() {
     const char* levelDirs[] = { "rtarget", "RTARGET", nullptr };
 
     for (int d = 0; levelDirs[d]; d++) {
-        if (!std::filesystem::is_directory(levelDirs[d])) continue;
+        if (!p3d::io::DirExists(levelDirs[d])) continue;
 
-        for (const auto& entry : std::filesystem::directory_iterator(levelDirs[d])) {
-            if (!entry.is_regular_file()) continue;
+        for (const p3d::io::DirEntryInfo& entry : p3d::io::ListDirectory(levelDirs[d], /*recursive=*/false)) {
+            if (entry.isDirectory) continue;
 
-            std::string ext = entry.path().extension().string();
+            std::string ext = std::filesystem::path(entry.name).extension().string();
             std::transform(ext.begin(), ext.end(), ext.begin(),
                            [](char c) { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); });
 
             if (ext != ".lcf" && ext != ".gcf") continue;
 
-            std::string stem = entry.path().stem().string();
+            std::string stem = std::filesystem::path(entry.name).stem().string();
             std::transform(stem.begin(), stem.end(), stem.begin(),
                            [](char c) { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); });
 
@@ -168,8 +168,7 @@ void AssetExporter::ScanLevelDirectory() {
             AssetEntry asset;
             asset.name = stem;
             asset.category = AssetCategory::StaticMesh;
-            asset.filePath = entry.path().string();
-            std::replace(asset.filePath.begin(), asset.filePath.end(), '\\', '/');
+            asset.filePath = p3d::io::NormalizeSeparators(entry.fullPath);
             asset.crc = crc;
             m_entries.push_back(std::move(asset));
         }
@@ -181,12 +180,12 @@ void AssetExporter::ScanTIMDirectory() {
     const char* timDirs[] = { "tim", "TIM", nullptr };
 
     for (int d = 0; timDirs[d]; d++) {
-        if (!std::filesystem::is_directory(timDirs[d])) continue;
+        if (!p3d::io::DirExists(timDirs[d])) continue;
 
-        for (const auto& entry : std::filesystem::recursive_directory_iterator(timDirs[d])) {
-            if (!entry.is_regular_file()) continue;
+        for (const p3d::io::DirEntryInfo& entry : p3d::io::ListDirectory(timDirs[d], /*recursive=*/true)) {
+            if (entry.isDirectory) continue;
 
-            std::string ext = entry.path().extension().string();
+            std::string ext = std::filesystem::path(entry.name).extension().string();
             // Case-insensitive .tim check
             bool isTim = ext.size() == 4 &&
                 std::tolower(static_cast<unsigned char>(ext[1])) == 't' &&
@@ -195,7 +194,7 @@ void AssetExporter::ScanTIMDirectory() {
 
             if (!isTim) continue;
 
-            std::string stem = entry.path().stem().string();
+            std::string stem = std::filesystem::path(entry.name).stem().string();
             std::transform(stem.begin(), stem.end(), stem.begin(),
                            [](char c) { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); });
 
@@ -204,8 +203,7 @@ void AssetExporter::ScanTIMDirectory() {
             AssetEntry asset;
             asset.name = stem;
             asset.category = AssetCategory::Texture;
-            asset.filePath = entry.path().string();
-            std::replace(asset.filePath.begin(), asset.filePath.end(), '\\', '/');
+            asset.filePath = p3d::io::NormalizeSeparators(entry.fullPath);
             asset.crc = crc;
             m_entries.push_back(std::move(asset));
         }
@@ -217,12 +215,12 @@ void AssetExporter::ScanSoundDirectory() {
     const char* soundDirs[] = { "sound", "SOUND", nullptr };
 
     for (int d = 0; soundDirs[d]; d++) {
-        if (!std::filesystem::is_directory(soundDirs[d])) continue;
+        if (!p3d::io::DirExists(soundDirs[d])) continue;
 
-        for (const auto& entry : std::filesystem::recursive_directory_iterator(soundDirs[d])) {
-            if (!entry.is_regular_file()) continue;
+        for (const p3d::io::DirEntryInfo& entry : p3d::io::ListDirectory(soundDirs[d], /*recursive=*/true)) {
+            if (entry.isDirectory) continue;
 
-            std::string ext = entry.path().extension().string();
+            std::string ext = std::filesystem::path(entry.name).extension().string();
             std::string lowerExt = ext;
             std::transform(lowerExt.begin(), lowerExt.end(), lowerExt.begin(),
                            [](char c) { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); });
@@ -231,7 +229,7 @@ void AssetExporter::ScanSoundDirectory() {
                 lowerExt != ".wap" && lowerExt != ".fag" && lowerExt != ".clp"
                 && lowerExt != ".dlg") continue;
 
-            std::string stem = entry.path().stem().string();
+            std::string stem = std::filesystem::path(entry.name).stem().string();
             std::transform(stem.begin(), stem.end(), stem.begin(),
                            [](char c) { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); });
 
@@ -240,8 +238,7 @@ void AssetExporter::ScanSoundDirectory() {
             AssetEntry asset;
             asset.name = stem;
             asset.category = AssetCategory::Sound;
-            asset.filePath = entry.path().string();
-            std::replace(asset.filePath.begin(), asset.filePath.end(), '\\', '/');
+            asset.filePath = p3d::io::NormalizeSeparators(entry.fullPath);
             asset.crc = crc;
             m_entries.push_back(std::move(asset));
         }
@@ -258,15 +255,8 @@ void AssetExporter::ScanDataDirectory() {
 // File I/O helpers
 
 std::vector<u8> AssetExporter::ReadFileBytes(const std::string& path) {
-    std::ifstream file(p3d::ResolvePathCaseInsensitive(path), std::ios::binary | std::ios::ate);
-    if (!file.is_open()) return {};
-
-    size_t size = static_cast<size_t>(file.tellg());
-    file.seekg(0, std::ios::beg);
-
-    std::vector<u8> data(size);
-    file.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(size));
-    return data;
+    auto data = p3d::io::ReadFile(p3d::io::ResolvePath(path));
+    return data ? std::move(*data) : std::vector<u8>{};
 }
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -301,8 +291,9 @@ static void AppendBE32(std::vector<u8>& bytes, u32 value) {
 static bool WriteTaggedPng(const std::string& path, int width, int height, const void* rgba, int stride) {
     if (!rgba || width <= 0 || height <= 0
         || !stbi_write_png(path.c_str(), width, height, 4, rgba, stride)) return false;
-    std::ifstream input(path, std::ios::binary);
-    std::vector<u8> png((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    auto pngData = p3d::io::ReadFile(path);
+    if (!pngData) return false;
+    std::vector<u8> png = std::move(*pngData);
     if (png.size() < 33) return false;
 
     const u32 hash = HashAssetBytes(static_cast<const u8*>(rgba), static_cast<size_t>(height) * stride);
@@ -317,9 +308,7 @@ static bool WriteTaggedPng(const std::string& path, int width, int height, const
     AppendBE32(chunk, PngCrc32(chunk.data() + crcStart, chunk.size() - crcStart));
     png.insert(png.begin() + 33, chunk.begin(), chunk.end());
 
-    std::ofstream output(path, std::ios::binary | std::ios::trunc);
-    output.write(reinterpret_cast<const char*>(png.data()), static_cast<std::streamsize>(png.size()));
-    return output.good();
+    return p3d::io::WriteFile(path, png);
 }
 
 bool AssetExporter::ConvertTIMtoPNG(const std::vector<u8>& rawData,
@@ -335,7 +324,7 @@ bool AssetExporter::ConvertTIMtoPNG(const std::vector<u8>& rawData,
 
     std::string dir = outputPath.substr(0, outputPath.find_last_of("/\\"));
     if (!dir.empty()) {
-        std::filesystem::create_directories(dir);
+        p3d::io::CreateDirectories(dir);
     }
 
     const bool result = WriteTaggedPng(outputPath, img->width, img->height,
@@ -488,7 +477,7 @@ static void UploadP3DTexToVRAM(const u8* data, u32 size, PsxVRAM& vram,
 
 std::vector<TexManifest> AssetExporter::ExportTexChunks(
     const std::vector<TexChunkExport>& chunks, const std::string& outputDir) {
-    std::filesystem::create_directories(outputDir);
+    p3d::io::CreateDirectories(outputDir);
     std::vector<TexManifest> manifests;
 
     for (const auto& chunk : chunks) {
@@ -515,9 +504,11 @@ static void GlbWriteU32(std::vector<u8>& buf, u32 v) {
 static void GlbWriteF32(std::vector<u8>& buf, float v) {
     u32 bits; memcpy(&bits, &v, 4); GlbWriteU32(buf, bits);
 }
-static void FileWriteU32(std::ofstream& f, u32 v) {
-    char b[4] = { (char)(v & 0xFF),(char)((v >> 8) & 0xFF),(char)((v >> 16) & 0xFF),(char)((v >> 24) & 0xFF) };
-    f.write(b, 4);
+static void BufWriteU32(std::vector<u8>& buf, u32 v) {
+    buf.push_back((u8)(v & 0xFF));
+    buf.push_back((u8)((v >> 8) & 0xFF));
+    buf.push_back((u8)((v >> 16) & 0xFF));
+    buf.push_back((u8)((v >> 24) & 0xFF));
 }
 
 std::vector<MatPrimitive> AssetExporter::GroupByMaterial(
@@ -714,17 +705,42 @@ bool AssetExporter::WriteGLB(const std::string& path, const std::string& meshNam
     if (skinned) J += ",\"skin\":0";
     J += "}";
     if (skinned) {
+        // Blender round-trips per-node custom properties (bones/objects have
+        // a real Custom Properties slot) but has no Blender data-block that
+        // corresponds to a glTF *skin*, so anything placed on the skin's own
+        // extras gets silently dropped on export. Carry the jointOrderMap on
+        // joint 0's extras instead, where it's proven to survive.
+        std::string jointOrderMapJson;
+        if (skeleton->jointOrderMap && skeleton->numMapEntries > 0) {
+            jointOrderMapJson = ",\"rchJointOrderMap\":[";
+            for (u32 param = 0; param < skeleton->numMapEntries; ++param) {
+                const u32 jointIdx = skeleton->jointOrderMap[param];
+                const u32 nameUID = (jointIdx < skeleton->numJoints)
+                    ? skeleton->joints[jointIdx].nameUID : 0;
+                jointOrderMapJson += std::to_string(nameUID);
+                if (param + 1 < skeleton->numMapEntries) jointOrderMapJson += ',';
+            }
+            jointOrderMapJson += "]";
+        }
+
         for (u32 joint = 0; joint < skeleton->numJoints; ++joint) {
             const STreeJoint& source = skeleton->joints[joint];
-            char encodedName[192];
-            std::snprintf(encodedName, sizeof(encodedName),
-                          "rch_%08x_%08x_%d_%d_%d_%d_%d_%d_%d",
+            std::string boneName = source.name[0] ? source.name
+                : ("Joint_" + std::to_string(joint));
+            char extras[192];
+            std::snprintf(extras, sizeof(extras),
+                          "{\"rchNameUID\":%u,\"rchFlags\":%u,\"rchCapture\":%d,"
+                          "\"rchTx\":%d,\"rchTy\":%d,\"rchTz\":%d,"
+                          "\"rchRx\":%d,\"rchRy\":%d,\"rchRz\":%d",
                           source.nameUID, source.flags, source.captureBufferIdx,
                           source.translationX, source.translationY, source.translationZ,
                           source.rotationX, source.rotationY, source.rotationZ);
+            std::string extrasJson = extras;
+            if (joint == 0) extrasJson += jointOrderMapJson;
+            extrasJson += "}";
             Mat4 world = jointWorld[joint];
             world.m[12] /= 4096.0f; world.m[13] /= 4096.0f; world.m[14] /= 4096.0f;
-            J += ",{\"name\":\"" + std::string(encodedName) + "\",\"matrix\":[";
+            J += ",{\"name\":\"" + esc(boneName) + "\",\"extras\":" + extrasJson + ",\"matrix\":[";
             for (int component = 0; component < 16; ++component) {
                 J += ff(world.m[component]);
                 if (component != 15) J += ',';
@@ -770,7 +786,8 @@ bool AssetExporter::WriteGLB(const std::string& path, const std::string& meshNam
             J += std::to_string(joint + 1);
             if (joint + 1 < skeleton->numJoints) J += ',';
         }
-        J += "],\"inverseBindMatrices\":" + std::to_string(valid.size() * attributesPerPrimitive) + "}]";
+        J += "]";
+        J += ",\"inverseBindMatrices\":" + std::to_string(valid.size() * attributesPerPrimitive) + "}]";
     }
 
     if (!texNames.empty()) {
@@ -830,15 +847,21 @@ bool AssetExporter::WriteGLB(const std::string& path, const std::string& meshNam
     u32 jsonSize = (u32)J.size();
     u32 totalSize = 12 + 8 + jsonSize + 8 + binSize;
 
-    std::filesystem::create_directories(std::filesystem::path(path).parent_path());
-    std::ofstream f(path, std::ios::binary);
-    if (!f.is_open()) return false;
+    p3d::io::CreateDirectories(std::filesystem::path(path).parent_path().string());
 
-    f.write("glTF", 4); FileWriteU32(f, 2); FileWriteU32(f, totalSize);
-    FileWriteU32(f, jsonSize); FileWriteU32(f, 0x4E4F534A);
-    f.write(J.c_str(), jsonSize);
-    FileWriteU32(f, binSize); FileWriteU32(f, 0x004E4942);
-    f.write(reinterpret_cast<const char*>(bin.data()), binSize);
+    std::vector<u8> glb;
+    glb.reserve(totalSize);
+    glb.insert(glb.end(), { 'g', 'l', 'T', 'F' });
+    BufWriteU32(glb, 2);
+    BufWriteU32(glb, totalSize);
+    BufWriteU32(glb, jsonSize);
+    BufWriteU32(glb, 0x4E4F534A);
+    glb.insert(glb.end(), J.c_str(), J.c_str() + jsonSize);
+    BufWriteU32(glb, binSize);
+    BufWriteU32(glb, 0x004E4942);
+    glb.insert(glb.end(), bin.begin(), bin.end());
+
+    if (!p3d::io::WriteFile(path, glb)) return false;
 
     LOG("[AssetExporter] GLB: %s (%zu prim(s))", path.c_str(), valid.size());
     return true;
@@ -1147,21 +1170,24 @@ static const char* kRsdSampleNames[] = {
 };
 
 static bool WritePCMWav(const std::string& path, const std::vector<s16>& pcm, u32 sampleRate, u16 channels) {
-    std::ofstream outFile(path, std::ios::binary);
-    if (!outFile.is_open()) return false;
-
     const u32 dataSize = static_cast<u32>(pcm.size() * sizeof(s16));
     const u16 bitsPerSample = 16;
     const u32 byteRate = sampleRate * channels * (bitsPerSample / 8);
     const u16 blockAlign = channels * (bitsPerSample / 8);
 
-    auto writeU32 = [&](u32 v) { outFile.write(reinterpret_cast<const char*>(&v), 4); };
-    auto writeU16 = [&](u16 v) { outFile.write(reinterpret_cast<const char*>(&v), 2); };
+    std::vector<u8> buf;
+    buf.reserve(44 + dataSize);
+    auto writeBytes = [&](const void* data, size_t size) {
+        const u8* p = reinterpret_cast<const u8*>(data);
+        buf.insert(buf.end(), p, p + size);
+    };
+    auto writeU32 = [&](u32 v) { writeBytes(&v, 4); };
+    auto writeU16 = [&](u16 v) { writeBytes(&v, 2); };
 
-    outFile.write("RIFF", 4);
+    writeBytes("RIFF", 4);
     writeU32(36 + dataSize);
-    outFile.write("WAVE", 4);
-    outFile.write("fmt ", 4);
+    writeBytes("WAVE", 4);
+    writeBytes("fmt ", 4);
     writeU32(16);
     writeU16(1);
     writeU16(channels);
@@ -1169,10 +1195,11 @@ static bool WritePCMWav(const std::string& path, const std::vector<s16>& pcm, u3
     writeU32(byteRate);
     writeU16(blockAlign);
     writeU16(bitsPerSample);
-    outFile.write("data", 4);
+    writeBytes("data", 4);
     writeU32(dataSize);
-    outFile.write(reinterpret_cast<const char*>(pcm.data()), dataSize);
-    return true;
+    writeBytes(pcm.data(), dataSize);
+
+    return p3d::io::WriteFile(path, buf);
 }
 
 bool AssetExporter::ConvertWAVtoWAV(const std::vector<u8>& rawData,
@@ -1180,7 +1207,7 @@ bool AssetExporter::ConvertWAVtoWAV(const std::vector<u8>& rawData,
                                     const std::string& sourceExt) {
     std::string dir = outputPath.substr(0, outputPath.find_last_of("/\\"));
     if (!dir.empty()) {
-        std::filesystem::create_directories(dir);
+        p3d::io::CreateDirectories(dir);
     }
 
     std::string lowerExt = sourceExt;
@@ -1250,7 +1277,7 @@ bool AssetExporter::ConvertWAVtoWAV(const std::vector<u8>& rawData,
         if (extPos2 != std::string::npos) {
             bankDir.erase(extPos2);
         }
-        std::filesystem::create_directories(bankDir);
+        p3d::io::CreateDirectories(bankDir);
 
         s32 exported = 0;
         for (u32 i = 0; i < static_cast<u32>(bank.clips.size()); i++) {
@@ -1276,7 +1303,7 @@ bool AssetExporter::ConvertWAVtoWAV(const std::vector<u8>& rawData,
             bankDir.erase(extPos);
         }
 
-        std::filesystem::create_directories(bankDir);
+        p3d::io::CreateDirectories(bankDir);
 
         s32 exported = 0;
         const u32 numSamples = static_cast<u32>(bank.pcmSamples.size());
@@ -1327,7 +1354,7 @@ bool AssetExporter::ConvertWAVtoWAV(const std::vector<u8>& rawData,
 
 // Conversion: Data → P3D chunk tree JSON
 
-static void WriteChunkTreeJSON(std::ofstream& out, const u8* d, u32 size, int depth) {
+static void WriteChunkTreeJSON(std::ostringstream& out, const u8* d, u32 size, int depth) {
     static const char kHex[] = "0123456789abcdef";
     auto hexPreview = [&](u32 off, u32 len) {
         for (u32 i = off; i < off + len && i < size; i++)
@@ -1377,16 +1404,16 @@ static void WriteChunkTreeJSON(std::ofstream& out, const u8* d, u32 size, int de
 bool AssetExporter::ConvertDataToJSON(const std::vector<u8>& rawData,
                                       const std::string& outputPath) {
     std::string dir = outputPath.substr(0, outputPath.find_last_of("/\\"));
-    if (!dir.empty()) std::filesystem::create_directories(dir);
+    if (!dir.empty()) p3d::io::CreateDirectories(dir);
 
-    std::ofstream out(outputPath);
-    if (!out.is_open()) return false;
-
+    std::ostringstream out;
     const u8* d = rawData.data();
     const u32 sz = (u32)rawData.size();
     out << "{\"_size\":" << sz << ",\"_data\":";
     WriteChunkTreeJSON(out, d, sz, 0);
     out << "}\n";
+
+    if (!p3d::io::WriteTextFile(outputPath, out.str())) return false;
 
     LOG("[AssetExporter] Data JSON: %s", outputPath.c_str());
     return true;
@@ -1422,7 +1449,7 @@ static bool ExportDialogWavs(const std::vector<u8>& rawData, const std::string& 
     const u32 dataBase = (headerSize + sectorSize - 1) & ~(sectorSize - 1);
     if (headerSize < 4 + characterCount * 2 || dataBase >= rawData.size()) return false;
 
-    std::filesystem::create_directories(outputDir);
+    p3d::io::CreateDirectories(outputDir);
     u32 exported = 0;
     for (u32 character = 0; character < characterCount; ++character) {
         const u32 characterInfo = p3dReadU16LE(rawData.data() + 4 + character * 2);
@@ -1868,5 +1895,7 @@ int AssetExporter::ExportAll(const char* outputDir,
 
 int AssetExporter::ExportAllCategories(const char* outputDir,
                                        ExportProgressCallback progress) {
-    return ExportAll(outputDir, AssetCategory::Texture, false, progress);
+    const int exported = ExportAll(outputDir, AssetCategory::Texture, false, progress);
+    p3d::io::InvalidateResolveCache();
+    return exported;
 }

@@ -33,8 +33,8 @@
 
 #if AUTO_UPDATER
 #include "extra/autoupdater.h"
-#include "version.h"
 #endif
+#include "version.h"
 
 #include "extra/dialogpreview.h"
 #include "extra/shadowcsm.h"

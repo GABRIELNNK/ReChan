@@ -1,6 +1,5 @@
 #include "gen/ccfile.h"
-#include "p3d/filepath.h"
-#include <stdio.h>
+#include "p3d/fileio.h"
 #include <string>
 
 static constexpr uintptr_t kWriteHandleSentinel = 2;
@@ -75,30 +74,28 @@ s32 ccFile::Open(const char* path, u16 mode) {
 
     SetName(path, 1);
 
-    const char* openMode = "rb";
+    p3d::io::FileHandle::Mode ioMode = p3d::io::FileHandle::Mode::Read;
     if (mode & OPEN_WRITE) {
-        openMode = "wb";
+        ioMode = p3d::io::FileHandle::Mode::Write;
     }
     else if (mode & OPEN_APPEND) {
-        openMode = "ab";
+        ioMode = p3d::io::FileHandle::Mode::Append;
     }
 
     const bool shouldResolve = (mode & (OPEN_WRITE | OPEN_APPEND)) == 0;
-    const std::string resolvedPath = shouldResolve
-        ? p3d::ResolvePathCaseInsensitive(GetName())
-        : std::string(GetName());
-    FILE* file = fopen(resolvedPath.c_str(), openMode);
-    if (file) {
-        fseek(file, 0, SEEK_END);
-        length = (s32)ftell(file);
-        fseek(file, 0, SEEK_SET);
+
+    auto* fh = new p3d::io::FileHandle();
+    if (fh->Open(GetName(), ioMode, shouldResolve)) {
+        length = (s32)fh->Size();
     }
     else {
+        delete fh;
+        fh = nullptr;
         length = 0;
     }
 
     s32 result = 0;
-    void* outHandle = file;
+    void* outHandle = fh;
     if (length != 0) {
         result = 1;
     }
@@ -118,7 +115,7 @@ s32 ccFile::Close() {
     MARKFUNCTION(0x8004C18C);
     if (handle && !isMemory) {
         if ((uintptr_t)handle != kWriteHandleSentinel) {
-            fclose((FILE*)handle);
+            delete reinterpret_cast<p3d::io::FileHandle*>(handle);
         }
         handle = nullptr;
     }
@@ -181,7 +178,7 @@ s32 ccFile::Read(void* dst, u32 size) {
                 bytesRead = (s32)readSize;
             }
             else {
-                bytesRead = (s32)fread(dst, 1, readSize, (FILE*)handle);
+                bytesRead = (s32)reinterpret_cast<p3d::io::FileHandle*>(handle)->Read(dst, readSize);
             }
         }
     }
@@ -200,17 +197,16 @@ s32 ccFile::Write(void* src, u32 size) {
     }
 
     if ((uintptr_t)handle == kWriteHandleSentinel) {
-        FILE* file = fopen(GetName(), "wb");
-        if (file) {
-            bytesWritten = (s32)fwrite(src, 1, size, file);
-            fclose(file);
+        p3d::io::FileHandle fh;
+        if (fh.Open(GetName(), p3d::io::FileHandle::Mode::Write, /*resolveCase=*/false)) {
+            bytesWritten = (s32)fh.Write(src, size);
         }
         handle = nullptr;
         return bytesWritten;
     }
 
     if (!isMemory) {
-        bytesWritten = (s32)fwrite(src, 1, size, (FILE*)handle);
+        bytesWritten = (s32)reinterpret_cast<p3d::io::FileHandle*>(handle)->Write(src, size);
         position += bytesWritten;
         if (position > length) {
             length = position;
@@ -251,7 +247,7 @@ s32 ccFile::Seek(u32 offset, u16 mode) {
             seekValue = -(long)offset;
         }
 
-        fseek((FILE*)handle, seekValue, whence);
+        reinterpret_cast<p3d::io::FileHandle*>(handle)->Seek(seekValue, whence);
     }
 
     return position;

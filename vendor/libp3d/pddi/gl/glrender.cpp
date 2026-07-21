@@ -2846,6 +2846,13 @@ void glContext::DestroyVRAMTexture(u32 handle) {
     if (handle) glDeleteTextures(1, &handle);
 }
 
+void glContext::UpdateVRAMTexture(u32 handle, int w, int h, const u16* data) {
+    if (!handle) return;
+    glBindTexture(GL_TEXTURE_2D, handle);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RED_INTEGER, GL_UNSIGNED_SHORT, data);
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
+
 void glContext::DrawPrimBuffer(pddiPrimBuffer* buffer, u32 indexOffset, u32 indexCount) {
     if (!buffer)
         return;

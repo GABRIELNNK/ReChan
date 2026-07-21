@@ -4,6 +4,7 @@
 #include "extra/autoupdater.h"
 #include "gen/game.h"
 #include "gen/time.h"
+#include "p3d/fileio.h"
 #include "version.h"
 
 #ifdef RC_PLATFORM_WINDOWS
@@ -91,65 +92,6 @@ static std::string shellExec(const char* cmd) {
     return result;
 }
 #endif
-
-static bool fileExists(const char* path) {
-#ifdef RC_PLATFORM_WINDOWS
-    DWORD attr = GetFileAttributesA(path);
-    return attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY);
-#else
-    struct stat st;
-    return stat(path, &st) == 0 && S_ISREG(st.st_mode);
-#endif
-}
-
-static bool dirExists(const char* path) {
-#ifdef RC_PLATFORM_WINDOWS
-    DWORD attr = GetFileAttributesA(path);
-    return attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY);
-#else
-    struct stat st;
-    return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
-#endif
-}
-
-static std::string getExePath() {
-#ifdef RC_PLATFORM_WINDOWS
-    char buf[MAX_PATH];
-    DWORD len = GetModuleFileNameA(nullptr, buf, MAX_PATH);
-    if (len > 0 && len < MAX_PATH) {
-        return std::string(buf, len);
-    }
-#else
-    char buf[PATH_MAX];
-    ssize_t len = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
-    if (len > 0) {
-        buf[len] = '\0';
-        return std::string(buf);
-    }
-#endif
-    return "";
-}
-
-static std::string getExeDir() {
-    std::string path = getExePath();
-    size_t pos = path.find_last_of("\\/");
-    return (pos != std::string::npos) ? path.substr(0, pos) : ".";
-}
-
-static std::string getTempDir() {
-#ifdef RC_PLATFORM_WINDOWS
-    char buf[MAX_PATH];
-    DWORD len = GetTempPathA(MAX_PATH, buf);
-    if (len > 0 && len < MAX_PATH) return std::string(buf);
-    return "C:\\Windows\\Temp\\";
-#else
-    const char* tmp = getenv("TMPDIR");
-    if (!tmp) tmp = "/tmp";
-    std::string result(tmp);
-    if (!result.empty() && result.back() != '/') result += '/';
-    return result;
-#endif
-}
 
 static std::string jsonGetString(const std::string& json, const char* key) {
     std::string search = "\"";
@@ -300,8 +242,8 @@ void AutoUpdater::Init() {
     m_downloadedBytes = 0;
     m_cancelDownload = false;
     m_menu = nullptr;
-    m_exePath = getExePath();
-    m_tempArchivePath = getTempDir() + "rechan_update" + GetAssetExtension();
+    m_exePath = p3d::io::GetExecutablePath();
+    m_tempArchivePath = p3d::io::GetTempDir() + "rechan_update" + GetAssetExtension();
 }
 
 void AutoUpdater::Shutdown() {
@@ -348,37 +290,41 @@ void AutoUpdater::InstallAndRelaunch() {
     if (m_state != State::ReadyToInstall) return;
     m_state = State::Installing;
 
-    std::string exeDir = getExeDir();
+    std::string exeDir = p3d::io::GetExecutableDir();
     std::string exeName = GetExecutableName();
 
+    char lineBuf[1024];
+
 #ifdef RC_PLATFORM_WINDOWS
-    std::string scriptPath = getTempDir() + "rechan_update.bat";
-    FILE* f = fopen(scriptPath.c_str(), "w");
-    if (f) {
-        fprintf(f, "@echo off\r\n");
-        fprintf(f, "timeout /t 3 /nobreak > nul\r\n");
-        fprintf(f, "powershell -Command \"Expand-Archive -Path '%s' -DestinationPath '%s' -Force\"\r\n",
-                m_tempArchivePath.c_str(), exeDir.c_str());
-        fprintf(f, "del \"%s\"\r\n", m_tempArchivePath.c_str());
-        fprintf(f, "start \"\" \"%s\\%s\"\r\n", exeDir.c_str(), exeName.c_str());
-        fprintf(f, "del \"%%~f0\"\r\n");
-        fclose(f);
-    }
+    std::string scriptPath = p3d::io::GetTempDir() + "rechan_update.bat";
+    std::string script = "@echo off\r\ntimeout /t 3 /nobreak > nul\r\n";
+    std::snprintf(lineBuf, sizeof(lineBuf),
+                  "powershell -Command \"Expand-Archive -Path '%s' -DestinationPath '%s' -Force\"\r\n",
+                  m_tempArchivePath.c_str(), exeDir.c_str());
+    script += lineBuf;
+    std::snprintf(lineBuf, sizeof(lineBuf), "del \"%s\"\r\n", m_tempArchivePath.c_str());
+    script += lineBuf;
+    std::snprintf(lineBuf, sizeof(lineBuf), "start \"\" \"%s\\%s\"\r\n", exeDir.c_str(), exeName.c_str());
+    script += lineBuf;
+    script += "del \"%~f0\"\r\n";
+    p3d::io::WriteTextFile(scriptPath, script);
+
     std::string cmd = "cmd.exe /D /S /C \"\"" + scriptPath + "\"\"";
     launchHidden(cmd);
 #else
-    std::string scriptPath = getTempDir() + "rechan_update.sh";
-    FILE* f = fopen(scriptPath.c_str(), "w");
-    if (f) {
-        fprintf(f, "#!/bin/sh\n");
-        fprintf(f, "sleep 3\n");
-        fprintf(f, "tar -xzf \"%s\" -C \"%s\"\n", m_tempArchivePath.c_str(), exeDir.c_str());
-        fprintf(f, "rm -f \"%s\"\n", m_tempArchivePath.c_str());
-        fprintf(f, "\"%s/%s\" &\n", exeDir.c_str(), exeName.c_str());
-        fprintf(f, "rm -f \"$0\"\n");
-        fclose(f);
-        chmod(scriptPath.c_str(), 0755);
-    }
+    std::string scriptPath = p3d::io::GetTempDir() + "rechan_update.sh";
+    std::string script = "#!/bin/sh\nsleep 3\n";
+    std::snprintf(lineBuf, sizeof(lineBuf), "tar -xzf \"%s\" -C \"%s\"\n",
+                  m_tempArchivePath.c_str(), exeDir.c_str());
+    script += lineBuf;
+    std::snprintf(lineBuf, sizeof(lineBuf), "rm -f \"%s\"\n", m_tempArchivePath.c_str());
+    script += lineBuf;
+    std::snprintf(lineBuf, sizeof(lineBuf), "\"%s/%s\" &\n", exeDir.c_str(), exeName.c_str());
+    script += lineBuf;
+    script += "rm -f \"$0\"\n";
+    p3d::io::WriteTextFile(scriptPath, script);
+    chmod(scriptPath.c_str(), 0755);
+
     std::string cmd = "sh \"" + scriptPath + "\" &";
     system(cmd.c_str());
 #endif
@@ -460,7 +406,7 @@ void AutoUpdater::DownloadThreadFunc() {
         return;
     }
 
-    if (!fileExists(outPath.c_str())) {
+    if (!p3d::io::FileExists(outPath.c_str())) {
         m_error = "Download failed: output file not created";
         m_state = State::Error;
         return;

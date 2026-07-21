@@ -2,7 +2,7 @@
 #include "pc/textbackend.h"
 #include "gen/common.h"
 #include "pc/log.h"
-#include "p3d/filepath.h"
+#include "p3d/fileio.h"
 #if CUSTOM_TEXT
 #include "extra/customtext.h"
 #endif
@@ -247,42 +247,12 @@ bool TextManager::ReadWholeFile(const char* path, std::vector<u8>& outData) {
         return false;
     }
 
-    const std::string resolvedPath = p3d::ResolvePathCaseInsensitive(path);
-    FILE* file = nullptr;
-#if defined(_MSC_VER)
-    fopen_s(&file, resolvedPath.c_str(), "rb");
-#else
-    file = fopen(resolvedPath.c_str(), "rb");
-#endif
-    if (!file) {
+    auto data = p3d::io::ReadFile(p3d::io::ResolvePath(path));
+    if (!data || data->empty()) {
         return false;
     }
 
-    if (fseek(file, 0, SEEK_END) != 0) {
-        fclose(file);
-        return false;
-    }
-
-    const long fileSize = ftell(file);
-    if (fileSize <= 0) {
-        fclose(file);
-        return false;
-    }
-
-    if (fseek(file, 0, SEEK_SET) != 0) {
-        fclose(file);
-        return false;
-    }
-
-    outData.resize((size_t)fileSize);
-    const size_t readCount = fread(outData.data(), 1, (size_t)fileSize, file);
-    fclose(file);
-
-    if (readCount != (size_t)fileSize) {
-        outData.clear();
-        return false;
-    }
-
+    outData = std::move(*data);
     return true;
 }
 

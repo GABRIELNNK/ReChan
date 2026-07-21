@@ -66,9 +66,6 @@ static bool sShowMods = false;
 static bool sShowShadows = false;
 static s32 sShadowDebugMode = 0;
 #endif
-#ifdef REAL_TEXTURE_RENDERING
-static bool sRealTextureMode = false;
-#endif
 static bool sAssetExporterCatalogBuilt = false;
 static char sAssetExporterFilter[128] = {};
 static int sAssetExporterCategoryFilter = 0;
@@ -1498,6 +1495,10 @@ void DebugUI::Draw() {
         sEnabled = !sEnabled;
     }
 
+    if (ImGui::IsKeyPressed(ImGuiKey_F1, false)) {
+        g_drawDebugConsole = !g_drawDebugConsole;
+    }
+
     ApplyCursorPolicy();
 
     if (ImGui::IsKeyPressed(ImGuiKey_B, false) && ImGui::GetIO().KeyCtrl) {
@@ -1558,8 +1559,11 @@ void DebugUI::Draw() {
             ImGui::MenuItem("Asset Exporter", nullptr, &sShowAssetExporter);
             ImGui::MenuItem("Mods", nullptr, &sShowMods);
 #ifdef REAL_TEXTURE_RENDERING
-            if (ImGui::MenuItem("Real Textures", nullptr, &sRealTextureMode)) {
-                if (p3d::context) p3d::context->SetRealTextureMode(sRealTextureMode);
+            {
+                bool realTextureMode = p3d::context && p3d::context->IsRealTextureModeEnabled();
+                if (ImGui::MenuItem("Real Textures", nullptr, &realTextureMode)) {
+                    if (p3d::context) p3d::context->SetRealTextureMode(realTextureMode);
+                }
             }
 #endif
             ImGui::Separator();

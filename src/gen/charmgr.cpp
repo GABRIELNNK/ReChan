@@ -969,7 +969,9 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
             scope.c_str(), scope.c_str());
         if (modPath) {
             OriginalSTree* modded = GLTFLoader::LoadSTree(modPath->c_str());
-            if (modded && modded->meshBuffer) {
+            const bool moddedHasMesh = modded
+                && (modded->meshBuffer || (modded->skeleton && modded->skeleton->joints[0].meshBuffer));
+            if (moddedHasMesh) {
                 LOG("[ModLoader] Using modded model for %s: %s", characterName, modPath->c_str());
                 s32 slotIdx = (type == 0) ? 0 : FindEmptySlot();
                 if (slotIdx >= 0) {
@@ -979,7 +981,22 @@ void CharacterManager::LoadCharacter(u32 type, CharMgrCallback* callback) {
                     slots[slotIdx].model = modded;
                     memset(slots[slotIdx].animIndexTable, 0xFF, CharSlot::ANIM_TABLE_SIZE);
                     if (g_levelManager) {
-                        modded->nameCRC = p3dHash(characterName);
+                        // Must match the native registration hash (see the
+                        // non-modded path below): Thing::CreateModel looks
+                        // models up by the nameHash baked into the character's
+                        // own .RR data (resource 1, offset +4), NOT by
+                        // p3dHash(characterName). Registering under the wrong
+                        // hash means FindModel() never finds this character,
+                        // TF_MODEL_CREATED never gets set on the Thing, and
+                        // HandleThingEnvironmentCollisions skips it entirely
+                        // (ai/thing.cpp, gen/colmgr.cpp) - the character falls
+                        // forever because collision is never even attempted.
+                        u32 nameHash = 0;
+                        CharFile* cf = slots[slotIdx].charFile;
+                        if (cf && cf->dataBuffer && cf->dataSize > 1) {
+                            nameHash = *(u32*)((u8*)cf->dataBuffer + 4);
+                        }
+                        modded->nameCRC = nameHash;
                         modded->SetStoreID(type == 0 ? 0 : 2);
                         g_levelManager->AddOriginal(modded, 0);
                     }

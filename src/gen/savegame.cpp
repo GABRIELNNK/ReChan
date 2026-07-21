@@ -5,6 +5,8 @@
 #include "gen/world.h"
 #include "gen/scoremgr.h"
 #include "ai/player.h"
+#include "p3d/fileio.h"
+#include "pc/apppaths.h"
 #if NEW_CHEATS
 #include "extra/cheats.h"
 #endif
@@ -15,9 +17,9 @@
 
 static constexpr u32 kSaveMagic = 0x53415645u;    // SAVE
 static constexpr u32 kSaveVersion = 1;
-static constexpr const char* kSaveDir = "userfiles";
-static constexpr const char* kSavePathFmt = "userfiles/jcsSAVE%d.sav";
-static constexpr const char* kAutosavePath = "userfiles/jcsAUTOSAVE.sav";
+static constexpr const char* kSaveDir = apppaths::kUserFilesDir;
+static constexpr const char* kSavePathFmt = apppaths::kSaveSlotFmt;
+static constexpr const char* kAutosavePath = apppaths::kAutosavePath;
 
 struct SaveGameBlob {
     u32 magic = kSaveMagic;
@@ -57,8 +59,7 @@ static bool BuildSlotPath(s32 slotIndex, char* outPath, s32 outPathLen) {
 }
 
 static void EnsureSaveDirectoryExists() {
-    std::error_code ec;
-    std::filesystem::create_directories(kSaveDir, ec);
+    p3d::io::CreateDirectories(kSaveDir);
 }
 
 static bool ReadBlobAtPath(const char* path, SaveGameBlob* outBlob) {
@@ -136,7 +137,7 @@ static void FormatSaveDate(s64 unixTime, char* outText, s32 outTextLen) {
 
     const time_t t = (time_t)unixTime;
     tm localTm = {};
-#if defined(_WIN32)
+#if defined(RC_PLATFORM_WINDOWS)
     if (localtime_s(&localTm, &t) != 0) {
         return;
     }

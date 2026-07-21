@@ -3,9 +3,8 @@
 #ifdef MOD_LOADER
 
 #include "pc/log.h"
-#include "p3d/filepath.h"
+#include "p3d/fileio.h"
 #include <cstring>
-#include <fstream>
 #include <vector>
 
 // Minimal RIFF WAV parser — avoids pulling in miniaudio for simple PCM loading.
@@ -41,17 +40,16 @@ WAVAudioBuffer WAVLoader::LoadFromFile(const char* path) {
         return result;
     }
 
-    const std::string resolvedPath = p3d::ResolvePathCaseInsensitive(path);
-    std::ifstream file(resolvedPath, std::ios::binary);
-    if (!file.is_open()) {
+    p3d::io::FileHandle file;
+    if (!file.Open(path, p3d::io::FileHandle::Mode::Read)) {
         LOG("[WAVLoader] Cannot open: %s", path);
         return result;
     }
 
     // Read RIFF header
     RiffHeader riff;
-    file.read(reinterpret_cast<char*>(&riff), sizeof(riff));
-    if (!file || std::memcmp(riff.chunkID, "RIFF", 4) != 0 ||
+    if (file.Read(&riff, sizeof(riff)) != sizeof(riff) ||
+        std::memcmp(riff.chunkID, "RIFF", 4) != 0 ||
         std::memcmp(riff.format, "WAVE", 4) != 0) {
         LOG("[WAVLoader] Not a valid WAV file: %s", path);
         return result;
@@ -61,22 +59,22 @@ WAVAudioBuffer WAVLoader::LoadFromFile(const char* path) {
     bool foundFmt = false;
 
     // Scan chunks until we find fmt and data
-    while (file.good()) {
+    while (true) {
         char chunkID[4] = {};
         u32 chunkSize = 0;
-        file.read(chunkID, 4);
-        file.read(reinterpret_cast<char*>(&chunkSize), 4);
-        if (!file) break;
+        if (file.Read(chunkID, 4) != 4 || file.Read(&chunkSize, 4) != 4) {
+            break;
+        }
 
         if (std::memcmp(chunkID, "fmt ", 4) == 0) {
             u32 readSize = chunkSize < sizeof(FmtChunk) - 8 ? chunkSize : sizeof(FmtChunk) - 8;
             fmt.subchunkSize = readSize;
-            file.read(reinterpret_cast<char*>(&fmt.audioFormat), readSize);
+            file.Read(&fmt.audioFormat, readSize);
             foundFmt = true;
 
             // Skip remaining fmt bytes if chunk is larger than expected
             if (chunkSize > readSize) {
-                file.seekg(static_cast<std::streamoff>(chunkSize - readSize), std::ios::cur);
+                file.Seek(static_cast<int64_t>(chunkSize - readSize), SEEK_CUR);
             }
         }
         else if (std::memcmp(chunkID, "data", 4) == 0) {
@@ -96,8 +94,7 @@ WAVAudioBuffer WAVLoader::LoadFromFile(const char* path) {
             result.size = chunkSize;
             result.data = new u8[chunkSize];
 
-            file.read(reinterpret_cast<char*>(result.data), chunkSize);
-            if (!file) {
+            if (file.Read(result.data, chunkSize) != chunkSize) {
                 LOG("[WAVLoader] Failed to read PCM data: %s", path);
                 delete[] result.data;
                 result.data = nullptr;
@@ -111,7 +108,7 @@ WAVAudioBuffer WAVLoader::LoadFromFile(const char* path) {
         }
         else {
             // Skip unknown chunk
-            file.seekg(static_cast<std::streamoff>(chunkSize), std::ios::cur);
+            file.Seek(static_cast<int64_t>(chunkSize), SEEK_CUR);
         }
     }
 

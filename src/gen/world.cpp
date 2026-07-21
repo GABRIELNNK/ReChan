@@ -43,7 +43,7 @@
 #include "p3d/context.h"
 #include "p3d/stream.h"
 #include "p3d/texture.h"
-#include "p3d/filepath.h"
+#include "p3d/fileio.h"
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
 
@@ -72,7 +72,6 @@ static void UploadRawTextureToWorldVRAM(s16 x, s16 y, s16 w, s16 h, const u8* ra
 #include "gen/uvdata.h"
 #include "ai/obstacle.h"
 
-#include <fstream>
 #include <filesystem>
 #include <algorithm>
 #include <cstring>
@@ -3079,7 +3078,7 @@ static bool LoadBlocksForPetalFromStream(
 // A texture page is 256x256 pixels; in 15-bit mode each pixel = 1 word at (tx*64+x, ty*256+y).
 static void UploadPngToVRAMPage(PsxVRAM& vram, u16 tpage, const char* pngPath) {
     int w, h, ch;
-    const std::string resolvedPngPath = p3d::ResolvePathCaseInsensitive(pngPath);
+    const std::string resolvedPngPath = p3d::io::ResolvePath(pngPath);
     unsigned char* px = stbi_load(resolvedPngPath.c_str(), &w, &h, &ch, 4);
     if (!px) {
         LOG("[ModLoader] Failed to load PNG for VRAM page: %s", pngPath);
@@ -3345,13 +3344,11 @@ void World::LoadLevelNames() {
     char filename[128];
     std::snprintf(filename, sizeof(filename), "RTARGET/GAME_LN.TXT");
 
-    std::ifstream file(p3d::ResolvePathCaseInsensitive(filename));
-    if (!file)
+    auto fileContent = p3d::io::ReadTextFile(p3d::io::ResolvePath(filename));
+    if (!fileContent)
         return;
 
-    std::string content((std::istreambuf_iterator<char>(file)),
-                        std::istreambuf_iterator<char>());
-    file.close();
+    std::string content = std::move(*fileContent);
 
     levelCount = 0;
     char* cursor = content.data();
@@ -3771,17 +3768,12 @@ bool World::Load(const std::string& lcfPath) {
     g_particleSystemChunkCount = 0;
 
     // Read LCF file from disc (PC equivalent of Stream::Open + disc read)
-    const std::string resolvedLcfPath = p3d::ResolvePathCaseInsensitive(lcfPath);
-    std::ifstream file(resolvedLcfPath, std::ios::binary | std::ios::ate);
-    if (!file) {
+    auto lcfData = p3d::io::ReadFile(p3d::io::ResolvePath(lcfPath));
+    if (!lcfData) {
         LOG("[World] Failed to open: %s", lcfPath.c_str());
         return false;
     }
-    auto fileSize = file.tellg();
-    file.seekg(0);
-    streamData.resize(static_cast<size_t>(fileSize));
-    file.read(reinterpret_cast<char*>(streamData.data()), fileSize);
-    file.close();
+    streamData = std::move(*lcfData);
 
     u32 dataSize = static_cast<u32>(streamData.size());
     const u8* data = streamData.data();
@@ -3939,9 +3931,15 @@ void World::UploadToVRAM(s16 x, s16 y, s16 w, s16 h, const u8* raw) {
 }
 
 void World::RefreshVRAMTexture() {
+    // Called every frame while a Director VRAM flipbook animation is active
+    // (Director::updateVramAnims), so update the existing texture in place
+    // rather than destroying and recreating it each call -- the same
+    // destroy+recreate cycle every frame indefinitely doesn't bother
+    // desktop's driver/VRAM budget but exhausts the GPU allocator on the
+    // Switch (both real hardware and emulation) after enough calls.
     if (vramHandle) {
-        p3d::context->DestroyVRAMTexture(vramHandle);
-        vramHandle = 0;
+        p3d::context->UpdateVRAMTexture(vramHandle, 1024, 512, vram.data);
+        return;
     }
     vramHandle = p3d::context->CreateVRAMTexture(1024, 512, vram.data);
 }
