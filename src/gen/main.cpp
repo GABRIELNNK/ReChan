@@ -1,5 +1,6 @@
 ﻿#include "common.h"
 #include "p3d/context.h"
+#include "p3d/fileio.h"
 #include "p3d/input.h"
 #include "p3d/inventory.h"
 #include "p3d/loadmanager.h"
@@ -21,6 +22,7 @@
 #include "snd/rsevent.h"
 #include "extra/fecustommenumgr.h"
 #include "extra/assetexporter.h"
+#include "pc/apppaths.h"
 #include "extra/gltfloader.h"
 #include "gen/model.h"
 #include "radlib/rtask.h"
@@ -37,6 +39,12 @@
 
 #include <vector>
 #include <algorithm>
+
+#if defined(RC_PLATFORM_SWITCH)
+#include <unistd.h>
+#include <switch.h>
+#include "pddi/gles/glesrender.h"
+#endif
 
 static f32 sSavedMasterVolume = 1.0f;
 static bool sWindowedCaptureRequestedByClick = false;
@@ -127,6 +135,14 @@ int main(int argc, char** argv) {
 #endif
     CrashReporter::Install();
 
+#if defined(RC_PLATFORM_SWITCH)
+    p3d::io::CreateDirectories("sdmc:/switch/rechan");
+    chdir("sdmc:/switch/rechan");
+
+    // Boosted handheld preset
+    apmSetPerformanceConfiguration(ApmPerformanceMode_Normal, 0x92220008);
+#endif
+
     if (argc >= 2 && std::strcmp(argv[1], "--test-crash-reporter") == 0) {
         CrashReporter::TriggerTestCrash();
     }
@@ -136,7 +152,7 @@ int main(int argc, char** argv) {
     if (argc >= 2 && std::strcmp(argv[1], "--export-assets") == 0) {
         const char* outputDir = (argc >= 3 && argv[2] && argv[2][0])
             ? argv[2]
-            : "~mods/ExportedAssets";
+            : apppaths::kExportedAssetsDefaultDir;
         AssetExporter& exporter = AssetExporter::Instance();
         exporter.BuildCatalog();
         const int exported = exporter.ExportAllCategories(outputDir);
@@ -166,8 +182,23 @@ int main(int argc, char** argv) {
     init.title = JCS_TITLE;
 
     tContext* ctx = platform->CreateContext(init);
-    if (!ctx)
+    if (!ctx) {
+#if defined(RC_PLATFORM_SWITCH)
+        consoleInit(NULL);
+        printf("[rechan] CreateContext() FAILED: %s\n", GetLastGlesInitError());
+        printf("[rechan] Press PLUS to exit.\n");
+        PadState pad;
+        padConfigureInput(1, HidNpadStyleSet_NpadStandard);
+        padInitializeDefault(&pad);
+        while (appletMainLoop()) {
+            padUpdate(&pad);
+            if (padGetButtonsDown(&pad) & HidNpadButton_Plus) break;
+            consoleUpdate(NULL);
+        }
+        consoleExit(NULL);
+#endif
         return 1;
+    }
 
     TrySetPlatformWindowIcon();
 

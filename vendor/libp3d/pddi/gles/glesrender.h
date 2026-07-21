@@ -1,56 +1,26 @@
-// glrender.h — OpenGL implementation of pddi interfaces
+// glesrender.h — OpenGL ES (Switch) implementation of the pddi interfaces
 #pragma once
 
 #include "pddi/pddi.h"
 #include "pddi/pdditex.h"
 #include "pddi/pddishad.h"
 #include "pddi/pddidev.h"
+#include <switch.h>
 #include <array>
 #include <string>
 #include <unordered_map>
 
-struct GLFWwindow;
+// glesTexture
 
-// glPrimBuffer──
-
-class glPrimBuffer : public pddiPrimBuffer {
+class glesTexture : public pddiTexture {
 public:
-    glPrimBuffer(const pddiPrimBufferDesc& desc);
-    ~glPrimBuffer() override;
+    glesTexture();
+    ~glesTexture() override;
 
-    void SetVertexData(const void* data, u32 count) override;
-    void SetIndices(const u16* indices, u32 count) override;
-    u32 GetIndexCount() const override { return indexCount; }
-    u32 GetVertexCount() const override { return vertexCount; }
-    pddiPrimType GetPrimType() const override { return primType; }
-
-    u32 GetVAO() const { return vao; }
-    u32 GetVertexFormat() const { return vertexFormat; }
-
-private:
-    pddiPrimType primType;
-    u32 vertexFormat;
-    u32 vertexCount = 0;
-    u32 indexCount = 0;
-    u32 stride = 0;
-    u32 vao = 0;
-    u32 vbo = 0;
-    u32 ebo = 0;
-
-    void SetupVertexAttribs();
-};
-
-// glTexture──
-
-class glTexture : public pddiTexture {
-public:
-    glTexture();
-    ~glTexture() override;
-
-    int  GetWidth() override { return width; }
-    int  GetHeight() override { return height; }
-    int  GetBpp() override { return bpp; }
-    int  GetAlphaDepth() override { return alphaDepth; }
+    int GetWidth() override { return width; }
+    int GetHeight() override { return height; }
+    int GetBpp() override { return bpp; }
+    int GetAlphaDepth() override { return alphaDepth; }
 
     void SetData(int w, int h, int bpp, int alphaDepth, const void* rgba) override;
     void SetFilterMode(pddiFilterMode mode) override;
@@ -58,8 +28,10 @@ public:
 
     u32 GetGLHandle() const { return handle; }
     unsigned int GetNativeHandle() const override { return handle; }
+
+    // Depth (shadow-map) or colour render-target storage. SetIdTargetStorage
+    // backs the RGBA8 instance-id companion texture for shadow-caster self-exclusion.
     bool SetRenderTargetStorage(int w, int h, pddiRenderTargetFormat format);
-    // R32UI storage for shadow-caster instance-ID render targets.
     bool SetIdTargetStorage(int w, int h);
 
 private:
@@ -71,12 +43,12 @@ private:
     pddiFilterMode filterMode = PDDI_FILTER_NONE;
 };
 
-// glShader──
+// glesShader — GLSL ES 3.00 ports of all 8 pddiBaseShader types.
 
-class glShader : public pddiBaseShader {
+class glesShader : public pddiBaseShader {
 public:
-    explicit glShader(const char* type);
-    ~glShader() override;
+    explicit glesShader(const char* shaderType);
+    ~glesShader() override;
 
     const char* GetType() override { return type.c_str(); }
 
@@ -101,7 +73,6 @@ private:
     std::string type;
     pddiTexture* texSlots[kMaxTextureSlots] = {};
     pddiColour diffuse = pddiColour(255, 255, 255);
-    pddiBlendMode blendMode = PDDI_BLEND_NONE;
 
     std::unordered_map<std::string, int> intParams;
     std::unordered_map<std::string, float> floatParams;
@@ -113,10 +84,43 @@ private:
     int FindUniform(const std::string& name);
 };
 
-class glRenderTarget : public pddiRenderTarget {
+// glesPrimBuffer — real VAO/VBO/EBO-backed retained-mode mesh storage.
+
+class glesPrimBuffer : public pddiPrimBuffer {
 public:
-    glRenderTarget(int width, int height, pddiRenderTargetFormat format, bool withInstanceId = false);
-    ~glRenderTarget() override;
+    explicit glesPrimBuffer(const pddiPrimBufferDesc& desc);
+    ~glesPrimBuffer() override;
+
+    void SetVertexData(const void* data, u32 count) override;
+    void SetIndices(const u16* indices, u32 count) override;
+    u32 GetIndexCount() const override { return indexCount; }
+    u32 GetVertexCount() const override { return vertexCount; }
+    pddiPrimType GetPrimType() const override { return primType; }
+
+    u32 GetVAO() const { return vao; }
+    u32 GetVertexFormat() const { return vertexFormat; }
+
+private:
+    pddiPrimType primType;
+    u32 vertexFormat;
+    u32 vertexCount = 0;
+    u32 indexCount = 0;
+    u32 stride = 0;
+    u32 vao = 0;
+    u32 vbo = 0;
+    u32 ebo = 0;
+
+    void SetupVertexAttribs();
+};
+
+// glesRenderTarget — real FBO-backed render target (depth-only for shadow
+// cascades, with an optional companion R32UI instance-id colour attachment;
+// or plain colour for anything else CreateRenderTarget is asked to make).
+
+class glesRenderTarget : public pddiRenderTarget {
+public:
+    glesRenderTarget(int width, int height, pddiRenderTargetFormat format, bool withInstanceId = false);
+    ~glesRenderTarget() override;
 
     bool Resize(int width, int height) override;
     int GetWidth() const override { return width; }
@@ -127,8 +131,8 @@ public:
     u32 GetFramebuffer() const { return framebuffer; }
 
 private:
-    glTexture* texture = nullptr;
-    glTexture* idTexture = nullptr;
+    glesTexture* texture = nullptr;
+    glesTexture* idTexture = nullptr;
     bool wantsIdAttachment = false;
     u32 framebuffer = 0;
     int width = 0;
@@ -137,96 +141,72 @@ private:
     bool valid = false;
 };
 
-// glDisplay
+const char* GetLastGlesInitError();
 
-class glDisplay : public pddiDisplay {
+// glesDisplay — EGL context/surface bound to libnx's default NWindow. No
+// monitor/fullscreen/borderless/cursor logic (meaningless on Switch's fixed
+// single-window applet model).
+
+class glesDisplay : public pddiDisplay {
 public:
-    glDisplay();
-    ~glDisplay() override;
+    glesDisplay();
+    ~glesDisplay() override;
 
-    bool  InitDisplay(const pddiDisplayInit& init) override;
-    void  SwapBuffers() override;
-    int   GetWidth() override;
-    int   GetHeight() override;
-    bool  ShouldClose() override;
-    void  PollEvents() override;
+    bool InitDisplay(const pddiDisplayInit& init) override;
+    void SwapBuffers() override;
+    int  GetWidth() override { return width; }
+    int  GetHeight() override { return height; }
+    bool ShouldClose() override;
+    void PollEvents() override;
 
-    // Input polling
-    bool IsKeyDown(int key) override;
-    bool IsMouseButtonDown(int button) override;
-    void GetMousePosition(double& x, double& y) override;
+    bool IsKeyDown(int) override { return false; }
+    bool IsMouseButtonDown(int) override { return false; }
+    void GetMousePosition(double& x, double& y) override { x = 0.0; y = 0.0; }
 
-    void SetIcon(int w, int h, const unsigned char* rgba) override;
+    void SetIcon(int, int, const unsigned char*) override {}
 
-    // Video mode
-    int  GetVideoModeCount() override;
-    void GetVideoMode(int index, pddiVideoMode& mode) override;
-    void SetFullscreen(bool fullscreen) override;
-    bool IsFullscreen() override;
-    void SetBorderless(bool borderless) override;
-    bool IsBorderless() override { return borderless; }
-    void SetResolution(int w, int h) override;
+    int  GetVideoModeCount() override { return 0; }
+    void GetVideoMode(int, pddiVideoMode&) override {}
+    void SetFullscreen(bool) override {}
+    bool IsFullscreen() override { return false; }
+    void SetBorderless(bool) override {}
+    bool IsBorderless() override { return false; }
+    void SetResolution(int w, int h) override { width = w; height = h; }
     void SetVSync(bool enabled) override;
-    void SetMSAA(int samples) override;
-    int  GetMSAA() override { return msaaSamples; }
-    void SetWindowPos(int x, int y) override;
+    void SetMSAA(int) override {}
+    int  GetMSAA() override { return 0; }
+    void SetWindowPos(int, int) override {}
 
-    void SetTitle(const char* title) override;
+    void SetTitle(const char*) override {}
 
-    // Cursor
-    void ShowCursor(bool visible) override;
-    void ClipCursor(bool clip) override;
+    void ShowCursor(bool) override {}
+    void ClipCursor(bool) override {}
 
-    // WndProc callback
-    void SetWndProc(pddiWndProc proc) override;
+    void SetWndProc(pddiWndProc proc) override { wndProc = proc; }
 
-    // Overlay
-    void AddOverlayCallback(OverlayCallback cb) override;
-    void RenderOverlay() override;
+    void AddOverlayCallback(OverlayCallback) override {}
+    void RenderOverlay() override {}
 
-    // Viewport
-    void GetViewport(int& x, int& y, int& w, int& h);
-
-    GLFWwindow* GetWindow() const { return window; }
+    void GetViewport(int& x, int& y, int& w, int& h) { x = 0; y = 0; w = width; h = height; }
 
 private:
-    GLFWwindow* window = nullptr;
-    bool imguiInitialized = false;
-    bool imguiFrameStarted = false;
-    std::vector<OverlayCallback> overlayCallbacks = {};
-    int fbWidth = 0;
-    int fbHeight = 0;
-    int windowedX = 100, windowedY = 100;
-    int windowedW = 960, windowedH = 720;
-    bool borderless = false;
-    bool cursorVisible = true;
-    bool cursorClipped = false;
-    bool focused = true;
-    int msaaSamples = 0;
-    int maxMsaaSamples = 0;
+    void* eglDisplay_ = nullptr; // EGLDisplay
+    void* eglContext_ = nullptr; // EGLContext
+    void* eglSurface_ = nullptr; // EGLSurface
+    int width = 1280;
+    int height = 720;
+    bool shouldClose = false;
     pddiWndProc wndProc;
-
-    void UpdateCursorClip();
-    int ClampMSAASamples(int samples) const;
-    void SyncFramebufferSize();
-    void QueryFramebufferSize(int& width, int& height) const;
-    void PresentBlackFrame();
-
-    static void FramebufferSizeCallback(GLFWwindow* window, int width, int height);
-    static void WindowFocusCallback(GLFWwindow* window, int focused);
-    static void WindowCloseCallback(GLFWwindow* window);
-    static void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
-    static void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
-    static void CursorPosCallback(GLFWwindow* window, double x, double y);
-    static void ScrollCallback(GLFWwindow* window, double xoff, double yoff);
 };
 
-// glContext──
+// glesContext — full pddiRenderContext: 2D quads/batches, full 3D mesh
+// rendering (PSX VRAM-atlas texturing + optional "real texture" mode),
+// shadow-cascade mapping, and render-target support.
 
-class glContext : public pddiRenderContext {
+class glesContext : public pddiRenderContext {
 public:
-    glContext(glDisplay* disp);
-    ~glContext() override;
+    explicit glesContext(glesDisplay* disp);
+    ~glesContext() override;
 
     void BeginFrame() override;
     void EndFrame() override;
@@ -237,14 +217,14 @@ public:
     void SetClearColour(pddiColour c) override;
     void Clear(int flags) override;
 
-    void SetProjectionMatrix(const Mat4& m) override;
-    void SetViewMatrix(const Mat4& m) override;
-    void SetWorldMatrix(const Mat4& m) override;
+    void SetProjectionMatrix(const Mat4& m) override { projection = m; }
+    void SetViewMatrix(const Mat4& m) override { viewMatrix = m; }
+    void SetWorldMatrix(const Mat4& m) override { worldMatrix = m; }
     const Mat4& GetWorldMatrix() const override { return worldMatrix; }
     const Mat4& GetViewMatrix() const override { return viewMatrix; }
     const Mat4& GetProjectionMatrix() const override { return projection; }
 
-    void SetWorldMirror(bool enable) override;
+    void SetWorldMirror(bool enable) override { worldMirror = enable; }
     bool GetWorldMirror() const override { return worldMirror; }
 
     void SetCullMode(pddiCullMode mode) override;
@@ -253,25 +233,26 @@ public:
     void SetDepthClamp(bool enable) override;
     void SetPolygonOffset(bool enable, f32 factor = 0.0f, f32 units = 0.0f) override;
     void SetScissor(int x, int y, int w, int h) override;
-    void SetMultisampleEnabled(bool enable) override;
-    void ResolveForOverlayPass() override;
+    void SetMultisampleEnabled(bool enable) override { multisampleEnabled = enable; }
+    void ResolveForOverlayPass() override {}
+
     pddiRenderTarget* CreateRenderTarget(int width, int height,
-                                         pddiRenderTargetFormat format,
-                                         bool withInstanceId = false) override;
+                                          pddiRenderTargetFormat format,
+                                          bool withInstanceId = false) override;
     bool SetRenderTarget(pddiRenderTarget* target) override;
 
     void DrawFilledCircle(pddiBaseShader* shader,
-                                     float centerX, float centerY,
-                                     float radiusX, float radiusY,
-                                     float u0, float v0, float u1, float v1,
-                                     int segments) override;
+                          float centerX, float centerY,
+                          float radiusX, float radiusY,
+                          float u0, float v0, float u1, float v1,
+                          int segments) override;
 
     void DrawCircle(pddiBaseShader* shader,
-                               float centerX, float centerY,
-                               float radiusX, float radiusY,
-                               float thickness,
-                               float u0, float v0, float u1, float v1,
-                               int segments) override;
+                    float centerX, float centerY,
+                    float radiusX, float radiusY,
+                    float thickness,
+                    float u0, float v0, float u1, float v1,
+                    int segments) override;
 
     void DrawQuad(pddiBaseShader* shader,
                   float x, float y, float w, float h,
@@ -315,10 +296,10 @@ public:
     void DrawGouraudQuad(float x0, float y0, float r0, float g0, float b0, float a0,
                          float x1, float y1, float r1, float g1, float b1, float a1,
                          float x2, float y2, float r2, float g2, float b2, float a2,
-                         float x3, float y3, float r3, float g3, float b3, float a3);
+                         float x3, float y3, float r3, float g3, float b3, float a3) override;
 
 private:
-    glDisplay* display;
+    glesDisplay* display;
     float cameraAspect = 0.0f;
     pddiColour clearColour;
     Mat4 projection;
@@ -330,11 +311,11 @@ private:
     u32 texInfoOverrideWord = 0;
     bool realTextureModeEnabled = false;
     float realTexOffsetX = 0.0f, realTexOffsetY = 0.0f, realTexSizeX = 1.0f, realTexSizeY = 1.0f;
+
     u32 quadVAO = 0;
     u32 quadVBO = 0;
     u32 program3D = 0;
     u32 shadowDepthProgram = 0;
-    u32 shadowCompareSampler = 0;
     bool shadowCasterPassActive = false;
     Mat4 shadowCasterLightVP;
     bool receiveShadowsEnabled = false;
@@ -365,9 +346,6 @@ private:
     float shadowCascadeBlendDistances[kShadowCascadeCount] = {};
     s32 shadowCascadeCount = 0;
     s32 shadowFilterQuality = 0;
-    // Raised versus the original tiers to compensate for the tightened
-    // normal-offset clamp in SampleCoveredCascade (grazing-angle faces now
-    // rely more on this constant/slope bias than on a large normal offset).
     float shadowBias[kShadowCascadeCount] = { 0.00115f, 0.00085f, 0.00062f };
     static constexpr float shadowBiasLow[kShadowCascadeCount] = { 0.00170f, 0.00125f, 0.00090f };
     static constexpr float shadowBiasMedium[kShadowCascadeCount] = { 0.00115f, 0.00085f, 0.00062f };
@@ -386,32 +364,20 @@ private:
     s32 batchUProjLoc = -1;
     s32 batchUTexLoc = -1;
     size_t batchVBOCapacityBytes = 0;
-    u32 msaaFbo = 0;
-    u32 msaaColorRbo = 0;
-    u32 msaaDepthStencilRbo = 0;
-    s32 msaaWidth = 0;
-    s32 msaaHeight = 0;
-    s32 activeMsaaSamples = 0;
-    bool usingMsaaFramebuffer = false;
-    bool multisampleEnabled = true;
-    bool resolvedForOverlay = false;
-    glRenderTarget* activeRenderTarget = nullptr;
+    glesRenderTarget* activeRenderTarget = nullptr;
     s32 savedFramebuffer = 0;
     s32 savedViewport[4] = {};
     s32 savedScissor[4] = {};
     bool savedScissorEnabled = false;
 
-    // PC-only cheat hook: see pddiRenderContext::SetWorldMirror.
     bool worldMirror = false;
+    bool multisampleEnabled = true;
 
-    // Renderstate cache
     pddiCullMode cachedCullMode = PDDI_CULL_NONE;
     bool cachedZBuffer = false;
     bool cachedDepthClamp = false;
     pddiBlendMode cachedBlendMode = PDDI_BLEND_NONE;
     bool stateDirty = true;
-    // Polygon offset override: when true, SetBlendMode(BLEND_NONE) restores these
-    // values instead of disabling polygon offset.
     bool polyOffsetOverride = false;
     f32 polyOffsetFactor = 0.0f;
     f32 polyOffsetUnits = 0.0f;
@@ -421,14 +387,11 @@ private:
     void InitBatchMesh();
     void Init3DShader();
     void InitShadowDepthShader();
-    void UpdateMultisampleState();
-    void EnsureMSAAFramebuffer(s32 samples, s32 width, s32 height);
-    void DestroyMSAAFramebuffer();
 };
 
-// glDevice
+// glesDevice
 
-class glDevice : public pddiDevice {
+class glesDevice : public pddiDevice {
 public:
     pddiDisplay* NewDisplay() override;
     pddiRenderContext* NewRenderContext(pddiDisplay* display) override;
@@ -438,20 +401,22 @@ public:
     pddiBaseShader* NewShader(const char* type) override;
 };
 
-// glGamepad
+// glesGamepad — real libnx PadState-backed implementation.
 
-class glGamepad : public pddiGamepad {
+class glesGamepad : public pddiGamepad {
 public:
+    glesGamepad();
+
     void Poll() override;
     bool IsConnected() const override { return connected; }
     bool IsButtonDown(int button) const override;
     float GetAxis(int axis) const override;
-    bool SupportsVibration() const override;
-    bool SetVibration(float lowFrequency, float highFrequency) override;
+    bool SupportsVibration() const override { return false; }
+    bool SetVibration(float, float) override { return false; }
 
 private:
+    PadState pad;
     bool connected = false;
-    bool buttons[GamepadButton::COUNT] = {};
+    u64 heldButtons = 0;
     float axes[GamepadAxis::COUNT] = {};
-    int activeJoystickId = -1;
 };

@@ -2735,6 +2735,39 @@ void glContext::Init3DShader() {
         glGetProgramInfoLog(program3D, sizeof(log), nullptr, log);
         std::fprintf(stderr, "3D shader link error:\n%s\n", log);
     }
+    else {
+        u3D.alphaScale = glGetUniformLocation(program3D, "uAlphaScale");
+        u3D.useZeroTexelKey = glGetUniformLocation(program3D, "uUseZeroTexelKey");
+        u3D.mvp = glGetUniformLocation(program3D, "uMVP");
+        u3D.worldMatrix = glGetUniformLocation(program3D, "uWorldMatrix");
+        u3D.viewMatrix = glGetUniformLocation(program3D, "uViewMatrix");
+        u3D.cameraPos = glGetUniformLocation(program3D, "uCameraPos");
+        u3D.shadowDebugMode = glGetUniformLocation(program3D, "uShadowDebugMode");
+        u3D.receiveShadows = glGetUniformLocation(program3D, "uReceiveShadows");
+        u3D.shadowCascadeCount = glGetUniformLocation(program3D, "uShadowCascadeCount");
+        u3D.shadowFilterQuality = glGetUniformLocation(program3D, "uShadowFilterQuality");
+        u3D.shadowBias = glGetUniformLocation(program3D, "uShadowBias[0]");
+        u3D.shadowLightDir = glGetUniformLocation(program3D, "uShadowLightDir");
+        u3D.lightVP = glGetUniformLocation(program3D, "uLightVP[0]");
+        u3D.cascadeSplits = glGetUniformLocation(program3D, "uCascadeSplits[0]");
+        u3D.cascadeBlendDistances = glGetUniformLocation(program3D, "uCascadeBlendDistances[0]");
+        u3D.shadowTexelWorldSize = glGetUniformLocation(program3D, "uShadowTexelWorldSize[0]");
+        u3D.receiverInstanceId = glGetUniformLocation(program3D, "uReceiverInstanceId");
+        u3D.shadowMap[0] = glGetUniformLocation(program3D, "uShadowMap0");
+        u3D.shadowMap[1] = glGetUniformLocation(program3D, "uShadowMap1");
+        u3D.shadowMap[2] = glGetUniformLocation(program3D, "uShadowMap2");
+        u3D.shadowIdMap[0] = glGetUniformLocation(program3D, "uShadowIdMap0");
+        u3D.shadowIdMap[1] = glGetUniformLocation(program3D, "uShadowIdMap1");
+        u3D.shadowIdMap[2] = glGetUniformLocation(program3D, "uShadowIdMap2");
+        u3D.hasVRAM = glGetUniformLocation(program3D, "uHasVRAM");
+        u3D.texInfoOverrideEnabled = glGetUniformLocation(program3D, "uTexInfoOverrideEnabled");
+        u3D.texInfoOverride = glGetUniformLocation(program3D, "uTexInfoOverride");
+        u3D.vram = glGetUniformLocation(program3D, "uVRAM");
+        u3D.realTextureMode = glGetUniformLocation(program3D, "uRealTextureMode");
+        u3D.realTex = glGetUniformLocation(program3D, "uRealTex");
+        u3D.realTexOffset = glGetUniformLocation(program3D, "uRealTexOffset");
+        u3D.realTexSize = glGetUniformLocation(program3D, "uRealTexSize");
+    }
 
     glDeleteShader(vs);
     glDeleteShader(fs);
@@ -2758,6 +2791,21 @@ void glContext::InitShadowDepthShader() {
         char log[512];
         glGetProgramInfoLog(shadowDepthProgram, sizeof(log), nullptr, log);
         std::fprintf(stderr, "Shadow depth shader link error:\n%s\n", log);
+    }
+    else {
+        uShadowDepth.lightMVP = glGetUniformLocation(shadowDepthProgram, "uLightMVP");
+        uShadowDepth.casterInstanceId = glGetUniformLocation(shadowDepthProgram, "uCasterInstanceId");
+        uShadowDepth.hasUV = glGetUniformLocation(shadowDepthProgram, "uHasUV");
+        uShadowDepth.hasTexInfo = glGetUniformLocation(shadowDepthProgram, "uHasTexInfo");
+        uShadowDepth.hasVRAM = glGetUniformLocation(shadowDepthProgram, "uHasVRAM");
+        uShadowDepth.useZeroTexelKey = glGetUniformLocation(shadowDepthProgram, "uUseZeroTexelKey");
+        uShadowDepth.texInfoOverrideEnabled = glGetUniformLocation(shadowDepthProgram, "uTexInfoOverrideEnabled");
+        uShadowDepth.texInfoOverride = glGetUniformLocation(shadowDepthProgram, "uTexInfoOverride");
+        uShadowDepth.vram = glGetUniformLocation(shadowDepthProgram, "uVRAM");
+        uShadowDepth.realTextureMode = glGetUniformLocation(shadowDepthProgram, "uRealTextureMode");
+        uShadowDepth.realTex = glGetUniformLocation(shadowDepthProgram, "uRealTex");
+        uShadowDepth.realTexOffset = glGetUniformLocation(shadowDepthProgram, "uRealTexOffset");
+        uShadowDepth.realTexSize = glGetUniformLocation(shadowDepthProgram, "uRealTexSize");
     }
 
     glDeleteShader(vs);
@@ -2863,45 +2911,41 @@ void glContext::DrawPrimBuffer(pddiPrimBuffer* buffer, u32 indexOffset, u32 inde
         }
         glUseProgram(shadowDepthProgram);
         Mat4 lightMvp = shadowCasterLightVP * worldMatrix;
-        glUniformMatrix4fv(glGetUniformLocation(shadowDepthProgram, "uLightMVP"),
-                           1, GL_FALSE, lightMvp.Data());
-        glUniform1ui(glGetUniformLocation(shadowDepthProgram, "uCasterInstanceId"),
-                     shadowCasterInstanceId);
+        glUniformMatrix4fv(uShadowDepth.lightMVP, 1, GL_FALSE, lightMvp.Data());
+        glUniform1ui(uShadowDepth.casterInstanceId, shadowCasterInstanceId);
 
         auto* glBufShadow = static_cast<glPrimBuffer*>(buffer);
         const u32 vertexFormat = glBufShadow->GetVertexFormat();
-        glUniform1i(glGetUniformLocation(shadowDepthProgram, "uHasUV"),
-                    (vertexFormat & PDDI_V_UV) ? 1 : 0);
-        glUniform1i(glGetUniformLocation(shadowDepthProgram, "uHasTexInfo"),
-                    (vertexFormat & PDDI_V_TEXINFO) ? 1 : 0);
-        glUniform1i(glGetUniformLocation(shadowDepthProgram, "uHasVRAM"), vramHandle ? 1 : 0);
+        glUniform1i(uShadowDepth.hasUV, (vertexFormat & PDDI_V_UV) ? 1 : 0);
+        glUniform1i(uShadowDepth.hasTexInfo, (vertexFormat & PDDI_V_TEXINFO) ? 1 : 0);
+        glUniform1i(uShadowDepth.hasVRAM, vramHandle ? 1 : 0);
         const int useZeroTexelKey = (cachedBlendMode != PDDI_BLEND_NONE) ? 1 : 0;
-        glUniform1i(glGetUniformLocation(shadowDepthProgram, "uUseZeroTexelKey"), useZeroTexelKey);
+        glUniform1i(uShadowDepth.useZeroTexelKey, useZeroTexelKey);
 
         const int texInfoOverride = texInfoOverrideEnabled ? 1 : 0;
-        glUniform1i(glGetUniformLocation(shadowDepthProgram, "uTexInfoOverrideEnabled"), texInfoOverride);
+        glUniform1i(uShadowDepth.texInfoOverrideEnabled, texInfoOverride);
         if (texInfoOverride != 0) {
             const float tpage = static_cast<float>((texInfoOverrideWord >> 16) & 0xFFFFu);
             const float cba = static_cast<float>(texInfoOverrideWord & 0xFFFFu);
-            glUniform2f(glGetUniformLocation(shadowDepthProgram, "uTexInfoOverride"), tpage, cba);
+            glUniform2f(uShadowDepth.texInfoOverride, tpage, cba);
         }
         else {
-            glUniform2f(glGetUniformLocation(shadowDepthProgram, "uTexInfoOverride"), -1.0f, 0.0f);
+            glUniform2f(uShadowDepth.texInfoOverride, -1.0f, 0.0f);
         }
 
         if (vramHandle) {
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, vramHandle);
-            glUniform1i(glGetUniformLocation(shadowDepthProgram, "uVRAM"), 0);
+            glUniform1i(uShadowDepth.vram, 0);
         }
 
         const int useRealTexture = (realTextureModeEnabled && currentTexture) ? 1 : 0;
-        glUniform1i(glGetUniformLocation(shadowDepthProgram, "uRealTextureMode"), useRealTexture);
+        glUniform1i(uShadowDepth.realTextureMode, useRealTexture);
         if (useRealTexture) {
             static_cast<glTexture*>(currentTexture)->Bind(1);
-            glUniform1i(glGetUniformLocation(shadowDepthProgram, "uRealTex"), 1);
-            glUniform2f(glGetUniformLocation(shadowDepthProgram, "uRealTexOffset"), realTexOffsetX, realTexOffsetY);
-            glUniform2f(glGetUniformLocation(shadowDepthProgram, "uRealTexSize"), realTexSizeX, realTexSizeY);
+            glUniform1i(uShadowDepth.realTex, 1);
+            glUniform2f(uShadowDepth.realTexOffset, realTexOffsetX, realTexOffsetY);
+            glUniform2f(uShadowDepth.realTexSize, realTexSizeX, realTexSizeY);
         }
 
         GLenum glModeShadow = GL_TRIANGLES;
@@ -2924,84 +2968,69 @@ void glContext::DrawPrimBuffer(pddiPrimBuffer* buffer, u32 indexOffset, u32 inde
     glUseProgram(program3D);
 
     const float alphaScale = (cachedBlendMode == PDDI_BLEND_ALPHA) ? 0.5f : 1.0f;
-    glUniform1f(glGetUniformLocation(program3D, "uAlphaScale"), alphaScale);
+    glUniform1f(u3D.alphaScale, alphaScale);
     const int useZeroTexelKey = (cachedBlendMode != PDDI_BLEND_NONE) ? 1 : 0;
-    glUniform1i(glGetUniformLocation(program3D, "uUseZeroTexelKey"), useZeroTexelKey);
+    glUniform1i(u3D.useZeroTexelKey, useZeroTexelKey);
 
     Mat4 mvp = projection * (viewMatrix * worldMatrix);
-    glUniformMatrix4fv(glGetUniformLocation(program3D, "uMVP"),
-                       1, GL_FALSE, mvp.Data());
-    glUniformMatrix4fv(glGetUniformLocation(program3D, "uWorldMatrix"),
-                       1, GL_FALSE, worldMatrix.Data());
-    glUniformMatrix4fv(glGetUniformLocation(program3D, "uViewMatrix"),
-                       1, GL_FALSE, viewMatrix.Data());
-    glUniform3f(glGetUniformLocation(program3D, "uCameraPos"),
-                cameraWorldPos[0], cameraWorldPos[1], cameraWorldPos[2]);
-    glUniform1i(glGetUniformLocation(program3D, "uShadowDebugMode"), shadowDebugMode);
+    glUniformMatrix4fv(u3D.mvp, 1, GL_FALSE, mvp.Data());
+    glUniformMatrix4fv(u3D.worldMatrix, 1, GL_FALSE, worldMatrix.Data());
+    glUniformMatrix4fv(u3D.viewMatrix, 1, GL_FALSE, viewMatrix.Data());
+    glUniform3f(u3D.cameraPos, cameraWorldPos[0], cameraWorldPos[1], cameraWorldPos[2]);
+    glUniform1i(u3D.shadowDebugMode, shadowDebugMode);
 
     const int receiveShadows = (receiveShadowsEnabled && shadowCascadeCount > 0) ? 1 : 0;
-    glUniform1i(glGetUniformLocation(program3D, "uReceiveShadows"), receiveShadows);
-    glUniform1i(glGetUniformLocation(program3D, "uShadowCascadeCount"), receiveShadows ? shadowCascadeCount : 0);
-    glUniform1i(glGetUniformLocation(program3D, "uShadowFilterQuality"), receiveShadows ? shadowFilterQuality : 0);
-    glUniform1fv(glGetUniformLocation(program3D, "uShadowBias[0]"), kShadowCascadeCount, shadowBias);
-    glUniform3f(glGetUniformLocation(program3D, "uShadowLightDir"),
-                shadowLightDir[0], shadowLightDir[1], shadowLightDir[2]);
+    glUniform1i(u3D.receiveShadows, receiveShadows);
+    glUniform1i(u3D.shadowCascadeCount, receiveShadows ? shadowCascadeCount : 0);
+    glUniform1i(u3D.shadowFilterQuality, receiveShadows ? shadowFilterQuality : 0);
+    glUniform1fv(u3D.shadowBias, kShadowCascadeCount, shadowBias);
+    glUniform3f(u3D.shadowLightDir, shadowLightDir[0], shadowLightDir[1], shadowLightDir[2]);
     if (receiveShadows) {
-        glUniformMatrix4fv(glGetUniformLocation(program3D, "uLightVP[0]"), shadowCascadeCount,
-                           GL_FALSE, shadowLightVP[0].Data());
-        glUniform1fv(glGetUniformLocation(program3D, "uCascadeSplits[0]"), shadowCascadeCount,
-                     shadowCascadeSplits);
-        glUniform1fv(glGetUniformLocation(program3D, "uCascadeBlendDistances[0]"), shadowCascadeCount,
-                     shadowCascadeBlendDistances);
-        glUniform1fv(glGetUniformLocation(program3D, "uShadowTexelWorldSize[0]"), kShadowCascadeCount,
-                     shadowTexelWorldSize);
-        glUniform1ui(glGetUniformLocation(program3D, "uReceiverInstanceId"), shadowReceiverInstanceId);
-        static const char* kShadowSamplerNames[kShadowCascadeCount] = {
-            "uShadowMap0", "uShadowMap1", "uShadowMap2"
-        };
-        static const char* kShadowIdSamplerNames[kShadowCascadeCount] = {
-            "uShadowIdMap0", "uShadowIdMap1", "uShadowIdMap2"
-        };
+        glUniformMatrix4fv(u3D.lightVP, shadowCascadeCount, GL_FALSE, shadowLightVP[0].Data());
+        glUniform1fv(u3D.cascadeSplits, shadowCascadeCount, shadowCascadeSplits);
+        glUniform1fv(u3D.cascadeBlendDistances, shadowCascadeCount, shadowCascadeBlendDistances);
+        glUniform1fv(u3D.shadowTexelWorldSize, kShadowCascadeCount, shadowTexelWorldSize);
+        glUniform1ui(u3D.receiverInstanceId, shadowReceiverInstanceId);
         for (s32 i = 0; i < shadowCascadeCount; i++) {
             if (!shadowDepthTextures[i]) continue;
             static_cast<glTexture*>(shadowDepthTextures[i])->Bind(2 + i);
             glBindSampler(2 + i, shadowCompareSampler);
-            glUniform1i(glGetUniformLocation(program3D, kShadowSamplerNames[i]), 2 + i);
+            glUniform1i(u3D.shadowMap[i], 2 + i);
             if (shadowIdTextures[i]) {
                 static_cast<glTexture*>(shadowIdTextures[i])->Bind(5 + i);
                 glBindSampler(5 + i, 0);
-                glUniform1i(glGetUniformLocation(program3D, kShadowIdSamplerNames[i]), 5 + i);
+                glUniform1i(u3D.shadowIdMap[i], 5 + i);
             }
         }
     }
 
     int hasVRAM = vramHandle ? 1 : 0;
-    glUniform1i(glGetUniformLocation(program3D, "uHasVRAM"), hasVRAM);
+    glUniform1i(u3D.hasVRAM, hasVRAM);
 
     const int texInfoOverride = texInfoOverrideEnabled ? 1 : 0;
-    glUniform1i(glGetUniformLocation(program3D, "uTexInfoOverrideEnabled"), texInfoOverride);
+    glUniform1i(u3D.texInfoOverrideEnabled, texInfoOverride);
     if (texInfoOverride != 0) {
         const float tpage = static_cast<float>((texInfoOverrideWord >> 16) & 0xFFFFu);
         const float cba = static_cast<float>(texInfoOverrideWord & 0xFFFFu);
-        glUniform2f(glGetUniformLocation(program3D, "uTexInfoOverride"), tpage, cba);
+        glUniform2f(u3D.texInfoOverride, tpage, cba);
     }
     else {
-        glUniform2f(glGetUniformLocation(program3D, "uTexInfoOverride"), -1.0f, 0.0f);
+        glUniform2f(u3D.texInfoOverride, -1.0f, 0.0f);
     }
 
     if (vramHandle) {
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, vramHandle);
-        glUniform1i(glGetUniformLocation(program3D, "uVRAM"), 0);
+        glUniform1i(u3D.vram, 0);
     }
 
     const int useRealTexture = (realTextureModeEnabled && currentTexture) ? 1 : 0;
-    glUniform1i(glGetUniformLocation(program3D, "uRealTextureMode"), useRealTexture);
+    glUniform1i(u3D.realTextureMode, useRealTexture);
     if (useRealTexture) {
         static_cast<glTexture*>(currentTexture)->Bind(1);
-        glUniform1i(glGetUniformLocation(program3D, "uRealTex"), 1);
-        glUniform2f(glGetUniformLocation(program3D, "uRealTexOffset"), realTexOffsetX, realTexOffsetY);
-        glUniform2f(glGetUniformLocation(program3D, "uRealTexSize"), realTexSizeX, realTexSizeY);
+        glUniform1i(u3D.realTex, 1);
+        glUniform2f(u3D.realTexOffset, realTexOffsetX, realTexOffsetY);
+        glUniform2f(u3D.realTexSize, realTexSizeX, realTexSizeY);
     }
 
     GLenum glMode = GL_TRIANGLES;

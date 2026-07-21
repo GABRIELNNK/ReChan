@@ -1,5 +1,6 @@
 build/
 bin/
+vendor/devkitpro/
 *.exe
 *.obj
 *.pdb
@@ -11,3 +12,15 @@ bin/
 *.i64
 *.idb
 .vs/
+
+DontShip/
+shipping/
+
+switch/**/build/
+switch/**/*.elf
+switch/**/*.nro
+switch/**/*.nacp
+switch/**/*.map
+switch/**/*.lst
+switch/**/build_log.txt
+switch/libp3d/lib/
