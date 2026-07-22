@@ -731,10 +731,13 @@ void ShadowCSM::DrawBlockCasterIntoCascades(Block* block, const LVector* drawPos
         return;
     }
 
-    pddiPrimBuffer* buffer = BuildUnculledPrimBufferFromPrimGeom(block->primGeom);
-    if (!buffer) {
-        return;
+    if (!block->shadowCasterBuffer) {
+        block->shadowCasterBuffer = BuildUnculledPrimBufferFromPrimGeom(block->primGeom);
+        if (!block->shadowCasterBuffer) {
+            return;
+        }
     }
+    pddiPrimBuffer* buffer = block->shadowCasterBuffer;
 
     s_casterCount++;
 
@@ -762,7 +765,6 @@ void ShadowCSM::DrawBlockCasterIntoCascades(Block* block, const LVector* drawPos
         p3d::context->SetRenderTarget(nullptr);
     }
 
-    buffer->Release();
     p3d::context->SetWorldMatrix(savedWorld);
 }
 

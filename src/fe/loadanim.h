@@ -13,6 +13,8 @@
 void StartLogo(const char* timFile);
 void FillMeter(u8 target);
 
+void PumpLoadingScreen();
+
 // Animates bar to target over several frames, cleans up textures,
 // then starts a new frame for the main loop's EndFrame balance.
 void StopLogo();

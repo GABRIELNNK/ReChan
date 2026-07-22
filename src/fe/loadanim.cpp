@@ -5,6 +5,7 @@
 #include "gen/config.h"
 #include "gen/time.h"
 #include "p3d/context.h"
+#include "p3d/input.h"
 #include "p3d/texture.h"
 #include "pddi/pddi.h"
 #include "pddi/pddidev.h"
@@ -94,6 +95,10 @@ static void PresentLoadingFrameFaded(u8 fill, u8 blackAlpha) {
     if (p3d::display) {
         p3d::display->PollEvents();
     }
+
+    if (p3d::input) {
+        p3d::input->ServiceInput();
+    }
     g_display->BeginFrame();
     DrawLoadingScreen(fill);
     if (blackAlpha > 0) {
@@ -109,6 +114,9 @@ static void PresentLoadingFrame(u8 fill) {
 static void PresentLoadingFrame_Tex(tTexture* tex) {
     if (p3d::display) {
         p3d::display->PollEvents();
+    }
+    if (p3d::input) {
+        p3d::input->ServiceInput();
     }
     g_display->BeginFrame();
     ScreenDraw::DrawFullscreen(tex);
@@ -155,12 +163,6 @@ void StartLogo(const char* timFile) {
     PresentLoadingFrame(0);
 }
 
-// PSX advanced the bar by 1 unit per VBlank call, so a 0->100 fill took
-// ~3.3s of real PSX disc-load time. The only caller in this codebase is
-// FillMeter(100) run once before the (now near-instant on PC) level Load(),
-// so pacing 1 unit/frame just adds a flat multi-second stall with nothing
-// real happening underneath it. Animate over a short fixed real duration
-// instead - still a visible eased fill, never a hard block.
 static constexpr f64 kFillMeterDurationSec = 0.35;
 
 // PSX: FillMeter__10VBlankLogoUc (LOADANIM.CPP:207, 0x80047A68)
@@ -174,9 +176,10 @@ void FillMeter(u8 target) {
         return;
     }
 
+    const f64 duration = kFillMeterDurationSec * (std::abs(delta) / 100.0);
     const f64 fillStart = Time::GetTimeInSeconds();
     for (;;) {
-        f32 t = (f32)((Time::GetTimeInSeconds() - fillStart) / kFillMeterDurationSec);
+        f32 t = (f32)((Time::GetTimeInSeconds() - fillStart) / duration);
         if (t >= 1.0f) {
             s_logo.currentFill = target;
             s_logo.targetFill = target;
@@ -189,6 +192,13 @@ void FillMeter(u8 target) {
         s_logo.targetFill = s_logo.currentFill;
         PresentLoadingFrame(s_logo.currentFill);
     }
+}
+
+void PumpLoadingScreen() {
+    if (!s_logo.active) {
+        return;
+    }
+    PresentLoadingFrame(s_logo.currentFill);
 }
 
 // PSX: StopLogo__10VBlankLogo (LOADANIM.CPP:183, 0x800479BC)

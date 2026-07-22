@@ -169,6 +169,15 @@ Vibrations:
 [FE_CCF]
 Configuration:
 
+[FE_BPTS]
+Affichage manette :
+
+[FE_DEFX]
+Standard (Xbox)
+
+[FE_NX]
+Nintendo Switch
+
 [FE_CSD]
 AFFICHAGE ETAT
 

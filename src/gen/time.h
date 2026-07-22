@@ -69,3 +69,10 @@ private:
 
 // PSX: gp-relative global, defined in time.cpp
 extern Time* g_time;
+
+struct FrameProfile {
+    f32 logicMs = 0.0f;
+    f32 drawSubmitMs = 0.0f;
+    f32 swapMs = 0.0f;
+};
+extern FrameProfile g_frameProfile;

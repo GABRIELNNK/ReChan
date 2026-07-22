@@ -6,6 +6,8 @@
 // PSX: gp-relative global
 Time* g_time = nullptr;
 
+FrameProfile g_frameProfile;
+
 Time::Time() { MARKFUNCTION(0x80044950); }
 Time::~Time() { MARKFUNCTION(0x800449E8); }
 

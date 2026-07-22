@@ -64,6 +64,8 @@ struct CharFile {
     s32 refCount = 0;                 // PSX +24: reference count
     u32 thingType = 0;               // PSX +28: AI::ThingTypes
 
+    void* wholeFileBuf = nullptr;
+
     CharFile(u32 type);
     ~CharFile();
 

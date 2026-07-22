@@ -37,6 +37,7 @@
 #include "version.h"
 
 #include "extra/dialogpreview.h"
+#include "extra/prompticons.h"
 #include "extra/shadowcsm.h"
 
 feCustomMenuMgr* g_feCustomMenuMgr = nullptr;
@@ -598,10 +599,15 @@ void feCustomMenuMgr::BuildPages() {
     auto& feOpts = AddPage(MenuPage_Options, "FE_OPT", "Menu_GameOption", MenuPage_Frontend, 2, false, -1, -1);
     SetEntries(feOpts, {
         Button("FE_CTL", EntryEvent_GoPage, MenuPage_Controller),
+        // Key Bindings is a keyboard-remapping page; no console has a keyboard.
+#if !defined(RC_PLATFORM_SWITCH)
         Button("FE_KBD", EntryEvent_GoPage, MenuPage_KeyBindings),
+#endif
         Button("FE_DIS", EntryEvent_GoPage, MenuPage_Display),
         Button("FE_SND", EntryEvent_GoPage, MenuPage_Sound),
+#if AUTO_UPDATER
         Button("FE_UPD", EntryEvent_GoPage, MenuPage_Update),
+#endif
         //Button("FE_CRE", EntryEvent_Credits),
 #if NEW_CHEATS
         Button("FE_CHEATS", EntryEvent_GoPage, MenuPage_Cheats),
@@ -616,6 +622,7 @@ void feCustomMenuMgr::BuildPages() {
     SetEntries(feCtrl, {
         Toggle("FE_CSH", EntryBinding_Shock),
         List("FE_CCF", EntryBinding_PlayerConfig, 1, 0, 2),
+        List("FE_BPTS", EntryBinding_ControllerPromptStyle, 1, 0, ControllerPromptStyle_Count - 1),
         Button("FE_BCK", EntryEvent_Back),
                }, 0, 42);
 
@@ -627,14 +634,18 @@ void feCustomMenuMgr::BuildPages() {
 
     auto& feDisplay = AddPage(MenuPage_Display, "FE_DIS", "Menu_GameOption", MenuPage_Options, 2, false, -1, -1);
     SetEntries(feDisplay, {
+#if !defined(RC_PLATFORM_SWITCH)
         List("FE_RES", EntryBinding_DisplayResolution, 1, 0, 64),
         List("FE_FSC", EntryBinding_DisplayScreenMode, 1, 0, 2),
+#endif
         Toggle("FE_VYS", EntryBinding_DisplayVsync),
 #if HIGH_FPS_PLAY_PRESENTATION
         List("FE_FPS", EntryBinding_DisplayFrameRate, 1, 0, 3),
 #endif
+#if !defined(RC_PLATFORM_SWITCH)
         List("FE_MSA", EntryBinding_DisplayMsaa, 1, 0, 4),
-#if MODERN_GRAPHICS
+#endif
+#if MODERN_GRAPHICS && !defined(RC_PLATFORM_SWITCH)
         List("FE_DSH", EntryBinding_DisplayShadowQuality, 1, 0, 4),
 #endif
         List("FE_LNG", EntryBinding_Language, 1, 0, (s32)NumLanguages - 1),
@@ -2786,6 +2797,13 @@ void feCustomMenuMgr::Adjust(s32 dir) {
             return;
         }
 
+        if (e->binding == EntryBinding_ControllerPromptStyle) {
+            const s32 current = GetBoundValue(*e);
+            const s32 v = WrapStepValue(current, e->step, e->lo, e->hi, dir);
+            ApplyValue(*e, v);
+            return;
+        }
+
 #if MODERN_GRAPHICS
         if (e->binding == EntryBinding_DisplayShadowQuality) {
             const s32 current = GetBoundValue(*e);
@@ -2837,6 +2855,7 @@ s32 feCustomMenuMgr::GetBoundValue(const Entry& e) const {
         case EntryBinding_Stereo: return (g_sound && g_sound->activeFlag) ? 1 : 0;
         case EntryBinding_Shock: return GetShock() ? 1 : 0;
         case EntryBinding_PlayerConfig: return g_inputManager ? (s32)g_inputManager->GetPlayerConfig() : 0;
+        case EntryBinding_ControllerPromptStyle: return ControllerPromptManager::GetStyle();
         case EntryBinding_Language: return (s32)g_customText.GetLanguage();
         case EntryBinding_DisplayResolution: return g_display ? g_display->GetResolutionIndex() : 0;
         case EntryBinding_DisplayScreenMode: return g_display ? g_display->GetScreenMode() : Display::GetDefaultScreenMode();
@@ -2922,6 +2941,11 @@ void feCustomMenuMgr::ApplyValue(const Entry& e, s32 v) {
             v = (s32)LangEnglish;
         }
         g_customText.SetLanguage((GameLanguage)v);
+    }
+    else if (e.binding == EntryBinding_ControllerPromptStyle) {
+        if (ControllerPromptManager::SetStyle(v)) {
+            ReloadControllerPromptTextures();
+        }
     }
     else if (e.binding == EntryBinding_DisplayScreenMode) {
         if (g_display) g_display->SetScreenMode(v);
@@ -3543,10 +3567,21 @@ void feCustomMenuMgr::LoadControllerOverlayTexture() {
         return;
     }
 
-    m_controllerTexture = tTexture::LoadFromImagePath(kControllerOverlayTexturePath);
+    char path[128];
+    ControllerPromptManager::BuildOverlayPath(path, (s32)sizeof(path));
+    m_controllerTexture = tTexture::LoadFromImagePath(path);
     if (!m_controllerTexture) {
-        LOG("[CustomMenu] Failed to load %s", kControllerOverlayTexturePath);
+        LOG("[CustomMenu] Failed to load %s", path);
     }
+}
+
+void feCustomMenuMgr::ReloadControllerPromptTextures() {
+    if (m_controllerTexture) {
+        m_controllerTexture->Release();
+        m_controllerTexture = nullptr;
+    }
+    LoadControllerOverlayTexture();
+    PromptIcons::ResetGamepadSheet();
 }
 
 void feCustomMenuMgr::LoadMenuOrnamentTexture() {
@@ -5235,6 +5270,20 @@ void feCustomMenuMgr::RenderCurrentPage() {
                                             selected ? selectedColor.GetBlue8() : normalColor.GetBlue8());
                     g_textManager->PrintString(frameRateText, valueScreenX, rowScreenY);
                 }
+                else if (item.binding == EntryBinding_ControllerPromptStyle) {
+                    const s32 style = ClampControllerPromptStyle(GetBoundValue(item));
+                    const char* styleText = Localize(kControllerPromptStyles[style].displayToken);
+
+                    if (!styleText) {
+                        continue;
+                    }
+
+                    g_textManager->SetAlignment(TextAlign_Right);
+                    g_textManager->SetColor(selected ? selectedColor.GetRed8() : normalColor.GetRed8(),
+                                            selected ? selectedColor.GetGreen8() : normalColor.GetGreen8(),
+                                            selected ? selectedColor.GetBlue8() : normalColor.GetBlue8());
+                    g_textManager->PrintString(styleText, valueScreenX, rowScreenY);
+                }
                 else if (item.binding == EntryBinding_PlayerConfig) {
                     const s32 cfg = GetBoundValue(item);
                     const char* cfgToken = (cfg == 0) ? "FE_CF1"
@@ -5880,8 +5929,10 @@ void feCustomMenuMgr::RenderControllerOverlay(s32 panelX, s32 panelY) const {
         return;
     }
 
-    const f32 screenTexW = SCREEN_SCALE_Y(128);
+    const s32 texW = m_controllerTexture->GetWidth();
+    const s32 texH = m_controllerTexture->GetHeight();
     const f32 screenTexH = SCREEN_SCALE_Y(128);
+    const f32 screenTexW = (texH > 0) ? screenTexH * ((f32)texW / (f32)texH) : screenTexH;
     const f32 screenTexX = SCALE_AND_CENTER_X(DEFAULT_SCREEN_WIDTH / 2);
     const f32 screenTexY = SCREEN_SCALE_Y(panelY + 32.0f);
 
@@ -5896,7 +5947,7 @@ void feCustomMenuMgr::RenderControllerOverlay(s32 panelX, s32 panelY) const {
         TextAlign alignment;
     };
 
-    const ButtonLabel buttons[] = {
+    ButtonLabel kButtonsDefault[] = {
         { 0,  nullptr,  -104.0f,  7.0f,  TextAlign_Right },
         { 2,  nullptr,  -104.0f,  16.0f, TextAlign_Right },
         { -1, "FE_CMV", -104.0f, 37.5f, TextAlign_Right },
@@ -5913,10 +5964,38 @@ void feCustomMenuMgr::RenderControllerOverlay(s32 panelX, s32 panelY) const {
         { -1, "FE_CMO", 104.0f,  71.5f, TextAlign_Left },
     };
 
-    if (!g_textManager || !g_textManager->SetFontByName(DEF_MENU_FONT_NAME)) {
+    ButtonLabel kButtonsSwitch[] = {
+        { 0,  nullptr,  -162.0f,  8.0f,  TextAlign_Right },
+        { 2,  nullptr,  -162.0f,  19.0f, TextAlign_Right },
+        { -1, "FE_CNU", -162.0f, 26.0f, TextAlign_Right },
+        { -1, "FE_CMV", -162.0f, 38.0f, TextAlign_Right },
+        { -1, "FE_CMV", -162.0f, 53.0f, TextAlign_Right },
+
+        { 1,  nullptr,  162.0f,   6.0f,  TextAlign_Left },
+        { 3,  nullptr,  162.0f,   19.0f, TextAlign_Left },
+        { -1, "FE_CMO", 162.0f,   26.0f, TextAlign_Left },
+        { 4,  nullptr,  162.0f,   31.5f, TextAlign_Left },
+        { 5,  nullptr,  162.0f,   37.0f, TextAlign_Left },
+        { 6,  nullptr,  162.0f,   42.0f, TextAlign_Left },
+        { 7,  nullptr,  162.0f,   47.5f, TextAlign_Left },
+        { -1, "FE_CNU", 162.0f,  55.5f, TextAlign_Left },
+    };
+
+    const bool useSwitchLabels = ControllerPromptManager::GetStyle() == (s32)ControllerPromptStyle_Switch;
+    const ButtonLabel* buttons = useSwitchLabels ? kButtonsSwitch : kButtonsDefault;
+    const s32 buttonCount = useSwitchLabels
+        ? (s32)(sizeof(kButtonsSwitch) / sizeof(kButtonsSwitch[0]))
+        : (s32)(sizeof(kButtonsDefault) / sizeof(kButtonsDefault[0]));
+
+    if (!g_textManager || !g_textManager->SetFontByName("Legal")) {
         return;
     }
-    g_textManager->SetScale(SCREEN_SCALE_Y(DEF_CONTROLLER_ACTION_SCALE), SCREEN_SCALE_Y(DEF_CONTROLLER_ACTION_SCALE));
+
+    if (useSwitchLabels)
+        g_textManager->SetScale(SCREEN_SCALE_Y(DEF_CONTROLLER_ACTION_SCALE * 0.8f), SCREEN_SCALE_Y(DEF_CONTROLLER_ACTION_SCALE * 0.8f));
+    else
+        g_textManager->SetScale(SCREEN_SCALE_Y(DEF_CONTROLLER_ACTION_SCALE), SCREEN_SCALE_Y(DEF_CONTROLLER_ACTION_SCALE));
+
     g_textManager->SetWrapWidth(0.0f);
     g_textManager->SetLineSpacing(0);
     g_textManager->SetPromptsEnabled(true);
@@ -5924,7 +6003,8 @@ void feCustomMenuMgr::RenderControllerOverlay(s32 panelX, s32 panelY) const {
     g_textManager->SetOutline(true);
     const u8* playerMap = g_inputManager ? g_inputManager->PlayerMapArray() : nullptr;
 
-    for (const auto& btn : buttons) {
+    for (s32 btnIdx = 0; btnIdx < buttonCount; btnIdx++) {
+        const ButtonLabel& btn = buttons[btnIdx];
         char displayName[32] = {};
         const char* text = nullptr;
 
@@ -5953,6 +6033,7 @@ void feCustomMenuMgr::RenderControllerOverlay(s32 panelX, s32 panelY) const {
     }
 
     g_textManager->SetScale(1.0f, 1.0f);
+    g_textManager->SetFontByName(DEF_MENU_FONT_NAME);
 }
 
 #if AUTO_UPDATER

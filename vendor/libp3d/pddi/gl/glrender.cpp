@@ -2093,7 +2093,7 @@ void glContext::Clear(int flags) {
 }
 
 void glContext::SetProjectionMatrix(const Mat4& m) { projection = m; }
-void glContext::SetViewMatrix(const Mat4& m) { viewMatrix = m; }
+void glContext::SetViewMatrix(const Mat4& m) { viewMatrix = m; frameConstUniformsDirty = true; }
 void glContext::SetWorldMatrix(const Mat4& m) { worldMatrix = m; }
 
 void glContext::SetWorldMirror(bool enable) {
@@ -2616,6 +2616,7 @@ void glContext::InitGouraudMesh() {
         glAttachShader(gouraudProgram, vs);
         glAttachShader(gouraudProgram, fs);
         glLinkProgram(gouraudProgram);
+        gouraudUProjLoc = glGetUniformLocation(gouraudProgram, "uProj");
     }
     if (vs) glDeleteShader(vs);
     if (fs) glDeleteShader(fs);
@@ -2707,8 +2708,7 @@ void glContext::DrawGouraudQuad(float x0, float y0, float r0, float g0, float b0
     };
 
     glUseProgram(gouraudProgram);
-    glUniformMatrix4fv(glGetUniformLocation(gouraudProgram, "uProj"),
-                       1, GL_FALSE, projection.Data());
+    glUniformMatrix4fv(gouraudUProjLoc, 1, GL_FALSE, projection.Data());
 
     glBindVertexArray(gouraudVAO);
     glBindBuffer(GL_ARRAY_BUFFER, gouraudVBO);
@@ -2854,6 +2854,8 @@ void glContext::SetShadowCascades(pddiTexture* const* depthTextures, const Mat4*
         shadowCascadeBlendDistances[i] = 0.0f;
         shadowTexelWorldSize[i] = 0.0f;
     }
+    shadowConstUniformsDirty = true;
+    shadowCascadeUniformsDirty = true;
 }
 
 void glContext::SetTexture(pddiTexture* t) {
@@ -2918,7 +2920,6 @@ void glContext::DrawPrimBuffer(pddiPrimBuffer* buffer, u32 indexOffset, u32 inde
         const u32 vertexFormat = glBufShadow->GetVertexFormat();
         glUniform1i(uShadowDepth.hasUV, (vertexFormat & PDDI_V_UV) ? 1 : 0);
         glUniform1i(uShadowDepth.hasTexInfo, (vertexFormat & PDDI_V_TEXINFO) ? 1 : 0);
-        glUniform1i(uShadowDepth.hasVRAM, vramHandle ? 1 : 0);
         const int useZeroTexelKey = (cachedBlendMode != PDDI_BLEND_NONE) ? 1 : 0;
         glUniform1i(uShadowDepth.useZeroTexelKey, useZeroTexelKey);
 
@@ -2933,6 +2934,7 @@ void glContext::DrawPrimBuffer(pddiPrimBuffer* buffer, u32 indexOffset, u32 inde
             glUniform2f(uShadowDepth.texInfoOverride, -1.0f, 0.0f);
         }
 
+        glUniform1i(uShadowDepth.hasVRAM, vramHandle ? 1 : 0);
         if (vramHandle) {
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, vramHandle);
@@ -2960,8 +2962,6 @@ void glContext::DrawPrimBuffer(pddiPrimBuffer* buffer, u32 indexOffset, u32 inde
         const void* indexPtrShadow = reinterpret_cast<const void*>(static_cast<uintptr_t>(indexOffset) * sizeof(u16));
         glBindVertexArray(glBufShadow->GetVAO());
         glDrawElements(glModeShadow, drawCountShadow, GL_UNSIGNED_SHORT, indexPtrShadow);
-        glBindVertexArray(0);
-        glUseProgram(0);
         return;
     }
 
@@ -2975,21 +2975,36 @@ void glContext::DrawPrimBuffer(pddiPrimBuffer* buffer, u32 indexOffset, u32 inde
     Mat4 mvp = projection * (viewMatrix * worldMatrix);
     glUniformMatrix4fv(u3D.mvp, 1, GL_FALSE, mvp.Data());
     glUniformMatrix4fv(u3D.worldMatrix, 1, GL_FALSE, worldMatrix.Data());
-    glUniformMatrix4fv(u3D.viewMatrix, 1, GL_FALSE, viewMatrix.Data());
-    glUniform3f(u3D.cameraPos, cameraWorldPos[0], cameraWorldPos[1], cameraWorldPos[2]);
-    glUniform1i(u3D.shadowDebugMode, shadowDebugMode);
+
+    if (frameConstUniformsDirty) {
+        glUniformMatrix4fv(u3D.viewMatrix, 1, GL_FALSE, viewMatrix.Data());
+        glUniform3f(u3D.cameraPos, cameraWorldPos[0], cameraWorldPos[1], cameraWorldPos[2]);
+        glUniform1i(u3D.shadowDebugMode, shadowDebugMode);
+        frameConstUniformsDirty = false;
+    }
 
     const int receiveShadows = (receiveShadowsEnabled && shadowCascadeCount > 0) ? 1 : 0;
     glUniform1i(u3D.receiveShadows, receiveShadows);
     glUniform1i(u3D.shadowCascadeCount, receiveShadows ? shadowCascadeCount : 0);
     glUniform1i(u3D.shadowFilterQuality, receiveShadows ? shadowFilterQuality : 0);
-    glUniform1fv(u3D.shadowBias, kShadowCascadeCount, shadowBias);
-    glUniform3f(u3D.shadowLightDir, shadowLightDir[0], shadowLightDir[1], shadowLightDir[2]);
+    // uShadowBias/uShadowLightDir/uLightVP/uCascade*/uShadowTexelWorldSize are 100%
+    // derived from SetShadowCascades, which only runs once/frame -- re-uploading them
+    // on every single mesh draw was pure waste. uReceiveShadows/uShadowCascadeCount/
+    // uShadowFilterQuality/uReceiverInstanceId above and below stay per-call since
+    // they (and receiveShadowsEnabled) vary per object.
+    if (shadowConstUniformsDirty) {
+        glUniform1fv(u3D.shadowBias, kShadowCascadeCount, shadowBias);
+        glUniform3f(u3D.shadowLightDir, shadowLightDir[0], shadowLightDir[1], shadowLightDir[2]);
+        shadowConstUniformsDirty = false;
+    }
     if (receiveShadows) {
-        glUniformMatrix4fv(u3D.lightVP, shadowCascadeCount, GL_FALSE, shadowLightVP[0].Data());
-        glUniform1fv(u3D.cascadeSplits, shadowCascadeCount, shadowCascadeSplits);
-        glUniform1fv(u3D.cascadeBlendDistances, shadowCascadeCount, shadowCascadeBlendDistances);
-        glUniform1fv(u3D.shadowTexelWorldSize, kShadowCascadeCount, shadowTexelWorldSize);
+        if (shadowCascadeUniformsDirty) {
+            glUniformMatrix4fv(u3D.lightVP, shadowCascadeCount, GL_FALSE, shadowLightVP[0].Data());
+            glUniform1fv(u3D.cascadeSplits, shadowCascadeCount, shadowCascadeSplits);
+            glUniform1fv(u3D.cascadeBlendDistances, shadowCascadeCount, shadowCascadeBlendDistances);
+            glUniform1fv(u3D.shadowTexelWorldSize, kShadowCascadeCount, shadowTexelWorldSize);
+            shadowCascadeUniformsDirty = false;
+        }
         glUniform1ui(u3D.receiverInstanceId, shadowReceiverInstanceId);
         for (s32 i = 0; i < shadowCascadeCount; i++) {
             if (!shadowDepthTextures[i]) continue;
@@ -3004,9 +3019,6 @@ void glContext::DrawPrimBuffer(pddiPrimBuffer* buffer, u32 indexOffset, u32 inde
         }
     }
 
-    int hasVRAM = vramHandle ? 1 : 0;
-    glUniform1i(u3D.hasVRAM, hasVRAM);
-
     const int texInfoOverride = texInfoOverrideEnabled ? 1 : 0;
     glUniform1i(u3D.texInfoOverrideEnabled, texInfoOverride);
     if (texInfoOverride != 0) {
@@ -3018,6 +3030,7 @@ void glContext::DrawPrimBuffer(pddiPrimBuffer* buffer, u32 indexOffset, u32 inde
         glUniform2f(u3D.texInfoOverride, -1.0f, 0.0f);
     }
 
+    glUniform1i(u3D.hasVRAM, vramHandle ? 1 : 0);
     if (vramHandle) {
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, vramHandle);
@@ -3048,8 +3061,6 @@ void glContext::DrawPrimBuffer(pddiPrimBuffer* buffer, u32 indexOffset, u32 inde
     auto* glBuf = static_cast<glPrimBuffer*>(buffer);
     glBindVertexArray(glBuf->GetVAO());
     glDrawElements(glMode, drawCount, GL_UNSIGNED_SHORT, indexPtr);
-    glBindVertexArray(0);
-    glUseProgram(0);
 }
 
 // glDevice

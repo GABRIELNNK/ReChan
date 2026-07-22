@@ -1593,6 +1593,7 @@ void glesContext::InitGouraudMesh() {
         glAttachShader(gouraudProgram, vs);
         glAttachShader(gouraudProgram, fs);
         glLinkProgram(gouraudProgram);
+        gouraudUProjLoc = glGetUniformLocation(gouraudProgram, "uProj");
     }
     if (vs) glDeleteShader(vs);
     if (fs) glDeleteShader(fs);
@@ -1707,8 +1708,7 @@ void glesContext::DrawGouraudQuad(float x0, float y0, float r0, float g0, float 
     };
 
     glUseProgram(gouraudProgram);
-    glUniformMatrix4fv(glGetUniformLocation(gouraudProgram, "uProj"),
-                       1, GL_FALSE, projection.Data());
+    glUniformMatrix4fv(gouraudUProjLoc, 1, GL_FALSE, projection.Data());
 
     glBindVertexArray(gouraudVAO);
     glBindBuffer(GL_ARRAY_BUFFER, gouraudVBO);
@@ -1862,6 +1862,8 @@ void glesContext::SetShadowCascades(pddiTexture* const* depthTextures, const Mat
         shadowCascadeBlendDistances[i] = 0.0f;
         shadowTexelWorldSize[i] = 0.0f;
     }
+    shadowConstUniformsDirty = true;
+    shadowCascadeUniformsDirty = true;
 }
 
 void glesContext::SetTexture(pddiTexture* t) {
@@ -1933,7 +1935,6 @@ void glesContext::DrawPrimBuffer(pddiPrimBuffer* buffer, u32 indexOffset, u32 in
         const u32 vertexFormat = glBufShadow->GetVertexFormat();
         glUniform1i(uShadowDepth.hasUV, (vertexFormat & PDDI_V_UV) ? 1 : 0);
         glUniform1i(uShadowDepth.hasTexInfo, (vertexFormat & PDDI_V_TEXINFO) ? 1 : 0);
-        glUniform1i(uShadowDepth.hasVRAM, vramHandle ? 1 : 0);
         const int useZeroTexelKey = (cachedBlendMode != PDDI_BLEND_NONE) ? 1 : 0;
         glUniform1i(uShadowDepth.useZeroTexelKey, useZeroTexelKey);
 
@@ -1948,6 +1949,7 @@ void glesContext::DrawPrimBuffer(pddiPrimBuffer* buffer, u32 indexOffset, u32 in
             glUniform2f(uShadowDepth.texInfoOverride, -1.0f, 0.0f);
         }
 
+        glUniform1i(uShadowDepth.hasVRAM, vramHandle ? 1 : 0);
         if (vramHandle) {
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, vramHandle);
@@ -1975,11 +1977,8 @@ void glesContext::DrawPrimBuffer(pddiPrimBuffer* buffer, u32 indexOffset, u32 in
         const void* indexPtrShadow = reinterpret_cast<const void*>(static_cast<uintptr_t>(indexOffset) * sizeof(u16));
         glBindVertexArray(glBufShadow->GetVAO());
         glDrawElements(glModeShadow, drawCountShadow, GL_UNSIGNED_SHORT, indexPtrShadow);
-        glBindVertexArray(0);
-        glUseProgram(0);
         return;
     }
-
     glUseProgram(program3D);
 
     const float alphaScale = (cachedBlendMode == PDDI_BLEND_ALPHA) ? 0.5f : 1.0f;
@@ -1990,21 +1989,30 @@ void glesContext::DrawPrimBuffer(pddiPrimBuffer* buffer, u32 indexOffset, u32 in
     Mat4 mvp = projection * (viewMatrix * worldMatrix);
     glUniformMatrix4fv(u3D.mvp, 1, GL_FALSE, mvp.Data());
     glUniformMatrix4fv(u3D.worldMatrix, 1, GL_FALSE, worldMatrix.Data());
-    glUniformMatrix4fv(u3D.viewMatrix, 1, GL_FALSE, viewMatrix.Data());
-    glUniform3f(u3D.cameraPos, cameraWorldPos[0], cameraWorldPos[1], cameraWorldPos[2]);
-    glUniform1i(u3D.shadowDebugMode, shadowDebugMode);
+    if (frameConstUniformsDirty) {
+        glUniformMatrix4fv(u3D.viewMatrix, 1, GL_FALSE, viewMatrix.Data());
+        glUniform3f(u3D.cameraPos, cameraWorldPos[0], cameraWorldPos[1], cameraWorldPos[2]);
+        glUniform1i(u3D.shadowDebugMode, shadowDebugMode);
+        frameConstUniformsDirty = false;
+    }
 
     const int receiveShadows = (receiveShadowsEnabled && shadowCascadeCount > 0) ? 1 : 0;
     glUniform1i(u3D.receiveShadows, receiveShadows);
     glUniform1i(u3D.shadowCascadeCount, receiveShadows ? shadowCascadeCount : 0);
     glUniform1i(u3D.shadowFilterQuality, receiveShadows ? shadowFilterQuality : 0);
-    glUniform1fv(u3D.shadowBias, kShadowCascadeCount, shadowBias);
-    glUniform3f(u3D.shadowLightDir, shadowLightDir[0], shadowLightDir[1], shadowLightDir[2]);
+    if (shadowConstUniformsDirty) {
+        glUniform1fv(u3D.shadowBias, kShadowCascadeCount, shadowBias);
+        glUniform3f(u3D.shadowLightDir, shadowLightDir[0], shadowLightDir[1], shadowLightDir[2]);
+        shadowConstUniformsDirty = false;
+    }
     if (receiveShadows) {
-        glUniformMatrix4fv(u3D.lightVP, shadowCascadeCount, GL_FALSE, shadowLightVP[0].Data());
-        glUniform1fv(u3D.cascadeSplits, shadowCascadeCount, shadowCascadeSplits);
-        glUniform1fv(u3D.cascadeBlendDistances, shadowCascadeCount, shadowCascadeBlendDistances);
-        glUniform1fv(u3D.shadowTexelWorldSize, kShadowCascadeCount, shadowTexelWorldSize);
+        if (shadowCascadeUniformsDirty) {
+            glUniformMatrix4fv(u3D.lightVP, shadowCascadeCount, GL_FALSE, shadowLightVP[0].Data());
+            glUniform1fv(u3D.cascadeSplits, shadowCascadeCount, shadowCascadeSplits);
+            glUniform1fv(u3D.cascadeBlendDistances, shadowCascadeCount, shadowCascadeBlendDistances);
+            glUniform1fv(u3D.shadowTexelWorldSize, kShadowCascadeCount, shadowTexelWorldSize);
+            shadowCascadeUniformsDirty = false;
+        }
         glUniform1ui(u3D.receiverInstanceId, shadowReceiverInstanceId);
         for (s32 i = 0; i < shadowCascadeCount; i++) {
             if (!shadowDepthTextures[i]) continue;
@@ -2019,9 +2027,6 @@ void glesContext::DrawPrimBuffer(pddiPrimBuffer* buffer, u32 indexOffset, u32 in
         }
     }
 
-    int hasVRAM = vramHandle ? 1 : 0;
-    glUniform1i(u3D.hasVRAM, hasVRAM);
-
     const int texInfoOverride = texInfoOverrideEnabled ? 1 : 0;
     glUniform1i(u3D.texInfoOverrideEnabled, texInfoOverride);
     if (texInfoOverride != 0) {
@@ -2033,6 +2038,7 @@ void glesContext::DrawPrimBuffer(pddiPrimBuffer* buffer, u32 indexOffset, u32 in
         glUniform2f(u3D.texInfoOverride, -1.0f, 0.0f);
     }
 
+    glUniform1i(u3D.hasVRAM, vramHandle ? 1 : 0);
     if (vramHandle) {
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, vramHandle);
@@ -2063,8 +2069,6 @@ void glesContext::DrawPrimBuffer(pddiPrimBuffer* buffer, u32 indexOffset, u32 in
     auto* glBuf = static_cast<glesPrimBuffer*>(buffer);
     glBindVertexArray(glBuf->GetVAO());
     glDrawElements(glMode, drawCount, GL_UNSIGNED_SHORT, indexPtr);
-    glBindVertexArray(0);
-    glUseProgram(0);
 }
 
 // glesDevice
@@ -2097,10 +2101,10 @@ struct ButtonMapEntry {
 };
 
 constexpr ButtonMapEntry kButtonMap[] = {
-    { GamepadButton::A,          HidNpadButton_A },
-    { GamepadButton::B,          HidNpadButton_B },
-    { GamepadButton::X,          HidNpadButton_X },
-    { GamepadButton::Y,          HidNpadButton_Y },
+    { GamepadButton::A,          HidNpadButton_B },
+    { GamepadButton::B,          HidNpadButton_A },
+    { GamepadButton::X,          HidNpadButton_Y },
+    { GamepadButton::Y,          HidNpadButton_X },
     { GamepadButton::LeftBumper, HidNpadButton_L },
     { GamepadButton::RightBumper,HidNpadButton_R },
     { GamepadButton::Back,       HidNpadButton_Minus },

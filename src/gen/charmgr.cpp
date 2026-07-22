@@ -17,6 +17,7 @@
 #include "p3d/flip.h"
 #include "p3d/ramtexanim.h"
 #include "gen/ccfile.h"
+#include "p3d/fileio.h"
 #include "gen/paramanim.h"
 #include "extra/modloader.h"
 #include "extra/gltfloader.h"
@@ -732,20 +733,26 @@ CharFile::CharFile(u32 type) {
     fileHandle = nullptr;
     rrHeader = nullptr;
     rrHeaderEntries = 0;
+    wholeFileBuf = nullptr;
 
     // Build path: "RCHARS/{name}.RR"
     char pathBuf[128];
     snprintf(pathBuf, sizeof(pathBuf), "RCHARS/%s.RR", g_charNameTable[type]);
 
-    fileHandle = new ccFile();
-    if (!fileHandle->Open(pathBuf, ccFile::OPEN_READ)) {
+    auto wholeFile = p3d::io::ReadFile(pathBuf);
+    if (!wholeFile) {
         LOG("[CharFile] Failed to open: %s", pathBuf);
         next = g_charFileList;
         g_charFileList = this;
         return;
     }
 
-    s32 fileSize = fileHandle->GetLength();
+    s32 fileSize = (s32)wholeFile->size();
+    wholeFileBuf = std::malloc((size_t)fileSize);
+    std::memcpy(wholeFileBuf, wholeFile->data(), (size_t)fileSize);
+
+    fileHandle = new ccFile();
+    fileHandle->OpenMem((u8*)wholeFileBuf, (u32)fileSize);
     s32 probeSize = (fileSize < (s32)(2 * sizeof(RREntry))) ? fileSize : (s32)(2 * sizeof(RREntry));
     rrHeader = (RREntry*)std::malloc(probeSize);
     fileHandle->Seek(0, ccFile::SEEK_FROM_START);
@@ -802,6 +809,10 @@ CharFile::~CharFile() {
         fileHandle->Close();
         delete fileHandle;
         fileHandle = nullptr;
+    }
+    if (wholeFileBuf) {
+        std::free(wholeFileBuf);
+        wholeFileBuf = nullptr;
     }
     std::free(rrHeader);
     rrHeader = nullptr;

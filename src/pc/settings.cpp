@@ -11,6 +11,8 @@
 #include "snd/sound.h"
 #include "snd/rsevent.h"
 #include "extra/shadowcsm.h"
+#include "extra/controllerpromptstyle.h"
+#include "extra/fecustommenumgr.h"
 
 #include <filesystem>
 #include <string>
@@ -265,6 +267,16 @@ static void SetPlayerConfigSetting(s32 value) {
     g_inputManager->SetPlayerConfig((u8)value);
 }
 
+static s32 GetControllerPromptStyleSetting() {
+    return ControllerPromptManager::GetStyle();
+}
+
+static void SetControllerPromptStyleSetting(s32 value) {
+    if (ControllerPromptManager::SetStyle(value) && g_feCustomMenuMgr) {
+        g_feCustomMenuMgr->ReloadControllerPromptTextures();
+    }
+}
+
 static s32 GetShockEnabledSetting() {
     return GetShock() ? 1 : 0;
 }
@@ -376,6 +388,8 @@ static const SettingDef kSettingDefs[] = {
     { "audio", "surround",         1, 0,   1, GetSurroundEnabledSetting, SetSurroundEnabledSetting },
     { "controls", "player_config", 0, 0,   2, GetPlayerConfigSetting, SetPlayerConfigSetting },
     { "controls", "shock",         0, 0,   1, GetShockEnabledSetting, SetShockEnabledSetting },
+    { "controls", "prompt_style", (s32)kDefaultControllerPromptStyle, 0, (s32)ControllerPromptStyle_Count - 1,
+      GetControllerPromptStyleSetting, SetControllerPromptStyleSetting },
     { "display", "screen_mode",     2, 0,   2, GetScreenModeSetting,  SetScreenModeSetting },
     { "display", "vsync",          1, 0,   1, GetVsyncSetting,       SetVsyncSetting },
     { "display", "frame_rate",    30, 0, 120, GetFrameRateSetting,   SetFrameRateSetting },

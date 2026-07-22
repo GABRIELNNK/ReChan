@@ -26,6 +26,7 @@
 #include "gen/scaledata.h"
 #include "gen/switch.h"
 #include "gen/skeleton.h"
+#include "gen/time.h"
 #include "gen/animmgr.h"
 #include "gen/particle.h"
 #include "gen/psxmath_helpers.h"
@@ -3504,7 +3505,6 @@ bool World::LoadLevelIndex(u32 levelIndex) {
 
     // PSX: EstimateLoadTime, StartLogo, FillMeter(100)
     StartLogo("RUNFIRST.TIM");
-    FillMeter(100);
 
     // PSX: rSPrintf(v8, "%slev%02d.lcf", "RTARGET\\", levelList[levelIndex * 2])
     char levelPath[64];
@@ -3521,6 +3521,8 @@ bool World::LoadLevelIndex(u32 levelIndex) {
         StopLogo();
         return false;
     }
+
+    PumpLoadingScreen();
 
     currentPetalIndex = targetPetalIndex;
 
@@ -3582,6 +3584,7 @@ bool World::LoadLevelIndex(u32 levelIndex) {
     if (g_ai) {
         g_ai->Populate();
     }
+    FillMeter(85);
 
     // PSX: v5 = player->blockNum (after Populate sets it from attrib 15)
     u16 playerBlockNum = 0x1000;
@@ -3634,6 +3637,8 @@ bool World::LoadLevelIndex(u32 levelIndex) {
     }
 
     WEffect_PopulateWEffects();
+
+    FillMeter(100);
 
     // PSX: if (IsValidBlockNumber(playerBlockNum) == 4096) -> reposition player
     // PSX returns 0x1000 (4096) when block is NOT valid.
@@ -3767,6 +3772,8 @@ bool World::Load(const std::string& lcfPath) {
     g_wEffectChunkCount = 0;
     g_particleSystemChunkCount = 0;
 
+    FillMeter(20);
+
     // Read LCF file from disc (PC equivalent of Stream::Open + disc read)
     auto lcfData = p3d::io::ReadFile(p3d::io::ResolvePath(lcfPath));
     if (!lcfData) {
@@ -3788,6 +3795,7 @@ bool World::Load(const std::string& lcfPath) {
 
     // Load TPG textures into VRAM (PSX HandleTPGChunk)
     LoadTPGTextures(data, dataSize);
+    FillMeter(40);
 
 #ifdef MOD_LOADER
     // After base VRAM load, let mods paint over individual texture pages.
@@ -3922,6 +3930,7 @@ bool World::Load(const std::string& lcfPath) {
     LOG("[World] Level size: (%d, %d, %d)",
         maxX - minX, maxY - minY, maxZ - minZ);
 
+    FillMeter(65);
     return blockMgr.GetNumBlocks() > 0;
 }
 
@@ -3946,7 +3955,9 @@ void World::RefreshVRAMTexture() {
 
 void World::Render(const LVector* playerPos) {
     p3d::context->SetVRAMHandle(vramHandle);
+    const f64 t0 = Time::GetTimeInSeconds();
     DrawEverythingHandler(playerPos);
+    g_frameProfile.drawSubmitMs = (f32)((Time::GetTimeInSeconds() - t0) * 1000.0);
     p3d::context->SetVRAMHandle(0);
 }
 
@@ -4631,7 +4642,6 @@ void World::LoadPetal(u32 petalIndex) {
 
     // PSX: EstimateLoadTime, StartLogo, FillMeter(100)
     StartLogo("RUNFIRST.TIM");
-    FillMeter(100);
 
     // Keep petal selection valid for this level before indexing sound tables.
     s32 petalCount = GetCurLevelPetals();
@@ -4738,11 +4748,13 @@ void World::LoadPetal(u32 petalIndex) {
         // PSX timing: BLK parse/load happens after AI::Populate.
         LOG("[World] LoadPetal: deferring BLK parse until post-populate");
     }
+    FillMeter(40);
 
     // PSX: AI::Populate for new petal entities
     if (g_ai) {
         g_ai->Populate();
     }
+    FillMeter(85);
 
     u32 startBlockNum = 0;
     if (Player::s_player) {
@@ -4756,6 +4768,7 @@ void World::LoadPetal(u32 petalIndex) {
     }
 
     WEffect_PopulateWEffects();
+    FillMeter(100);
 
     RefreshVRAMTexture();
 

@@ -11,8 +11,20 @@ export PATH := $(DEVKITPRO)/devkitA64/bin;$(DEVKITPRO)/tools/bin;$(ORIGINAL_PATH
 PORTLIBS_PATH := $(DEVKITPRO)/portlibs
 PORTLIBS := $(PORTLIBS_PATH)/switch
 
-TARGET		:=	rechan
-BUILD		:=	build
+DEBUG	?=	0
+
+ifeq ($(strip $(DEBUG)),1)
+	TARGET		:=	rechan-debug
+	BUILD		:=	build-debug
+	OPTFLAGS	:=	-Og
+	LIBP3D		:=	-lp3d-debug
+else
+	TARGET		:=	rechan
+	BUILD		:=	build
+	OPTFLAGS	:=	-O3
+	LIBP3D		:=	-lp3d
+endif
+
 SOURCES		:=	../../src/ai \
 			../../src/gen \
 			../../src/fe \
@@ -32,8 +44,13 @@ INCLUDES	:=	../../src \
 ARCH	:=	-march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
 
 DEFINES	:=	-DRC_PLATFORM_SWITCH -DRC_PLATFORM_NULL -DIMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS
+ifeq ($(strip $(DEBUG)),1)
+	DEFINES	+=	-DDEBUG
+else
+	DEFINES	+=	-DNDEBUG
+endif
 
-CFLAGS	:=	-g -Wall -O2 -ffunction-sections \
+CFLAGS	:=	-g -Wall $(OPTFLAGS) -ffunction-sections \
 			$(ARCH) $(DEFINES)
 
 CFLAGS	+=	$(INCLUDE) -D__SWITCH__
@@ -43,13 +60,13 @@ CXXFLAGS	:=	$(CFLAGS) -std=gnu++20
 ASFLAGS	:=	-g $(ARCH)
 LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 
-LIBS	:=	-lp3d -lEGL -lGLESv2 -lglapi -ldrm_nouveau -lnx -lm
+LIBS	:=	$(LIBP3D) -lEGL -lGLESv2 -lglapi -ldrm_nouveau -lnx -lm
 
 LIBDIRS	:=	$(PORTLIBS) $(LIBNX) $(CURDIR)/../libp3d
 
 APP_TITLE	:=	ReChan
 APP_AUTHOR	:=	SilverwireGames
-APP_VERSION	:=	1.0.1-switch-probe
+APP_VERSION	:=	1.0.1
 
 ifneq ($(BUILD),$(notdir $(CURDIR)))
 

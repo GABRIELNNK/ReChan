@@ -34,6 +34,14 @@ static constexpr s32 kDefaultMenuBackGamepadButton = GpBtn::B;
 static constexpr s32 kDefaultMenuBackGamepadButton = GpBtn::Y;
 #endif
 
+#if defined(RC_PLATFORM_SWITCH)
+static constexpr s32 kMenuConfirmGamepadButton = GpBtn::B;
+static constexpr s32 kMenuBackGamepadButton = GpBtn::A;
+#else
+static constexpr s32 kMenuConfirmGamepadButton = GpBtn::A;
+static constexpr s32 kMenuBackGamepadButton = kDefaultMenuBackGamepadButton;
+#endif
+
 static const s32 kBindableKeys[] = {
     KEY_SPACE,
     KEY_APOSTROPHE,
@@ -282,8 +290,8 @@ ActionInput::ActionInput() {
     bindings[ACTION_MENU_DOWN] = { { KEY_DOWN, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::DpadDown, GpBtn::NONE, GpAxis::LeftY, 0.5f };
     bindings[ACTION_MENU_LEFT] = { { KEY_LEFT, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::DpadLeft, GpBtn::NONE, GpAxis::LeftX, -0.5f };
     bindings[ACTION_MENU_RIGHT] = { { KEY_RIGHT, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::DpadRight, GpBtn::NONE, GpAxis::LeftX, 0.5f };
-    bindings[ACTION_MENU_CONFIRM] = { { KEY_ENTER, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::A, GpBtn::NONE, GpAxis::NONE, 0 };
-    bindings[ACTION_MENU_BACK] = { { KEY_ESCAPE, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, kDefaultMenuBackGamepadButton, GpBtn::NONE, GpAxis::NONE, 0 };
+    bindings[ACTION_MENU_CONFIRM] = { { KEY_ENTER, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, kMenuConfirmGamepadButton, GpBtn::NONE, GpAxis::NONE, 0 };
+    bindings[ACTION_MENU_BACK] = { { KEY_ESCAPE, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, kMenuBackGamepadButton, GpBtn::NONE, GpAxis::NONE, 0 };
     bindings[ACTION_MENU_CLEAR] = { { KEY_DELETE, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::Y, GpBtn::NONE, GpAxis::NONE, 0 };
 }
 

@@ -311,6 +311,14 @@ int main(int argc, char** argv) {
         if (g_actionInput) {
             g_actionInput->Update(p3d::input);
         }
+#if defined(__SWITCH__)
+        if (p3d::input &&
+            p3d::input->IsGamepadButtonDown(GpBtn::LB) &&
+            p3d::input->IsGamepadButtonDown(GpBtn::RB) &&
+            p3d::input->IsGamepadButtonTriggered(GpBtn::Back)) {
+            g_drawDebugConsole = !g_drawDebugConsole;
+        }
+#endif
         if (g_inputManager) {
             const ActionInput* actionInputForGame = DebugUI::ShouldBlockGameInput()
                 ? nullptr
@@ -325,7 +333,10 @@ int main(int argc, char** argv) {
         }
 
         const GameState stateBeforeStep = game.GetState();
+        const f64 stepT0 = Time::GetTimeInSeconds();
+        g_frameProfile.drawSubmitMs = 0.0f;
         bool running = game.Step();
+        g_frameProfile.logicMs = (f32)((Time::GetTimeInSeconds() - stepT0) * 1000.0) - g_frameProfile.drawSubmitMs;
         if (!running) {
             // PC: If the game loop signals to stop, break out of the loop to shut down.
             if (game.GetState() == GameState::End) {

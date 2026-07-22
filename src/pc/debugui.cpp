@@ -1495,7 +1495,7 @@ void DebugUI::Draw() {
         sEnabled = !sEnabled;
     }
 
-    if (ImGui::IsKeyPressed(ImGuiKey_F1, false)) {
+    if (ImGui::IsKeyPressed(ImGuiKey_F1, false) && ImGui::GetIO().KeyCtrl) {
         g_drawDebugConsole = !g_drawDebugConsole;
     }
 

@@ -169,6 +169,15 @@ Vibration:
 [FE_CCF]
 Konfiguration:
 
+[FE_BPTS]
+Tastenanzeige:
+
+[FE_DEFX]
+Standard (Xbox)
+
+[FE_NX]
+Nintendo Switch
+
 [FE_CSD]
 STATUSANZEIGE
 

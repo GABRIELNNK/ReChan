@@ -3,6 +3,8 @@
 #include "gen/camera.h"
 #include "gen/config.h"
 #include "gen/psxmath_helpers.h"
+#include "gen/time.h"
+#include "gen/game.h"
 #include "p3d/context.h"
 #include "p3d/camera.h"
 #include "pddi/pddi.h"
@@ -325,7 +327,12 @@ void Display::EndFrame() {
     ++frameCounter;
     p3d::context->EndFrame();
     p3d::display->RenderOverlay();
+#if defined(RC_PLATFORM_SWITCH)
+    DrawDebugInfo();
+#endif
+    const f64 t0 = Time::GetTimeInSeconds();
     p3d::display->SwapBuffers();
+    g_frameProfile.swapMs = (f32)((Time::GetTimeInSeconds() - t0) * 1000.0);
 }
 
 // PSX: dispBeginFrameHandler (DISPLAY.CPP:105, 0x800DB43C)

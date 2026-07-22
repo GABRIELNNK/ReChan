@@ -169,6 +169,15 @@ Vibracion:
 [FE_CCF]
 Configuracion:
 
+[FE_BPTS]
+Iconos de botones:
+
+[FE_DEFX]
+Predeterminado (Xbox)
+
+[FE_NX]
+Nintendo Switch
+
 [FE_CSD]
 PANTALLA DE ESTADO
 

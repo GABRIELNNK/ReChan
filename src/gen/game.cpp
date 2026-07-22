@@ -2568,10 +2568,27 @@ void DrawDebugInfo() {
                                    HudY(0.0f));
 
 
-        g_textManager->SetScale(SCREEN_SCALE_Y(0.108f), SCREEN_SCALE_Y(0.108f));
-
         if (!g_drawDebugConsole)
             return;
+
+        if (g_textManager && g_time) {
+            g_textManager->SetFontByName("Legal");
+            g_textManager->SetScale(SCREEN_SCALE_Y(0.108f), SCREEN_SCALE_Y(0.108f));
+            g_textManager->SetAlignment(TextAlign_Right);
+            g_textManager->SetWrapWidth(0.0f);
+            g_textManager->SetLineSpacing(0);
+            g_textManager->SetPromptsEnabled(false);
+            g_textManager->SetShadow(false);
+            g_textManager->SetOutline(true);
+            g_textManager->SetColor(0, 255, 0);
+
+            char perf[128];
+            std::snprintf(perf, sizeof(perf), "%.1f fps | logic %.2fms  draw %.2fms  swap %.2fms",
+                          g_time->fps, g_frameProfile.logicMs, g_frameProfile.drawSubmitMs, g_frameProfile.swapMs);
+            g_textManager->PrintString(perf, SCREEN_WIDTH - HudX(0.0f), HudY(0.0f));
+        }
+
+        g_textManager->SetScale(SCREEN_SCALE_Y(0.108f), SCREEN_SCALE_Y(0.108f));
 
         s32 i = 0;
         for (auto& it : Log::Get().GetMessageStack()) {

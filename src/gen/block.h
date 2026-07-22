@@ -6,6 +6,7 @@ struct DBVolume;
 struct DBAttrib;
 struct CollisionSector;
 struct tPrimGeom;
+class pddiPrimBuffer;
 
 struct Block {
     // +0: parsed flag (1 if data has prims, 0 otherwise)
@@ -54,6 +55,11 @@ struct Block {
     tPrimGeom* primGeom;
     // +72: collision sector pointer
     CollisionSector* collision;
+    // PC: cached unculled shadow-caster geometry for this block, built once from
+    // primGeom and reused every frame by ShadowCSM::DrawBlockCasterIntoCascades,
+    // instead of being rebuilt (CPU retriangulation + GL buffer create/upload) on
+    // every single shadow pass. Released in Destroy() alongside primGeom.
+    pddiPrimBuffer* shadowCasterBuffer;
     // +76: texture page animation frame counter
     s32 texPageFrame;
     // +80-100: half-extents (computed in SetDimension)

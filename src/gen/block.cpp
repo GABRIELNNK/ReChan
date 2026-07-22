@@ -41,6 +41,11 @@ void Block::Destroy() {
         collision->Unload();
         collision = nullptr;
     }
+
+    if (shadowCasterBuffer) {
+        shadowCasterBuffer->Release();
+        shadowCasterBuffer = nullptr;
+    }
 }
 
 // Init__5BlockPC8DBVolume (BLOCK.CPP:288)
@@ -439,6 +444,10 @@ void Block::LoadPrim(const u8* primData, u32 primSize) {
     if (primGeom) {
         delete primGeom;
         primGeom = nullptr;
+    }
+    if (shadowCasterBuffer) {
+        shadowCasterBuffer->Release();
+        shadowCasterBuffer = nullptr;
     }
 
     if (!primData || primSize < 108) {

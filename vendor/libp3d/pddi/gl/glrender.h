@@ -301,11 +301,12 @@ public:
                            pddiTexture* const* idTextures, int count) override;
     void SetCameraWorldPos(float x, float y, float z) override {
         cameraWorldPos[0] = x; cameraWorldPos[1] = y; cameraWorldPos[2] = z;
+        frameConstUniformsDirty = true;
     }
     void SetShadowLightDirection(float x, float y, float z) override {
         shadowLightDir[0] = x; shadowLightDir[1] = y; shadowLightDir[2] = z;
     }
-    void SetShadowDebugMode(int mode) override { shadowDebugMode = mode; }
+    void SetShadowDebugMode(int mode) override { shadowDebugMode = mode; frameConstUniformsDirty = true; }
     void SetShadowCasterInstanceId(u32 id) override { shadowCasterInstanceId = id; }
     void SetShadowReceiverInstanceId(u32 id) override { shadowReceiverInstanceId = id; }
     void ClearShadowCasterIdTarget() override;
@@ -377,9 +378,14 @@ private:
     float shadowLightDir[3] = { 0.35f, -0.85f, 0.25f };
     float shadowTexelWorldSize[kShadowCascadeCount] = {};
     s32 shadowDebugMode = 0;
+
+    bool shadowConstUniformsDirty = true;
+    bool shadowCascadeUniformsDirty = true;
+    bool frameConstUniformsDirty = true;
     u32 gouraudVAO = 0;
     u32 gouraudVBO = 0;
     u32 gouraudProgram = 0;
+    s32 gouraudUProjLoc = -1;
     u32 batchVAO = 0;
     u32 batchVBO = 0;
     u32 batchProgram = 0;

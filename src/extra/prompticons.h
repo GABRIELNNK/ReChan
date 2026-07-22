@@ -5,6 +5,7 @@
 #if CUSTOM_MENU
 
 #include "core.h"
+#include "extra/controllerpromptstyle.h"
 #include "pc/inputaction.h"
 #include "pc/tim.h"
 #include "p3d/texture.h"
@@ -699,9 +700,12 @@ private:
         }
         sheet.tried = true;
 
-        const char* path = keyboard
-            ? "pc/textures/frontend/keyboard_mouse_sheet_default.png"
-            : "pc/textures/frontend/controller_sheet_default.png";
+        char builtPath[128];
+        const char* path = "pc/textures/frontend/keyboard_mouse_sheet_default.png";
+        if (!keyboard) {
+            ControllerPromptManager::BuildSheetPath(builtPath, (s32)sizeof(builtPath));
+            path = builtPath;
+        }
         sheet.tex = tTexture::LoadFromImagePath(path, &sheet.width, &sheet.height);
         return sheet.tex != nullptr;
     }
@@ -714,6 +718,18 @@ private:
     static SheetState& GetXboxSheet() {
         static SheetState sheet;
         return sheet;
+    }
+
+public:
+    // Call after ControllerPromptManager::SetStyle() reports a change, so the
+    // next gamepad button prompt reloads from the new style's sheet instead
+    // of keeping the old one cached.
+    static void ResetGamepadSheet() {
+        SheetState& sheet = GetXboxSheet();
+        if (sheet.tex) {
+            sheet.tex->Release();
+        }
+        sheet = SheetState{};
     }
 };
 

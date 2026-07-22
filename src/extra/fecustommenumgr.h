@@ -3,6 +3,7 @@
 #include "gen/savegame.h"
 #include "extra/customtext.h"
 #include "extra/colorpulse.h"
+#include "extra/controllerpromptstyle.h"
 #include <functional>
 #include <initializer_list>
 #include <vector>
@@ -85,6 +86,7 @@ enum EntryBinding : u8 {
     EntryBinding_Stereo,
     EntryBinding_Shock,
     EntryBinding_PlayerConfig,
+    EntryBinding_ControllerPromptStyle,
     EntryBinding_Language,
     EntryBinding_DisplayResolution,
     EntryBinding_DisplayScreenMode,
@@ -172,8 +174,8 @@ enum EntryEvent : u8 {
 #define DEF_HELP_GROUP_GAP_PX 14.0f
 
 // Controller page tuning
-#define DEF_CONTROLLER_WINDOW_W 420
-#define DEF_CONTROLLER_WINDOW_H 186
+#define DEF_CONTROLLER_WINDOW_W 480
+#define DEF_CONTROLLER_WINDOW_H 202
 
 // Changelog page tuning
 #define DEF_CHANGELOG_WINDOW_W 380
@@ -406,6 +408,11 @@ public:
 
     void RenderAutosaveSpinner(s32 centerX, s32 centerY, f32 alpha01 = 1.0f) const;
 
+    // Called by settings.cpp when the controller-prompt-style setting changes,
+    // so the Controller page's diagram and any cached gamepad button-prompt
+    // sheet reload from the new style's textures.
+    void ReloadControllerPromptTextures();
+
 private:
     void BuildPages();
     PageDef& AddPage(MenuPage id, const char* title,
@@ -489,7 +496,6 @@ private:
     static constexpr f32 kTitleFistLightExposure = 3.0f;
 
     // frontend
-    static constexpr const char* kControllerOverlayTexturePath = "pc/textures/frontend/controller_overlay_default.png";
     static constexpr const char* kMenuOrnamentTexturePath = "pc/textures/frontend/menu_ornament.png";
     static constexpr const char* kTitleScreenBackgroundTexturePath = "pc/textures/frontend/background.png";
     static constexpr const char* kTitleScreenJackieTexturePath = "pc/textures/frontend/jackie.png";

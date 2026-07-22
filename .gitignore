@@ -17,6 +17,7 @@ DontShip/
 shipping/
 
 switch/**/build/
+switch/**/build-debug/
 switch/**/*.elf
 switch/**/*.nro
 switch/**/*.nacp

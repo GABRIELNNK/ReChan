@@ -11,8 +11,18 @@ export PATH := $(DEVKITPRO)/devkitA64/bin;$(DEVKITPRO)/tools/bin;$(ORIGINAL_PATH
 PORTLIBS_PATH := $(DEVKITPRO)/portlibs
 PORTLIBS := $(PORTLIBS_PATH)/switch
 
-TARGET		:=	p3d
-BUILD		:=	build
+DEBUG	?=	0
+
+ifeq ($(strip $(DEBUG)),1)
+	TARGET		:=	p3d-debug
+	BUILD		:=	build-debug
+	OPTFLAGS	:=	-Og
+else
+	TARGET		:=	p3d
+	BUILD		:=	build
+	OPTFLAGS	:=	-O3
+endif
+
 SOURCES		:=	../../vendor/libp3d/p3d \
 			../../vendor/libp3d/pddi/gles \
 			../../vendor/libp3d/vendor/imgui
@@ -21,10 +31,13 @@ INCLUDES	:=	../../vendor/libp3d \
 
 ARCH	:=	-march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
 
-# See switch/rechan/Makefile for why these two defines are needed.
+# See switch/rechan/Makefile for why these defines are needed.
 DEFINES	:=	-DRC_PLATFORM_SWITCH -DRC_PLATFORM_NULL -DIMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS
+ifneq ($(strip $(DEBUG)),1)
+	DEFINES	+=	-DNDEBUG
+endif
 
-CFLAGS	:=	-g -Wall -O2 -ffunction-sections \
+CFLAGS	:=	-g -Wall $(OPTFLAGS) -ffunction-sections \
 			$(ARCH) $(DEFINES)
 
 CFLAGS	+=	$(INCLUDE) -D__SWITCH__

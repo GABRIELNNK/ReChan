@@ -169,6 +169,15 @@ Vibrazione:
 [FE_CCF]
 Configurazione:
 
+[FE_BPTS]
+Icone pulsanti:
+
+[FE_DEFX]
+Predefinito (Xbox)
+
+[FE_NX]
+Nintendo Switch
+
 [FE_CSD]
 DISPLAY STATO
 
