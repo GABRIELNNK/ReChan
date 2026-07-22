@@ -304,6 +304,10 @@ Block* BlockManager::GetBlock(u32 index) {
     return &blocks[index];
 }
 
+Block* BlockManager::GetBlockByBlockNumber(u32 blockNum) {
+    return GetBlockByNumber(blocks, blockNum);
+}
+
 // IsValidBlockNumber__12BlockManagerUl (BLKMGR.CPP:769)
 // PSX: iterates loaded block linked list, returns true if any block has that blockNum.
 // PC: all blocks are loaded, iterate all blocks.

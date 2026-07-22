@@ -4065,8 +4065,7 @@ void World::DrawEverythingHandler(const LVector* playerPos) {
     }
     BlockManager& blockMgr = *g_blockManager;
 
-    u32 numBlocks = blockMgr.GetNumBlocks();
-    if (numBlocks == 0) return;
+    if (blockMgr.GetNumBlocks() == 0) return;
 
     // PSX: DemandLoading when game state == 8
     if (g_game && g_game->GetState() == GameState::Play) {
@@ -4075,17 +4074,17 @@ void World::DrawEverythingHandler(const LVector* playerPos) {
 
     // Build draw entry array: {Block*, distSq, zDepth}
     // PSX: iterates loaded block linked list (offset +144)
-    // PC: iterates all blocks (all are loaded)
     struct DrawEntry {
         Block* block;
         s32 distSq;
         s32 zDepth;
     };
-    DrawEntry drawArray[128];
+    DrawEntry drawArray[kBlockManagerListCapacity];
     u32 count = 0;
 
-    for (u32 i = 0; i < numBlocks && count < 128; i++) {
-        Block* block = blockMgr.GetBlock(i);
+    const u32 loadedCount = blockMgr.GetAlreadyLoadedCount();
+    for (u32 i = 0; i < loadedCount && count < kBlockManagerListCapacity; i++) {
+        Block* block = blockMgr.GetBlockByBlockNumber(blockMgr.GetAlreadyLoadedBlockNum(i));
         if (!block || !block->primGeom) continue;
 
         s32 distSq, zDepth;

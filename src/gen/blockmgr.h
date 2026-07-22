@@ -32,6 +32,10 @@ public:
     // get block by index
     Block* GetBlock(u32 index);
 
+    // resolve a block by its block number (used to walk the windowed
+    // alreadyLoadedList instead of scanning the whole level per frame)
+    Block* GetBlockByBlockNumber(u32 blockNum);
+
     // PSX: IsValidBlockNumber (BLKMGR.CPP:769, 0x80050C70)
     // Iterates loaded block list, returns true if blockNum is loaded.
     bool IsValidBlockNumber(u32 blockNum) const;
@@ -68,6 +72,10 @@ public:
     void UpdateAlreadyLoadedList();
 
     u32 GetNumBlocks() const { return totalBlocks; }
+
+    // windowed set of currently-resident blocks
+    u32 GetAlreadyLoadedCount() const { return alreadyLoadedCount; }
+    u16 GetAlreadyLoadedBlockNum(u32 index) const { return alreadyLoadedList[index]; }
 
     // PSX player death-volume handling clears BlockManager +0x8C before queuing death.
     void SetDeathVolumeFlag(s32 value) { flag3 = (u32)value; }

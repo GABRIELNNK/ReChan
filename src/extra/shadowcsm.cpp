@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cfloat>
+#include <vector>
 
 constexpr s32 kCascadeCount = 3;
 
@@ -73,10 +74,43 @@ bool s_levelLightValid = false;
 s32 s_levelLightID = -1;
 Vec3 s_levelLightDir = {};
 
+struct QueuedBlockCaster {
+    pddiPrimBuffer* buffer;
+    Vec3 worldMin;
+    Vec3 worldMax;
+    f32 tx, ty, tz;
+};
+std::vector<QueuedBlockCaster> s_queuedBlockCasters;
+
 Vec3 TransformPoint(const Mat4& m, const Vec3& p) {
     f32 x = 0.0f, y = 0.0f, z = 0.0f;
     Mat4TransformPoint(m, p.x, p.y, p.z, x, y, z);
     return { x, y, z };
+}
+
+bool CasterBoundsOverlapCascade(s32 cascadeIndex, const Vec3& worldMin, const Vec3& worldMax) {
+    const Vec3 corners[8] = {
+        { worldMin.x, worldMin.y, worldMin.z }, { worldMax.x, worldMin.y, worldMin.z },
+        { worldMin.x, worldMax.y, worldMin.z }, { worldMax.x, worldMax.y, worldMin.z },
+        { worldMin.x, worldMin.y, worldMax.z }, { worldMax.x, worldMin.y, worldMax.z },
+        { worldMin.x, worldMax.y, worldMax.z }, { worldMax.x, worldMax.y, worldMax.z },
+    };
+
+    f32 minX = FLT_MAX, minY = FLT_MAX, minZ = FLT_MAX;
+    f32 maxX = -FLT_MAX, maxY = -FLT_MAX, maxZ = -FLT_MAX;
+    for (const Vec3& corner : corners) {
+        const Vec3 lp = TransformPoint(s_lightVP[cascadeIndex], corner);
+        minX = std::min(minX, lp.x);
+        minY = std::min(minY, lp.y);
+        minZ = std::min(minZ, lp.z);
+        maxX = std::max(maxX, lp.x);
+        maxY = std::max(maxY, lp.y);
+        maxZ = std::max(maxZ, lp.z);
+    }
+
+    return maxX >= -1.0f && minX <= 1.0f
+        && maxY >= -1.0f && minY <= 1.0f
+        && maxZ >= 0.0f && minZ <= 1.0f;
 }
 
 Vec3 TransformDir(const Mat4& m, const Vec3& v) {
@@ -634,18 +668,49 @@ void ShadowCSM::SetCasterWorldOffset(f32 x, f32 y, f32 z) {
 
 void ShadowCSM::BeginCasterPrepass() {
     s_casterPrepass = s_framePrepared;
+    s_queuedBlockCasters.clear();
 }
 
 void ShadowCSM::EndCasterPrepass() {
     s_casterPrepass = false;
-    if (p3d::context) {
-        p3d::context->SetRenderTarget(nullptr);
-        p3d::context->SetShadowCasterPass(false, Mat4());
-        p3d::context->SetReceiveShadows(false);
-        p3d::context->EnableZBuffer(true);
-        p3d::context->SetPolygonOffset(false);
-        p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+    if (!p3d::context) {
+        s_queuedBlockCasters.clear();
+        return;
     }
+
+    if (!s_queuedBlockCasters.empty()) {
+        p3d::context->SetShadowCasterInstanceId(0);
+        for (s32 i = 0; i < s_activeCascadeCount; i++) {
+            p3d::context->SetRenderTarget(s_cascadeTargets[i]);
+            p3d::context->SetBlendMode(PDDI_BLEND_NONE);
+            p3d::context->EnableZBuffer(true);
+            BeginShadowCasterDepthBias();
+            p3d::context->SetCullMode(PDDI_CULL_NONE);
+            p3d::context->SetShadowCasterPass(true, s_lightVP[i]);
+
+            for (const QueuedBlockCaster& caster : s_queuedBlockCasters) {
+                if (!CasterBoundsOverlapCascade(i, caster.worldMin, caster.worldMax)) {
+                    continue;
+                }
+                Mat4 blockWorld;
+                blockWorld.SetTranslation(caster.tx, caster.ty, caster.tz);
+                p3d::context->SetWorldMatrix(blockWorld);
+                p3d::context->DrawPrimBuffer(caster.buffer);
+            }
+
+            p3d::context->SetShadowCasterPass(false, Mat4());
+            EndShadowCasterDepthBias();
+            p3d::context->SetRenderTarget(nullptr);
+        }
+    }
+    s_queuedBlockCasters.clear();
+
+    p3d::context->SetRenderTarget(nullptr);
+    p3d::context->SetShadowCasterPass(false, Mat4());
+    p3d::context->SetReceiveShadows(false);
+    p3d::context->EnableZBuffer(true);
+    p3d::context->SetPolygonOffset(false);
+    p3d::context->SetBlendMode(PDDI_BLEND_NONE);
 }
 
 bool ShadowCSM::IsCasterPrepass() {
@@ -737,35 +802,23 @@ void ShadowCSM::DrawBlockCasterIntoCascades(Block* block, const LVector* drawPos
             return;
         }
     }
-    pddiPrimBuffer* buffer = block->shadowCasterBuffer;
-
     s_casterCount++;
 
-    const Mat4 savedWorld = p3d::context->GetWorldMatrix();
-    Mat4 blockWorld;
-    blockWorld.SetTranslation(static_cast<f32>(drawPos->x),
-                              static_cast<f32>(drawPos->y),
-                              static_cast<f32>(drawPos->z));
-
-    p3d::context->SetShadowCasterInstanceId(0);
-
-    for (s32 i = 0; i < s_activeCascadeCount; i++) {
-        p3d::context->SetRenderTarget(s_cascadeTargets[i]);
-        p3d::context->SetBlendMode(PDDI_BLEND_NONE);
-        p3d::context->EnableZBuffer(true);
-        BeginShadowCasterDepthBias();
-        p3d::context->SetCullMode(PDDI_CULL_NONE);
-        p3d::context->SetShadowCasterPass(true, s_lightVP[i]);
-        p3d::context->SetWorldMatrix(blockWorld);
-
-        p3d::context->DrawPrimBuffer(buffer);
-
-        p3d::context->SetShadowCasterPass(false, Mat4());
-        EndShadowCasterDepthBias();
-        p3d::context->SetRenderTarget(nullptr);
-    }
-
-    p3d::context->SetWorldMatrix(savedWorld);
+    const f32 tx = static_cast<f32>(drawPos->x);
+    const f32 ty = static_cast<f32>(drawPos->y);
+    const f32 tz = static_cast<f32>(drawPos->z);
+    QueuedBlockCaster entry;
+    entry.buffer = block->shadowCasterBuffer;
+    entry.worldMin = { tx + static_cast<f32>(block->primGeom->bboxMinX),
+                       ty + static_cast<f32>(block->primGeom->bboxMinY),
+                       tz + static_cast<f32>(block->primGeom->bboxMinZ) };
+    entry.worldMax = { tx + static_cast<f32>(block->primGeom->bboxMaxX),
+                       ty + static_cast<f32>(block->primGeom->bboxMaxY),
+                       tz + static_cast<f32>(block->primGeom->bboxMaxZ) };
+    entry.tx = tx;
+    entry.ty = ty;
+    entry.tz = tz;
+    s_queuedBlockCasters.push_back(entry);
 }
 
 #endif // MODERN_GRAPHICS

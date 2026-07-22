@@ -2589,6 +2589,8 @@ void DrawDebugInfo() {
         }
 
         g_textManager->SetScale(SCREEN_SCALE_Y(0.108f), SCREEN_SCALE_Y(0.108f));
+        g_textManager->SetAlignment(TextAlign_Left);
+        g_textManager->SetColor(128, 128, 128);
 
         s32 i = 0;
         for (auto& it : Log::Get().GetMessageStack()) {
