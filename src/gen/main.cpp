@@ -141,6 +141,24 @@ int main(int argc, char** argv) {
 
     // Boosted handheld preset
     apmSetPerformanceConfiguration(ApmPerformanceMode_Normal, 0x92220008);
+
+    const AppletType appletType = appletGetAppletType();
+    if (appletType != AppletType_Application && appletType != AppletType_SystemApplication) {
+        consoleInit(NULL);
+        printf("[rechan] Launched in applet mode (type %d).\n", (int)appletType);
+        printf("[rechan] ReChan needs to run as a full application, not an applet.\n");
+        printf("[rechan] Press PLUS to exit.\n");
+        PadState pad;
+        padConfigureInput(1, HidNpadStyleSet_NpadStandard);
+        padInitializeDefault(&pad);
+        while (appletMainLoop()) {
+            padUpdate(&pad);
+            if (padGetButtonsDown(&pad) & HidNpadButton_Plus) break;
+            consoleUpdate(NULL);
+        }
+        consoleExit(NULL);
+        return 1;
+    }
 #endif
 
     if (argc >= 2 && std::strcmp(argv[1], "--test-crash-reporter") == 0) {

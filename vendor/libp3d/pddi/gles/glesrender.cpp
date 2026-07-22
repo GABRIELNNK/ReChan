@@ -2101,10 +2101,10 @@ struct ButtonMapEntry {
 };
 
 constexpr ButtonMapEntry kButtonMap[] = {
-    { GamepadButton::A,          HidNpadButton_B },
-    { GamepadButton::B,          HidNpadButton_A },
-    { GamepadButton::X,          HidNpadButton_Y },
-    { GamepadButton::Y,          HidNpadButton_X },
+    { GamepadButton::A,          HidNpadButton_A },
+    { GamepadButton::B,          HidNpadButton_B },
+    { GamepadButton::X,          HidNpadButton_X },
+    { GamepadButton::Y,          HidNpadButton_Y },
     { GamepadButton::LeftBumper, HidNpadButton_L },
     { GamepadButton::RightBumper,HidNpadButton_R },
     { GamepadButton::Back,       HidNpadButton_Minus },

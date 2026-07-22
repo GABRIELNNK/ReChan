@@ -35,13 +35,19 @@ static constexpr s32 kDefaultMenuBackGamepadButton = GpBtn::Y;
 #endif
 
 #if defined(RC_PLATFORM_SWITCH)
-static constexpr s32 kMenuConfirmGamepadButton = GpBtn::B;
-static constexpr s32 kMenuBackGamepadButton = GpBtn::A;
+static constexpr s32 kJumpGamepadButton = GpBtn::B;
+static constexpr s32 kPunchGamepadButton = GpBtn::Y;
+static constexpr s32 kKickGamepadButton = GpBtn::X;
+static constexpr s32 kGrabGamepadButton = GpBtn::A;
 #else
-static constexpr s32 kMenuConfirmGamepadButton = GpBtn::A;
-static constexpr s32 kMenuBackGamepadButton = kDefaultMenuBackGamepadButton;
+static constexpr s32 kJumpGamepadButton = GpBtn::A;
+static constexpr s32 kPunchGamepadButton = GpBtn::X;
+static constexpr s32 kKickGamepadButton = GpBtn::Y;
+static constexpr s32 kGrabGamepadButton = GpBtn::B;
 #endif
 
+
+#if !defined(RC_PLATFORM_SWITCH)
 static const s32 kBindableKeys[] = {
     KEY_SPACE,
     KEY_APOSTROPHE,
@@ -125,6 +131,7 @@ static const s32 kBindableKeys[] = {
     KEY_RIGHT_CONTROL,
     KEY_RIGHT_ALT,
 };
+#endif // !RC_PLATFORM_SWITCH
 
 static bool IsValidDesktopSlot(s32 slot) {
     return slot >= 0 && slot < kDesktopBindingSlotCount;
@@ -270,10 +277,10 @@ ActionInput* g_actionInput = nullptr;
 
 ActionInput::ActionInput() {
     // { keyboard slots }, { mouse slots }, gpBtn, gpBtn2, gpAxis, threshold
-    bindings[ACTION_JUMP] = { { KEY_SPACE, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::A, GpBtn::NONE, GpAxis::NONE, 0 };
-    bindings[ACTION_PUNCH] = { { KEY_J, 0 }, { MouseBtn::NONE, MouseBtn::Left }, GpBtn::X, GpBtn::NONE, GpAxis::NONE, 0 };
-    bindings[ACTION_KICK] = { { KEY_K, 0 }, { MouseBtn::NONE, MouseBtn::Right }, GpBtn::Y, GpBtn::NONE, GpAxis::NONE, 0 };
-    bindings[ACTION_GRAB] = { { KEY_E, 0 }, { MouseBtn::NONE, MouseBtn::Middle }, GpBtn::B, GpBtn::NONE, GpAxis::NONE, 0 };
+    bindings[ACTION_JUMP] = { { KEY_SPACE, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, kJumpGamepadButton, GpBtn::NONE, GpAxis::NONE, 0 };
+    bindings[ACTION_PUNCH] = { { KEY_J, 0 }, { MouseBtn::NONE, MouseBtn::Left }, kPunchGamepadButton, GpBtn::NONE, GpAxis::NONE, 0 };
+    bindings[ACTION_KICK] = { { KEY_K, 0 }, { MouseBtn::NONE, MouseBtn::Right }, kKickGamepadButton, GpBtn::NONE, GpAxis::NONE, 0 };
+    bindings[ACTION_GRAB] = { { KEY_E, 0 }, { MouseBtn::NONE, MouseBtn::Middle }, kGrabGamepadButton, GpBtn::NONE, GpAxis::NONE, 0 };
     bindings[ACTION_DIVE_ROLL] = { { KEY_LEFT_CONTROL, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::RB, GpBtn::NONE, GpAxis::NONE, 0 };
     bindings[ACTION_STRAFE] = { { KEY_LEFT_SHIFT, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::NONE, GpBtn::NONE, GpAxis::RTrigger, 0.5f };
     bindings[ACTION_COUNTER] = { { KEY_C, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::LB, GpBtn::NONE, GpAxis::NONE, 0 };
@@ -290,15 +297,15 @@ ActionInput::ActionInput() {
     bindings[ACTION_MENU_DOWN] = { { KEY_DOWN, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::DpadDown, GpBtn::NONE, GpAxis::LeftY, 0.5f };
     bindings[ACTION_MENU_LEFT] = { { KEY_LEFT, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::DpadLeft, GpBtn::NONE, GpAxis::LeftX, -0.5f };
     bindings[ACTION_MENU_RIGHT] = { { KEY_RIGHT, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::DpadRight, GpBtn::NONE, GpAxis::LeftX, 0.5f };
-    bindings[ACTION_MENU_CONFIRM] = { { KEY_ENTER, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, kMenuConfirmGamepadButton, GpBtn::NONE, GpAxis::NONE, 0 };
-    bindings[ACTION_MENU_BACK] = { { KEY_ESCAPE, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, kMenuBackGamepadButton, GpBtn::NONE, GpAxis::NONE, 0 };
+    bindings[ACTION_MENU_CONFIRM] = { { KEY_ENTER, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::A, GpBtn::NONE, GpAxis::NONE, 0 };
+    bindings[ACTION_MENU_BACK] = { { KEY_ESCAPE, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, kDefaultMenuBackGamepadButton, GpBtn::NONE, GpAxis::NONE, 0 };
     bindings[ACTION_MENU_CLEAR] = { { KEY_DELETE, 0 }, { MouseBtn::NONE, MouseBtn::NONE }, GpBtn::Y, GpBtn::NONE, GpAxis::NONE, 0 };
 }
 
 bool ActionInput::PollAction(Action action, PlatformInput* platform) const {
     const ActionBinding& b = bindings[action];
 
-    // Check desktop slots.
+#if !defined(RC_PLATFORM_SWITCH)
     for (s32 slot = 0; slot < kDesktopBindingSlotCount; slot++) {
         if (b.keyboardKeys[slot] && platform->IsKeyDown(b.keyboardKeys[slot])) {
             return true;
@@ -308,6 +315,7 @@ bool ActionInput::PollAction(Action action, PlatformInput* platform) const {
             return true;
         }
     }
+#endif
 
     // Check gamepad button
     if (b.gamepadButton != GpBtn::NONE && platform->IsGamepadButtonDown(b.gamepadButton)) {
@@ -338,6 +346,7 @@ void ActionInput::Update(PlatformInput* platform) {
         return;
     }
 
+#if !defined(RC_PLATFORM_SWITCH)
     for (s32 i = 0; i < 3; i++) {
         mousePrev[i] = mouseDown[i];
         mouseDown[i] = platform->IsMouseButtonDown(i);
@@ -372,10 +381,16 @@ void ActionInput::Update(PlatformInput* platform) {
         }
         keysRegistered = true;
     }
+#endif // !RC_PLATFORM_SWITCH
 
     // Switch active device based on last input used.
+#if defined(RC_PLATFORM_SWITCH)
+    const bool hasKeyboard = false;
+    const bool hasMouse = false;
+#else
     const bool hasKeyboard = platform->HasAnyKeyboardInput();
     const bool hasMouse = platform->HasAnyMouseInput();
+#endif
     const bool hasDesktop = hasKeyboard || hasMouse;
     bool gpConnected = platform->IsGamepadConnected();
     if (!gpConnected) {
