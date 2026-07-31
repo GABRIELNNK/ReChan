@@ -39,6 +39,8 @@ project "libp3d"
         libp3d_root .. "/vendor/sdl2/**.mm",
         libp3d_root .. "/vendor/sdl2/**.m",
 
+        libp3d_root .. "/pddi/gles/**.h",
+        libp3d_root .. "/pddi/gles/**.cpp",
         libp3d_root .. "/pddi/null/**.h",
         libp3d_root .. "/pddi/null/**.cpp",
     }
